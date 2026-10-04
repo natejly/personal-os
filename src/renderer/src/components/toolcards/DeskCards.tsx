@@ -49,7 +49,7 @@ export function DoneCard(props: ToolCardProps): JSX.Element {
 }
 
 /**
- * desk_ask once it is no longer waiting on an answer (ToolEvents keeps the answer box for the pending one):
+ * desk_ask / ask_user once it is no longer waiting on an answer (ToolEvents keeps the answer box for the pending one):
  * the question, the offered choices as chips, and the answer, with the chosen chip marked.
  */
 export function AskCard(props: ToolCardProps): JSX.Element {
@@ -68,7 +68,7 @@ export function AskCard(props: ToolCardProps): JSX.Element {
       {answered ? (
         <div className="tc-statusrow"><Badge tone="ok">Your answer</Badge><span>{answer || 'Approved without a typed answer'}</span></div>
       ) : d?.status === 'no_answer' ? <div className="tc-muted">Approved without a typed answer.</div>
-        : d ? <div className="tc-muted">Waiting for your answer in Needs you.</div> : null}
+        : d ? <div className="tc-muted">Waiting for your answer{event.name === 'desk_ask' ? ' in Needs you' : ''}.</div> : null}
       <ErrorLine event={event} />
     </CardShell>
   )
@@ -77,3 +77,4 @@ export function AskCard(props: ToolCardProps): JSX.Element {
 registerToolCard('desk_deliver', DeliverCard)
 registerToolCard('desk_done', DoneCard)
 registerToolCard('desk_ask', AskCard)
+registerToolCard('ask_user', AskCard)

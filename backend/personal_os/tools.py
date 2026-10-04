@@ -218,8 +218,40 @@ ALTERNATIVE = {
     "desk_deliver": "desk_write_file it into outputs/ first, then deliver that path",
     "desk_import_sandbox": "sandbox_read_file the file, then desk_write_file what you need",
     "desk_ask": "make the most reasonable assumption, say what it was, and carry on",
+    "ask_user": "make the most reasonable assumption, say what it was, and carry on",
     "desk_done": "summarise what you did in your reply; the user can finish the desk",
 }
+
+
+# What a question tool (desk_ask, ask_user) returns when its card was approved with nothing typed.
+NO_ANSWER = {"status": "no_answer",
+             "note": "The user saw your question and approved it without typing an answer. Do not ask again: proceed on your best "
+                     "judgement, state the assumption you made in your reply, and keep going."}
+
+
+def answered(answer: str, options: Any) -> dict[str, Any]:
+    """The result of a question the user answered; `choice` marks an answer that is one of the offered options."""
+    opts = [o.strip() for o in options if isinstance(o, str)] if isinstance(options, list) else []
+    return {"status": "answered", "answer": answer, **({"choice": answer} if answer in opts else {}),
+            "note": "The user answered your question. Carry on with it; do not ask it again."}
+
+
+def asked(name: str, question: str, options: Any, ctx: dict[str, Any]) -> tuple[Any, list[str]]:
+    """Shared front of the question tools: (a tool_error or the answer already held in ctx['ask_note'], or None; the options)."""
+    if not question.strip():
+        return tool_error(f"{name} needs a question.", field="question",
+                          expected="one specific question the user can answer in a sentence",
+                          example={"question": "Which of the two vendors should I price against?"}), []
+    opts: list[str] = []
+    if options is not None:
+        if (not isinstance(options, list) or not 2 <= len(options) <= 4
+                or not all(isinstance(o, str) and 0 < len(o.strip()) <= 80 for o in options)):
+            return tool_error("options must be 2 to 4 short choices (each a non-empty string of at most 80 characters).",
+                              field="options", expected="a list like ['Dana only', 'The whole team']",
+                              example={"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]}), []
+        opts = [o.strip() for o in options]
+    note = str(ctx.get("ask_note") or "").strip()  # an answer the loop already holds for this call, when it passes one
+    return (answered(note, opts) if note else None), opts
 
 
 def tool_error(message: str, *, field: str | None = None, expected: str | None = None,
@@ -1192,6 +1224,24 @@ class Toolbox:
                               alternative=ALTERNATIVE["propose_plan"])
         R("propose_plan", ToolSpec("propose_plan", plans.PLAN_DESCRIPTION, plans.PLAN_PARAMETERS, propose_plan, "utility",
                                    "plan", examples=plans.PLAN_EXAMPLES))
+
+        async def ask_user(ctx: dict[str, Any], question: str, context: str = "", options: Any = None) -> Any:
+            # The card is the question: an answer typed or picked on it comes back here as ask_note (or straight
+            # from the loop). Reaching the end means the card was approved with nothing typed.
+            early, _ = asked("ask_user", question, options, ctx)
+            return early if early is not None else dict(NO_ANSWER)
+        ask_spec = ToolSpec("ask_user", "Ask the user one question and wait for the answer. Use it only when a decision is genuinely theirs (a preference, a choice between real alternatives, a missing fact you cannot look up) and guessing would waste the work. Offer 2-4 short options when the answer is one of a few; they can still type their own. Ask once, with everything they need to decide, and do not ask what you can find out with your other tools.",
+            _obj({"question": {"type": "string", "description": "One specific question"},
+                  "context": {"type": "string", "description": "What you found that makes the question necessary"},
+                  "options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 4,
+                              "description": "Optional 2-4 short choices the user can pick with one click; they may still type their own answer"}},
+                 ["question"]),
+            ask_user, "utility", "plan",
+            examples=[{"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]},
+                      {"question": "Which quarter should I compare against?",
+                       "context": "The file has Q1 and Q3 but no Q2, so a year-on-year read is not possible."}])
+        ask_spec.force_ask = lambda args: True  # the call is its card: a mode of "on" or a standing grant never answers it
+        R("ask_user", ask_spec)
 
     # ---- scheduled tasks: work the app runs later, on its own ----
     def _register_schedule(self) -> None:
@@ -3046,30 +3096,15 @@ def _register_cowork(self: Toolbox) -> None:
         desk_id = _id(ctx, "desk_ask")
         if not isinstance(desk_id, str):
             return desk_id
+        early, opts = asked("desk_ask", question, options, ctx)
+        if early is not None:
+            return early
         q = question.strip()
-        if not q:
-            return tool_error("desk_ask needs a question.", field="question",
-                              expected="one specific question the user can answer in a sentence",
-                              example={"question": "Which of the two vendors should I price against?"})
-        opts: list[str] = []
-        if options is not None:
-            if (not isinstance(options, list) or not 2 <= len(options) <= 4
-                    or not all(isinstance(o, str) and 0 < len(o.strip()) <= 80 for o in options)):
-                return tool_error("options must be 2 to 4 short choices (each a non-empty string of at most 80 characters).",
-                                  field="options", expected="a list like ['Dana only', 'The whole team']",
-                                  example={"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]})
-            opts = [o.strip() for o in options]
-        note = str(ctx.get("ask_note") or "").strip()  # an answer the loop already holds for this call, when it passes one
-        if note:
-            return {"status": "answered", "answer": note, **({"choice": note} if note in opts else {}),
-                    "note": "The user answered your question. Carry on with it; do not ask it again."}
         if (ctx.get("modes") or {}).get("desk_ask") == "ask":
             # The tool is gated by a card, so reaching this body in "ask" mode means the card was approved and
             # no answer came with it (an answer is returned by the loop before the body runs). Blocking the
             # desk here would park it on a question the user has just looked at while the run kept streaming.
-            return {"status": "no_answer",
-                    "note": "The user saw your question and approved it without typing an answer. Do not ask again: proceed on your best "
-                            "judgement, state the assumption you made in your reply, and keep going."}
+            return dict(NO_ANSWER)
         # One question column, one answer box: `context` is folded into the question rather than
         # dropped, because the user reads and answers the whole thing in one place.
         if context.strip():
@@ -3089,6 +3124,7 @@ def _register_cowork(self: Toolbox) -> None:
                   {"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]},
                   {"question": "Which quarter should I compare against?",
                    "context": "The file has Q1 and Q3 but no Q2, so a year-on-year read is not possible."}]))
+
 
     async def desk_done(ctx: dict[str, Any], summary: str, next_steps: str = "") -> Any:
         desk_id = _id(ctx, "desk_done")

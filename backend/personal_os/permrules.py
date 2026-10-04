@@ -27,7 +27,7 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask"})
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 

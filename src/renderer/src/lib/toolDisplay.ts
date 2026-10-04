@@ -41,7 +41,7 @@ const VERBS: Record<string, string> = {
   skill_list: 'List skills', skill_draft: 'Draft skill', skill_revise: 'Revise skill',
   save_writing_sample: 'Save writing sample', writing_style: 'Read writing style',
   desk_list_files: 'List desk files', desk_read_file: 'Read desk file', desk_write_file: 'Write desk file',
-  desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', desk_done: 'Finish desk task',
+  desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', ask_user: 'Ask a question', desk_done: 'Finish desk task',
   desk_import_sandbox: 'Import from sandbox',
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
   sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
@@ -95,7 +95,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     case 'agent_stop': return { verb, subject: str('id') }
     case 'agent_wait': return { verb, subject: Array.isArray(a.ids) && a.ids.length ? a.ids.map(String).join(', ') : 'all' }
     case 'desk_fetch_file': return { verb, subject: hostPath(str('url')) }
-    case 'desk_ask': return { verb, subject: clip(str('question'), 80) }
+    case 'desk_ask': case 'ask_user': return { verb, subject: clip(str('question'), 80) }
     case 'desk_done': return { verb, subject: clip(str('summary'), 80) }
     case 'view_image': return { verb, subject: str('path') }
     case 'convert_document': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
@@ -263,7 +263,10 @@ export function errorLine(error: string): string {
   return clip(first, 80)
 }
 
-const OWN_BODY = new Set(['propose_plan', 'desk_ask', 'doc_edit'])
+/** Tools whose card is a question: answered with a typed or picked answer, never Allow/Deny. */
+export const QUESTION_TOOLS = new Set(['desk_ask', 'ask_user'])
+
+const OWN_BODY = new Set(['propose_plan', ...QUESTION_TOOLS, 'doc_edit'])
 
 /**
  * Only a finished, plain row may fold into a group: no approval state, plan tag, verdict, undo, image or

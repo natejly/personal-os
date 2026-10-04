@@ -472,10 +472,9 @@ class Jobs:
         with self.db.tx() as c:
             if c.execute("SELECT 1 FROM settings WHERE key='jobsSeeded'").fetchone():
                 return 0
-        have = {j["name"] for j in self.list()}
         made = 0
-        for s in SEED_JOBS:
-            if s["name"] not in have:
+        if not self.list():  # a database from before the marker already had its seed; any jobs at all means it ran
+            for s in SEED_JOBS:
                 self.create(s["name"], s["cron"], s["prompt"], enabled=False, at=at, allowed_tools=s.get("allowed_tools"))
                 made += 1
         with self.db.tx() as c:

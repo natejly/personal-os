@@ -722,8 +722,10 @@ class Subagents:
             raise _Halt("cost_cap" if not ch.halt_reason else ch.halt_reason)
         ch.messages.append({"role": "system", "content": "You are out of tool rounds. Do not call tools. In one message, summarize what "
                                                          "you have done and found so far, and what remains unfinished."})
-        text, _ = await self._model_round(ch, schemas, final=True)
-        ch.messages.pop()  # the 'out of tool rounds' line: a resumed child must not inherit it
+        try:
+            text, _ = await self._model_round(ch, schemas, final=True)
+        finally:
+            ch.messages.pop()  # the 'out of tool rounds' line: a resumed child must not inherit it
         if text:
             ch.text = text
             ch.messages.append({"role": "assistant", "content": text})
@@ -863,7 +865,7 @@ class Subagents:
         if ch.ctx.get("proposal_only"):
             return "not available in a background run: it needs an approval and nobody is watching"
         run = ch.ctx.get("run")
-        if getattr(run, "kind", None) in UNATTENDED_KINDS and self.settings().get("unattendedApprovals") == "deny":
+        if getattr(run, "kind", None) in UNATTENDED_KINDS and (ch.ctx.get("settings") or self.settings()).get("unattendedApprovals") == "deny":
             return "refused: no one is available to approve it and unattendedApprovals is set to deny"
         return None
 

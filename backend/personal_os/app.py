@@ -6924,11 +6924,6 @@ def update_meeting(id: str, body: MeetingPatch) -> dict[str, Any]:
 def delete_meeting(id: str) -> dict[str, bool]:
     """Idempotent, like delete_note: a missing id is already the state the caller asked for."""
     meeting_store.delete(id)
-    # No `meeting` widget kind ships in this slice, so this sweep is a no-op today - but doing it
-    # anyway is the cleanup delete_note does and delete_doc forgets, and the first widget to ship
-    # would otherwise leave orphan windows pointing at a deleted meeting.
-    with contextlib.suppress(Exception):
-        canvases.delete_windows_for("meeting", id)
     return {"ok": True}
 
 

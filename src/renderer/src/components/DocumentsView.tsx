@@ -1,22 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, Trash2, FileText, PanelLeftOpen, Pin, X } from 'lucide-react'
+import { Upload, Trash2, FileText, Pin, X } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
 import type { Document } from '@shared/types'
 import ProjectChip from './ProjectChip'
-import ScopeSelect from './ScopeSelect'
-import SendToSpace from './SendToSpace'
-import { fenced, lines, usePageContext } from '../lib/pageContext'
-import AppSwitcher from './AppSwitcher'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
-export default function DocumentsView({ projectId, embedded = false }: { projectId?: string; embedded?: boolean }): JSX.Element {
+/** Uploads, for Files -> Uploads, Settings and a project. `embedded` is accepted for those callers; it is the only mode. */
+export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { uploadDocuments, deleteDocument, pinDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
-  // Embedded without a project (Settings → Knowledge base) it follows the library scope, like the page did.
+  const { uploadDocuments, deleteDocument, pinDocument, loadScope } = useStore()
+  // Without a project it follows the library scope, which Files -> Uploads picks in its header.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
@@ -38,12 +34,11 @@ export default function DocumentsView({ projectId, embedded = false }: { project
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {embedded && documents.length > 0 && <div className="add-row">{uploadBtn}<span className="muted small">Drop more files here.</span></div>}
-      {!embedded && documents.length > 0 && <p className="muted small">Drop more files here.</p>}
+      {documents.length > 0 && <div className="add-row">{uploadBtn}<span className="muted small">Drop more files here.</span></div>}
       {documents.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
-          <h2>No documents yet</h2>
+          <h2>No uploads yet</h2>
           <p>Drop files here, or upload them.</p>
           <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
@@ -75,31 +70,5 @@ export default function DocumentsView({ projectId, embedded = false }: { project
       )}
     </div>
   )
-  usePageContext(() => (embedded ? undefined : {
-    view: 'documents',
-    label: open ? `Document “${open.name}”` : 'Documents',
-    detail: open
-      ? `The user has this uploaded document open — id \`${open.id}\`.\n\n${fenced(open.text ?? '')}`
-      : `Uploaded documents, all searchable from any chat:\n${lines(documents, (d) => `${d.name} (\`${d.id}\`, ${d.chunk_count ?? 0} chunks)`)}`,
-    refs: open ? [{ kind: 'document', id: open.id, name: open.name }] : documents.slice(0, 40).map((d) => ({ kind: 'document', id: d.id, name: d.name })),
-    hints: open ? ['Summarise this document', 'What does it say about…'] : ['What is in my library?']
-  }), [documents, open, embedded])
-
-  if (embedded) return body
-
-  return (
-    <main className="page">
-      <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><FileText size={16} /> Documents</h2>
-        <div className="no-drag header-right">
-          <SendToSpace items={[{ kind: 'documents' }]} />
-          <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
-          {uploadBtn}
-        </div>
-        <AppSwitcher />
-      </header>
-      {body}
-    </main>
-  )
+  return body
 }

@@ -22,8 +22,8 @@ export function downloadHtml(name: string, code: string, ext = 'html', type = 't
 const when = (t: number): string => new Date(t * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 /**
- * A full-size artifact with its version history. `inline` fills its container (the Artifacts list);
- * otherwise it is a full-window dialog (Open from a chat card or from Library -> Made).
+ * A full-size artifact with its version history. `inline` fills its container (Files -> Pages);
+ * otherwise it is a full-window dialog (Open from a chat card).
  */
 export default function ArtifactViewer({ id, onClose, onDeleted, inline = false }: {
   id: string

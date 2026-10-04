@@ -669,7 +669,6 @@ export const api = {
   },
   canvases: {
     list: () => req<Canvas[]>('/canvases'),
-    get: (id: string) => req<Canvas>(`/canvases/${id}`),
     create: (c: { name?: string; project_id?: string | null; copy_from?: string | null }) => req<Canvas>('/canvases', { method: 'POST', body: json(c) }),
     update: (id: string, patch: { name?: string; project_id?: string | null; position?: number; snap_mode?: SnapMode; grid_size?: number; zoom?: number; pan_x?: number; pan_y?: number; wallpaper?: string; locked?: boolean; clear_project?: boolean }) =>
       req<Canvas>(`/canvases/${id}`, { method: 'PUT', body: json(patch) }),
@@ -794,7 +793,6 @@ export const api = {
   /** Space presets (`/canvas-presets`): named templates of a canvas. */
   presets: {
     list: () => req<CanvasPreset[]>('/canvas-presets'),
-    get: (id: string) => req<CanvasPreset>(`/canvas-presets/${id}`),
     /** The server snapshots the canvas; a blank name takes the canvas's name. */
     create: (p: { canvas_id: string; name?: string }) => req<CanvasPreset>('/canvas-presets', { method: 'POST', body: json(p) }),
     update: (id: string, patch: { name?: string }) => req<CanvasPreset>(`/canvas-presets/${id}`, { method: 'PUT', body: json(patch) }),

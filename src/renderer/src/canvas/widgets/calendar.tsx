@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
+import { useCanvas } from '../store'
 import { api } from '../../lib/api'
 import CalendarWeek, { addDays, dayKey, fmtTime, localDay, slotIso, startOfWeek, withoutTodoEvents, type Slot } from '../../components/CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
@@ -23,7 +24,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const connected = useStore((s) => s.google?.connected ?? false)
   const todos = useStore((s) => s.todos)
   const toast = useStore((s) => s.toast)
-  const setView = useStore((s) => s.setView)
+  const openTodos = (): void => void useCanvas.getState().ensureWindow(win.canvas_id, 'todos')
   const updateTodo = useStore((s) => s.updateTodo)
   const mode = readMode(win.config.mode)
   const days = typeof win.config.days === 'number' ? win.config.days : 7
@@ -213,7 +214,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
                   </button>
                 ))}
                 {g.todos.map((t) => (
-                  <button key={t.id} className="widget-row" onClick={() => setView('todos')}>
+                  <button key={t.id} className="widget-row" onClick={openTodos}>
                     <span className="widget-meta">todo</span>
                     <span className="grow widget-sub">○ {t.title}</span>
                   </button>
@@ -225,7 +226,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       ) : (
         <div className="cal-scroll">
           <CalendarWeek days={columns} events={shown} todos={todos} canCreate={connected}
-            onOpen={(e) => setEditing({ event: e })} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+            onOpen={(e) => setEditing({ event: e })} onTodo={openTodos} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
             onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
             onCreateAllDay={(day) => setEditing({ event: null, draft: { day, allDay: true } })}
             onMove={connected ? (e, start, end) => void move(e, start, end) : undefined}

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Notebook } from 'lucide-react'
+import { Notebook, Trash2 } from 'lucide-react'
 import type { Note } from '@shared/types'
 import { api } from '../../lib/api'
+import { useStore } from '../../store'
+import { useCanvas } from '../store'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { SAFE_MD } from '../../components/Message'
 import SmartTextarea from '../../components/SmartTextarea'
@@ -97,6 +99,14 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     setBody(v)
   }
 
+  const remove = async (): Promise<void> => {
+    if (!confirm('Delete this sticky note?')) return
+    await useCanvas.getState().closeWindow(win.id)
+    // A locked space or a refused close keeps the window, so the note stays with it.
+    if (useCanvas.getState().canvases[win.canvas_id]?.windows.some((x) => x.id === win.id)) return
+    await api.notes.delete(id).catch(() => useStore.getState().toast('Could not delete the sticky note', 'error'))
+  }
+
   return (
     <div className="widget" style={{ background: skin.bg, color: skin.ink }}>
       <div className="widget-bar" style={{ color: 'inherit', borderColor: 'rgba(0,0,0,0.12)' }}>
@@ -110,6 +120,7 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
         ))}
         <span className="spacer" />
         <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null ? 'saved' : 'saving…'}</span>
+        <button className="icon-btn ghost sm" title="Delete sticky note" aria-label="Delete sticky note" style={{ color: 'inherit' }} onClick={() => void remove()}><Trash2 size={12} /></button>
       </div>
 
       {editing ? (
@@ -137,7 +148,7 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
 
 export const def: WidgetDef = {
   kind: 'note',
-  label: 'Note',
+  label: 'Sticky note',
   icon: <Notebook size={18} />,
   defaultSize: { w: 300, h: 300 },
   minSize: { w: 200, h: 160 },

@@ -104,10 +104,8 @@ export default function Sidebar(): JSX.Element {
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
   const openDoc = useStore((s) => s.openDoc)
-  // Picking an item in the sidebar is a navigation gesture: from the canvas it leaves the space and
-  // routes to the classic view, rather than opening the chat as one more window in the space. Adding
-  // to a space stays the drag gesture (and ⌘N / the dock for a new chat window).
-  const openConversation = (id: string): void => void selectChat(id)
+  // Inside a space a chat opens (or focuses) as a window there; from any other view it routes to the chat view.
+  const openConversation = (id: string): void => void (inCanvas ? useCanvas.getState().openChat(id) : selectChat(id))
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   // Full-text hits over message bodies, for queries of 3+ characters. Title matches stay instant; these

@@ -37,7 +37,7 @@ const noteLabel = (body: string): string => {
 /** Registry icons are drawn for widget chrome (15–18px); a menu row wants them at 14. */
 const iconOf = (kind: WidgetKind): JSX.Element => cloneElement(WIDGETS[kind].icon, { size: 14 })
 
-/** One entry per registry kind (WIDGETS order), so all 12 kinds are reachable. */
+/** One entry per registry kind (WIDGETS order), so every kind is reachable. */
 export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEntry[] {
   const { canvasId, at } = opts
   const cv = useCanvas.getState
@@ -84,7 +84,7 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
   const note = async (): Promise<MenuEntry[]> => {
     const notes = (await api.notes.list('all')).sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT_NOTES)
     const fresh: MenuEntry = {
-      label: 'New note',
+      label: 'New sticky note',
       icon: <Plus size={14} />,
       run: act(async () => {
         const n = await api.notes.create({ project_id: projectOf() })

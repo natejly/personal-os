@@ -14,7 +14,7 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   todos: 'Todos',
   calendar: 'Calendar',
   board: 'Board',
-  note: 'Note',
+  note: 'Sticky note',
   'dashboard-widget': 'Widget',
   memory: 'Memory',
   graph: 'Graph',

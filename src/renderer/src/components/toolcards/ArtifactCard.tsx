@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import ArtifactFrame from '../ArtifactFrame'
 import { openInSpaceArgs } from '../../artifacts/openExport'
 import { useCanvas } from '../../canvas/store'
+import { addedToSpace } from '../../lib/pinChart'
 import { useStore } from '../../store'
 import ArtifactViewer, { downloadHtml } from '../ArtifactViewer'
 import { registerToolCard, type ToolCardProps } from './registry'
@@ -56,9 +57,9 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
   const openInSpace = async (): Promise<void> => {
     if (!ref) return
     const { activeCanvasId, ensureWindow } = useCanvas.getState()
-    if (!activeCanvasId) return toast('No space is open', 'info')
+    if (!activeCanvasId) return toast('No space yet — create one first', 'info')
     // ensureWindow focuses an existing window for this artifact instead of adding a second one.
-    await ensureWindow(activeCanvasId, openInSpaceArgs(ref).kind, ref.id)
+    if ((await ensureWindow(activeCanvasId, openInSpaceArgs(ref).kind, ref.id)).win) addedToSpace(activeCanvasId)
   }
 
   const code = async (): Promise<string> => {

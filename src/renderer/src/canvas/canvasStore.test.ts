@@ -357,3 +357,13 @@ test('a minimized window is the only one renderOrder drops', () => {
   seed(canvas('c1', [win({ id: 'a', created_at: 1 }), win({ id: 'b', created_at: 2, state: 'minimized' })]))
   assert.deepEqual(renderOrder(useCanvas.getState().canvases['c1'].windows).map((w) => w.id), ['a'])
 })
+
+test('openChat focuses the window a space already has for that chat instead of opening a second', async () => {
+  seed(canvas('c1', []), canvas('c2', [win({ id: 'w9', canvas_id: 'c2', ref_id: 'conv1' })]))
+  await useCanvas.getState().openChat('conv1')
+  const s = useCanvas.getState()
+  assert.equal(s.activeCanvasId, 'c2')
+  assert.equal(s.focusedWindowId, 'w9')
+  assert.equal(s.canvases.c2.windows.length, 1)
+  assert.ok(!calls.some((c) => c.method === 'POST'))
+})

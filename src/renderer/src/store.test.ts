@@ -706,6 +706,35 @@ test('a send from a draft shows its bubble at once and takes it back when the ch
   assert.equal(useStore.getState().draftPendingSend, null)
 })
 
+test('a draft parks chat settings instead of writing the global ones, and send applies them to the new chat', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let globalWrites = 0
+  const realSave = useStore.getState().saveSettings
+  t.after(() => useStore.setState({ saveSettings: realSave }))
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, toasts: [], saveSettings: async () => { globalWrites++ } })
+  const { calls } = stubFetch(t, (m, p, b) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' })) : m === 'PATCH' ? json(row({ id: 'c9', settings: b.settings })) : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().setChatSettings({ planMode: 'always' })
+  await useStore.getState().setChatSettings({ skipPermissions: true, useMemory: false })
+  assert.equal(globalWrites, 0)
+  assert.equal(calls.length, 0, 'nothing reaches the server, settings included')
+  assert.deepEqual(useStore.getState().draftChatSettings, { planMode: 'always', skipPermissions: true, useMemory: false })
+  await useStore.getState().send('hi')
+  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { planMode: 'always', skipPermissions: true, useMemory: false } })
+  assert.equal(calls.some((c) => c.path.includes('/settings')), false)
+  assert.deepEqual(useStore.getState().draftChatSettings, {})
+})
+
+test('a failed PATCH of parked chat settings refuses the run and keeps them on the draft', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: { planMode: 'always' }, toasts: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' })) : json({ detail: 'down' }, 500))
+  assert.equal(await useStore.getState().send('hi'), false)
+  assert.equal(calls.some((c) => c.path.includes('/chat')), false, 'no run starts')
+  assert.deepEqual(useStore.getState().draftChatSettings, { planMode: 'always' })
+  assert.equal(useStore.getState().draftPendingSend, null)
+  assert.match(useStore.getState().toasts[0].text, /settings/)
+})
+
 test('an over-long send is refused before any request, with the size notice', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   seed()

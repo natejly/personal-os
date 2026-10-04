@@ -13,28 +13,28 @@ const LABEL: Record<Mode, string> = {
 }
 
 /**
- * ⌘⇧P cycles off → auto → always. With a conversation this writes `conv.settings.planMode`; with no
- * conversation yet (a brand-new chat) it writes the global default instead, so the toggle is never a
- * no-op the user has to repeat after their first message.
+ * ⌘⇧P cycles off → auto → always. It writes `conv.settings.planMode`, never the global default: with
+ * no conversation yet (a brand-new chat) the store parks the value and `send` applies it to the chat
+ * it creates, so the toggle is never a no-op the user has to repeat after their first message.
  *
- * `setPlanMode` sends ONE key: the backend's settings merge (repos.py:132-135) is shallow, which is
+ * It sends ONE key: the backend's settings merge (repos.py:132-135) is shallow, which is
  * fine for a scalar and is exactly why `tools` — a nested object — has to be spread by its callers.
  */
 export default function PlanModeToggle({ conversationId }: { conversationId?: string }): JSX.Element {
   const convId = useStore((s) => conversationId ?? s.focusedConversationId)
   const focused = useStore((s) => s.focusedConversationId)
-  const convMode = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.planMode ?? null)
+  const convMode = useStore((s) => {
+    const id = conversationId ?? s.focusedConversationId
+    return (id ? s.sessions[id]?.conversation.settings.planMode : s.draftChatSettings.planMode) ?? null
+  })
   const globalMode = useStore((s) => s.settings.planMode ?? 'off')
-  const setPlanMode = useStore((s) => s.setPlanMode)
-  const saveSettings = useStore((s) => s.saveSettings)
+  const setChatSettings = useStore((s) => s.setChatSettings)
 
   const mode: Mode = convMode ?? globalMode
 
   const cycle = useRef(() => {})
   cycle.current = () => {
-    const next = NEXT[mode]
-    if (convId) void setPlanMode(convId, next)
-    else saveSettings({ planMode: next }).catch((e) => useStore.getState().toast((e as Error).message, 'error'))
+    void setChatSettings({ planMode: NEXT[mode] }, convId ?? undefined)
   }
 
   // Only the composer the user is actually looking at owns the shortcut: several chat widgets can be

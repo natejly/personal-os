@@ -180,7 +180,8 @@ function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
+/** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it. */
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -216,7 +217,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
-        {summarized && (
+        {summarized && showContextChips && (
           <button className="compact-note" title="Open the context panel, where the summary lives" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
             Earlier messages were summarized to fit the context window
           </button>
@@ -233,7 +234,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 {modelLabel(message.model)}
               </span>
             )}
-            {ctx && ctxCount > 0 && (
+            {showContextChips && ctx && ctxCount > 0 && (
               <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
                 {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
                 {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
@@ -243,7 +244,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {!isUser && (message.tool_events?.length ?? 0) > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
-            {trace && (
+            {showContextChips && trace && (
               <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
                 <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
               </button>

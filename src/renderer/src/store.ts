@@ -211,6 +211,8 @@ export interface State {
   settingsTab: SettingsTab
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   toasts: Toast[]
+  /** The ⌘K command palette. */
+  paletteOpen: boolean
 
   conversations: Conversation[]
   /** Loaded conversations, keyed by id. Each one streams independently. */
@@ -902,9 +904,9 @@ export const useStore = create<State>((set, get) => {
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
-    // ⌘B (Toggle Sidebar) and ⇧⌘M (Meetings) are menu accelerators, and a menu accelerator never reaches the page:
-    // inside the Markdown editor they would hide the sidebar or leave the doc instead of bold / maths. While the
-    // editor has focus, hand the chord back to it as the keystroke it was.
+    // ⌘B (Toggle Sidebar), ⌘K (Command Palette) and ⇧⌘M (Meetings) are menu accelerators, and a menu accelerator never
+    // reaches the page: inside the Markdown editor they would hide the sidebar, open the palette or leave the doc instead
+    // of bold / link / maths. While the editor has focus, hand the chord back to it as the keystroke it was.
     const toEditor = (key: string, shift: boolean): boolean => {
       const el = typeof document === 'undefined' ? null : document.activeElement
       if (!el || el.tagName !== 'TEXTAREA' || !el.classList.contains('md-input')) return false
@@ -915,6 +917,7 @@ export const useStore = create<State>((set, get) => {
       const s = get()
       if (action === 'toggle-sidebar' && toEditor('b', false)) return
       if (action === 'view:meetings' && toEditor('M', true)) return
+      if (action === 'palette' && toEditor('k', false)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
         // Always personal: a new chat belongs to a project only when the user asked for one by
@@ -922,6 +925,7 @@ export const useStore = create<State>((set, get) => {
         // ⌘N taken while reading a project chat silently filed the next unrelated thought under it.
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
+      else if (action === 'palette') set((st) => ({ paletteOpen: !st.paletteOpen }))
       else if (action === 'new-note') void s.createDoc({})
       else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
@@ -934,8 +938,12 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')
       else if (action.startsWith('desk:')) { s.setView('cowork'); void s.openDesk(action.slice(5)) }
-      else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
-      else if (action === 'upload') {
+      else if (action.startsWith('view:')) {
+        const v = action.slice(5) as View
+        // A view turned off in Settings → Modules stays off: its shortcut says how to turn it back on.
+        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('modules') })
+        else s.setView(v)
+      } else if (action === 'upload') {
         s.openFiles('uploads')
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
@@ -1626,6 +1634,7 @@ export const useStore = create<State>((set, get) => {
     settingsTab: 'provider',
     projectModal: null,
     toasts: [],
+    paletteOpen: false,
     conversations: [],
     sessions: {},
     liveRuns: {},

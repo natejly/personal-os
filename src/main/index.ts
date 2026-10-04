@@ -160,7 +160,7 @@ function buildMenu(): void {
         // Not an OS-global shortcut: nothing outside the app acts. Files gets a doc in the default place.
         { label: 'New Note', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
         { label: "Today's Note", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
-        { label: 'Upload Document…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
+        { label: 'Upload File…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
         ...(isMac
           ? []
@@ -196,25 +196,32 @@ function buildMenu(): void {
         { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
         { label: 'Boards', accelerator: 'CmdOrCtrl+4', click: () => sendMenu('view:boards') },
         { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
-        { label: 'Memory', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
-        { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
-        { label: 'Knowledge Base', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
+        { label: 'Memory…', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
+        { label: 'Knowledge Graph…', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
+        { label: 'Uploads', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
         { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
+        { label: 'Files', click: () => sendMenu('view:docs') },
+        { label: 'Mail', click: () => sendMenu('view:mail') },
+        { label: 'Library', click: () => sendMenu('view:library') },
+        { type: 'separator' },
+        // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.
+        { label: 'Command Palette…', accelerator: 'CmdOrCtrl+K', click: () => sendMenu('palette') },
         { type: 'separator' },
         // ⌘⇧[ / ⌘⇧] step through chats (⌃⌘[ / ⌃⌘] are pop-out transparency and ⌥⌘arrows are spaces).
         { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Shift+[', click: () => sendMenu('chat:prev') },
         { label: 'Next Chat', accelerator: 'CmdOrCtrl+Shift+]', click: () => sendMenu('chat:next') },
         { label: 'Search Chats', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendMenu('chat:search') },
         { type: 'separator' },
-        { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         // ⌘I asks about what is on screen. The chat's context inspector, which used to own it, moves one
         // modifier over.
         { label: 'Ask About This Page', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
         { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
+        // Shown for discovery only: the composer binds ⇧⌘P itself, so the menu must not swallow it.
+        { label: 'Cycle Plan Mode', accelerator: 'CmdOrCtrl+Shift+P', registerAccelerator: false },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
@@ -230,6 +237,7 @@ function buildMenu(): void {
     {
       label: 'Spaces',
       submenu: [
+        { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'New Space', accelerator: 'Control+Command+N', click: () => sendMenu('canvas:new-space') },
         { type: 'separator' },
         // ⌥⌘arrows, not ⌃arrows: macOS owns ⌃←/⌃→/⌃↑ and an app accelerator loses to a system one.
@@ -255,7 +263,7 @@ function buildMenu(): void {
         ...(isMac ? [{ role: 'zoom' as const }, { type: 'separator' as const }, { role: 'front' as const }] : []),
         { type: 'separator' },
         { label: 'Pop Out', accelerator: 'Control+Command+O', click: () => sendWindowMenu('canvas:popout') },
-        { label: 'Return to Canvas', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
+        { label: 'Return to Space', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
         { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
         // Transparency is a pop-out's own property, so these ride sendWindowMenu like the pin above:
         // whoever has focus answers, and a widget still on the canvas only stores the level.

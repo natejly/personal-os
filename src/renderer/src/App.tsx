@@ -19,6 +19,7 @@ import CoworkView from './components/CoworkView'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
+import CommandPalette from './components/CommandPalette'
 import ProjectModal from './components/ProjectModal'
 import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
@@ -155,6 +156,7 @@ export default function App(): JSX.Element {
   const init = useStore((s) => s.init)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const settingsOpen = useStore((s) => s.settingsOpen)
+  const paletteOpen = useStore((s) => s.paletteOpen)
   const projectModal = useStore((s) => s.projectModal)
   const view = useStore((s) => s.view)
   const ModView = moduleForView(view)?.view?.Component
@@ -225,6 +227,7 @@ export default function App(): JSX.Element {
       )}
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
+      {paletteOpen && <CommandPalette />}
       {projectModal && <ProjectModal />}
       <BackendBanner />
       {wizardOpen && <Onboarding />}

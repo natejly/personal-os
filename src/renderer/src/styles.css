@@ -1055,6 +1055,19 @@ button.tag:disabled { cursor: default; }
 .doc-preview { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; max-height: 52px; overflow: hidden; }
 .doc-meta { font-size: 11px; color: var(--text-faint); }
 .modal.wide { width: 760px; }
+
+/* ---------- Command palette (⌘K) ---------- */
+.palette-backdrop { align-items: flex-start; padding-top: 14vh; }
+.modal.palette { width: 560px; overflow: hidden; display: flex; flex-direction: column; max-height: 60vh; }
+.palette-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.modal input.palette-input { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 14px 16px; font-size: 15px; background: transparent; }
+.modal input.palette-input:focus { border-color: var(--border); }
+.palette-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
+.palette-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 8px; font-size: 13px; cursor: default; }
+.palette-list li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-list li small { color: var(--text-faint); font-size: 11px; flex-shrink: 0; }
+.palette-list li.active { background: color-mix(in srgb, var(--text) 8%, var(--bg-elev)); }
+.palette-list .palette-empty { color: var(--text-muted); }
 .doc-text { white-space: pre-wrap; font-size: 12.5px; padding: 20px; margin: 0; line-height: 1.5; font-family: var(--font); }
 
 /* ---------- Project modal ---------- */

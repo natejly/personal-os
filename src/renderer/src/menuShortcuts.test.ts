@@ -78,14 +78,67 @@ test('a view action routes, and view:graph opens memory on the graph', () => {
   useStore.getState().setSettingsOpen(false)
 })
 
-test('view:documents opens Files on uploads', () => {
+/** A stand-in DOM for the duration of `fn`: node has neither `document` nor `KeyboardEvent`. */
+const withDom = async (doc: object, fn: () => void | Promise<void>): Promise<void> => {
+  const g = globalThis as unknown as { document?: unknown; KeyboardEvent?: unknown }
+  g.document = doc
+  g.KeyboardEvent = class { constructor(public type: string, init: object) { Object.assign(this, init) } }
+  try { await fn() } finally { delete g.document; delete g.KeyboardEvent }
+}
+
+test('view:documents and upload open Files on uploads, where the upload input renders', async () => {
   fire('view:documents')
   assert.equal(useStore.getState().view, 'docs')
   assert.equal(useStore.getState().filesSection, 'uploads')
+  const clicked: string[] = []
+  await withDom({ activeElement: null, getElementById: (id: string) => ({ click: () => clicked.push(id) }) }, async () => {
+    fire('upload')
+    await new Promise((r) => setTimeout(r, 150))
+  })
+  assert.equal(useStore.getState().filesSection, 'uploads')
+  assert.deepEqual(clicked, ['doc-upload-input'])
   // ⌘, after that still opens on Provider.
   fire('settings')
   assert.equal(useStore.getState().settingsTab, 'provider')
   useStore.getState().setSettingsOpen(false)
+})
+
+test('palette toggles the command palette outside the editor', () => {
+  assert.equal(useStore.getState().paletteOpen, false)
+  fire('palette')
+  assert.equal(useStore.getState().paletteOpen, true)
+  fire('palette')
+  assert.equal(useStore.getState().paletteOpen, false)
+})
+
+test('palette inside the Markdown editor is handed back as ⌘K (insert link)', async () => {
+  const sent: { key: string; metaKey: boolean; shiftKey: boolean }[] = []
+  const textarea = { tagName: 'TEXTAREA', classList: { contains: (c: string) => c === 'md-input' }, dispatchEvent: (e: never) => sent.push(e) }
+  await withDom({ activeElement: textarea }, () => fire('palette'))
+  assert.equal(useStore.getState().paletteOpen, false)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].key, 'k')
+  assert.equal(sent[0].metaKey, true)
+  assert.equal(sent[0].shiftKey, false)
+})
+
+test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => {
+  const orig = useStore.getState().settings
+  useStore.setState({ settings: { ...orig, hiddenViews: ['activity'] }, toasts: [] })
+  useStore.getState().setView('todos')
+  fire('view:activity')
+  assert.equal(useStore.getState().view, 'todos')
+  const [t] = useStore.getState().toasts
+  assert.equal(t.text, 'Activity is turned off')
+  assert.equal(t.action?.label, 'Turn on')
+  t.action?.run()
+  assert.equal(useStore.getState().settingsOpen, true)
+  assert.equal(useStore.getState().settingsTab, 'modules')
+  useStore.getState().setSettingsOpen(false)
+  // A view that is on still opens.
+  fire('view:calendar')
+  assert.equal(useStore.getState().view, 'calendar')
+  useStore.setState({ settings: orig, toasts: [] })
 })
 
 test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {

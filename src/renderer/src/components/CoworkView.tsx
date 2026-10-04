@@ -146,7 +146,7 @@ export default function CoworkView(): JSX.Element {
           >
             <Archive size={13} /> {showArchived ? 'Archived' : 'Archive'}
           </button>
-          <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
+          <button id="new-desk-btn" className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
         </div>
         <AppSwitcher />
       </header>

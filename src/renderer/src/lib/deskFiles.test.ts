@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { RunChanges, RunInfo } from '@shared/types'
-import { defaultDeskTab, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, recentRunIds, splitUrl, undoNote } from './deskFiles'
+import type { Desk, RunChanges, RunInfo } from '@shared/types'
+import { defaultDeskTab, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, queuePositions, recentRunIds, splitUrl, undoNote } from './deskFiles'
 
 const run = (id: string, at: number): RunInfo => ({ run_id: id, conversation_id: 'c', message_id: null, seq: 0, started_at: at, live: false, answering: false })
 const ch = (count: number): RunChanges => ({ available: true, count, state: 'applied', files: Array.from({ length: count }, (_, i) => ({ root: 'r', status: 'A' as const, path: `f${i}` })), skipped: [] })
@@ -51,4 +51,11 @@ test('deliveryLabel, undoNote, splitUrl', () => {
   assert.equal(undoNote(['a', 'b', 'c', 'd']), '4 left alone (edited since): a, b, c, …')
   assert.deepEqual(splitUrl('https://example.com/a/b?q=1'), { host: 'example.com', rest: '/a/b?q=1' })
   assert.deepEqual(splitUrl('nonsense'), { host: 'nonsense', rest: '' })
+})
+
+test('queuePositions: only queued desks, oldest first, 1-based', () => {
+  const d = (id: string, status: Desk['status'], queued_at: number | null = null): Desk => ({ id, status, queued_at } as Desk)
+  const pos = queuePositions([d('late', 'queued', 30), d('live', 'working'), d('early', 'queued', 10), d('mid', 'queued', 20)])
+  assert.deepEqual([...pos.entries()], [['early', 1], ['mid', 2], ['late', 3]])
+  assert.equal(pos.get('live'), undefined)
 })

@@ -783,7 +783,10 @@ def test_desk_start_asks_and_plans() -> None:
     try:
         appmod.desks.live_count = lambda: 5  # type: ignore[method-assign]
         capped = run(appmod.toolbox.call("desk_start", {"title": "x", "brief": "y"}, mkctx(new_conv())))
-        check("error" in capped, "desk_start counts against deskMaxLive")
+        check("error" not in capped and capped.get("queued") is True and capped.get("position") == 1,
+              f"desk_start counts against deskMaxLive: over it the desk is queued, not refused, got {capped}")
+        check("queued (position 1)" in capped["note"], "and the note tells the chat it is waiting")
+        appmod.desks.delete(capped["desk_id"])
     finally:
         del appmod.desks.live_count
         appmod.db.set_settings({"deskMaxLive": llm.DEFAULT_SETTINGS["deskMaxLive"]})

@@ -308,23 +308,38 @@ def test_three_desks_run_at_once() -> None:
     check(set(landed.values()) == {"stopped"}, f"and all three stop independently, got {landed}")
 
 
-def test_the_live_desk_cap_409s() -> None:
-    script(delay=0.05)
+def test_the_live_desk_cap_queues() -> None:
+    script(delay=0.5)
     busy = make_desk("The only desk allowed")
     settings_patch(deskMaxLive=1)
+    over: dict[str, Any] = {}
     try:
         wait_until(lambda: desk(busy["desk"]["id"])["status"] in LIVE, "the first desk to be live")
-        over = client.post("/cowork/desks", json={"brief": "One too many", "start": True})
-        check(over.status_code == 409, f"creating a fifth live desk 409s, got {over.status_code}")
-        check(over.json()["detail"]["max"] == 1, "the 409 says what the cap was")
-        queued = make_desk("Queued for later", start=False)
-        check(queued["desk"]["status"] == "draft", "but a draft can still be queued: a draft is not live")
-        started = client.post(f"/cowork/desks/{queued['desk']['id']}/start")
-        check(started.status_code == 409, f"starting it is what 409s, got {started.status_code}")
-    finally:
-        settings_patch(deskMaxLive=4)
+        over = make_desk("One too many")
+        oid = over["desk"]["id"]
+        check(over.get("queued") is True and over["position"] == 1 and over["max"] == 1 and "run_id" not in over,
+              f"a desk started over the cap is queued, not refused: {over}")
+        check(over["desk"]["status"] == "queued" and not runs_of(oid), "it waits without a run")
+        later = make_desk("Queued for later", start=False)
+        started = j("POST", f"/cowork/desks/{later['desk']['id']}/start")
+        check(started["queued"] is True and started["position"] == 2, f"Start on a draft queues it behind, got {started}")
+        stopped = j("POST", f"/cowork/desks/{later['desk']['id']}/stop")
+        check(stopped["status"] == "stopped", "a queued desk can be stopped")
+        check([d["id"] for d in desks.queued()] == [oid], "…which takes it out of the queue")
         j("POST", f"/cowork/desks/{busy['desk']['id']}/stop")
         quiet(busy["desk"]["id"])
+        wait_until(lambda: len(run_store.list(desk_id=oid, statuses=None)) == 1,
+                   "the queued desk to launch once the slot frees")
+        check(desk(oid)["status"] != "queued", "it left the queue when it launched")
+        first = run_store.list(desk_id=oid, statuses=None)[0]
+        check(first["input"]["content"] == "One too many", "with the turn it was queued with")
+    finally:
+        settings_patch(deskMaxLive=4)
+        for did in (busy["desk"]["id"], (over.get("desk") or {}).get("id")):
+            if did and desk(did)["status"] in (*LIVE, "queued"):
+                j("POST", f"/cowork/desks/{did}/stop")
+            if did:
+                quiet(did)
 
 
 def test_a_double_start_makes_one_run() -> None:
@@ -715,7 +730,7 @@ def test_delete_keeps_the_workspace_unless_purge() -> None:
 TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first,
          test_three_desks_run_at_once,
-         test_the_live_desk_cap_409s,
+         test_the_live_desk_cap_queues,
          test_a_double_start_makes_one_run,
          test_an_unanswered_card_parks_rather_than_auto_denying,
          test_deciding_a_parked_card_resumes_the_desk,

@@ -1,4 +1,4 @@
-import type { DeskStatus, RunChanges, RunInfo } from '@shared/types'
+import type { Desk, DeskStatus, RunChanges, RunInfo } from '@shared/types'
 
 /**
  * Pure helpers behind the desk's Files / Changes / Browser tabs, kept out of the components so
@@ -101,6 +101,12 @@ export type DeskTab = 'activity' | 'plan' | 'files' | 'browser' | 'output'
  */
 export const defaultDeskTab = (status: DeskStatus, planPending = false): DeskTab =>
   (status === 'awaiting_plan' || planPending ? 'plan' : status === 'review' ? 'output' : 'activity')
+
+/** Each queued desk's 1-based place in line, oldest first — the order the backend launches them in. */
+export const queuePositions = (desks: Desk[]): Map<string, number> =>
+  new Map(desks.filter((d) => d.status === 'queued')
+    .sort((a, b) => (a.queued_at ?? 0) - (b.queued_at ?? 0))
+    .map((d, i) => [d.id, i + 1]))
 
 /** The host of a URL for emphasis, with the rest split off. Falls back to the raw string. */
 export function splitUrl(url: string): { host: string; rest: string } {

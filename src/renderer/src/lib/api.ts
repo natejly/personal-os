@@ -5,7 +5,7 @@ import type {
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
-  DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
+  DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
@@ -634,17 +634,18 @@ export const api = {
       list: (s: Scope = 'all', status: DeskStatus | '' = '', archived = false) =>
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
-      /** `start: false` leaves the desk a draft. Throws a 409 carrying `{live, max}` over `deskMaxLive`. */
+      /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
       create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean }) =>
-        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number }>('/cowork/desks', { method: 'POST', body: json(d) }),
+        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
       patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
         req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
       delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
-      start: (id: string) => req<{ run_id: string; seq: number; conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
-      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number }>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
+      /** Over `deskMaxLive` these queue the desk and answer `DeskQueued` instead of a run. */
+      start: (id: string) => req<({ run_id: string; seq: number } | DeskQueued) & { conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
+      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number } | DeskQueued>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
       /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
-      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string }>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
+      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string } & Partial<DeskQueued>>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
       /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
       pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),

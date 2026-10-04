@@ -1785,6 +1785,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             run is not None and run.kind in UNATTENDED_KINDS)
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
+            # The same list as context_used's chunks: search_documents numbers new passages after the prompt's (tools._cite).
+            "citations": used["chunks"],
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
             # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),

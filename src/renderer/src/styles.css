@@ -966,6 +966,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ctx-chip { display: inline-flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-faint); padding: 2px 8px; border-radius: 10px; background: var(--hover); }
 .ctx-chip span { display: inline-flex; align-items: center; gap: 3px; }
 .ctx-chip:hover { color: var(--text); }
+/* An inline [n] citation in a reply: opens the passage it came from. */
+.cite-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px; vertical-align: 2px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border: none; border-radius: 8px; cursor: pointer; }
+.cite-chip:hover, .cite-chip:focus-visible { background: color-mix(in srgb, var(--accent) 28%, transparent); }
 .muted.small, .small { font-size: 12px; }
 
 /* ---------- Generic pages ---------- */

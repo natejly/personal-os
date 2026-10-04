@@ -1956,6 +1956,11 @@ export interface Job {
   last_skip_reason: string | null
   /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
   allowed_tools: string[] | null
+  /** 'desk': each fire opens a desk with `prompt` as its brief, instead of a proposal-only chat run. */
+  target: 'run' | 'desk'
+  /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
+  desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
+  desk_budget: Record<string, number> | null
 }
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */

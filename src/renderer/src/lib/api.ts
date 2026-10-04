@@ -174,9 +174,9 @@ export const api = {
   jobs: {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
+    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
@@ -190,7 +190,8 @@ export const api = {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
       return r.text()
     },
-    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
+    /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
+    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

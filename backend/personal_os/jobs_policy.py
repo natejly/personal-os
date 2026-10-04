@@ -91,7 +91,9 @@ class JobPolicy:
     # ---- the watcher ----
     def watch_soon(self, job: dict[str, Any], fire: dict[str, Any], run_id: str) -> None:
         """Follow a launched run in the background. Manual and dry runs are not watched (see module docstring)."""
-        if fire.get("manual") or fire.get("dry_run"):
+        # A desk job's fire is a desk: retrying it would be a second desk for the slot. A desk that fails is
+        # resumed from the desk itself.
+        if fire.get("manual") or fire.get("dry_run") or job.get("target") == "desk":
             return
         t = asyncio.ensure_future(self.watch(job, fire, run_id))
         self._tasks.add(t)

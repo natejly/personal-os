@@ -15,6 +15,7 @@ import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, Jo
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { SAFE_MD } from './Message'
+import { AUTONOMY } from './DeskRail'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -257,14 +258,18 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
       )}
-      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
-        aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
-        <Wrench size={12} />
-      </button>
-      <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
-        onClick={() => void preview()}>
-        <Eye size={12} />
-      </button>
+      {job.target !== 'desk' && (
+        <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
+          aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
+          <Wrench size={12} />
+        </button>
+      )}
+      {job.target === 'desk'
+        ? <span className="muted small" title="Each fire opens a desk with this prompt as its brief">desk · {AUTONOMY.find((a) => a.value === (job.desk_autonomy ?? 'plan'))?.label}</span>
+        : <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+            onClick={() => void preview()}>
+            <Eye size={12} />
+          </button>}
       <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
         onClick={() => setHistory((v) => !v)}>
         <History size={12} />
@@ -296,7 +301,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false, desk: false, autonomy: 'plan' as 'plan' | 'propose' }
 
 /** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
 function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
@@ -310,7 +315,8 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
     e.preventDefault()
     if (!ready || busy) return
     setBusy(true)
-    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
+    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
+      ...(f.desk ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}) }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
     const ok = await createJob(f.repeat
       ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
@@ -341,10 +347,22 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
       </div>
       <label className="chip-check-row small">
-        <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
-        <span>Only allow some tools</span>
+        <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
+        <span>Start a desk</span>
       </label>
-      {f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
+      {f.desk && (
+        <select value={f.autonomy} aria-label="How the desk works"
+          onChange={(e) => setF({ ...f, autonomy: e.target.value as 'plan' | 'propose' })}>
+          {AUTONOMY.filter((a) => a.value !== 'ask').map((a) => <option key={a.value} value={a.value} title={a.hint}>{a.label}</option>)}
+        </select>
+      )}
+      {!f.desk && (
+        <label className="chip-check-row small">
+          <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
+          <span>Only allow some tools</span>
+        </label>
+      )}
+      {f.onlyTools && !f.desk && <ToolPicker value={picked} onChange={setPicked} />}
     </form>
   )
 }

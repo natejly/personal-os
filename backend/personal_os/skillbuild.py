@@ -94,6 +94,9 @@ FENCE_RUN = re.compile(r"[<>]{2,}")
 # Only tokens inside a built-in tool's namespace are checked, so ordinary snake_case in prose is left
 # alone and a plausible-but-wrong tool name ("gmail_send_now") still gets caught.
 TOOL_TOKEN_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+# A connector tool slug (mcp__<server>__<tool>). The prefix alone marks it as a tool name, so every
+# one is checked, without the namespace filter above.
+MCP_TOKEN_RE = re.compile(r"\bmcp__[a-z0-9_]+")
 
 
 def _f(level: str, code: str, message: str, hint: str = "", field: str = "procedure", excerpt: str = "") -> Finding:
@@ -199,8 +202,9 @@ def lint_skill(name: str, description: str, procedure: str, *,
     if known_tools:
         namespaces = {t.split("_", 1)[0] for t in known_tools}
         seen: set[str] = set()
-        for token in TOOL_TOKEN_RE.findall(procedure):
-            if token in known_tools or token in seen or token.split("_", 1)[0] not in namespaces:
+        tokens = [t for t in TOOL_TOKEN_RE.findall(procedure) if t.split("_", 1)[0] in namespaces]
+        for token in MCP_TOKEN_RE.findall(procedure) + tokens:
+            if token in known_tools or token in seen:
                 continue
             seen.add(token)
             near = difflib.get_close_matches(token, sorted(known_tools), n=1, cutoff=0.7)

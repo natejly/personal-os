@@ -157,6 +157,10 @@ def test_failed_run_that_will_retry_is_not_news_and_pause_is() -> None:
     appmod.jobs.pause(j["id"], "paused after 3 failed runs: e")
     ev = client.get("/inbox/notify", params={"since": t - 3600}).json()
     assert any(e["kind"] == "job_paused" and e["id"].startswith(f"job:{j['id']}:") for e in ev)
+    x = mkjob("expiring")
+    appmod.jobs.pause(x["id"], "expired")
+    ev = client.get("/inbox/notify", params={"since": t - 3600}).json()
+    assert [e["body"] for e in ev if e["id"].startswith(f"job:{x['id']}:")] == ["Its schedule expired. Switch it back on to keep it running."]
 
 
 def test_notify_setting_round_trips() -> None:

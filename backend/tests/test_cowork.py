@@ -594,6 +594,7 @@ def test_accept_is_exactly_once_and_reads_the_promotion_back() -> None:
     state = delivering_desk("Promote the report")
     did, oid = state["id"], state["outputs"][0]["id"]
     body = {"outputs": [{"output_id": oid, "destination": "doc", "title": "The report"}]}
+    j("POST", f"/cowork/desks/{did}/accept", {"outputs": [{"output_id": oid, "destination": "pdf"}]}, expect=422)
     first = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
     check(first["ok"] is True and first["verified"] is True, f"the promotion was read back and matched, got {first}")
     check(docs.get(first["ref"])["content"] == REPORT, "and the doc really holds the file's bytes")

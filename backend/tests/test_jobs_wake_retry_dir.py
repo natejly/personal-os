@@ -301,6 +301,15 @@ def test_clock_and_directory_on_one_job_launch_once_per_tick(home_dir: str) -> N
     assert len(job_runs(job["id"])) == 1
 
 
+def test_a_patched_home_relative_folder_is_stored_resolved(home_dir: str) -> None:
+    job = watch_job(home_dir)
+    rel = "~/" + os.path.basename(home_dir)
+    r = client.patch(f"/jobs/{job['id']}", json={"watch_dir": rel})
+    assert r.status_code == 200 and r.json()["watch_dir"] == str(Path(home_dir).resolve())
+    (Path(home_dir) / "a.txt").write_text("1")
+    assert len(tick(T0 + 1)) == 1, "the folder is still watched"
+
+
 def test_a_directory_outside_home_or_hidden_is_refused() -> None:
     for bad in ("/etc", os.path.join(os.path.expanduser("~"), ".ssh")):
         r = client.post("/jobs", json={"name": "w", "prompt": "p", "kind": "watch", "watch_dir": bad})

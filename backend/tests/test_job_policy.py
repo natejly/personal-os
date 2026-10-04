@@ -128,6 +128,27 @@ def test_retry_backoff_and_attempt_persist() -> None:
     assert len(r.launched) == before
 
 
+def test_a_one_off_retries_although_firing_retired_it() -> None:
+    r = Rig()
+    jb = r.jobs.create("once", "", "p", kind="once", run_at=T0 + 60, timezone="UTC", enabled=True, at=T0 - 10, max_retries=2)
+
+    def flip(s: float) -> None:
+        if s < 120:
+            for i in range(len(r.launched)):
+                if r.store.get(f"run{i}")["status"] == "running":
+                    r.finish(f"run{i}", "error", "boom")
+
+    r.on_sleep = flip
+
+    async def go() -> None:
+        await r.fire(T0 + 61)
+        await r.policy.drain()
+
+    asyncio.run(go())
+    assert len(r.launched) == 3  # the fire plus max_retries=2
+    assert r.jobs.get(jb["id"])["enabled"] is False  # still retired
+
+
 def test_streak_pauses_and_success_resets() -> None:
     r = Rig()
     jb = r.job(max_retries=0)

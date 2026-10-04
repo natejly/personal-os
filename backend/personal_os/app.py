@@ -17,7 +17,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -77,7 +77,7 @@ from .presets import CanvasPresets
 from . import resume
 from . import permrules
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents, parallel_safe
+from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
@@ -602,8 +602,6 @@ def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None
 
 # The note a user typed with a denial, handed from POST /approvals to the run waiting on that call.
 _approval_notes: dict[str, str] = {}
-# Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
-UNATTENDED_KINDS = ("job", "scheduled")
 
 
 def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
@@ -7631,7 +7629,7 @@ class DeskResumeIn(BaseModel):
 
 class AcceptItem(BaseModel):
     output_id: str
-    destination: str                      # doc | doc_append | document | download
+    destination: Literal["doc", "doc_append", "document", "download"]  # cowork.OUTPUT_KINDS; checked before the claim
     title: str | None = None
     doc_id: str | None = None
     project_id: str | None = None

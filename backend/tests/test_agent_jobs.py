@@ -159,6 +159,8 @@ def test_the_shipped_jobs_are_seeded_once_and_disabled() -> None:
         assert valid_cron(row["cron"]) and row["prompt"]
         assert row["enabled"] is False and row["next_due_at"] is None, "an unattended run costs money: the user opts in"
     assert fresh.seed(at=T0) == 0, "seeding again adds nothing"
+    fresh.delete(seeded["Weekly review"]["id"])
+    assert fresh.seed(at=T0) == 0 and "Weekly review" not in {j["name"] for j in fresh.list()}, "a deleted shipped job stays deleted"
     assert [s["name"] for s in SEED_JOBS] == ["Morning brief", "Scan unread and draft replies", "Weekly review"]
 
 

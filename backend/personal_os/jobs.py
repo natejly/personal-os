@@ -260,6 +260,12 @@ def spent(job: dict[str, Any]) -> bool:
     return abs(float(job["last_due_at"]) - float(job["run_at"])) < 1.0
 
 
+def retryable(job: dict[str, Any]) -> bool:
+    """May a failed run of this job be retried? Enabled jobs, and a one-off that retired itself by firing
+    (mark_fired disables it before its run ends) as long as nobody paused it."""
+    return bool(job.get("enabled")) or (spent(job) and not job.get("paused_reason"))
+
+
 def next_due_for(job: dict[str, Any], after: float) -> float | None:
     """The instant this job should next fire, or None if it never will again.
 
@@ -339,6 +345,8 @@ class Jobs:
             cols["enabled"] = int(bool(cols["enabled"]))
         if cols.get("kind") == "once":
             cols["cron"] = ""
+        if cols.get("watch_dir"):
+            cols["watch_dir"] = check_watch_dir(cols["watch_dir"])  # stored resolved, as create stores it
         if "allowed_tools" in cols:
             cols["allowed_tools"] = None if cols["allowed_tools"] is None else json.dumps(list(cols["allowed_tools"]))
         if "enabled" in cols:
@@ -390,10 +398,10 @@ class Jobs:
         """How many entries are new or touched in the job's folder since the last look, and remember this look.
         The first look (no baseline yet) only records one."""
         try:
-            check_watch_dir(job["watch_dir"])
+            path = check_watch_dir(job["watch_dir"])  # resolved: a stored '~/Downloads' must still list
         except Exception:  # noqa: BLE001 - a folder that left the guard (moved, now hidden) just goes quiet
             return 0
-        new = scan_dir(job["watch_dir"])
+        new = scan_dir(path)
         with self.db.tx() as c:
             r = c.execute("SELECT watch_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
         raw = r["watch_seen"] if r else None
@@ -459,13 +467,19 @@ class Jobs:
             c.execute("UPDATE jobs SET last_run_id=?, last_error=? WHERE id=?", (run_id, error, id))
 
     def seed(self, at: float | None = None) -> int:
-        """The three jobs the app ships with, once. Disabled: an unattended run spends money, so the user opts in."""
+        """The three jobs the app ships with, once per database: a marker row keeps a deleted or renamed one from
+        coming back on the next start. Disabled: an unattended run spends money, so the user opts in."""
+        with self.db.tx() as c:
+            if c.execute("SELECT 1 FROM settings WHERE key='jobsSeeded'").fetchone():
+                return 0
         have = {j["name"] for j in self.list()}
         made = 0
         for s in SEED_JOBS:
             if s["name"] not in have:
                 self.create(s["name"], s["cron"], s["prompt"], enabled=False, at=at, allowed_tools=s.get("allowed_tools"))
                 made += 1
+        with self.db.tx() as c:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('jobsSeeded', 'true')")
         return made
 
 

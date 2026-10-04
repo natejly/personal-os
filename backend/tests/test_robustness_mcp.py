@@ -228,6 +228,24 @@ class TestRichResults(unittest.TestCase):
         self.assertFalse(old.exists())
         self.assertTrue(new.exists())
 
+    def test_an_unwritable_media_folder_is_an_error_item_not_a_raise(self) -> None:
+        from mcp.types import CallToolResult, ImageContent
+        blocker = Path(self._dir.name) / "blocker"
+        blocker.write_bytes(b"x")  # a file where the folder's parent should be
+        with unittest.mock.patch.object(mcp_client.mac, "mcp_media_dir", return_value=blocker / "mcp_media"):
+            out = mcp_client._result_dict(CallToolResult(content=[ImageContent(type="image", data="QUFB", mime_type="image/png")]))
+        self.assertNotIn("path", out["media"][0])
+        self.assertIn("not saved", out["media"][0]["error"])
+
+    def test_a_repeated_image_refreshes_its_mtime(self) -> None:
+        from mcp.types import CallToolResult, ImageContent
+        block = CallToolResult(content=[ImageContent(type="image", data="QUFB", mime_type="image/png")])
+        p = Path(mcp_client._result_dict(block)["media"][0]["path"])
+        os.utime(p, (1, 1))
+        mcp_client._result_dict(block)
+        self.assertEqual(mcp_client.sweep_media(), 0)
+        self.assertTrue(p.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

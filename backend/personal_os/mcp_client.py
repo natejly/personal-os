@@ -265,12 +265,18 @@ def _save_media(data_b64: Any, mime: str) -> dict[str, Any]:
     folder = mac.mcp_media_dir()
     if folder is None:
         return {"mime_type": mime, "error": "not saved: no data folder"}
-    folder.mkdir(parents=True, exist_ok=True)
     path = folder / (hashlib.sha256(data).hexdigest() + _MEDIA_EXT.get(mime, ".bin"))
-    if not path.exists():
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            with contextlib.suppress(OSError):
+                os.utime(path)  # a fresh reference: keep sweep_media off it
+        else:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+    except OSError as e:
+        return {"mime_type": mime, "error": f"not saved: {e}"}
     return {"mime_type": mime, "path": str(path), "bytes": len(data)}
 
 

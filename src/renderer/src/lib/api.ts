@@ -131,6 +131,8 @@ const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
 
+export interface MemoryExport { grain_memories: number; memories: { content: string; kind: string; pinned: boolean }[] }
+
 export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
 
 export const api = {
@@ -534,6 +536,9 @@ export const api = {
     /** Every row including superseded / forgotten ones. */
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
+    history: (id: string) => req<Memory[]>(`/memories/${id}/history`),
+    exportFile: (s: Scope) => req<MemoryExport>(`/memories/export?${scope(s)}`),
+    importFile: (file: unknown, projectId: string | null) => req<{ added: number; skipped: number }>('/memories/import', { method: 'POST', body: json({ file, project_id: projectId }) }),
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }),
     proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
     applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
@@ -796,7 +801,9 @@ export const api = {
     update: (id: string, patch: { name?: string }) => req<CanvasPreset>(`/canvas-presets/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/canvas-presets/${id}`, { method: 'DELETE' }),
     /** Creates a NEW canvas; `skipped` counts windows whose referent no longer exists. */
-    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) })
+    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) }),
+    exportFile: (id: string) => req<Record<string, unknown>>(`/canvas-presets/${id}/export`),
+    importFile: (file: unknown) => req<{ preset: CanvasPreset }>('/canvas-presets/import', { method: 'POST', body: json({ file, instantiate: false }) })
   }
 }
 

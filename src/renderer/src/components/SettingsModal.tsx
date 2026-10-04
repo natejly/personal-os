@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, RotateCcw, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, RotateCcw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
+import { downloadJson, pickJson } from '../lib/jsonFile'
+import { usePresets } from '../canvas/presets'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
@@ -75,6 +77,38 @@ function IndexStatusLine(): JSX.Element | null {
   )
 }
 
+/** Space presets as files: export one to a JSON file, or import one (it is added to the presets list, not opened). */
+function PresetFiles(): JSX.Element {
+  const presets = usePresets((s) => s.presets)
+  const toast = useStore((s) => s.toast)
+  useEffect(() => { void usePresets.getState().load() }, [])
+  const exportOne = async (p: { id: string; name: string }): Promise<void> => {
+    try { downloadJson(`${p.name.replace(/[^\w-]+/g, '-') || 'preset'}.grain-preset.json`, await api.presets.exportFile(p.id)) } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const importOne = async (): Promise<void> => {
+    try {
+      const file = await pickJson()
+      if (!file) return
+      const r = await api.presets.importFile(file)
+      toast(`Imported preset "${r.preset.name}"`)
+      await usePresets.getState().load()
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
+  return (
+    <>
+      <h4>Presets</h4>
+      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes and dashboard widgets travel with it; chats never do.</p>
+      {presets.map((p) => (
+        <div className="test-row" key={p.id}>
+          <span>{p.name} <small className="muted">· {p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>
+          <button className="ghost-btn" type="button" onClick={() => void exportOne(p)}><Download size={14} /> Export</button>
+        </div>
+      ))}
+      <div className="test-row"><button className="ghost-btn" type="button" onClick={() => void importOne()}><Upload size={14} /> Import preset…</button></div>
+    </>
+  )
+}
+
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
@@ -87,9 +121,8 @@ export default function SettingsModal(): JSX.Element {
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
-  const knowledgeTab = useStore((s) => s.knowledgeTab)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { setKnowledgeTab, setLibraryScope } = useStore()
+  const { setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   /** For the Knowledge base tab, whose changes apply immediately: keep the draft in step and save now. */
@@ -256,17 +289,12 @@ export default function SettingsModal(): JSX.Element {
               <div className="knowledge-head">
                 <h3>Knowledge base</h3>
                 <div className="knowledge-controls modal-free">
-                  <div className="seg" role="group" aria-label="Knowledge base section">
-                    <button className={knowledgeTab === 'memory' ? 'active' : ''} aria-pressed={knowledgeTab === 'memory'} onClick={() => setKnowledgeTab('memory')}><Brain size={13} /><span>Memory</span></button>
-                    <button className={knowledgeTab === 'documents' ? 'active' : ''} aria-pressed={knowledgeTab === 'documents'} onClick={() => setKnowledgeTab('documents')}><FileText size={13} /><span>Documents</span></button>
-                  </div>
                   <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
                 </div>
               </div>
-              <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
-              {knowledgeTab === 'memory' && <p className="muted small">Auto-learn, the extraction model and the embedding model are under <button type="button" className="link-btn" onClick={() => setTab('memory')}>Memory &amp; learning</button>.</p>}
+              <p className="muted small">Documents whose best excerpts are pulled into replies. Changes here apply immediately. Memories are under <button type="button" className="link-btn" onClick={() => setTab('memory')}>Memory &amp; learning</button>.</p>
               {/* Saved on change like the rest of this tab, so Re-embed now sees it before Save. */}
-              {knowledgeTab === 'documents' && <>
+              <>
                 <label className="toggle-row plain modal-free">
                   <span className="toggle-text"><b>Contextual chunks</b><small>On Re-embed now, ask the model to write one sentence situating each chunk in its document, and index it with the chunk (up to 64 chunks per press). Costs one model call per chunk. Off by default.</small></span>
                   <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => applyNow({ contextualChunks: e.target.checked })} /><span className="switch" />
@@ -283,9 +311,9 @@ export default function SettingsModal(): JSX.Element {
                   <input defaultValue={draft.retrievalRerankModel ?? ''} placeholder="Off" spellCheck={false}
                     onBlur={(e) => { const m = e.target.value.trim(); if (m !== (draft.retrievalRerankModel ?? '')) applyNow({ retrievalRerankModel: m, retrievalRerank: Boolean(m) }) }} />
                 </label>
-              </>}
+              </>
               <div className="knowledge-body modal-free">
-                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
+                <IndexStatusLine /><DocumentsView embedded />
               </div>
             </section>}
 
@@ -300,13 +328,13 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
+                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it below, under Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
-              <label><span>Embedding model <small className="muted">(shared with document search; after changing it, Save, then press Re-embed now under Knowledge base → Documents. Memories re-embed as they are searched)</small></span>
+              <label><span>Embedding model <small className="muted">(shared with document search; after changing it, Save, then press Re-embed now under Knowledge base. Memories re-embed as they are searched)</small></span>
                 <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
               </label>
               <label className="toggle-row plain">
@@ -314,6 +342,9 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.hybridRetrieval !== false} onChange={(e) => patch({ hybridRetrieval: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <p className="muted small">The settings above save with Save. The memories and graph below save as you change them.</p>
+              <div className="knowledge-controls modal-free"><ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} /></div>
+              <div className="knowledge-body modal-free"><MemoryPanel embedded /></div>
             </section>}
 
             {tab === 'integrations' && <section>
@@ -447,6 +478,7 @@ export default function SettingsModal(): JSX.Element {
                   {GRID_SIZES.map((g) => <option key={g} value={g}>{g} pt</option>)}
                 </select>
               </label>
+              <PresetFiles />
             </section>}
 
             {tab === 'trash' && <TrashPanel />}

@@ -146,6 +146,31 @@ def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
 
 
 @needs_seatbelt
+def test_home_as_workspace_root_cannot_write_dotfiles_library_or_data(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(box.root))
+    (box.root / "Library").mkdir()
+    r = box.run("shell_run", command="echo x >> .zshrc; echo y > Library/agent.plist; echo z > ok.txt; echo done")
+    assert "done" in r["output"] and (box.root / "ok.txt").exists()
+    assert not (box.root / ".zshrc").exists() and not (box.root / "Library" / "agent.plist").exists()
+
+
+@needs_seatbelt
+def test_background_leader_exit_kills_its_leftover_children(box: Box) -> None:
+    async def go() -> None:
+        r = await box.arun("shell_run", command="sleep 30 & echo pid=$!", background=True)
+        for _ in range(50):
+            p = await box.arun("shell_poll", job_id=r["job_id"])
+            if p["status"] != "running":
+                break
+            await asyncio.sleep(0.1)
+        pid = int(box.tb.shell.jobs[r["job_id"]].buf.split("pid=")[1].split()[0])
+        await asyncio.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    asyncio.run(go())
+
+
+@needs_seatbelt
 def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     (home / ".ssh").mkdir(parents=True)
@@ -677,3 +702,18 @@ def test_run_python_profile_allows_the_mime_tables_python_reads_at_import() -> N
     died under the profile with PermissionError."""
     prof = sandbox._mac_profile("/tmp/w", sys.executable)
     assert '(literal "/private/etc/apache2/mime.types")' in prof and '(literal "/private/etc/mime.types")' in prof
+
+
+@needs_seatbelt
+def test_matplotlib_warm_up_runs_the_work_venv_under_seatbelt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The venv's site-packages (and their .pth files) run at import, so the warm-up must be sandboxed too, and still work."""
+    pytest.importorskip("matplotlib")
+    import subprocess
+    seen: list[list[str]] = []
+    real = subprocess.run
+    monkeypatch.setattr(sandbox.subprocess, "run", lambda cmd, **kw: (seen.append(cmd), real(cmd, **kw))[1])
+    monkeypatch.setattr(sandbox, "MPL_CACHE", str(tmp_path))
+    monkeypatch.setattr(sandbox, "_mpl_warmed", False)
+    sandbox._warm_mpl(sys.executable)
+    assert seen and seen[0][0] == "sandbox-exec"
+    assert any(n.startswith("fontlist-") for n in os.listdir(tmp_path))

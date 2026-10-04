@@ -79,6 +79,7 @@ from . import permrules
 from . import shell as shell_tool
 from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
+from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
@@ -2274,7 +2275,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": used, "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": um["content"]})
+                        messages.append({"role": "user", "content": expand_command(um["content"], command_store)})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut

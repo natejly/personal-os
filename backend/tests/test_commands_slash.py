@@ -80,3 +80,31 @@ def test_subtask_command_points_the_model_at_command_run() -> None:
     content = drive(cid, "/digest rust")[-1]["content"]
     assert "command_run" in content and "'digest'" in content and "'rust'" in content
     assert "Research rust deeply" not in content  # the child agent fills it, not this turn
+
+
+def test_a_command_steered_into_a_live_run_is_filled() -> None:
+    _save("standup", "Summarise $ARGUMENTS")
+    cid = convos.create(None, "t", "m")["id"]
+    steers: list[dict[str, Any]] = []
+    calls: list[list[dict[str, Any]]] = []
+
+    async def stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, kind: str = "chat",
+                     effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: Any = None) -> Any:
+        calls.append([dict(m) for m in messages])
+        if len(calls) == 1:  # the steer arrives while the first segment is streaming
+            steers.append(convos.add_message(cid, "user", "/standup yesterday"))
+        yield {"type": "delta", "text": "ok"}
+        yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
+
+    async def go() -> None:
+        async for _ in appmod._chat_stream(cid, appmod.ChatIn(content="hi"), asyncio.Event(), steers):
+            pass
+    prev = llm.stream_chat
+    llm.stream_chat = stream  # type: ignore[assignment]
+    try:
+        asyncio.run(go())
+    finally:
+        llm.stream_chat = prev
+    assert len(calls) == 2, "the steer is answered in the same run"
+    last = [m for m in calls[1] if m["role"] == "user"][-1]["content"]
+    assert last.startswith("/standup yesterday") and "Summarise yesterday" in last

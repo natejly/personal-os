@@ -180,7 +180,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           placeholder={streaming ? 'Steer the reply…' : placeholder}
           noGhost={!!slash}
           onKeyDown={(e) => {
-            const act = slash && !e.nativeEvent.isComposing ? slashMenuKey(e.key, slashActive, slash.length) : null
+            const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
             if (act) {
               e.preventDefault()
               if (act.kind === 'move') setSlashActive(act.active)

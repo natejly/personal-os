@@ -617,8 +617,8 @@ class Workspace:
         The only writer of `inputs/`. The quota is checked for the whole batch first, so a refused batch lands
         nothing; an existing name gets Finder's `name 2.ext` rather than being replaced."""
         root = self.ensure(desk_id).resolve()
-        need_files = 2 * len(items) + 1
-        need_bytes = 2 * sum(len(data) for _, data, _ in items) + 300 * len(items)
+        need_files = 2 * len(items) + 2   # each input and its baseline, plus the manifest and its baseline
+        need_bytes = 2 * sum(len(data) for _, data, _ in items) + 600 * len(items)
         use = self.usage(desk_id)
         if use["files"] + need_files > self.max_files:
             raise WorkspaceError(f"this workspace already holds {use['files']} files and the limit is {self.max_files}", usage=use)
@@ -648,6 +648,10 @@ class Workspace:
                         fh.write("# Inputs\n\nSnapshot copies the user handed this desk. Read them; do not edit them.\n\n")
                     fh.write(f"- `{rel}`: {' '.join(str(source).split())[:200]} ({len(data)} bytes, "
                              f"sha256 {hashlib.sha256(data).hexdigest()[:12]})\n")
+                # The manifest is the provenance record: its baseline follows each append, so only a later edit shows.
+                mbase = self._baseline_of(desk_id, f"{INPUTS_DIR}/{INPUTS_MANIFEST}")
+                mbase.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(manifest, mbase)
             except OSError as e:
                 raise _oserror(rel, "copied in", e) from e
             out.append({"path": rel, "bytes": len(data), "source": source})

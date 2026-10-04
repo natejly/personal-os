@@ -8313,13 +8313,15 @@ def _input_name(title: str, taken: set[str]) -> str:
 DESK_INPUT_MAX = 20
 
 
-def _load_desk_inputs(refs: list[DeskInputRef]) -> list[tuple[str, bytes, str]]:
+def _load_desk_inputs(refs: list[DeskInputRef], used_bytes: int = 0) -> list[tuple[str, bytes, str]]:
     """What the user picked, read into (name, bytes, source). The route is a trust boundary even though the user picks:
     a local path must resolve, symlinks followed, under the home folder and outside dot-folders, ~/Library, the app's
-    data and credential files, and is size-checked against the workspace quota before it is read."""
+    data and credential files. Local files are size-checked together against the room left (`used_bytes` is what the
+    workspace already holds) before any is read."""
     if len(refs) > DESK_INPUT_MAX:
         raise HTTPException(400, f"At most {DESK_INPUT_MAX} inputs at a time")
     out: list[tuple[str, bytes, str]] = []
+    paths: list[tuple[int, Path, int]] = []   # (slot in out, file, size)
     for ref in refs:
         if ref.kind == "doc":
             d = docs.get(ref.id or "")
@@ -8331,10 +8333,10 @@ def _load_desk_inputs(refs: list[DeskInputRef]) -> list[tuple[str, bytes, str]]:
             if not d:
                 raise HTTPException(404, f"No document {ref.id!r}")
             try:
-                data = Path(d["path"]).read_bytes()
-            except OSError:
-                data = (d["text"] or "").encode("utf-8")   # the stored bytes are gone; the extracted text is what is left
-            out.append((d["name"], data, f"uploaded document {d['name']!r} ({d['id']})"))
+                out.append((d["name"], Path(d["path"]).read_bytes(), f"uploaded document {d['name']!r} ({d['id']})"))
+            except OSError:   # the stored bytes are gone; the extracted text is what is left, and is named as such
+                out.append((f"{d['name']}.txt", (d["text"] or "").encode("utf-8"),
+                            f"extracted text of uploaded document {d['name']!r} ({d['id']})"))
         elif ref.kind == "path":
             try:
                 p = mac.allowed_path(ref.path or "")
@@ -8345,16 +8347,25 @@ def _load_desk_inputs(refs: list[DeskInputRef]) -> list[tuple[str, bytes, str]]:
                 raise HTTPException(400, why)
             if not p.is_file():
                 raise HTTPException(400, f"{p} is not a file")
-            size = p.stat().st_size
-            if size > workspace.max_total_bytes // 2:
-                raise HTTPException(400, f"{p.name} is {size} bytes; the workspace limit is {workspace.max_total_bytes} "
-                                         "and an input takes twice its size (a copy and a baseline)")
             try:
-                out.append((p.name, p.read_bytes(), str(p)))
+                paths.append((len(out), p, p.stat().st_size))
             except OSError as e:
                 raise HTTPException(400, f"{p.name} could not be read ({e.__class__.__name__})") from e
+            out.append((p.name, b"", str(p)))   # read below, once every path has been sized
         else:
             raise HTTPException(400, f"Unknown input kind {ref.kind!r}: doc, document or path")
+    # Every local file is stat'ed and the batch checked against what the workspace has left before any is read, so
+    # twenty large picks are refused at the boundary rather than pulled into memory first.
+    sizes = [size for _, _, size in paths]
+    room = workspace.max_total_bytes - used_bytes - 2 * sum(len(data) for _, data, _ in out)
+    if 2 * sum(sizes) > room:
+        raise HTTPException(400, f"those files are {sum(sizes)} bytes and an input takes twice its size (a copy and a "
+                                 f"baseline); the workspace has {max(room, 0)} bytes left of {workspace.max_total_bytes}")
+    for i, p, _ in paths:
+        try:
+            out[i] = (p.name, p.read_bytes(), str(p))
+        except OSError as e:
+            raise HTTPException(400, f"{p.name} could not be read ({e.__class__.__name__})") from e
     return out
 
 
@@ -8362,7 +8373,7 @@ def _load_desk_inputs(refs: list[DeskInputRef]) -> list[tuple[str, bytes, str]]:
 def add_desk_inputs(id: str, body: DeskInputsIn) -> dict[str, Any]:
     """Hand a desk more material after it was created. Its next turn's system context lists them."""
     _desk_or_404(id, False)
-    items = _load_desk_inputs(body.inputs)
+    items = _load_desk_inputs(body.inputs, workspace.usage(id)["bytes"])
     if not items:
         raise HTTPException(400, "No inputs given")
     try:

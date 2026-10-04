@@ -202,3 +202,17 @@ def test_notify_field_round_trips_and_is_validated() -> None:
     assert client.patch(f"/jobs/{j['id']}", json={"notify": None}).json()["notify"] == "never"
     assert client.patch(f"/jobs/{j['id']}", json={"notify": "sometimes"}).status_code == 422
     assert mkjob("plain")["notify"] == "problems"
+
+
+def test_runs_listing_interleaves_skips_and_stats_leave_them_out() -> None:
+    j = mkjob()
+    add_run(j["id"], "done", start=NOW - 300)
+    appmod.jobs.record_skip(j["id"], "previous run still running", NOW - 200, NOW - 200)
+    add_run(j["id"], "error", start=NOW - 100)
+    body = client.get(f"/jobs/{j['id']}/runs").json()
+    assert [r["status"] for r in body] == ["error", "skipped", "done"]
+    assert body[1]["reason"] == "previous run still running" and body[1]["due_at"] == NOW - 200
+    assert len(client.get(f"/jobs/{j['id']}/runs?limit=2").json()) == 2
+    st = client.get(f"/jobs/{j['id']}/stats").json()
+    assert st["runs"] == 2 and st["success_rate"] == 0.5 and st["skipped"] == 1
+    assert "skipped" not in client.get(f"/jobs/{j['id']}/runs.csv").text, "the CSV stays one row per run"

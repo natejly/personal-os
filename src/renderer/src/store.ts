@@ -5,6 +5,7 @@ import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecisio
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
+import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
@@ -495,6 +496,7 @@ export interface State {
   updateJob: (id: string, patch: Parameters<typeof api.jobs.update>[1]) => Promise<string | null>
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
+  rejectJobProposals: (jobId: string) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
   approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) => Promise<void>
   refreshGoogle: () => Promise<void>
@@ -3760,12 +3762,25 @@ export const useStore = create<State>((set, get) => {
     },
     decideProposal: async (id, accept, args) => {
       try {
-        const res = accept ? await api.proposals.accept(id, args) : await api.proposals.reject(id)
-        if (accept && !res.ok) get().toast(`That did not go through: ${res.proposal.error ?? 'unknown error'}`, 'error')
-        else if (accept && res.proposal.tool === 'gmail_send') {
-          get().toast('Queued — it sends after the undo window.', 'info')
-          window.dispatchEvent(new Event('grain-outbox-changed'))
-        } else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+        if (!accept) {
+          await api.proposals.reject(id)
+          get().toast('Dropped.', 'info')
+          return
+        }
+        const res = await api.proposals.accept(id, args)
+        const t = acceptToast(res)
+        get().toast(t.text, t.kind)
+        if (res.queued) window.dispatchEvent(new Event('grain-outbox-changed'))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        void get().refreshAgentInbox()
+      }
+    },
+    rejectJobProposals: async (jobId) => {
+      try {
+        const { rejected } = await api.proposals.rejectAll(jobId)
+        get().toast(`Dropped ${rejected} proposal${rejected === 1 ? '' : 's'}.`, 'info')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       } finally {

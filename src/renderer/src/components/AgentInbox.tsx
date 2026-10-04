@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
+import type { AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
@@ -56,7 +56,7 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
     <li className="inbox-item">
       <div className="inbox-item-head">
         <span className="inbox-tool">{p.tool}</span>
-        <span className="muted small">proposed {fmtWhen(p.created_at)}</span>
+        <span className="muted small">{p.job ? `${p.job} · ` : ''}proposed {fmtWhen(p.created_at)}</span>
         <span style={{ flex: 1 }} />
         <button className="icon-btn sm" title={editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
           onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
@@ -131,11 +131,12 @@ const fmtDur = (s: number | null): string => (s === null ? '' : s < 90 ? `${Math
 const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
   running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
 }
+const skipReason = (why: string): string => why.replace('previous run still running', 'still running')
 
 /** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
 function JobHistory({ job }: { job: Job }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const [runs, setRuns] = useState<JobRunRecord[] | null>(null)
+  const [runs, setRuns] = useState<(JobRunRecord | JobSkipRecord)[] | null>(null)
   const [stats, setStats] = useState<JobStats | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -169,18 +170,30 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
+          {!!stats.skipped && ` · ${stats.skipped} skipped`}
           <span style={{ flex: 1 }} />
           <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
         </div>
       )}
       {runs && runs.length === 0 && <p className="muted small">Not run yet.</p>}
-      {runs && runs.map((r) => (
+      {runs && runs.map((r) => r.status === 'skipped' ? (
+        <div key={r.run_id} className="job-history-run small muted" title={`Skipped ${fmtDate(r.started_at)}`}>
+          <span className="chip">skipped</span>
+          <span>{fmtDate(r.due_at ?? r.started_at)}</span>
+          <span>{skipReason(r.reason)}</span>
+        </div>
+      ) : (
         <div key={r.run_id} className="job-history-run small">
           <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
           {r.manual && <span className="chip">by hand</span>}
+          {r.late && (
+            <span className="chip warn" title={r.due_at ? `Due ${fmtDate(r.due_at)}` : undefined}>
+              late{r.missed_slots > 0 ? ` · ${r.missed_slots} slot${r.missed_slots === 1 ? '' : 's'} missed` : ''}
+            </span>
+          )}
           <span className="muted">{r.tool_calls} call{r.tool_calls === 1 ? '' : 's'}</span>
           {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
@@ -276,7 +289,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'off'}
       </span>
       {job.last_skip_reason && job.last_skip_at && (
-        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
+        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {skipReason(job.last_skip_reason)}</span>
       )}
       {(job.kind === 'cron' || job.kind === 'once') && (
         <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
@@ -524,7 +537,7 @@ const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
@@ -533,6 +546,14 @@ export default function AgentInbox(): JSX.Element | null {
   const paused = box.needs_you.paused_jobs ?? []
   const deskRows = box.needs_you.desks ?? []
   const elsewhere = box.needs_you.elsewhere ?? []
+  // A job with several pending proposals gets one "Reject all" row, so a noisy job is one click to clear.
+  const perJob = new Map<string, { name: string; n: number }>()
+  for (const p of proposals) {
+    if (!p.job_id) continue
+    const g = perJob.get(p.job_id) ?? { name: p.job ?? 'A deleted job', n: 0 }
+    perJob.set(p.job_id, { ...g, n: g.n + 1 })
+  }
+  const bulk = [...perJob.entries()].filter(([, g]) => g.n > 1)
 
   const goDesk = (deskId: string): void => {
     setView('cowork')
@@ -637,6 +658,19 @@ export default function AgentInbox(): JSX.Element | null {
                   <span className="chip bad"><AlertTriangle size={11} /> Paused: {p.reason}</span>
                   <span style={{ flex: 1 }} />
                   <button className="primary-btn sm" onClick={() => void setJobEnabled(p.id, true)}><Play size={13} /> Resume</button>
+                </div>
+              </li>
+            ))}
+            {bulk.map(([jobId, g]) => (
+              <li className="inbox-item" key={`bulk-${jobId}`}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job">{g.name}</span>
+                  <span className="chip">{g.n} proposals</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="ghost-btn sm"
+                    onClick={() => { if (confirm(`Reject all ${g.n} proposals from “${g.name}”?`)) void rejectJobProposals(jobId) }}>
+                    <X size={13} /> Reject all from {g.name}
+                  </button>
                 </div>
               </li>
             ))}

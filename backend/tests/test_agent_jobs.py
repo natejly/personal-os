@@ -866,3 +866,53 @@ def test_a_job_budget_never_loosens_the_users_own_stricter_setting() -> None:
     assert caps["maxRunCost"] == 0.01, "the user's stricter cap wins"
     assert caps["maxRunSeconds"] == appmod.JOB_BUDGET["maxRunSeconds"], "a 0 in the job budget is not 'unlimited'"
 
+
+# ---------------- proposal hygiene ----------------
+def _bare_proposal(job_id: str | None, *, at: float | None = None) -> dict[str, Any]:
+    return proposals.create(run_id=None, tool="calendar_create", args={"summary": f"x {time.time()}"}, job_id=job_id, at=at)
+
+
+def test_a_stale_proposal_expires_on_a_tick_and_cannot_be_accepted() -> None:
+    now = time.time()
+    old = _bare_proposal("jx", at=now - 8 * 86400)
+    fresh = _bare_proposal("jx", at=now - 6 * 86400)
+    sched = Scheduler(jobs, appmod._launch_job, clock=lambda: now, policy=appmod.job_policy)  # noqa: SLF001 - default 7 days
+    tick(now, sched)
+    assert proposals.get(old["id"])["status"] == "expired" and proposals.get(fresh["id"])["status"] == "pending"
+    r = client.post(f"/proposals/{old['id']}/accept")
+    assert r.status_code == 409 and "expired" in r.text
+    assert SENT == [], "an expired proposal never runs"
+    assert all(p["id"] != old["id"] for p in j("GET", "/inbox")["needs_you"]["proposals"])
+    assert any(p["id"] == old["id"] for p in j("GET", "/proposals?status=expired"))
+    proposals.reject(fresh["id"])
+
+
+def test_deleting_a_job_rejects_its_pending_proposals() -> None:
+    jb = make_job("doomed", "0 * * * *", at=T0, enabled=False)
+    mine, other = _bare_proposal(jb["id"]), _bare_proposal("someone-else")
+    assert any(p["id"] == mine["id"] and p["job"] == jb["name"] for p in j("GET", "/inbox")["needs_you"]["proposals"])
+    j("DELETE", f"/jobs/{jb['id']}")
+    row = proposals.get(mine["id"])
+    assert row["status"] == "rejected" and row["error"] == "job deleted"
+    assert proposals.get(other["id"])["status"] == "pending"
+    proposals.reject(other["id"])
+
+
+def test_reject_all_only_touches_that_jobs_pending_proposals() -> None:
+    a1, a2, b = _bare_proposal("job-a"), _bare_proposal("job-a"), _bare_proposal("job-b")
+    done = _bare_proposal("job-a")
+    proposals.reject(done["id"], at=1.0)
+    assert j("POST", "/proposals/reject_all?job_id=job-a")["rejected"] == 2
+    assert proposals.get(a1["id"])["status"] == proposals.get(a2["id"])["status"] == "rejected"
+    assert proposals.get(b["id"])["status"] == "pending" and proposals.get(done["id"])["decided_at"] == 1.0
+    proposals.reject(b["id"])
+
+
+def test_accepting_a_send_says_it_is_queued_not_sent() -> None:
+    p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "B."})
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is True and res["queued"] is True and res["sends_in_seconds"] > 0
+    assert SENT == [] and any(r["status"] == "holding" for r in appmod.outbox.list())
+    q = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
+    res = j("POST", f"/proposals/{q['id']}/accept")
+    assert res["ok"] is True and res["queued"] is False and res["sends_in_seconds"] is None

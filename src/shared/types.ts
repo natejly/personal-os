@@ -2003,13 +2003,16 @@ export interface AgentProposal {
   tool: string
   args: Record<string, unknown>
   args_digest: string
-  status: 'pending' | 'accepted' | 'rejected'
+  /** 'expired': left pending past settings.proposalExpireDays; it can no longer be accepted. */
+  status: 'pending' | 'accepted' | 'rejected' | 'expired'
   result: unknown
   error: string | null
   /** The user changed the arguments before accepting. */
   edited: boolean
   created_at: number
   decided_at: number | null
+  /** The job's name, on inbox rows only (null once the job is gone). */
+  job?: string | null
 }
 
 /** One job run as "While you were away" shows it. Every field but `summary` comes from a row, not from prose. */
@@ -2062,7 +2065,19 @@ export interface JobRunRecord {
   summary: string
 }
 
+/** A slot the job turned away (job_skips), listed among its runs. `started_at` is when it was skipped. */
+export interface JobSkipRecord {
+  run_id: string
+  conversation_id: null
+  status: 'skipped'
+  reason: string
+  due_at: number | null
+  started_at: number
+}
+
 export interface JobStats {
+  /** Skipped slots in the window; never counted in `runs` or `success_rate`. */
+  skipped?: number
   runs: number
   ok: number
   failed: number

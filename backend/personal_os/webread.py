@@ -1,4 +1,4 @@
-"""What fetch_url does with a response body: content-type routing, numbered link citations, query-focused
+"""What fetch_url does with a response body: content-type routing, numbered link references, query-focused
 trimming, offset paging and a small TTL cache. Pure functions plus `WebCache`; no network, no model."""
 from __future__ import annotations
 
@@ -53,7 +53,8 @@ _LINK = re.compile(r"(?<!\!)\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
 def numberize_links(md: str, base_url: str = "") -> tuple[str, list[dict[str, Any]]]:
-    """`[text](href)` -> `[text][n]`; relative hrefs resolved, non-http(s) dropped to plain text, duplicates share a number."""
+    """`[text](href)` -> `[text](^Ln)`; relative hrefs resolved, non-http(s) dropped to plain text, duplicates share a number.
+    The ^L prefix keeps link numbers apart from the reply's `[n]` citation numbers, so a copied ref never becomes a source chip."""
     links: list[dict[str, Any]] = []
     index: dict[str, int] = {}
 
@@ -71,13 +72,13 @@ def numberize_links(md: str, base_url: str = "") -> tuple[str, list[dict[str, An
         if n is None:
             n = index[absu] = len(links) + 1
             links.append({"n": n, "text": label.strip()[:120], "url": absu})
-        return f"[{label}][{n}]" if label.strip() else ""
+        return f"[{label}](^L{n})" if label.strip() else ""
 
     return _LINK.sub(sub, md), links
 
 
 def references(links: list[dict[str, Any]], cap: int = LINK_CAP) -> str:
-    return "\n".join(f"[{l['n']}]: {l['url']}" for l in links[:cap])
+    return "\n".join(f"^L{l['n']}: {l['url']}" for l in links[:cap])
 
 
 def decode(content_type: str, body: bytes) -> str:

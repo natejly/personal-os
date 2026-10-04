@@ -11,13 +11,38 @@ export interface Project {
   stats?: { conversations: number; memories: number; nodes: number; documents: number }
 }
 
+/**
+ * A cited source. An excerpt has chunk_id; a read span (kind 'range': a pinned file, a read_document slice, doc or
+ * meeting lines) has start/end into the text its viewer loads; a web page (source 'web') has url and opens in the browser.
+ */
+export interface Citation {
+  name: string
+  text: string
+  n?: number
+  source?: string
+  chunk_id?: string
+  document_id?: string
+  doc_id?: string | null
+  idx?: number
+  heading?: string
+  page?: number | null
+  kind?: 'range'
+  start?: number
+  end?: number
+  meeting_id?: string
+  part?: string
+  url?: string
+  title?: string
+  domain?: string
+}
+
 export interface ContextUsed {
   project: { id: string; name: string } | null
   memories: { id: string; content: string; project_id: string | null }[]
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
-  /** `n` is the excerpt's citation number in the reply ("[n]"); absent on messages saved before citations. */
-  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null; n?: number; heading?: string; page?: number | null }[]
+  /** Every source the reply may cite. `n` is its citation number ("[n]"); absent on messages saved before citations. */
+  chunks: Citation[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */

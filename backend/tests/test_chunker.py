@@ -184,6 +184,6 @@ check(_excerpt_header({"name": "n.pdf", "idx": 0, "heading": "", "page": 4}) == 
 check(_excerpt_header({"name": "n.txt", "idx": 2, "heading": "", "page": None}) == "n.txt (chunk 3)", "header: fallback")
 pv = client.post("/context/preview", json={"query": "quarantine"}).json()
 ex = [c for c in pv["chunks"] if c["document_id"] == up["id"]]
-check(ex and ex[0]["heading"] == "Quarantine procedure" and "### guide.md — Quarantine procedure" in pv["system_prompt"], "context excerpt shows the section")
+check(ex and ex[0]["heading"] == "Quarantine procedure" and f"### [{ex[0]['n']}] guide.md — Quarantine procedure" in pv["system_prompt"], "context excerpt shows the section")
 
 print(f"test_chunker: {passed} checks passed")

@@ -6,7 +6,7 @@ import type { ContextUsed } from '@shared/types'
 
 export type ChunkRef = ContextUsed['chunks'][number]
 
-/** A cited excerpt in its source text: the chunk's span wrapped in <mark> and scrolled into view. */
+/** A cited excerpt in its source text: the chunk's (or read range's) span wrapped in <mark> and scrolled into view. */
 export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClose: () => void }): JSX.Element {
   const [view, setView] = useState<{ text: string; start: number; end: number } | null>(null)
   const [err, setErr] = useState(false)
@@ -14,11 +14,18 @@ export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClo
   const isDoc = chunk.source === 'doc'
 
   useEffect(() => {
-    const id = (isDoc && chunk.doc_id) || chunk.document_id
+    const id = (isDoc && chunk.doc_id) || chunk.document_id || ''
     void (async () => {
       try {
+        if (chunk.source === 'meeting' && chunk.meeting_id) {
+          // A transcript is not part of the meeting payload: show the cited lines on their own.
+          const m = await api.meetings.get(chunk.meeting_id)
+          const body = chunk.part === 'notes' || chunk.part === 'enhanced' ? m[chunk.part] : ''
+          setView(body ? { text: body, start: chunk.start ?? 0, end: chunk.end ?? 0 } : { text: chunk.text, start: 0, end: chunk.text.length })
+          return
+        }
         const [span, text] = await Promise.all([
-          api.chunkSpan(isDoc, id, chunk.chunk_id),
+          chunk.chunk_id ? api.chunkSpan(isDoc, id, chunk.chunk_id) : { start: chunk.start ?? 0, end: chunk.end ?? 0 },
           isDoc ? api.docs.get(id).then((d) => d.content) : api.documents.get(id).then((d) => d.text ?? '')
         ])
         setView({ text, start: span.start, end: span.end })

@@ -366,12 +366,12 @@ class Conversations:
                        trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
                        outcome: str | None = None, error_kind: str | None = None) -> None:
         if context_used and context_used.get("chunks"):
-            # Every saved reply goes through here: check its [n] against the full excerpts, then keep a prefix.
-            # Mutates in place, so the 'done' event that follows carries the same ledger as the row.
-            from .context import CITE_TEXT_KEEP, cite_check
+            # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
+            # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
+            # text, so a second finish on the same ledger (a parked card, a steer's next segment) checks the same.
+            from .context import cite_check, cite_slim
             cite_check(content, context_used["chunks"])
-            for r in context_used["chunks"]:
-                r["text"] = str(r.get("text") or "")[:CITE_TEXT_KEEP]
+            context_used = cite_slim(context_used)
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "

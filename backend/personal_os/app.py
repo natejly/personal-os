@@ -2220,7 +2220,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             _active.pop(am["id"], None)
             convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))
             convos.touch(conv_id)
-        yield "done", {"id": am.get("id"), "error": str(e), "context_used": used, "tool_events": [], "trace": tracer.spans,
+        yield "done", {"id": am.get("id"), "error": str(e), "context_used": cite_slim(used), "tool_events": [], "trace": tracer.spans,
                        "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
                        "reasoning": None, "outcome": None, "error_kind": getattr(e, "kind", None)}
         return
@@ -2244,7 +2244,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A steer closes the current segment and the reply carries on in a fresh assistant
                     # message, so this `done` ends a segment, not the run. Anything supervising the run
                     # (a desk turn) must not read it as the end of the turn and charge for it.
-                    yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
+                    yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                                    "reasoning": reasoning, "outcome": partial}
@@ -2786,7 +2786,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         convos.touch(conv_id)
                         if run is not None:
                             run.partial, run.cost, run.rounds = None, budget.cost, budget.rounds
-                        yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
+                        yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                                        "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid}
@@ -3074,7 +3074,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.
         run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
-    yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
+    yield "done", {"id": am["id"], "error": error, "context_used": cite_slim(used), "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}

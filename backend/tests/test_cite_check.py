@@ -43,20 +43,27 @@ def test_code_is_skipped() -> None:
     assert "support" not in refs[0]
 
 
-def test_quote_past_400_chars_and_saved_trimmed() -> None:
+def test_quote_past_400_chars_survives_a_second_finish() -> None:
+    # A parked card finishes the same row twice, and a steer's segments share one ledger: each finish must check
+    # against the whole excerpt, not the 400-char prefix the previous one saved.
     long = "Filler words about nothing in particular. " * 12 + "The boiler is serviced every October by the landlord."
     assert len(long) > 400
     used = {"memories": [], "nodes": [], "chunks": [ref(1, long)]}
+    reply = "The landlord services the boiler every October [1]."
     with tempfile.TemporaryDirectory() as d:
         convos = Conversations(Database(d))
         conv = convos.create(None, "t", "m")
-        mid = convos.add_message(conv["id"], "assistant", "")["id"]
-        convos.finish_message(mid, "The landlord services the boiler every October [1].", None, used)
+        mids = [convos.add_message(conv["id"], "assistant", "")["id"] for _ in range(2)]
+        convos.finish_message(mids[0], reply, None, used)
+        convos.finish_message(mids[0], reply, None, used)  # parked: the same row again
+        convos.finish_message(mids[1], reply, None, used)  # steered: the next segment, same ledger
         with convos.db.tx() as c:
-            saved = json.loads(c.execute("SELECT context_used FROM messages WHERE id=?", (mid,)).fetchone()[0])
-    chunk = saved["chunks"][0]
-    assert chunk["quote"] == "The boiler is serviced every October by the landlord." and chunk["support"] == "ok"
-    assert len(chunk["text"]) == 400 and len(used["chunks"][0]["text"]) == 400  # the 'done' event sees the same ledger
+            saved = [json.loads(c.execute("SELECT context_used FROM messages WHERE id=?", (m,)).fetchone()[0]) for m in mids]
+    for row in saved:
+        chunk = row["chunks"][0]
+        assert chunk["quote"] == "The boiler is serviced every October by the landlord." and chunk["support"] == "ok"
+        assert len(chunk["text"]) == 400
+    assert used["chunks"][0]["text"] == long
 
 
 def test_marker_before_the_claim_scores_the_whole_sentence() -> None:

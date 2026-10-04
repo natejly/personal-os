@@ -93,12 +93,12 @@ def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
             "doc_id": h.get("doc_id"), "text": h["text"]}  # full while the run lives: cite_check quotes from it
 
 
-CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message trims to this)
+CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message saves cite_slim)
 
 
 def cite_slim(used: dict[str, Any] | None) -> dict[str, Any] | None:
     """The copy a streamed event carries (and the run tape journals): excerpts trimmed as the saved row will be.
-    The live dict keeps the full text until finish_message has run cite_check on it."""
+    The live dict always keeps the full text, so every cite_check on it sees whole excerpts."""
     if not used or not used.get("chunks"):
         return used
     return {**used, "chunks": [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]}

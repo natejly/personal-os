@@ -10,9 +10,9 @@ const GROUP_ICON: Record<string, JSX.Element> = {
   style: <PenLine size={13} />, health: <HeartPulse size={13} />
 }
 export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes: 'writes in-app data', network: 'reads the internet', executes: 'runs sandboxed code', external: 'acts outside the app', plan: 'always asks: the call is the approval card', schedules: 'books work for later' }
-const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
+export const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
 
-const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
+export const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
 
 /** Tri-state overrides (inherit / on / ask / off) for a project or a chat. `effectiveBase` is what "inherit" resolves to. */
 export function ToolOverrides({ value, onChange, effectiveBase, compact = false }: {

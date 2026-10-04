@@ -321,13 +321,13 @@ export const api = {
     check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }),
     /** The same check on a config that has not been saved, so trust can be decided first. */
     checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }),
-    tools: () => req<{ tools: McpTool[] }>('/mcp/tools'),
+    tools: () => req<{ tools: McpTool[]; grants: { tool_slug: string; scope: 'global' | 'project' | 'chat'; scope_id: string; mode: ToolMode }[] }>('/mcp/tools'),
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
     acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
-    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global') =>
-      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}`, { method: 'DELETE' })
+    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}${scopeId ? `&scope_id=${encodeURIComponent(scopeId)}` : ''}`, { method: 'DELETE' })
   },
   google: {
     status: () => req<GoogleStatus>('/integrations/google/status'),

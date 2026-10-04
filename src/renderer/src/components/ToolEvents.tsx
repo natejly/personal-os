@@ -369,10 +369,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
             context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
         )}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
-          <>
-            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
-            <ApprovalRules event={t} conversationId={conversationId} />
-          </>
+          <GenericApproval event={t} conversationId={conversationId} decide={async (ok) => decideFor(t)(ok)} />
         )}
         {open[t.id] && <GenericBody event={t} />}
       </div>

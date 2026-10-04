@@ -41,7 +41,7 @@ from . import webread
 from . import websearch
 from . import outbox as outbox_mod
 from . import scheduling, verify
-from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
+from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .microvm import SandboxError, Sandboxes
@@ -1203,14 +1203,16 @@ class Toolbox:
         def _row(j: dict[str, Any]) -> dict[str, Any]:
             """One scheduled task as the model should see it: when it runs, not how the row is stored."""
             return {"id": j["id"], "name": j["name"],
-                    "schedule": j["cron"] if j["kind"] == "cron" else f"once at {_iso(j['run_at'])}",
-                    "repeats": j["kind"] == "cron", "timezone": j["timezone"], "enabled": j["enabled"],
+                    "schedule": j["cron"] if j["kind"] == "cron" else
+                                f"once at {_iso(j['run_at'])}" if j["kind"] == "once" else
+                                f"when files change in {j.get('watch_dir')}" + (f", and on {j['cron']}" if j["cron"] else ""),
+                    "repeats": j["kind"] != "once", "timezone": j["timezone"], "enabled": j["enabled"],
                     "next_run": _iso(j["next_due_at"]), "last_run": _iso(j["last_fired_at"]),
                     "last_error": j["last_error"]}
 
         async def schedule_task(ctx: dict[str, Any], name: str, prompt: str, when: str | None = None,
                                 in_minutes: int | None = None, cron: str | None = None,
-                                timezone: str | None = None) -> Any:
+                                timezone: str | None = None, watch_dir: str | None = None) -> Any:
             if not (name or "").strip():
                 return tool_error("A scheduled task needs a short name.", field="name",
                                   example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
@@ -1225,11 +1227,25 @@ class Toolbox:
             if not valid_tz(tz):
                 return tool_error(f"'{tz}' is not a timezone name.", field="timezone", expected="e.g. 'Europe/Berlin'")
             given = [k for k, v in (("cron", cron), ("when", when), ("in_minutes", in_minutes)) if v]
-            if len(given) > 1:
+            if len(given) > 1 and not watch_dir:
                 return tool_error(f"Give one schedule, not {len(given)} ({', '.join(given)}).",
                                   expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
             pid = ctx.get("project_id")
-            if cron:
+            if watch_dir:
+                if when or in_minutes:
+                    return tool_error("A folder-watching task runs when files change, not at one time.",
+                                      field="watch_dir", expected="`watch_dir` alone, or with a `cron`")
+                if cron and not valid_cron(cron):
+                    return tool_error(f"'{cron}' is not a cron expression I can read.", field="cron",
+                                      expected="five fields, or leave it out")
+                try:
+                    folder = check_watch_dir(watch_dir)
+                except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
+                    return tool_error(f"I can't watch that folder: {e}", field="watch_dir",
+                                      expected="a folder under the home folder, not a hidden one, e.g. ~/Downloads")
+                job = self.jobs.create(name.strip(), cron or "", prompt, kind="watch", timezone=tz, enabled=True,
+                                       project_id=pid, watch_dir=folder)
+            elif cron:
                 if not valid_cron(cron):
                     return tool_error(f"'{cron}' is not a cron expression I can read.", field="cron",
                                       expected="five fields: minute hour day-of-month month day-of-week",
@@ -1265,13 +1281,15 @@ class Toolbox:
             "replied', 'every Friday afternoon, write my weekly review'). For something the USER should do, use "
             "todo_add instead — this schedules the assistant, not the person. One-off: `when` as an ISO-8601 local "
             "date and time (call current_time first if you are unsure of today's date), or `in_minutes`. "
-            "Repeating: `cron`, five fields.",
+            "Repeating: `cron`, five fields. On a folder: `watch_dir` runs it whenever files appear or change there "
+            "(the run is told which names changed).",
             _obj({"name": {"type": "string", "description": "Short label, shown in the Agent inbox"},
                   "prompt": {"type": "string", "description": "The self-contained instruction to run later"},
                   "when": {"type": "string", "description": "One-off: ISO-8601 local date and time, e.g. 2026-10-01T15:00"},
                   "in_minutes": {"type": "integer", "description": "One-off, relative: run this many minutes from now"},
                   "cron": {"type": "string", "description": "Repeating: five-field cron expression, e.g. '0 17 * * 5'"},
-                  "timezone": {"type": "string", "description": "IANA name; defaults to this machine's"}},
+                  "timezone": {"type": "string", "description": "IANA name; defaults to this machine's"},
+                  "watch_dir": {"type": "string", "description": "Run when files appear or change in this folder, e.g. ~/Downloads"}},
                  ["name", "prompt"]), schedule_task, "schedule", "schedules",
             examples=[{"name": "Chase the invoice", "prompt": "Check whether Acme has replied about invoice 2231; if not, draft a short follow-up.", "when": "2026-10-01T15:00"},
                       {"name": "Weekly review", "prompt": "Write my weekly review from my todos, calendar and recent chats.", "cron": "0 17 * * 5"},

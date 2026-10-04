@@ -112,6 +112,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
       const b = browserLine(name, a, null)
       return { verb, subject: clip(name === 'browser_manage' ? `${b.action} ${b.subject}`.trim() : b.subject, 80) }
     }
+    case 'schedule_task': return { verb, subject: [clip(str('name'), 50), str('watch_dir') ? `when files change in ${clip(str('watch_dir'), 40)}` : ''].filter(Boolean).join(' ') }
     case 'gmail_send':
     case 'gmail_draft': return { verb, subject: str('to') ? `to ${clip(str('to'), 50)}` : '' }
   }

@@ -58,6 +58,7 @@ PROPOSAL_STATUSES = ("pending", "accepted", "rejected")
 KINDS = ("cron", "once", "watch")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
 WATCH_MAX_ENTRIES = 2000
+WATCH_CHANGED_NAMES = 50  # names a directory fire hands the run; past this, only the count
 
 # What a job run is launched with. The three the user asked for; seeded disabled, because an unattended
 # run costs money and nobody opted in yet (the Agent Inbox offers the toggle).
@@ -218,6 +219,11 @@ def check_watch_dir(raw: str | None) -> str:
     if not p.is_dir():
         raise mac.LocalPathError(f"{p} is not a folder")
     return str(p)
+
+
+def _changed(names: list[str]) -> dict[str, Any]:
+    """What a directory fire carries: how many entries changed, and the first WATCH_CHANGED_NAMES of their names."""
+    return {"collapsed": len(names), "changed": names[:WATCH_CHANGED_NAMES]}
 
 
 def scan_dir(path: str) -> dict[str, int]:
@@ -386,13 +392,13 @@ class Jobs:
                              "AND watch_dir<>''").fetchall()
         return [d for d in (self._row(r) for r in rows) if d]
 
-    def poll_dir(self, job: dict[str, Any]) -> int:
-        """How many entries are new or touched in the job's folder since the last look, and remember this look.
+    def poll_dir(self, job: dict[str, Any]) -> list[str]:
+        """The entries new or touched in the job's folder since the last look, and remember this look.
         The first look (no baseline yet) only records one."""
         try:
             check_watch_dir(job["watch_dir"])
         except Exception:  # noqa: BLE001 - a folder that left the guard (moved, now hidden) just goes quiet
-            return 0
+            return []
         new = scan_dir(job["watch_dir"])
         with self.db.tx() as c:
             r = c.execute("SELECT watch_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
@@ -401,7 +407,7 @@ class Jobs:
         if old is None or new != old:
             with self.db.tx() as c:
                 c.execute("UPDATE jobs SET watch_seen=? WHERE id=?", (json.dumps(new), job["id"]))
-        return 0 if old is None else sum(1 for k, v in new.items() if old.get(k) != v)
+        return [] if old is None else sorted(k for k, v in new.items() if old.get(k) != v)
 
     def arm(self, at: float) -> int:
         """Give every enabled job with no armed slot one, from now. A job armed this way has nothing to catch up.
@@ -655,7 +661,7 @@ class Scheduler:
                         "timezone": job["timezone"], "due_at": at, "fired_at": at, "late_seconds": 0.0,
                         "missed_slots": 0, "late": False}
                 self.jobs.mark_fired(job["id"], fired_at=at, due_at=at, next_due_at=None)
-                await self._start(job, {**fire, "trigger": "dir", "collapsed": hits[job["id"]]}, fired)
+                await self._start(job, {**fire, "trigger": "dir", **_changed(hits[job["id"]])}, fired)
                 continue
             if not valid_schedule(job["kind"], job["cron"], job["run_at"]):
                 bad = "has no time to run at" if once else f"'{job['cron']}' is not a cron expression this can read"
@@ -669,7 +675,7 @@ class Scheduler:
             # Advance the clock bookkeeping before launching: a launch that throws must not re-fire next pass.
             self.jobs.mark_fired(job["id"], fired_at=at, due_at=fire["due_at"], next_due_at=nxt, disable=once)
             if job["id"] in hits:
-                fire = {**fire, "trigger": "clock+dir", "collapsed": hits[job["id"]]}
+                fire = {**fire, "trigger": "clock+dir", **_changed(hits[job["id"]])}
             if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
                 # One last fire (this one), then the job stops until the user switches it back on.
                 self.jobs.pause(job["id"], "expired", at)

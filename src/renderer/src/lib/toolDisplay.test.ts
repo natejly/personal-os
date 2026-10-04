@@ -146,3 +146,8 @@ test('browser calls name the page or the ref, and never echo typed text', () => 
   assert.equal(fullTitle('browser_manage', { action: 'wait', ms: 1500 }), 'Manage browser Wait 1500 ms')
   assert.equal(fullTitle('browser_scroll', { direction: 'down', amount: 2 }), 'Scroll browser down 2 screens')
 })
+
+test('a folder-watching schedule names the folder on its approval card', () => {
+  assert.equal(fullTitle('schedule_task', { name: 'Sort downloads', watch_dir: '~/Downloads' }), 'Schedule a task Sort downloads when files change in ~/Downloads')
+  assert.equal(fullTitle('schedule_task', { name: 'Weekly review', cron: '0 17 * * 5' }), 'Schedule a task Weekly review')
+})

@@ -1318,7 +1318,11 @@ export const useStore = create<State>((set, get) => {
         case 'plan':
           set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
           // A step finishing is not a status change, so the open desk's plan would otherwise lag.
-          if (get().activeDesk?.conversation_id === convId) void get().openDesk(get().activeDesk!.id)
+          // Only the row is refetched: openDesk would also re-attach the session on every step.
+          if (get().activeDesk?.conversation_id === convId) {
+            const id = get().activeDesk!.id
+            void api.cowork.desks.get(id).then((d) => { if (get().activeDeskId === id) set({ activeDesk: d }) }).catch(() => {})
+          }
           break
         case 'desk_status':
           putDesk(ev.data)

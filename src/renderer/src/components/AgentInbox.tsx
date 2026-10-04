@@ -36,7 +36,7 @@ const argText = (args: Record<string, unknown>): string =>
     .map((k) => `${k}: ${args[k] as string}`)
     .join('\n') || JSON.stringify(args)
 
-function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
+function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }): JSX.Element {
   const decideProposal = useStore((s) => s.decideProposal)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -54,7 +54,10 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
     <li className="inbox-item">
       <div className="inbox-item-head">
         <span className="inbox-tool">{p.tool}</span>
-        <span className="muted small">proposed {fmtWhen(p.created_at)}</span>
+        <span className="muted small">
+          {p.source ? `from ${p.source.kind === 'desk' ? `desk ${p.source.name}` : p.source.name} · ` : ''}proposed {fmtWhen(p.created_at)}
+        </span>
+        {onOpen && <button className="link small" onClick={onOpen}>Open</button>}
         <span style={{ flex: 1 }} />
         <button className="icon-btn sm" title={editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
           onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
@@ -359,6 +362,7 @@ export default function AgentInbox(): JSX.Element | null {
   const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
+  useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
@@ -397,8 +401,8 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
         <span style={{ flex: 1 }} />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
-        <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled tasks" aria-label="Scheduled tasks" onClick={toggleJobs}>
-          <Clock size={13} />
+        <button className={`ghost-btn sm ${showJobs ? 'on' : ''}`} aria-expanded={showJobs} onClick={toggleJobs}>
+          Scheduled ({jobs.length})
         </button>
       </header>
 
@@ -442,8 +446,10 @@ export default function AgentInbox(): JSX.Element | null {
                         <X size={13} /> Deny
                       </button>
                       <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
-                        <Check size={13} /> Allow
+                        <Check size={13} /> Approve
                       </button>
+                      {/* Arguments cannot be edited here; the chat's card can. */}
+                      {a.conversation_id && <button className="link small" onClick={() => goChat(a.conversation_id as string)}>open chat</button>}
                     </>
                   )}
                 </div>
@@ -471,7 +477,11 @@ export default function AgentInbox(): JSX.Element | null {
                 </div>
               </li>
             ))}
-            {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}
+            {proposals.map((p) => (
+              <ProposalCard key={p.id} p={p} onOpen={
+                p.source?.kind === 'desk' ? () => goDesk((p.source as { id: string }).id)
+                  : p.conversation_id ? () => void selectChat(p.conversation_id as string) : undefined} />
+            ))}
             {elsewhere.map((q) => (
               <li className="inbox-item" key={q.key}>
                 <div className="inbox-item-head">

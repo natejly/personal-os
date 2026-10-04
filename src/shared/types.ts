@@ -1502,6 +1502,8 @@ export interface BoardCard {
   due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
   over_limit?: boolean
   claimed_by?: string | null; lease_expires_at?: number | null
+  /** A `completed` event exists for this card (Boards.complete). */
+  completed?: boolean
 }
 export interface CardEvent { id: string; seq: number; card_id: string; actor: string; kind: string; payload: Record<string, unknown>; created_at: number }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
@@ -1975,6 +1977,8 @@ export interface AgentProposal {
   edited: boolean
   created_at: number
   decided_at: number | null
+  /** Who proposed it (GET /inbox only): the job, or the desk whose run did. */
+  source?: { kind: 'job' | 'desk'; id: string; run_id: string | null; name: string } | null
 }
 
 /** One job run as "While you were away" shows it. Every field but `summary` comes from a row, not from prose. */

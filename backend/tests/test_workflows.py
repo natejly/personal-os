@@ -336,6 +336,23 @@ def test_workflow_run_tool_only_proposes() -> None:
     check(tb.specs["workflow_resume"].danger == "plan" and tb.specs["workflow_run"].danger == "writes", "resume always asks; run only records")
 
 
+def test_run_reports_to_its_chat() -> None:
+    reset()
+    w = save(DIGEST)
+    cid = appmod.convos.create(None, "t", "m")["id"]
+    said = lambda: [m["content"] for m in appmod.convos.get(cid)["messages"] if m["role"] == "assistant"]
+    r = store.create_run(w, {"folder": "/a"}, conversation_id=cid)
+    check(len(said()) == 1 and "waiting for approval" in said()[0] and "Library -> Workflows" in said()[0], "a new run tells its chat to approve it")
+    store.set_run(r["id"], status="awaiting_approval")
+    store.set_run(r["id"], status="running")
+    check(len(said()) == 1, "repeating a status or moving to running posts nothing")
+    store.set_run(r["id"], status="done", result="/a/digest.md")
+    store.set_run(r["id"], status="done")
+    check(len(said()) == 2 and "finished" in said()[1] and "/a/digest.md" in said()[1], "done posts once, with the result")
+    store.create_run(w, {"folder": "/b"})
+    check(len(said()) == 2, "a run with no chat posts nowhere")
+
+
 # ---- the engine ----------------------------------------------------------------------------------
 
 def test_full_run_with_fan_out_and_approval() -> None:

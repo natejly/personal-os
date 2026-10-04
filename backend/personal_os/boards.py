@@ -78,8 +78,10 @@ class Boards:
             if not b:
                 return None
             cols = c.execute("SELECT * FROM board_columns WHERE board_id=? ORDER BY position", (id,)).fetchall()
-            cards = c.execute("SELECT * FROM cards WHERE board_id=? ORDER BY position, created_at", (id,)).fetchall()
-        return {**row_to_dict(b), "columns": [row_to_dict(x) for x in cols], "cards": [row_to_dict(x, ("labels",)) for x in cards]}  # type: ignore[arg-type]
+            cards = c.execute("SELECT *, EXISTS(SELECT 1 FROM card_events e WHERE e.card_id=cards.id AND e.kind='completed') AS completed "
+                              "FROM cards WHERE board_id=? ORDER BY position, created_at", (id,)).fetchall()
+        return {**row_to_dict(b), "columns": [row_to_dict(x) for x in cols],  # type: ignore[arg-type]
+                "cards": [{**row_to_dict(x, ("labels",)), "completed": bool(x["completed"])} for x in cards]}  # type: ignore[arg-type]
 
     def create(self, name: str, project_id: str | None = None, columns: list[str] | None = None) -> dict[str, Any]:
         bid = new_id()

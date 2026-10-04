@@ -106,15 +106,25 @@ def test_proposal_idempotency(env):
 
 
 def test_http_surface():
+    import asyncio
+
     from fastapi.testclient import TestClient
 
     from personal_os import app as appmod
     c = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+    ctx = {"project_id": None, "conversation_id": None, "tainted": False, "taint_sources": [], "settings": appmod.settings()}
+    tool = lambda name, **args: asyncio.run(appmod.toolbox.call(name, args, ctx))  # noqa: E731
     bd = c.post("/boards", json={"name": "H"}).json()
     card = c.post(f"/boards/{bd['id']}/cards", json={"title": "t"}).json()
-    tok = c.post(f"/boards/cards/{card['id']}/claim", json={"holder": "agent"}).json()["token"]
-    assert c.post(f"/boards/cards/{card['id']}/claim", json={"holder": "x"}).status_code == 409
+    tok = tool("board_claim", card=card["id"])["token"]
+    assert "error" in tool("board_claim", card=card["id"])
     c.post(f"/boards/cards/{card['id']}/move", json={"column_id": bd["columns"][1]["id"]})
     evs = c.get(f"/boards/{bd['id']}/cards/{card['id']}/events").json()
     assert ("released", "preempted") in [(e["kind"], e["payload"].get("reason")) for e in evs]
-    assert c.post(f"/boards/cards/{card['id']}/release", json={"token": tok}).json() == {"ok": False}
+    assert tool("board_release", card=card["id"], token=tok) == {"released": False}
+    # The user's Mark done is the HTTP writer of `completed`, and the board read shows it.
+    shown = lambda: next(x for x in c.get(f"/boards/{bd['id']}").json()["cards"] if x["id"] == card["id"])["completed"]  # noqa: E731
+    assert shown() is False
+    assert c.post(f"/boards/cards/{card['id']}/complete").json() == {"ok": True}
+    assert shown() is True
+    assert c.post(f"/boards/cards/{card['id']}/claim", json={"holder": "x"}).status_code in (404, 405)

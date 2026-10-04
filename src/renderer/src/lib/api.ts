@@ -181,7 +181,6 @@ export const api = {
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
   proposals: {
-    list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
     accept: (id: string, args?: Record<string, unknown>) =>
       req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }),
@@ -200,7 +199,9 @@ export const api = {
     updateCard: (cid: string, patch: { title?: string; description?: string; due?: string; priority?: number; labels?: string[]; clear_due?: boolean }) => req<BoardCard>(`/boards/cards/${cid}`, { method: 'PUT', body: json(patch) }),
     cardEvents: (bid: string, cid: string) => req<CardEvent[]>(`/boards/${bid}/cards/${cid}/events`),
     moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
-    deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' })
+    deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' }),
+    /** The user accepting a card as done: the only HTTP writer of its `completed` event. */
+    complete: (cid: string) => req<{ ok: boolean }>(`/boards/cards/${cid}/complete`, { method: 'POST' })
   },
   sources: {
     list: () => req<{ sources: DataSource[]; internal: string[] }>('/sources'),

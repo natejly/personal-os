@@ -8,7 +8,6 @@ import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
-import HomeCowork from './HomeCowork'
 import type { Meeting, MeetingCandidate } from '@shared/types'
 import { moduleHome } from '../shell/registry'
 import ProjectChip from './ProjectChip'
@@ -209,6 +208,7 @@ export default function HomeView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, refreshRecap, openMemory } = useStore()
   const recap = useStore((s) => s.recap)
+  const inbox = useStore((s) => s.agentInbox)
   const recapLoading = useStore((s) => s.recapLoading)
   const settings = useStore((s) => s.settings)
   const saveSettings = useStore((s) => s.saveSettings)
@@ -248,11 +248,18 @@ export default function HomeView(): JSX.Element {
       todayEvents.length ? `Today\u2019s calendar:\n${lines(todayEvents, (e) => `${e.start} — ${e.summary} (\`${e.id}\`)`)}` : 'Nothing on the calendar today.',
       laterEvents.length ? `Coming up:\n${lines(laterEvents, (e) => `${e.start} — ${e.summary}`, 10)}` : '',
       d?.todos?.length ? `Open todos:\n${lines(d.todos, (t) => `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''})`)}` : 'No open todos.',
-      recap?.content ? `Yesterday\u2019s recap:\n${fenced(recap.content, 1500)}` : ''
+      recap?.content ? `Yesterday\u2019s recap:\n${fenced(recap.content, 1500)}` : '',
+      inbox ? (inbox.counts.needs_you ? `Agent inbox, ${inbox.counts.needs_you} waiting on the user:\n${lines([
+        ...inbox.needs_you.approvals.map((a) => `approve ${a.tool}${a.job ? ` (${a.job})` : ''}`),
+        ...inbox.needs_you.proposals.map((p) => `proposed ${p.tool}${p.source ? ` from ${p.source.name}` : ''}`),
+        ...(inbox.needs_you.desks ?? []).map((e) => `desk ${e.desk_title || 'Desk'}: ${e.body || e.kind}`),
+        ...(inbox.needs_you.paused_jobs ?? []).map((p) => `paused job ${p.name}: ${p.reason}`),
+        ...(inbox.needs_you.elsewhere ?? []).map((q) => `${q.count} ${q.label}`)
+      ], (s) => s)}` : 'Agent inbox: nothing is waiting on the user.') : ''
     ].filter(Boolean).join('\n\n'),
     refs: (d?.todos ?? []).slice(0, 20).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
     hints: ['What should I focus on today?', 'Block time for my todos', 'Anything I am forgetting?']
-  }), [d, recap, today])
+  }), [d, recap, today, inbox])
 
   return (
     <main className="page home">
@@ -297,7 +304,6 @@ export default function HomeView(): JSX.Element {
         </div>
 
         {on('agent') && <AgentInbox />}
-        {on('cowork') && <HomeCowork />}
 
         {on('recap') && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">

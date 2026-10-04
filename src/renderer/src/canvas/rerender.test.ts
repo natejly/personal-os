@@ -74,7 +74,6 @@ const SIDEBAR: Sel[] = [
   (s) => s.focusedConversationId,
   (s) => s.view,
   (s) => s.projectViewId,
-  (s) => s.personalStats,
   (s) => s.view === 'canvas',
   (s) => s.newChat,
   (s) => s.selectChat,

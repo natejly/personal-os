@@ -1109,11 +1109,6 @@ async def delete_project(id: str) -> dict[str, Any]:
     return {"ok": True, "stopped": stopped}
 
 
-@app.get("/projects/global/stats")
-def global_stats() -> dict[str, int]:
-    return projects.stats(None)
-
-
 # ---------------- conversations ----------------
 class ConvIn(BaseModel):
     project_id: str | None = None
@@ -4562,15 +4557,6 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
     return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
 
 
-@app.post("/memories/reindex")
-async def reindex_memories() -> dict[str, Any]:
-    """Embed every live memory that has no current vector (200 per call; call again while `pending` > 0)."""
-    cfg = settings()
-    embedder.reset()  # an explicit retry, so an earlier back-off does not apply
-    n = await memory_index.index(cfg)
-    return {"indexed": n, "pending": memory_index.pending_count(embedder.model(cfg)) if memory_index.enabled(cfg) else 0}
-
-
 @app.get("/memories/proposals")
 def list_memory_proposals(status: str = "pending", project_id: str | None = "all") -> list[dict[str, Any]]:
     return consolidator.list(status or None, sid(project_id))
@@ -4598,11 +4584,6 @@ def restore_memory(id: str) -> dict[str, Any]:
     if not m:
         raise HTTPException(404)
     return m
-
-
-@app.get("/memories/{id}/history")
-def memory_history(id: str) -> list[dict[str, Any]]:
-    return memories.history(id)
 
 
 @app.post("/memories")

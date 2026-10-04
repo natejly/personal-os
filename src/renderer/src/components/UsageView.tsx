@@ -8,19 +8,19 @@ import ChartBlock from './ChartBlock'
 
 const RANGES = [7, 30, 90] as const
 
-const money = (n: number): string =>
+export const money = (n: number): string =>
   n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
-const compact = (n: number): string => new Intl.NumberFormat(undefined, { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
-const ms = (n: number): string => (n < 1000 ? `${n} ms` : `${(n / 1000).toFixed(1)} s`)
+export const compact = (n: number): string => new Intl.NumberFormat(undefined, { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
+export const ms = (n: number): string => (n < 1000 ? `${n} ms` : `${(n / 1000).toFixed(1)} s`)
 /** "2026-09-29" → "Sep 29" */
-const shortDay = (iso: string): string => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+export const shortDay = (iso: string): string => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 const hourLabel = (h: number): string => `${((h + 11) % 12) + 1}${h < 12 ? 'am' : 'pm'}`
 
-const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
+export const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
 
 const pct = (f: number): string => `${Math.round(f * 100)}%`
 
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
+export function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
     <div className="usage-tile">
       <span className="usage-tile-label">{label}</span>

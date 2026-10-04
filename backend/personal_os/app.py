@@ -836,6 +836,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}")
         elif k == "sandboxImage" and v and not IMAGE_REF.match(v):  # empty = the default image
             raise HTTPException(422, "sandboxImage must be an image reference such as python:3.12-slim")
+        elif k == "sandboxNetwork" and v not in ("off", "proxy", "open"):
+            raise HTTPException(422, "sandboxNetwork must be 'off', 'proxy' or 'open'")
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")

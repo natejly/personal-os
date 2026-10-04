@@ -95,11 +95,11 @@ def test_settings_validate_the_sandbox_image_and_runtime() -> None:
                        ("sandboxKeepDays", -1)):
             assert client.put("/settings", json={k: bad}).status_code == 422, (k, bad)
         r = client.put("/settings", json={"sandboxImage": "ghcr.io/acme/tools:1.2", "sandboxRuntime": "podman",
-                                          "sandboxNetwork": True, "sandboxKeepDays": 30})
+                                          "sandboxNetwork": "proxy", "sandboxKeepDays": 30})
         assert r.status_code == 200
         got = r.json()
         assert (got["sandboxImage"], got["sandboxRuntime"], got["sandboxNetwork"], got["sandboxKeepDays"]) == \
-            ("ghcr.io/acme/tools:1.2", "podman", True, 30)
+            ("ghcr.io/acme/tools:1.2", "podman", "proxy", 30)
     finally:
         client.put("/settings", json={k: llm.DEFAULT_SETTINGS[k] for k in
                                       ("sandboxImage", "sandboxRuntime", "sandboxNetwork", "sandboxKeepDays")})

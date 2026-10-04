@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
+import socket
+import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -48,7 +52,7 @@ class World:
         self.resolved: dict[str, list[str]] = {}
         self.connects: list[tuple[str, int]] = []
 
-    async def start(self, mp: pytest.MonkeyPatch) -> egress.Egress:
+    async def start(self, mp: pytest.MonkeyPatch, bind: str = "127.0.0.1") -> egress.Egress:
         async def handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
             data = await r.read(65536)
             self.heads.append(data)
@@ -69,7 +73,7 @@ class World:
             return await asyncio.open_connection("127.0.0.1", self.up_port)
         mp.setattr(egress, "resolve", fake_resolve)
         mp.setattr(egress, "connect", fake_connect)
-        eg = egress.Egress()
+        eg = egress.Egress(bind)
         await eg.ensure()
         return eg
 
@@ -193,3 +197,64 @@ def test_one_server_is_started_lazily_and_closed() -> None:
         await eg.close()
         assert eg.port is None
     run(go())
+
+
+def test_a_listener_beyond_loopback_still_needs_the_token_and_refuses_internal_targets(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """The sandbox sidecar binds every interface. That must change nothing about who gets through or where to."""
+    async def go() -> None:
+        w = World()
+        eg = await w.start(monkeypatch, bind="0.0.0.0")
+        try:
+            assert eg.env("t")["HTTP_PROXY"] == f"http://grain:t@0.0.0.0:{eg.port}"
+            req = "CONNECT example.com:443 HTTP/1.1\r\n\r\n"
+            assert (await w.request(eg, req)).startswith(b"HTTP/1.1 407")
+            assert (await w.request(eg, req, "wrong")).startswith(b"HTTP/1.1 407")
+            log = str(tmp_path / "egress.json")
+            eg.runs["tok"] = egress.Run(("example.com",), log=log)
+            for host in ("10.0.0.7", "127.0.0.1", "169.254.169.254"):
+                assert (await w.request(eg, f"CONNECT {host}:443 HTTP/1.1\r\n\r\n", "tok")).startswith(b"HTTP/1.1 403")
+            w.resolved["example.com"] = ["192.168.1.10"]
+            assert (await w.request(eg, req, "tok")).startswith(b"HTTP/1.1 403")
+            w.resolved["example.com"] = [PUBLIC]
+            assert (await w.request(eg, req, "tok", b"x")).startswith(b"HTTP/1.1 200")
+            assert w.connects == [(PUBLIC, 443)]
+            with open(log) as f:  # the report the host reads back is on disk by the time the client got its answer
+                assert json.load(f) == {"contacted": ["example.com"],
+                                        "blocked": ["10.0.0.7", "127.0.0.1", "169.254.169.254", "example.com"]}
+        finally:
+            await w.close(eg)
+    run(go())
+
+
+def test_the_file_runs_as_the_sidecar_and_keeps_its_report_across_restarts(tmp_path: Any) -> None:
+    """Exactly what the sandbox's proxy container runs: `python3 -c <egress.py>` with the token and allowlist in env."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    log = tmp_path / "egress.json"
+    log.write_text(json.dumps({"contacted": ["pypi.org"], "blocked": []}))  # what it saw before a stop/start
+    env = {**os.environ, "GRAIN_PROXY_TOKEN": "sekrit", "GRAIN_PROXY_ALLOW": "pypi.org,example.com",
+           "GRAIN_PROXY_PORT": str(port), "GRAIN_PROXY_LOG": str(log)}
+    with open(egress.__file__) as f:
+        src = f.read()
+    p = subprocess.Popen([sys.executable, "-c", src], env=env)
+
+    def ask(raw: str) -> bytes:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
+            c.sendall(raw.encode())
+            return c.recv(4096)
+    try:
+        for _ in range(100):
+            try:
+                ask("x\r\n\r\n")
+                break
+            except OSError:
+                time.sleep(0.05)
+        auth = f"Proxy-Authorization: Basic {base64.b64encode(b'grain:sekrit').decode()}\r\n"
+        assert ask("CONNECT evil.io:443 HTTP/1.1\r\n\r\n").startswith(b"HTTP/1.1 407")
+        assert ask(f"CONNECT evil.io:443 HTTP/1.1\r\n{auth}\r\n").startswith(b"HTTP/1.1 403")
+        assert ask(f"CONNECT 10.0.0.1:443 HTTP/1.1\r\n{auth}\r\n").startswith(b"HTTP/1.1 403")
+        assert json.loads(log.read_text()) == {"contacted": ["pypi.org"], "blocked": ["evil.io", "10.0.0.1"]}
+    finally:
+        p.kill()
+        p.wait()

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { SandboxStatus, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { ageLabel, sandboxKey, sandboxTitle } from '../lib/runningViews'
+import { sandboxNetMode, type SandboxNetMode } from '../lib/coworkSettings'
 
 /**
  * The Linux sandbox section of Settings > Tools: whether the container runtime answers (and why not), the settings
@@ -32,9 +33,12 @@ export default function SandboxSettings({ draft, patch }: { draft: Settings; pat
         <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
         <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
       </label>
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Network in new sandboxes</b><small>Off by default. When on, anything a sandbox command prints may be third-party text, so it marks the chat as having read untrusted content and later external actions ask. Applies to containers created or restored after saving.</small></span>
-        <input type="checkbox" checked={!!draft.sandboxNetwork} onChange={(e) => patch({ sandboxNetwork: e.target.checked })} /><span className="switch" />
+      <label><span>Network in new sandboxes <small className="muted">(applies to containers created or restored after saving)</small></span>
+        <select value={sandboxNetMode(draft.sandboxNetwork)} onChange={(e) => patch({ sandboxNetwork: e.target.value as SandboxNetMode })}>
+          <option value="off">Off</option>
+          <option value="proxy">Allowed hosts only (package registries plus the shell's allowed hosts)</option>
+          <option value="open">Open (output marks the chat as having read untrusted content)</option>
+        </select>
       </label>
       <label><span>Image <small className="muted">(what a fresh sandbox starts from)</small></span>
         <input value={draft.sandboxImage ?? ''} placeholder="python:3.12-slim" spellCheck={false} onChange={(e) => patch({ sandboxImage: e.target.value })} />

@@ -40,6 +40,14 @@ export function networkPatch(mode: NetworkMode, hosts: string[] = []): NetSettin
   return { shellNetwork: false, shellRegistryAccess: true, shellAllowedDomains: hosts }
 }
 
+export type SandboxNetMode = 'off' | 'proxy' | 'open'
+
+/** The stored sandboxNetwork value as the choice shown. A stored true (the old on/off switch) is open; anything unknown is off. */
+export function sandboxNetMode(v: Settings['sandboxNetwork']): SandboxNetMode {
+  if (v === true) return 'open'
+  return v === 'proxy' || v === 'open' ? v : 'off'
+}
+
 /** Limits the backend enforces (`NUMERIC_SETTING_RANGES`); keys it leaves out are only non-negative. */
 const RANGES: Record<string, [number, number]> = { browserMaxTabs: [1, 12] }
 

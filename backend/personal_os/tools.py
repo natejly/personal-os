@@ -45,7 +45,7 @@ from . import scheduling, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .microvm import SandboxError, Sandboxes
+from .microvm import SandboxError, Sandboxes, net_mode
 from .repos import Documents, Graph, Memories
 from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
@@ -842,12 +842,13 @@ class Toolbox:
         return bool(spec and spec.force_ask and spec.force_ask(args))
 
     def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
-        """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created)."""
+        """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created). The proxy mode counts:
+        an allowed host can still carry out what a tainted reply read, so it asks like the shell's allowlist does."""
         sb = self.sandboxes
         if not sb or spec.group != "sandbox" or spec.danger != "executes":
             return False
         try:
-            return bool(sb.networked(ctx.get("conversation_id") or "") or sb.settings().get("sandboxNetwork"))
+            return bool(sb.reaches_out(ctx.get("conversation_id") or "") or net_mode(sb.settings().get("sandboxNetwork")) != "off")
         except Exception:  # noqa: BLE001 - unknown means assume it can reach out
             return True
 

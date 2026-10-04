@@ -221,9 +221,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
-    # The sandbox_* containers: network detached unless this is on (then their output taints the reply), the image a
-    # fresh one starts from, and the CLI that drives them (docker, podman or nerdctl).
-    "sandboxNetwork": False,
+    # The sandbox_* containers: the image a fresh one starts from, and the CLI that drives them (docker, podman or
+    # nerdctl). Their network is sandboxNetwork below.
     "sandboxImage": DEFAULT_IMAGE,
     "sandboxRuntime": "docker",
     # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
@@ -231,6 +230,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "workspaceRoots": [],
     # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
     "sandboxMountDesk": True,
+    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
+    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
+    "sandboxNetwork": "off",
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.

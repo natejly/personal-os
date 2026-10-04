@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { Todo } from '@shared/types'
+import type { CalendarEvent, Todo } from '@shared/types'
 import { dragProps } from '../canvas/dnd'
 import ProjectChip from './ProjectChip'
 import { localDay } from './CalendarWeek'
@@ -21,26 +21,34 @@ export const dueLabel = (due: string | null): { text: string; cls: string } => {
 
 /** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime.
  *
- * With the todo -> calendar mirror on (todocal.py) this lands on the same calendar the mirror
- * uses, and `calendar_id` is recorded, so the next pass adopts this event — keeping the time
- * that was picked here — instead of looking on the wrong calendar and making a second one.
+ * A todo that already has an event (the mirror's, or an earlier placement) has that event moved;
+ * a second event would leave the first one orphaned on the calendar. Otherwise the event is made
+ * first and the due date and link are written together, so the todo -> calendar mirror
+ * (todocal.py) is never poked with a dated, unlinked todo and never makes an event of its own.
+ * Writing the link resets the mirror's signature, so its next pass adopts the event at the time
+ * picked here.
  */
 export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
-  const when = start || todo.due || localDay()
   const app = useStore.getState()
-  if (!todo.due && when.length === 10) await app.updateTodo(todo.id, { due: when })
-  else if (when.length === 10 && todo.due !== when) await app.updateTodo(todo.id, { due: when })
+  const cur = app.todos.find((t) => t.id === todo.id) ?? todo
+  const when = start || todo.due || localDay()
   const mirror = app.todoCalendar
   const calendarId = (mirror?.config.enabled && mirror.config.calendarId) || undefined
-  const ev = await api.google.createEvent({
+  let ev: CalendarEvent | null = null
+  if (cur.calendar_event_id) {
+    // Gone or not writable: fall through and make a new one; the server tombstones the old link.
+    try { ev = await api.google.updateEvent(cur.calendar_event_id, { start: when, calendar_id: cur.calendar_id ?? 'primary' }) } catch { ev = null }
+  }
+  ev ??= await api.google.createEvent({
     summary: todo.title,
     start: when,
     description: todo.notes || undefined,
     ...(calendarId ? { calendar_id: calendarId } : {})
   })
   const link = { calendar_event_id: ev.id, calendar_link: ev.link, calendar_id: ev.calendar_id ?? calendarId ?? null }
-  await app.updateTodo(todo.id, link)
-  return { ...todo, due: when.length === 10 ? when : todo.due, ...link }
+  const due = when.slice(0, 10)
+  await app.updateTodo(todo.id, { ...link, ...(cur.due !== due ? { due } : {}) })
+  return { ...cur, due, ...link }
 }
 
 export default function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {

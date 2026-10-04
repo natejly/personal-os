@@ -1298,7 +1298,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); padding: 2px 6px; border-radius: 8px; cursor: pointer; }
 .todo-due:hover { background: var(--hover); color: var(--text); }
 .todo-due.today { color: var(--accent); }
-.todo-est { width: 52px; font-size: 11px; padding: 2px 4px; }
+.todo-est, .todo-tags { font-size: 11px; padding: 2px 4px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }
+.todo-est { width: 52px; }
+/* Empty row fields stay out of the way until the row is hovered or being edited. */
+.todo:not(:hover):not(:focus-within) :is(.todo-est, .todo-tags):placeholder-shown { opacity: 0; }
 .planner-panel { margin-bottom: 12px; }
 .planner-panel .planner-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
 .planner-panel .planner-when { color: var(--text-faint); font-size: 12px; }
@@ -2370,7 +2373,7 @@ select:focus-visible {
 .todo-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }
 .todo-tag.on { background: var(--accent-soft, var(--border)); color: var(--text); }
 .todo-tag button { all: unset; cursor: pointer; display: inline-flex; }
-.todo-tags { width: 84px; font-size: 11px; }
+.todo-tags { width: 84px; }
 .todo-blocked { display: inline-flex; color: var(--text-dim); }
 .todo-subinput { margin-top: 4px; font-size: 12px; }
 .todo-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }

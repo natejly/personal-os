@@ -3776,11 +3776,13 @@ export const useStore = create<State>((set, get) => {
       const t = await api.todos.update(id, patch)
       if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
+      if ('done' in patch || 'due' in patch || 'clear_due' in patch) void get().refreshDashboard()  // todo_stats: the nav badge and Today card
     },
     deleteTodo: async (id) => {
       const title = get().todos.find((x) => x.id === id)?.title
       await api.todos.delete(id)
       set((s) => ({ todos: s.todos.filter((x) => x.id !== id), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
+      void get().refreshDashboard()
       get().offerUndo(title ? `todo “${title}”` : 'todo', [{ type: 'todo', id }])
     }
   }

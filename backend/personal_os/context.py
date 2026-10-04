@@ -125,6 +125,7 @@ _STOP = frozenset("a an and are as at be been but by can did do does for from ha
 _CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.S)
 _SENTS = re.compile(r"(?<=[.!?])\s+|\n+")  # not on "]": "As noted in [2] the ..." is one sentence
 _MARK = re.compile(r"\[(\d{1,3})\]")
+_TRAIL = re.compile(r"([.!?])(\s*)((?:\[\d{1,3}\]\s*)+)")
 
 
 def _terms(text: str) -> set[str]:
@@ -136,9 +137,14 @@ def cite_check(reply: str, refs: list[dict[str, Any]]) -> dict[int, dict[str, An
     excerpt sentence sharing the most words with it is the quote; under 20% of the sentence's words found
     there is 'weak'. A number with no excerpt is 'invalid'. Code is skipped. Cited refs gain quote and support."""
     byn = {int(r["n"]): r for r in refs if r.get("n")}
+    for r in byn.values():  # an earlier finish's verdict (a steer's previous segment) must not leak into this one
+        r.pop("quote", None)
+        r.pop("support", None)
     best: dict[int, tuple[float, str]] = {}
     out: dict[int, dict[str, Any]] = {}
-    for sent in _SENTS.split(_CODE.sub(" ", reply or "")):
+    # "Rent is due on the fifth. [1]", or [1] on the next line: markers after the stop belong to that sentence
+    text = _TRAIL.sub(lambda m: f" {m.group(3).strip()}{m.group(1)} ", _CODE.sub(" ", reply or ""))
+    for sent in _SENTS.split(text):
         words = _terms(sent)
         for n in dict.fromkeys(int(m) for m in _MARK.findall(sent)):
             r = byn.get(n)

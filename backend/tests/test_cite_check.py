@@ -73,6 +73,22 @@ def test_marker_before_the_claim_scores_the_whole_sentence() -> None:
         assert cite_check(reply, refs)[1]["support"] == "ok", reply
 
 
+def test_marker_after_the_full_stop_belongs_to_that_sentence() -> None:
+    for reply in ("Rent is due on the fifth of each month. [1]",
+                  "Rent is due on the fifth of each month. [1] Also pets are fine.",
+                  "Rent is due on the fifth of each month.\n[1]"):
+        assert cite_check(reply, [ref(1, LEASE)])[1]["support"] == "ok", reply
+
+
+def test_second_check_clears_an_earlier_verdict() -> None:
+    refs = [ref(1, LEASE), ref(2, "Pets are allowed with a deposit.")]
+    cite_check("Rent is due on the fifth of each month [1].", refs)
+    assert refs[0]["support"] == "ok"
+    cite_check("Pets are allowed with a deposit [2].", refs)
+    assert "support" not in refs[0] and "quote" not in refs[0], "ref 1 is not cited this time, so it has no verdict"
+    assert refs[1]["support"] == "ok"
+
+
 def test_event_copy_is_trimmed_and_live_ledger_is_not() -> None:
     used = {"chunks": [ref(1, "x" * 900)]}
     slim = cite_slim(used)

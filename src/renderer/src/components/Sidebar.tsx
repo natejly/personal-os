@@ -228,6 +228,13 @@ export default function Sidebar(): JSX.Element {
       <div className="sidebar-scroll">
       <nav className="nav">
         {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
+        {/* Hidden views leave no trace otherwise; this is the way back to them. */}
+        {NAV.some((n) => n.view && n.view !== 'home' && viewHidden(settings, n.view)) && (
+          <button className="nav-item nav-more" title="Turn on hidden views in Settings → Modules"
+            onClick={() => useStore.getState().openSettings('modules')}>
+            <Plus size={15} /><span>More modules…</span>
+          </button>
+        )}
       </nav>
 
       <SidebarSpaces />

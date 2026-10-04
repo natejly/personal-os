@@ -13,9 +13,9 @@ import InlineNote from './InlineNote'
  */
 
 const DESTINATIONS: { value: PromotionKind; label: string; hint: string }[] = [
-  { value: 'doc', label: 'Doc', hint: 'Creates a new doc, searchable immediately' },
-  { value: 'doc_append', label: 'Append to doc', hint: 'Proposes an edit to an existing doc; you accept it in Docs' },
-  { value: 'document', label: 'Document', hint: 'Ingests it as an uploaded document' },
+  { value: 'doc', label: 'New doc', hint: 'Creates a new doc, searchable immediately' },
+  { value: 'doc_append', label: 'Append to a doc', hint: 'Proposes an edit to an existing doc; you accept it in Docs' },
+  { value: 'document', label: 'Add to knowledge base', hint: 'Ingests it as an uploaded document' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
 
@@ -229,7 +229,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
       {noting === 'reject' && (
         <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
       )}
-      <footer className="desk-review-foot">
+      {undecided.length > 0 && <footer className="desk-review-foot">
         <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
           <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
         </button>
@@ -242,7 +242,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         >
           <X size={13} /> Reject{selection.length > 0 ? ' selected' : ' all'}
         </button>
-      </footer>
+      </footer>}
     </div>
   )
 }

@@ -69,7 +69,8 @@ their own instructions, knowledge files, memories and graph.
   note. On macOS any doc can be recorded or dictated into, with the transcript
   kept apart from the text and a summary proposed for you to accept. See
   [docs/docs-editor.md](docs/docs-editor.md).
-- **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
+- **Activity monitor** (macOS, opt-in, off by default; the view starts hidden,
+  turn it on in Settings → Modules). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text
   you type, microphone and system audio — summarizes it every few minutes, and
   writes the result to `context/activity.md`, which is fed back into chats so the
@@ -90,7 +91,8 @@ their own instructions, knowledge files, memories and graph.
   keeps coming back, a calendar block around your real focus window. Suggestions
   are proposals: the common action opens a chat pre-loaded with the request rather
   than acting, "not now" hides one for a week, and dismissing one is permanent.
-- **Meetings** (macOS, opt-in, off by default). A notepad that listens: type
+- **Meetings** (macOS, opt-in, off by default; the view starts hidden, turn it
+  on in Settings → Modules). A notepad that listens: type
   during a call while the recorder captures it natively (AVAudioEngine and, on
   macOS 14.2+, a Core Audio tap for the far side of the call), segments
   transcribe in the background, and afterwards the enhance pass proposes your
@@ -102,7 +104,8 @@ their own instructions, knowledge files, memories and graph.
   then whisper.cpp, then your LLM proxy. Meetings never expire, are unreachable
   from the activity monitor's purge, and never reach auto-learn. See
   [docs/meetings.md](docs/meetings.md).
-- **Cowork desks.** A desk is a task you hand over: its own conversation, its own
+- **Cowork desks** (the view starts hidden; turn it on in Settings → Modules).
+  A desk is a task you hand over: its own conversation, its own
   folder, and one plan you approve before it acts. Several run at once. Long
   autonomy is bought by chaining bounded replies, never by a longer leash — each
   turn is an ordinary reply with an ordinary budget, and the desk chains another

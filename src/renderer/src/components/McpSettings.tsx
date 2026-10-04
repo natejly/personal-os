@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
+  AlertTriangle, Check, ChevronDown, ChevronRight, LogIn, LogOut, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import type { McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@shared/types'
+import type { McpReport, McpServer, McpServerDraft, McpSignIn, McpTool, ToolMode } from '@shared/types'
 
 /** A connector that is coming up gets polled; one that has settled does not. */
 const POLL_MS = 2500
 
-const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string } = {
-  name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, description: '',
+const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string; url: string } = {
+  name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, description: '', url: '',
   argv: '', envText: '', secretsText: ''
+}
+
+/** Start a remote server's browser sign-in and resolve once it settles: done, error, or given up after 5 minutes. */
+export async function signInMcp(id: string): Promise<McpSignIn> {
+  const st = await api.mcp.signIn(id)
+  if (st.status === 'error') throw new Error(st.error)
+  if (st.auth_url) window.open(st.auth_url, '_blank')
+  for (let i = 0; i < 150; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const x = await api.mcp.signInStatus(id)
+    if (x.status !== 'waiting' && x.status !== 'starting') return x
+  }
+  return { ...st, status: 'error', error: 'sign-in timed out' }
 }
 
 /** Split a pasted command line into argv, honouring simple quoting. */
@@ -221,7 +234,14 @@ export default function McpSettings(): JSX.Element {
     return true
   }
 
+  const remote = draft.transport === 'http'
   const draftConfig = (): Partial<McpServerDraft> => {
+    if (remote) {
+      const url = draft.url.trim()
+      let host = ''
+      try { host = new URL(url).host } catch { /* validated on add */ }
+      return { name: draft.name.trim() || host, transport: 'http', url, description: draft.description }
+    }
     const [command = '', ...args] = tokenize(draft.argv)
     return {
       name: draft.name.trim() || command, transport: 'stdio', command, args, cwd: draft.cwd.trim(),
@@ -239,14 +259,22 @@ export default function McpSettings(): JSX.Element {
   const addServer = (): Promise<void> =>
     run('draft-add', async () => {
       const cfg = draftConfig()
-      if (!cfg.command) throw new Error('Enter the command that starts the server')
+      if (remote ? !/^https?:\/\/\S+$/.test(cfg.url ?? '') : !cfg.command)
+        throw new Error(remote ? 'Enter the server URL, starting with https://' : 'Enter the command that starts the server')
       const created = await api.mcp.create({ ...cfg, name: cfg.name || 'MCP server', enabled: true })
       setDraft(EMPTY)
       setDraftReport(null)
       setAdding(false)
       setOpen(created.id)
       await refresh()
-      toast(`Added ${created.name} — its tools ask before running`)
+      toast(remote ? `Added ${created.name} — sign in to connect it` : `Added ${created.name} — its tools ask before running`)
+    })
+
+  const signIn = (s: McpServer): Promise<void> =>
+    run(`sign-${s.id}`, async () => {
+      const x = await signInMcp(s.id)
+      if (x.status === 'error') toast(`${s.name} sign-in failed: ${x.error}`, 'error')
+      await refresh()
     })
 
   const setMode = (slug: string, mode: ToolMode): Promise<void> =>
@@ -310,12 +338,22 @@ export default function McpSettings(): JSX.Element {
             {expanded && (
               <div className="mcp-body">
                 <div className="mcp-meta">
-                  <code className="mono">{joinArgv(s.command, s.args)}</code>
+                  <code className="mono">{s.transport === 'stdio' ? joinArgv(s.command, s.args) : s.url}</code>
                   {s.cwd && <small className="muted">in {s.cwd}</small>}
                   {s.secret_keys.length > 0 && <small className="muted">secrets: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>}
                 </div>
 
                 <div className="mcp-actions">
+                  {s.transport === 'http' && (s.signed_in ? (
+                    <button className="ghost-btn" disabled={busy === `out-${s.id}`}
+                      onClick={() => void run(`out-${s.id}`, async () => { await api.mcp.signOut(s.id); await refresh() })}>
+                      <LogOut size={13} /> Sign out
+                    </button>
+                  ) : (
+                    <button className="ghost-btn" disabled={busy === `sign-${s.id}`} onClick={() => void signIn(s)}>
+                      <LogIn size={13} /> {busy === `sign-${s.id}` ? 'Waiting for the browser…' : 'Sign in'}
+                    </button>
+                  ))}
                   <button className="ghost-btn" disabled={busy === `chk-${s.id}`}
                     onClick={() => void run(`chk-${s.id}`, async () => {
                       const report = await api.mcp.check(s.id)
@@ -377,6 +415,17 @@ export default function McpSettings(): JSX.Element {
             <label><span>Name</span>
               <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
             </label>
+            <label><span>Runs</span>
+              <select value={draft.transport} onChange={(e) => { setDraft({ ...draft, transport: e.target.value as 'stdio' | 'http' }); setDraftReport(null) }}>
+                <option value="stdio">On this Mac, from a command</option>
+                <option value="http">Remotely, at a URL (signs in through the browser)</option>
+              </select>
+            </label>
+            {remote ? (
+              <label><span>Server URL</span>
+                <input value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} placeholder="https://example.com/mcp" spellCheck={false} />
+              </label>
+            ) : (<>
             <label><span>Command <small className="muted">(or paste the server&apos;s config JSON here)</small></span>
               <input value={draft.argv} spellCheck={false} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents"
                 onChange={(e) => setDraft({ ...draft, argv: e.target.value })}
@@ -394,10 +443,13 @@ export default function McpSettings(): JSX.Element {
             <label><span>Secrets <small className="muted">(KEY=value; kept in the backend and never sent to a model or shown again)</small></span>
               <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
             </label>
+            </>)}
             <div className="mcp-actions">
-              <button className="ghost-btn" disabled={busy === 'draft-check'} onClick={() => void checkDraft()}>
-                <ShieldAlert size={13} /> {busy === 'draft-check' ? 'Checking…' : 'Check it first'}
-              </button>
+              {!remote && (
+                <button className="ghost-btn" disabled={busy === 'draft-check'} onClick={() => void checkDraft()}>
+                  <ShieldAlert size={13} /> {busy === 'draft-check' ? 'Checking…' : 'Check it first'}
+                </button>
+              )}
               <button className="primary-btn" disabled={busy === 'draft-add'} onClick={() => void addServer()}>Add connector</button>
             </div>
             {draftReport && <Report report={draftReport} />}

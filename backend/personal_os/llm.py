@@ -117,11 +117,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Hold this in the Docs editor to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
-    # Library / Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
+    # Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
     "homeWidgets": {"cowork": False, "meetings": False},
-    "hiddenViews": ["library", "cowork", "meetings", "activity"],
-    # Bump when the default-off set changes so existing DBs pick up the new hides once.
-    "modulesDefault": 3,
+    "hiddenViews": ["cowork", "meetings", "activity"],
+    # Bump when the default-off set changes so existing DBs pick up the change once.
+    "modulesDefault": 4,
     # tools: {tool_name: bool}; missing = on
     "tools": {},
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.

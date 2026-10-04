@@ -97,6 +97,11 @@ export interface ChatSession {
   pendingSends?: PendingSend[]
 }
 
+/** Where an accepted desk output went, for the toast. */
+const PROMOTED_TO: Record<string, string> = {
+  doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'the knowledge base', download: 'your Mac'
+}
+
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
 
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
@@ -1312,6 +1317,8 @@ export const useStore = create<State>((set, get) => {
       switch (ev.event) {
         case 'plan':
           set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+          // A step finishing is not a status change, so the open desk's plan would otherwise lag.
+          if (get().activeDesk?.conversation_id === convId) void get().openDesk(get().activeDesk!.id)
           break
         case 'desk_status':
           putDesk(ev.data)
@@ -2768,7 +2775,11 @@ export const useStore = create<State>((set, get) => {
         // `verified` is read from the response, never assumed: a promotion the backend could not
         // read back is a red row, not a tick.
         const bad = results.filter((r) => !r.ok || !r.verified).length
-        get().toast(bad ? `${bad} of ${results.length} could not be verified` : `Promoted ${results.length} output${results.length === 1 ? '' : 's'}`, bad ? 'error' : 'info')
+        const where = [...new Set(results.map((r) => PROMOTED_TO[r.kind] ?? r.kind))].join(', ')
+        const doc = results.length === 1 && results[0].kind === 'doc' ? results[0].ref : null
+        get().toast(bad ? `${bad} of ${results.length} could not be verified` : `Saved ${results.length} output${results.length === 1 ? '' : 's'} to ${where}`,
+          bad ? 'error' : 'info', doc ? { label: 'Open', run: () => void get().openDoc(doc) } : undefined)
+        if (results.some((r) => r.ok && r.kind === 'doc')) void get().refreshDocs()
         await get().openDesk(id)
         return results
       } catch (e) {

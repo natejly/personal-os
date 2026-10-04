@@ -291,8 +291,8 @@ def _seed_settings_from_env() -> None:
 
 _seed_settings_from_env()
 
-_MODULES_DEFAULT = 3
-_DEFAULT_OFF_VIEWS = ("library", "cowork", "meetings", "activity")
+_MODULES_DEFAULT = 4
+_DEFAULT_OFF_VIEWS = ("cowork", "meetings", "activity")
 _DEFAULT_OFF_HOME = ("cowork", "meetings")
 
 
@@ -311,6 +311,9 @@ def _seed_hidden_modules() -> None:
     for v in add:
         if v not in hidden:
             hidden.append(v)
+    # Stamp 4 shows Library once: skill and workflow approvals, connectors and saved artifacts live only there.
+    if current < 4 and "library" in hidden:
+        hidden.remove("library")
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     if not current:
         for k in _DEFAULT_OFF_HOME:
@@ -1935,8 +1938,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 m[PLAN_TOOL] = "ask"
                 if desk_id:
                     m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
-            if desk_id:
-                m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
+            if desk_id or "cowork" in (cfg.get("hiddenViews") or []):
+                # A desk starting another desk would plan under its own budget; with Cowork hidden a started
+                # desk would have no row to come back to.
+                m.pop("desk_start", None)
             return toolbox.schemas(m) + offer
 
         tool_schemas = _schemas()
@@ -1958,6 +1963,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     _counts[_n] = _counts.get(_n, 0) + 1
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
+                 job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
@@ -4040,7 +4046,9 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
         conv_settings["tools"] = job_tools.tool_modes(job["allowed_tools"], _all_tool_infos())
     convos.update(conv["id"], {"settings": conv_settings})
     prompt = _job_prompt(job, fire)
-    body = ChatIn(content=(job_tools.DRY_RUN_HINT + "\n\n" + prompt) if fire.get("dry_run") else prompt)
+    # A preview's instruction rides in the system prompt (see the hints in the chat runner), so the transcript's
+    # first user turn is the job's own prompt.
+    body = ChatIn(content=prompt)
     run = bus.start(conv["id"], lambda r: _run_job(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the

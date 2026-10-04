@@ -51,7 +51,7 @@ def register(box: Any, store: Artifacts) -> None:
         return _result(a, "created", code)
     R("artifact_create", ToolSpec(
         "artifact_create",
-        "Create an artifact: a self-contained interactive HTML page the user sees live in the chat and keeps in Library -> Made "
+        "Create an artifact: a self-contained interactive HTML page the user sees live in the chat and keeps in Library -> Artifacts "
         "(a calculator, visualisation, mock-up, game, formatted report, small tool). Use it for anything visual or interactive that "
         "is bigger than a snippet. " + HTML_NOTE,
         _obj({"title": {"type": "string", "description": "Short name, 2-4 words"},

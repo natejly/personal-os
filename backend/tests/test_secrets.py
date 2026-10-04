@@ -46,11 +46,10 @@ class FileBackendTests(unittest.TestCase):
         from personal_os import logs
         s = SecretStore(Path(tempfile.mkdtemp()), backend="file")
         s.set("apiKey", "fw_LATERKEY0123")
-        s.set("googleToken", json.dumps({"refresh_token": "1//0LATERREFRESH", "token_uri": "https://oauth2.example/token"}))
-        out = logs.redact("echo fw_LATERKEY0123 and 1//0LATERREFRESH via https://oauth2.example/token")
+        s.set("googleToken", json.dumps({"refresh_token": "1//0LATERREFRESH"}))
+        out = logs.redact("echo fw_LATERKEY0123 and 1//0LATERREFRESH")
         self.assertNotIn("LATERKEY", out)
         self.assertNotIn("LATERREFRESH", out)
-        self.assertIn("https://oauth2.example/token", out)
 
     def test_empty_value_deletes(self) -> None:
         d = Path(tempfile.mkdtemp())

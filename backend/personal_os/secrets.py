@@ -34,7 +34,8 @@ _NOT_FOUND = 44  # `security` exit status for "item could not be found"
 
 def _teach_logs(value: str | None) -> None:
     """Every secret this store hands out or saves is redacted from the log by its exact value, from now on,
-    not only from the next start. A JSON blob (Google token, MCP server keys) teaches its string leaves too."""
+    not only from the next start. A JSON blob (the Google token's secret fields, MCP server keys) holds only
+    secrets, so each of its string values is taught too."""
     if not value:
         return
     logs.register_secret(value)
@@ -44,7 +45,7 @@ def _teach_logs(value: str | None) -> None:
         return
     if isinstance(blob, dict):
         for v in blob.values():
-            if isinstance(v, str) and not v.startswith("http"):  # token_uri and the like are not secrets
+            if isinstance(v, str):
                 logs.register_secret(v)
 
 

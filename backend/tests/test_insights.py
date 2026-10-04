@@ -530,6 +530,21 @@ def test_a_habit_never_adopts_or_rewrites_the_users_matching_memory() -> None:
     assert m.insights.memories.get(mine["id"])["content"] == mine["content"]
 
 
+def test_a_pinned_habit_memory_keeps_its_wording() -> None:
+    m = _monitor(REPLY)
+    _seeded(m)
+    asyncio.run(m.insights.refresh(force=True))
+    h = m.insights.get_habit_by_key("habit-mornings-in-cursor")
+    assert h is not None and h["memory_id"]
+    m.insights.memories.update(h["memory_id"], {"pinned": True})
+    before = m.insights.memories.get(h["memory_id"])["content"]
+    moved = json.dumps({"habits": [{"key": "habit-mornings-in-cursor", "statement": "User writes code in Cursor every afternoon.",
+                                    "kind": "fact", "confidence": 0.85, "evidence": []}], "suggestions": []})
+    m.insights._complete = _monitor(moved)._complete
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.memories.get(h["memory_id"])["content"] == before
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

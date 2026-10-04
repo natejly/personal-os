@@ -2001,6 +2001,8 @@ export interface JobRunSummary {
   tool_calls: number
   proposals: number
   pending_proposals: number
+  /** Marked read in the Agent Inbox (inbox_seen). A read card collapses to one line. */
+  seen: boolean
   /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
   summary: string
 }
@@ -2058,7 +2060,7 @@ export interface AgentInbox {
     elsewhere?: { key: InboxQueueKey; label: string; count: number }[]
   }
   while_you_were_away: JobRunSummary[]
-  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }
+  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; unseen_runs: number; late: number; failed: number }
   scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
 }
 

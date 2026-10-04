@@ -206,6 +206,23 @@ class RunStore:
                          "ORDER BY started_at DESC, rowid DESC LIMIT ?", (job_id, since, max(1, min(int(limit), 200))))
         return [r for r in (self._run_row(x) for x in rows) if r]
 
+    def seen(self, run_ids: Iterable[str]) -> set[str]:
+        """Which of `run_ids` the user has marked read in the Agent Inbox."""
+        ids = list(run_ids)
+        if not ids:
+            return set()
+        return {r["run_id"] for r in self._all(f"SELECT run_id FROM inbox_seen WHERE run_id IN ({','.join('?' * len(ids))})", ids)}
+
+    def mark_seen(self, run_ids: Iterable[str]) -> None:
+        t = time.time()
+        with self._lock:
+            try:
+                self._c.executemany("INSERT OR IGNORE INTO inbox_seen(run_id, seen_at) VALUES(?,?)", [(r, t) for r in run_ids])
+                self._c.commit()
+            except Exception:
+                self._c.rollback()
+                raise
+
     # ---- events ----
     def append(self, run_id: str, seq: int, event: str, data: Any) -> bool:
         try:

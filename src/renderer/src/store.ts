@@ -4,6 +4,7 @@ import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecisio
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
+import { markRunsSeen } from './lib/inboxBadge'
 import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
@@ -483,6 +484,8 @@ export interface State {
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
+  /** Mark one "While you were away" run read, or every run in the window when `runId` is null. Optimistic. */
+  markInboxRunSeen: (runId: string | null) => Promise<void>
   refreshJobs: () => Promise<void>
   /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
   createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
@@ -3681,6 +3684,15 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         /* the inbox is a card on Today, not the shell: a failed read must not toast on every refresh */
         void e
+      }
+    },
+    markInboxRunSeen: async (runId) => {
+      // Optimistic, like the desk inbox: the badge must not wait on a round trip.
+      set((st) => (st.agentInbox ? { agentInbox: markRunsSeen(st.agentInbox, runId === null ? null : [runId]) } : {}))
+      try {
+        await (runId === null ? api.inboxSeenAll() : api.inboxRunSeen(runId))
+      } catch {
+        void get().refreshAgentInbox()
       }
     },
     refreshJobs: async () => {

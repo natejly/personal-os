@@ -426,6 +426,12 @@ CREATE TABLE IF NOT EXISTS plan_steps (
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
 
+-- Which job runs the user has read in the Agent Inbox. No foreign key: a run's row can go and leave this behind harmlessly.
+CREATE TABLE IF NOT EXISTS inbox_seen (
+  run_id TEXT PRIMARY KEY,
+  seen_at REAL NOT NULL
+);
+
 -- fetch_url's response cache (webread.WebCache); rows are disposable.
 CREATE TABLE IF NOT EXISTS web_cache (
   url TEXT PRIMARY KEY,

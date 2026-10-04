@@ -2724,11 +2724,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             if steers and not desk_id and c["name"] in QUESTION_TOOLS:
                                 # The user wrote while a question waited: that message is the answer. It is taken off
                                 # the steers so the loop top does not hand it to the model a second time as a new turn.
-                                note = str(steers.pop()["content"]).strip()[:500]
+                                answer = steers.pop()
+                                note = str(answer["content"]).strip()[:500]
                                 fut.set_result("allow")
                                 _approval_notes[uid] = note
                                 if store is not None:
                                     store.decide(uid, "allow", by="steer", note=note)
+                                # The /steer route already stored it as a user row. The answer lives on the card and the
+                                # approval row, so that row goes: kept, the next turn's history replays it as an unanswered turn.
+                                with db.tx() as tx:
+                                    tx.execute("DELETE FROM messages WHERE id=?", (answer["id"],))
+                                yield "removed_message", {"id": answer["id"]}
                                 break
                             if steers and not desk_id:
                                 # The user wrote instead of answering the card: that is a no, with their words as the

@@ -155,6 +155,29 @@ def test_a_message_written_while_it_waits_is_the_answer_and_not_a_second_turn() 
     res = tool_result()
     assert res["status"] == "answered" and res["answer"] == "Option B please", res
     assert [m["content"] for m in SEEN[1] if m["role"] == "user"] == ["go"], "the answer is not folded in again as a new turn"
+    # Nor on the next turn: the stored transcript does not keep it as a user message under the reply that used it.
+    stored = j("GET", f"/conversations/{cid}")["messages"]
+    assert [m["content"] for m in stored if m["role"] == "user"] == ["go"], stored
+    ROUNDS.append(["ok"])
+    finished(j("POST", f"/conversations/{cid}/chat", {"content": "second"})["run_id"])
+    assert [m["content"] for m in SEEN[2] if m["role"] == "user"] == ["go", "second"], SEEN[2]
+    stored = j("GET", f"/conversations/{cid}")["messages"]
+    assert "Option B please" not in [m["content"] for m in stored if m["role"] == "user"], stored
+
+
+def test_a_plan_card_that_receives_a_steer_is_still_a_deny() -> None:
+    args = {"title": f"steered plan {time.time()}"}
+    plan = {"title": "Do it", "steps": [{"tool": "todo_add", "arguments": args}]}
+    ROUNDS.extend([{"tool_calls": [{"id": "p0", "name": "propose_plan", "arguments": json.dumps(plan)}]}, ["ok"]])
+    cid, rid = start({"planMode": "always"})
+    row = card(rid)
+    assert row["tool"] == "propose_plan"
+    j("POST", f"/conversations/{cid}/steer", {"content": "Option B please"})
+    finished(rid)
+    after = store.approval(row["call_id"])
+    assert after["status"] == "denied" and after["decided_by"] == "steer", after
+    assert appmod.plans.by_call(row["call_id"])["decided_by"] == "steer"
+    assert appmod.plans.rejected(cid, "todo_add", args) is None, "a steer's no leaves the plan re-proposable"
 
 
 def test_no_always_click_or_on_mode_ever_answers_the_card() -> None:

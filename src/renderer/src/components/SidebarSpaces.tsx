@@ -63,7 +63,7 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
         const c = useCanvas.getState().canvases[canvasId]
         if (!c) return
         const count = c.windows.length
-        if (count === 0 || confirm(`Delete "${c.name}" and its ${count} windows?`)) void useCanvas.getState().deleteSpace(canvasId)
+        if (confirm(count ? `Delete "${c.name}" and its ${count} window${count === 1 ? '' : 's'}? This can't be undone.` : `Delete "${c.name}"? This can't be undone.`)) void useCanvas.getState().deleteSpace(canvasId)
       }
     }
   ]

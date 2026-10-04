@@ -223,7 +223,7 @@ export default function DashboardsView(): JSX.Element {
             <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           )}
           {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
-          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
+          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}" and its widgets? This can't be undone.`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
         <AppSwitcher />
       </header>

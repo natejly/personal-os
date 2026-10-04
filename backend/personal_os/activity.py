@@ -30,7 +30,7 @@ import httpx
 
 from . import insights as insights_mod
 from . import stt
-from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401
+from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, device_input, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401
 from . import native_audio
 from .db import Database, new_id, now, row_to_dict
 from . import activity_categories as categories_mod
@@ -779,8 +779,8 @@ def capabilities(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         _cap("platform", "Supported platform", IS_MAC, f"Running on {sys.platform}.",
              "The collectors are macOS-only; the rest of the app is unaffected."),
-        _cap("pyobjc", "Native bridge (pyobjc)", pyobjc_ok,
-             "App names, window titles, idle time and keystroke taps come through pyobjc."
+        _cap("pyobjc", "macOS system access", pyobjc_ok,
+             "App names, window titles, idle time and typing counts come through it."
              if pyobjc_ok else f"pyobjc not importable: {_pyobjc_error or 'not installed'}.",
              "Run `cd backend && uv pip install -e '.[activity]'`, then restart the app. Without it, app "
              "tracking falls back to lsappinfo (name only).",
@@ -1333,7 +1333,7 @@ class AudioCollector(Collector):
                         self.sleep(5)
                         continue
                     r = subprocess.run(
-                        [ff, "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", f":{device}",
+                        [ff, "-hide_banner", "-loglevel", "error", *device_input(device),
                          "-t", str(chunk), "-ac", "1", "-ar", "16000", "-y", str(path)],
                         capture_output=True, text=True, timeout=chunk + 30,
                     )
@@ -1597,7 +1597,7 @@ class Monitor:
         cfg = self.config()
         self.stop_event = threading.Event()
         self.running = True
-        self.paused = False
+        # A pause outlives a restart (any config edit restarts); only stop() or expiry ends it.
         self.db.set_settings({"activity": {**cfg, "enabled": True}})
         sig = cfg.get("signals") or {}
         self.collectors = []
@@ -1623,6 +1623,7 @@ class Monitor:
         self.collectors = []
         self.last_focus = {}
         if persist:
+            self.paused, self.pause_until = False, 0.0
             self.db.set_settings({"activity": {**self.config(), "enabled": False}})
         log.info("activity: stopped")
         return self.status()

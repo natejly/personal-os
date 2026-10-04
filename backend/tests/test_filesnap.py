@@ -197,6 +197,29 @@ def test_failed_write_leaves_no_row() -> None:
           "no model tool restores snapshots")
 
 
+def test_overwrite_that_cannot_encode_leaves_the_file_and_no_row() -> None:
+    tb = Toolbox(None, None, None, lambda: {}, filesnap=FS)  # type: ignore[arg-type]
+    f = HOME / "Desktop" / "surrogate.md"
+    f.write_text("keep me")
+    ctx = dict(CTX)
+    asyncio.run(tb.call("read_local_file", {"path": str(f)}, ctx))
+    before = len(FS.list())
+    out = asyncio.run(tb.call("write_local_file", {"path": str(f), "content": "bad \ud800 text", "mode": "overwrite"}, ctx))
+    check("UTF-8" in out.get("error", "") and out.get("field") != "mode", "an unencodable write says why, not 'bad mode'")
+    check(f.read_text() == "keep me", "the failed overwrite did not truncate the file")
+    check(len(FS.list()) == before, "unchanged file: its snapshot is discarded")
+    check(not [p for p in f.parent.iterdir() if p.name.startswith(".grain-write-")], "no temp file left behind")
+
+
+def test_discard_keeps_the_snapshot_of_a_file_a_failed_write_changed() -> None:
+    f = HOME / "Desktop" / "partial.md"
+    f.write_text("original")
+    sid = FS.capture("append", str(f), CTX)["snapshot_id"]
+    f.write_text("original + half an app")  # the write died part way
+    FS.discard(sid)
+    check(any(r["snapshot_id"] == sid for r in FS.list()), "a changed file keeps its way back")
+
+
 def test_toolbox_without_filesnap_unchanged() -> None:
     tb = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
     f = HOME / "Desktop" / "plain.md"

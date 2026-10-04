@@ -102,6 +102,13 @@ const EXTRACT = (max: number, withLinks: boolean): string => `(() => {
   return { title: document.title || '', url: location.href, text: text.slice(0, ${max + 1}), links };
 })()`
 
+/** A page script that never settles (a hung renderer, a blocked main thread) must not hold the loader forever. */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let tid: NodeJS.Timeout | undefined
+  const t = new Promise<never>((_r, reject) => { tid = setTimeout(() => reject(new Error(what)), ms) })
+  return Promise.race([p, t]).finally(() => clearTimeout(tid))
+}
+
 async function loadPage(url: string, maxChars: number, timeoutMs: number, waitFor = '', withLinks = false): Promise<PageResult> {
   const win = new BrowserWindow({
     show: false,
@@ -151,16 +158,13 @@ async function loadPage(url: string, maxChars: number, timeoutMs: number, waitFo
       const probe = `!!document.querySelector(${JSON.stringify(waitFor)})`
       let found = false
       while (!found && Date.now() < until) {
-        found = (await wc.executeJavaScript(probe, true).catch(() => false)) === true
+        found = (await withTimeout(wc.executeJavaScript(probe, true), 1_000, 'probe').catch(() => false)) === true
         if (!found) await new Promise((r) => setTimeout(r, 250))
       }
       if (!found) timedOut = true
     }
     const read = wc.executeJavaScript(EXTRACT(maxChars, withLinks), true) as Promise<{ title: string; url: string; text: string; links?: { text: string; href: string }[] }>
-    const out = await Promise.race([
-      read,
-      new Promise<never>((_r, reject) => setTimeout(() => reject(new Error('reading the page timed out')), 5_000))
-    ])
+    const out = await withTimeout(read, 5_000, 'reading the page timed out')
     const text = String(out.text ?? '')
     return { url: String(out.url || url), title: String(out.title ?? ''), text: text.slice(0, maxChars),
       truncated: text.length > maxChars, timedOut,

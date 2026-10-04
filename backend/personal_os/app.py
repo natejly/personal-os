@@ -4933,13 +4933,13 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
-    await toolbox.shell.shutdown()  # host shell jobs: SIGTERM then SIGKILL to each group
 
 
 # ---------------- Google integration ----------------

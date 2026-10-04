@@ -132,9 +132,13 @@ class FileSnapshots:
             c.execute("UPDATE file_snapshots SET after_digest=? WHERE snapshot_id=?", (_digest(p), sid))
 
     def discard(self, sid: str) -> None:
-        """The write failed, so there is nothing to undo: forget the row and its blob."""
+        """The write failed, so there is nothing to undo: forget the row and its blob. If it failed part way and the
+        file is no longer what was captured, the snapshot is kept: it is the only way back."""
         row = self._row(sid)
         if not row:
+            return
+        if row["op"] != "move" and _digest(Path(row["path"])) != row["before_digest"]:
+            self.finalize(sid)
             return
         self._unlink(row.get("before_path"))
         with self.db.tx() as c:

@@ -107,6 +107,8 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
         late = f"(allow file-read* (subpath {_q(os.path.realpath(os.path.dirname(wb)))}))\n"
     # A desk workspace lives inside the app data dir, which the deny above covers. Re-allow only those
     # writable folders, then repeat the secret-name denies so a database or .env still loses.
+    creds = " ".join([*(f"(subpath {_q(os.path.join(home, d))})" for d in (".docker", ".azure")),
+                      *(f"(literal {_q(os.path.join(home, f))})" for f in (".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"))])
     data_real = os.path.realpath(data)
     inside = list(dict.fromkeys(rp for p in writable if (rp := os.path.realpath(p)).startswith(data_real + os.sep)))
     if inside:
@@ -133,7 +135,7 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
                  (subpath {_q(os.path.join(root, "backend", "personal_os"))})
                  (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".gnupg"))})
                  (subpath {_q(os.path.join(home, ".aws"))}) (subpath {_q(os.path.join(home, ".config", "gcloud"))})
-                 (subpath {_q(os.path.join(home, ".kube"))})
+                 (subpath {_q(os.path.join(home, ".kube"))}) {creds}
                  (subpath {_q(os.path.join(home, "Library", "Keychains"))})
                  (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
 {late}"""

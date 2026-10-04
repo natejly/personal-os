@@ -2542,6 +2542,10 @@ def _register_mac(self: Toolbox) -> None:
         except mac.LocalPathError as e:
             await _with_undo(snap, {"error": "failed"})
             return _path_error("write_local_file", e, example={"path": "~/Desktop/summary.md", "content": "# Summary\n"})
+        except UnicodeError:
+            await _with_undo(snap, {"error": "failed"})
+            return tool_error("write_local_file: content cannot be saved as UTF-8 text (it holds an invalid character, "
+                              "such as a lone surrogate), so nothing was written.", field="content")
         except ValueError as e:
             await _with_undo(snap, {"error": "failed"})
             return tool_error(f"write_local_file: {e}", field="mode", expected="create, overwrite or append",

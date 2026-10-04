@@ -510,11 +510,14 @@ class HealthSources:
         provider = PROVIDERS[s["provider"]]
         end = today or date.today()
         start = end - timedelta(days=s["days_back"] - 1)
+        if s["last_sync_at"]:  # reach back over a gap since the last good sync (that day again: it may have been partial)
+            start = max(min(start, date.fromtimestamp(s["last_sync_at"])), end - timedelta(days=MAX_DAYS - 1))
         offered = self._tools(s)
         weight_unit = (self.health.metric("weight") or {}).get("unit", "kg").lower()
         result: dict[str, Any] = {"from": start.isoformat(), "to": end.isoformat(), "written": {}, "unchanged": 0, "problems": []}
         found: dict[tuple[str, date], float] = {}
         summed: dict[tuple[str, date], float] = {}
+        call_failed = False
         for tp in provider.tools:
             name = next((n for n in tp.names if n in offered), None)
             if not name:
@@ -535,9 +538,11 @@ class HealthSources:
                     out = await self.mcp.call(tool["slug"], args, timeout=60)
                 except Exception as e:  # noqa: BLE001 - one failing tool must not stop the others
                     result["problems"].append({"tool": name, "error": str(e).splitlines()[0][:200] if str(e) else type(e).__name__})
+                    call_failed = True
                     break
                 if out.get("is_error"):
                     result["problems"].append({"tool": name, "error": (out.get("error") or "the tool reported an error")[:200]})
+                    call_failed = True
                     break
                 doc = parse_output(out)
                 sample = sample or (out.get("content") or "")[:240]
@@ -571,9 +576,10 @@ class HealthSources:
             else:
                 result["unchanged"] += 1
         err = "; ".join(f"{p['tool']}: {p['error']}" for p in result["problems"])[:500]
+        # A failed call keeps the old last_sync_at, so the next sync reaches back over the days it missed.
         with self.db.tx() as c:
             c.execute("UPDATE health_sources SET last_sync_at=?, last_error=?, last_result=? WHERE id=?",
-                      (now(), err, json.dumps(result), id))
+                      (s["last_sync_at"] if call_failed else now(), err, json.dumps(result), id))
         return result
 
 

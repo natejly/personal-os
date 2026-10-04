@@ -3801,11 +3801,6 @@ export const useStore = create<State>((set, get) => {
 })
 
 /**
- * Pin a session for as long as a surface is showing it, and release it on unmount. A retained
- * session is never an LRU victim, which is the only protection a canvas window has: the canvas view
- * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
- */
-/**
  * pagehide cannot await, and a plain fetch dies with the page, so the buffered doc edits go out as a
  * keepalive PUT. ponytail: keepalive bodies cap at 64 KB, so a longer doc still loses its last
  * second on reload/quit; a main-process flush on before-quit would lift that.
@@ -3843,6 +3838,11 @@ export const restoreDocTabs = async (): Promise<void> => {
   await useStore.getState().openDoc(typeof saved.active === 'string' && tabs.includes(saved.active) ? saved.active : tabs[tabs.length - 1])
 }
 
+/**
+ * Pin a session for as long as a surface is showing it, and release it on unmount. A retained
+ * session is never an LRU victim, which is the only protection a canvas window has: the canvas view
+ * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
+ */
 export const retainSession = (conversationId: string): (() => void) => {
   const first = !retained.has(conversationId)
   retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)

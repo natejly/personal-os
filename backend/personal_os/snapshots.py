@@ -53,9 +53,9 @@ SHELL_TOOLS = frozenset({"shell_run"})
 PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 
 READ_ONLY_COMMANDS = frozenset({
-    "ls", "cat", "head", "tail", "pwd", "echo", "grep", "egrep", "fgrep", "rg", "wc", "stat", "file", "which", "tree",
-    "du", "df", "date", "whoami", "sort", "uniq", "cut", "tr", "basename", "dirname", "realpath", "diff", "cmp",
-    "md5", "shasum", "sha256sum", "true", "printf", "type", "uname", "id", "hostname", "less", "more", "nl", "column",
+    "ls", "cat", "head", "tail", "pwd", "echo", "grep", "egrep", "fgrep", "rg", "wc", "stat", "file", "which",
+    "du", "df", "date", "whoami", "cut", "tr", "basename", "dirname", "realpath", "diff", "cmp",
+    "md5", "shasum", "sha256sum", "true", "printf", "type", "uname", "id", "hostname", "more", "nl", "column",
 })
 READ_ONLY_GIT = frozenset({"status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame", "remote", "describe", "shortlog"})
 # find and sed can write, so they are read-only only without these flags; anything else with them is mutating.
@@ -86,6 +86,8 @@ def read_only_shell(command: str) -> bool:
             return False
         prog = os.path.basename(argv[0])
         if prog == "git":
+            if any(a.startswith(("--output", "-o")) for a in argv[1:]):  # log/diff/show --output=FILE writes it
+                return False
             rest = [a for a in argv[1:] if not a.startswith("-")]
             if not rest or rest[0] not in READ_ONLY_GIT or (rest[0] in ("branch", "remote") and len(rest) > 1):
                 return False
@@ -352,10 +354,14 @@ class Snapshots:
         want_state, new_state = ("applied", "undone") if undo else ("undone", "applied")
         reverted: list[str] = []
         edited: list[str] = []
+        rows = [r for r in self.rows(run_id) if r["after_tree"] and r["state"] == want_state]
+        for r in rows:  # retention or gc may have dropped the trees: refuse up front instead of half-applying and calling it done
+            try:
+                self._git(None, "cat-file", "-e", f'{r["before_tree"] if undo else r["after_tree"]}^{{tree}}', h=_h16(Path(r["root"])))
+            except SnapshotError:
+                raise SnapshotError(f"this run's snapshot has expired, so it can no longer be {'undone' if undo else 'redone'}") from None
         done = False
-        for r in self.rows(run_id):
-            if not r["after_tree"] or r["state"] != want_state:
-                continue
+        for r in rows:
             root = Path(r["root"])
             h = _h16(root)
             src_tree = r["before_tree"] if undo else r["after_tree"]

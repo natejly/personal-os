@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import re
 import resource
 import shutil
 import signal
@@ -36,7 +37,8 @@ _mpl_warmed = False
 
 
 def _warm_mpl(py: str) -> None:
-    """Build the shared font cache once, unsandboxed, from our own code - so no sandboxed run can ever poison it."""
+    """Build the shared font cache once, from our own code, before any run - so no model-written script can poison it.
+    Still under Seatbelt: the work venv's site-packages (python_install) run at import, and its .pth files with them."""
     global _mpl_warmed
     if _mpl_warmed:
         return
@@ -45,7 +47,10 @@ def _warm_mpl(py: str) -> None:
         os.makedirs(MPL_CACHE, exist_ok=True)
         if any(n.startswith("fontlist-") for n in os.listdir(MPL_CACHE)):
             return
-        subprocess.run([py, "-I", "-c", "import matplotlib.font_manager"], capture_output=True, timeout=180,
+        cmd = [py, "-I", "-c", "import matplotlib.font_manager"]
+        if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+            cmd = ["sandbox-exec", "-p", _mac_profile(MPL_CACHE, py), *cmd]
+        subprocess.run(cmd, capture_output=True, timeout=180,
                        env={"PATH": "/usr/bin:/bin", "HOME": MPL_CACHE, "MPLBACKEND": "Agg", "MPLCONFIGDIR": MPL_CACHE})
     except (OSError, subprocess.SubprocessError):
         pass  # worst case matplotlib rebuilds the cache inside the run
@@ -87,10 +92,12 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
     *secrets* are the denylist: ssh/gpg/aws/gcloud/keychains, any .env, the app's own data dir and database. Writes
     are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never to a repo's hooks or
-    config, where a write would run later outside the sandbox. Network is off unless `network`; with `proxy_port` (and
-    not `network`) the one thing it may connect to is the allowlisting proxy on localhost at that port (egress.py).
+    config, where a write would run later outside the sandbox. The same goes for home dot-folders, ~/Library and the
+    app's data dir, even when a granted root contains them (the home folder itself as a workspace root). Network is
+    off unless `network`; with `proxy_port` (and not `network`) the one thing it may connect to is the allowlisting proxy on localhost at that port (egress.py).
     """
     home, root, data = _paths()
+    home_r = os.path.realpath(home)
     w = " ".join(f"(subpath {_q(os.path.realpath(p))})" for p in writable)
     net = "(allow network*)" if network else "(deny network*)"
     if proxy_port and not network:
@@ -129,6 +136,7 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
 (allow pseudo-tty)
 (deny appleevent-send)
 (deny file-write* (regex #"/\\.git/hooks(/|$)") (regex #"/\\.git/config$"))
+(deny file-write* (regex #"^{re.escape(home_r)}/\\.") (subpath {_q(os.path.join(home_r, "Library"))}) (subpath {_q(os.path.realpath(data))}))
 (deny file-read* (subpath {_q(data)}) (literal {_q(os.path.join(root, ".env"))})
                  (subpath {_q(os.path.join(root, "backend", "personal_os"))})
                  (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".gnupg"))})

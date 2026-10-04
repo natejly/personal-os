@@ -397,8 +397,7 @@ class ShellJobs:
             await asyncio.wait_for(asyncio.shield(job.pump), 1.0)  # type: ignore[arg-type]
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
-        if not job.background or timed_out:
-            _signal_group(job.pgid, signal.SIGKILL)
+        _signal_group(job.pgid, signal.SIGKILL)  # background too: once the leader exits nothing could reach a leftover child
         if job.pump and not job.pump.done():
             job.pump.cancel()
         job.exit_code = job.proc.returncode

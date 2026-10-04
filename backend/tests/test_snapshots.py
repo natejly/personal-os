@@ -70,6 +70,8 @@ check(S.roots("d1") == [ROOT, DESKS / "d1"], "desk workspace is a root")
 check(sn.read_only_shell("ls -la | grep foo") and sn.read_only_shell("git status"), "read-only shell recognised")
 check(not sn.read_only_shell("rm draft.md && python build.py") and not sn.read_only_shell("echo hi > f")
       and not sn.read_only_shell("find . -delete") and not sn.read_only_shell("git commit -m x"), "mutating shell recognised")
+check(not any(sn.read_only_shell(c) for c in ("sort -o notes.txt notes.txt", "uniq a.txt b.txt", "tree -o out.txt",
+                                                "git diff --output=patch.diff")), "commands that write by flag are mutating")
 check(S.wants("shell_run", {"command": "rm draft.md && python build.py"}, None), "mutating shell is snapshotted")
 check(not S.wants("shell_run", {"command": "ls"}, None), "read-only shell is not")
 check(S.wants("write_local_file", {"path": str(ROOT / "new.txt")}, None), "write inside a root is snapshotted")
@@ -176,6 +178,18 @@ store.append("run-4", 2, "done", {"id": "msg-4", "error": None, "segment": False
 mc = c.get("/messages/msg-4/changes").json()
 check(mc.get("run_id") == "run-4" and mc["count"] == 1, "after done the changes show without waiting for the run to close")
 check(c.post("/runs/run-4/undo").json()["reverted"] == ["d.txt"] and (ROOT / "d.txt").read_text() == "1", "undo right after done")
+
+# a run whose snapshot trees were pruned: undo refuses and leaves the state alone
+(ROOT / "e.txt").write_text("1")
+store.create("run-5", None)
+S.before("run-5", [ROOT])
+(ROOT / "e.txt").write_text("2")
+S.finish("run-5")
+with DB.tx() as cx:
+    cx.execute("UPDATE run_snapshots SET before_tree=? WHERE run_id=?", ("0" * 40, "run-5"))
+r5 = c.post("/runs/run-5/undo")
+check(r5.status_code == 409 and "expired" in r5.json()["detail"], "expired snapshot: undo is a 409")
+check(S.summary("run-5")["state"] == "applied" and (ROOT / "e.txt").read_text() == "2", "expired snapshot: nothing changed")
 
 # without git the feature reports itself unavailable
 real = sn.shutil.which

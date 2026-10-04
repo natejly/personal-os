@@ -2170,7 +2170,7 @@ export interface ActivityConfig {
   summaryModel: string
   profileEveryHours: number
   /** Record-everything mode: every signal on, redaction off, both exclusion lists emptied. */
-  palantir: boolean
+  recordEverything: boolean
   insights: ActivityInsightConfig
 }
 
@@ -2335,7 +2335,7 @@ export interface ActivityStatus {
   /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
   secure_input: boolean
   /** Record-everything mode is on: every signal recording and the gate's filters down. */
-  palantir: boolean
+  recordEverything: boolean
   /** Redactions so far today, by entity. Counts only. */
   redactions?: Record<string, number>
 }

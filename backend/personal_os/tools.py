@@ -2064,7 +2064,7 @@ def _register_activity(self: Toolbox) -> None:
         rows = act.permissions()
         return {
             "signals_on": [k for k, v in (self.activity.config().get("signals") or {}).items() if v],
-            "record_everything_mode": bool(self.activity.config().get("palantir")),
+            "record_everything_mode": bool(self.activity.config().get("recordEverything")),
             "permissions": [{"id": r["id"], "label": r["label"], "state": r["state"],
                              "gates": r["signals"], "fix": r["fix"]} for r in rows],
             "missing": [r["label"] for r in rows if not r["ok"]],

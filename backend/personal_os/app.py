@@ -6475,7 +6475,7 @@ class ActivityConfigIn(BaseModel):
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
-    palantir: bool | None = None
+    recordEverything: bool | None = None
     insights: dict[str, Any] | None = None
 
 
@@ -6497,11 +6497,11 @@ def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True)
     # Record-everything mode never travels as a plain field: it has to go through set_record_everything, which
     # snapshots the settings it is about to flatten so they can be put back.
-    palantir = patch.pop("palantir", None)
+    recordEverything = patch.pop("recordEverything", None)
     if patch:
         monitor.set_config(patch)
-    if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
-        monitor.set_record_everything(bool(palantir))
+    if recordEverything is not None and bool(recordEverything) != bool(monitor.config().get("recordEverything")):
+        monitor.set_record_everything(bool(recordEverything))
     return monitor.status()
 
 

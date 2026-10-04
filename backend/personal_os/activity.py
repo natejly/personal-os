@@ -93,10 +93,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # See insights.py. Proposals only - nothing here ever acts on its own.
     "insights": dict(insights_mod.DEFAULTS),
     # Record-everything mode: every signal on and the gate's discretionary filters stood down. Never on by
-    # default, and it keeps what it replaced in palantirRestore so switching it off puts the old
+    # default, and it keeps what it replaced in recordEverythingRestore so switching it off puts the old
     # settings back instead of guessing at defaults.
-    "palantir": False,
-    "palantirRestore": {},
+    "recordEverything": False,
+    "recordEverythingRestore": {},
     # Category rules (activity_categories.py). None = the shipped default tree; a list replaces it.
     "categories": None,
 }
@@ -1517,17 +1517,22 @@ class Monitor:
     # ---- config ----
     def config(self) -> dict[str, Any]:
         stored = self.db.get_settings().get("activity")
+        if isinstance(stored, dict):  # accept the pre-rename keys once, in case the migration has not run
+            stored = dict(stored)
+            for old, new in (("palantir", "recordEverything"), ("palantirRestore", "recordEverythingRestore")):
+                if old in stored:
+                    stored.setdefault(new, stored.pop(old))
         return _deep_merge(DEFAULT_CONFIG, stored if isinstance(stored, dict) else {})
 
     def set_config(self, patch: dict[str, Any]) -> dict[str, Any]:
         cur = self.config()
         patch = dict(patch or {})
-        if cur.get("palantir") and patch.get("palantir") is not False:
+        if cur.get("recordEverything") and patch.get("recordEverything") is not False:
             # While the mode is on these three are flattened on purpose; an edit to them is the
             # user's new baseline, so it goes into the snapshot that turning the mode off restores.
             kept = {k: patch.pop(k) for k in ("excludeApps", "excludeTitlePatterns", "excludeRules", "redact") if k in patch}
             if kept:
-                patch["palantirRestore"] = {**(cur.get("palantirRestore") or {}), **kept}
+                patch["recordEverythingRestore"] = {**(cur.get("recordEverythingRestore") or {}), **kept}
         cfg = _deep_merge(cur, patch)
         cfg["signals"] = {k: bool(v) for k, v in (cfg.get("signals") or {}).items() if k in SIGNALS}
         self.db.set_settings({"activity": cfg})
@@ -1557,8 +1562,8 @@ class Monitor:
         """
         cfg = self.config()
         if on:
-            restore = cfg.get("palantirRestore") or {}
-            if not cfg.get("palantir"):
+            restore = cfg.get("recordEverythingRestore") or {}
+            if not cfg.get("recordEverything"):
                 restore = {
                     "signals": dict(cfg.get("signals") or {}),
                     "redact": bool(cfg.get("redact", True)),
@@ -1567,14 +1572,14 @@ class Monitor:
                     "excludeRules": list(cfg.get("excludeRules") or []),
                 }
             new = {
-                **cfg, "palantir": True, "palantirRestore": restore, "enabled": True,
+                **cfg, "recordEverything": True, "recordEverythingRestore": restore, "enabled": True,
                 "signals": {s: True for s in SIGNALS},
                 "redact": False, "excludeApps": [], "excludeTitlePatterns": [], "excludeRules": [],
             }
         else:
-            r = cfg.get("palantirRestore") or {}
+            r = cfg.get("recordEverythingRestore") or {}
             new = {
-                **cfg, "palantir": False, "palantirRestore": {},
+                **cfg, "recordEverything": False, "recordEverythingRestore": {},
                 "signals": dict(r.get("signals") or DEFAULT_CONFIG["signals"]),
                 "redact": bool(r.get("redact", True)),
                 "excludeApps": list(r.get("excludeApps", DEFAULT_CONFIG["excludeApps"])),
@@ -1668,7 +1673,7 @@ class Monitor:
             "md_path": str(self.md_path),
             "audio_devices": audio_devices() if (cfg.get("signals") or {}).get("micAudio") or (cfg.get("signals") or {}).get("outputAudio") else [],
             "secure_input": secure_input_active(),
-            "palantir": bool(cfg.get("palantir")),
+            "recordEverything": bool(cfg.get("recordEverything")),
             "redactions": self.gate.counts,
         }
 

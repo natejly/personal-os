@@ -486,8 +486,8 @@ def test_record_everything_mode_turns_everything_on_and_stands_the_gate_down() -
     assert all(cfg["signals"][s] for s in activity.SIGNALS)   # every signal, including the heavy ones
     assert cfg["redact"] is False
     assert cfg["excludeApps"] == [] and cfg["excludeTitlePatterns"] == []
-    assert cfg["palantir"] is True
-    assert m.status()["palantir"] is True
+    assert cfg["recordEverything"] is True
+    assert m.status()["recordEverything"] is True
     # and the gate really does stop filtering
     assert m.gate.excluded("1Password", "vault") is False
     assert m.gate.scrub("my password is hunter2") == "my password is hunter2"
@@ -504,8 +504,8 @@ def test_record_everything_mode_puts_back_exactly_what_it_replaced() -> None:
     after = m.config()
     for k in ("signals", "redact", "excludeApps", "excludeTitlePatterns"):
         assert after[k] == before[k], k
-    assert after["palantir"] is False
-    assert after["palantirRestore"] == {}
+    assert after["recordEverything"] is False
+    assert after["recordEverythingRestore"] == {}
     assert m.gate.excluded("Signal") is True
     assert "[secret]" in m.gate.scrub("my password is hunter2")
 

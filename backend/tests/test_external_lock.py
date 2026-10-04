@@ -103,3 +103,101 @@ def test_a_legacy_stored_on_still_shows_a_card_and_always_grants_nothing() -> No
     j("POST", f"/approvals/{card['call_id']}", {"decision": "always_global"})
     _wait(lambda: (r := appmod.run_store.get(rid)) and r["status"] not in ("running", "awaiting_approval"), "the run")
     assert "schedule_task" not in (appmod.settings().get("tools") or {}), "'Always' on a schedules card is one-shot"
+
+
+# ---- an approved plan step still stands in for the card, now that external tools top out at ask ----
+SENT: list[str] = []
+
+
+async def _fake_send(ctx: dict[str, Any], to: str) -> Any:
+    SENT.append(to)
+    return {"ok": True, "sent": to}
+
+
+@pytest.fixture()
+def fake_send():  # type: ignore[no-untyped-def]
+    from personal_os.tools import ToolSpec, _obj
+    real = tb.specs["gmail_send"]
+    # Not in the "google" group, which is only offered once Google is connected.
+    tb.specs["gmail_send"] = ToolSpec("gmail_send", "fake send", _obj({"to": {"type": "string"}}, ["to"]), _fake_send, "test", "external")
+    SENT.clear()
+    ROUNDS.clear()
+    # A desk here runs its plan and stops: no completion gate, no reviewer turn, no parked card.
+    j("PUT", "/settings", {"deskDoneGate": False, "deskSelfReview": False, "parkAfterSeconds": 0, "planMode": "off"})
+    yield
+    tb.specs["gmail_send"] = real
+    ROUNDS.clear()
+
+
+def _call(name: str, args: dict[str, Any], cid: str) -> dict[str, Any]:
+    return {"id": cid, "name": name, "arguments": json.dumps(args)}
+
+
+def _plan_run(steps: list[dict[str, Any]], then: list[dict[str, Any]], desk: bool = False) -> tuple[dict[str, str], dict[str, Any]]:
+    """propose_plan, approve it, then make `then` one call per round. Returns the approvals filter and the plan row.
+
+    Taint a plan expected is only honoured where the plan stays active across the run, which is a desk: in a chat
+    any taint voids the pre-approval (plans.taint_expected with no active plan)."""
+    ROUNDS.append({"tool_calls": [_call("propose_plan", {"title": "Reply", "steps": steps}, "p0")]})
+    ROUNDS.extend({"tool_calls": [c]} for c in then)
+    ROUNDS.append(["done"])
+    if desk:
+        scope = {"desk_id": j("POST", "/cowork/desks", {"brief": "reply to them", "start": True})["desk"]["id"]}
+    else:
+        cid = j("POST", "/conversations", {})["id"]
+        j("PATCH", f"/conversations/{cid}", {"settings": {"tools": {"gmail_send": "on", "search_documents": "on"}}})
+        scope = {"run_id": j("POST", f"/conversations/{cid}/chat", {"content": "reply to them"})["run_id"]}
+    card = _card(scope, "propose_plan")
+    j("POST", f"/approvals/{card['call_id']}", {"decision": "allow"})
+    return scope, appmod.plans.by_call(card["call_id"]) or {}
+
+
+def _rows(scope: dict[str, str], status: str = "pending") -> list[dict[str, Any]]:
+    k, v = next(iter(scope.items()))
+    return [a for a in j("GET", f"/approvals?status={status}&{k}={v}") if a.get(k) == v]
+
+
+def _card(scope: dict[str, str], tool: str) -> dict[str, Any]:
+    return _wait(lambda: [a for a in _rows(scope) if a["tool"] == tool], f"the {tool} card")[0]
+
+
+def _done(scope: dict[str, str]) -> None:
+    if "run_id" in scope:
+        _wait(lambda: (r := appmod.run_store.get(scope["run_id"])) and r["status"] not in ("running", "awaiting_approval"), "the run")
+    else:
+        _wait(lambda: not j("GET", f"/runs?desk_id={scope['desk_id']}"), "the desk's runs")
+
+
+def _sends(scope: dict[str, str]) -> list[dict[str, Any]]:
+    return [a for a in _rows(scope, "all") if a["tool"] == "gmail_send"]
+
+
+def test_an_approved_gmail_send_step_runs_without_a_card(fake_send: None) -> None:
+    args = {"to": "a@example.com"}
+    scope, plan = _plan_run([{"tool": "gmail_send", "arguments": args}], [_call("gmail_send", args, "s0")])
+    _done(scope)
+    assert SENT == ["a@example.com"] and _sends(scope) == [], "the capped 'ask' is what the plan card answered"
+    assert appmod.plans.get(plan["plan_id"])["steps"][0]["status"] == "done"
+
+
+def test_taint_the_plan_expected_still_claims_its_gmail_send_step(fake_send: None) -> None:
+    query, args = {"query": "their last message"}, {"to": "b@example.com"}
+    scope, plan = _plan_run([{"tool": "search_documents", "arguments": query}, {"tool": "gmail_send", "arguments": args}],
+                            [_call("search_documents", query, "t0"), _call("gmail_send", args, "s0")], desk=True)
+    assert plan["expected_taint"] == ["search_documents"], "the plan card named the read"
+    _done(scope)
+    assert SENT == ["b@example.com"] and _sends(scope) == [], "the user already approved this send after this read"
+    assert [st["status"] for st in appmod.plans.get(plan["plan_id"])["steps"]] == ["done", "done"]
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_taint_the_plan_did_not_expect_still_asks_and_is_forced(fake_send: None, desk: bool) -> None:
+    args = {"to": "c@example.com"}
+    scope, plan = _plan_run([{"tool": "gmail_send", "arguments": args}],
+                            [_call("search_documents", {"query": "anything"}, "t0"), _call("gmail_send", args, "s0")], desk=desk)
+    card = _card(scope, "gmail_send")
+    assert card["forced"] is True
+    j("POST", f"/approvals/{card['call_id']}", {"decision": "deny"})
+    _done(scope)
+    assert SENT == []
+    assert appmod.plans.get(plan["plan_id"])["steps"][0]["status"] == "approved", "the step was not spent"

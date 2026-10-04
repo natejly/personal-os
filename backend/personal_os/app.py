@@ -2569,7 +2569,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
                 # External and schedules tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on'
                 # into a forced card for them: a tainted run forces it here, so the card buys no grant or allow rule.
-                forced = forced or (mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"]))
+                # That alone does not stop an approved plan step from standing in for the card: taint the plan did
+                # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
+                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
+                forced = forced or taint_only
                 perm = permrules.Resolution(mode, forced)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
@@ -2578,7 +2581,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode
                     if perm.kind == "doom_loop":
-                        forced = True
+                        forced, taint_only = True, False
                 elif mcp_is(c["name"]) and mode != "off":
                     # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
                     perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
@@ -2631,8 +2634,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # In a chat a plan exists to stand in for the modal, so it is only consulted when
                     # there would have been one. A desk's plan is also its record of progress - what
                     # `_should_chain` reads - so an approved step is claimed there even for a call that
-                    # was going to run anyway. A forced approval never consults a plan either way.
-                    if not forced and (mode == "ask" or (active_plan is not None and mode == "on")):
+                    # was going to run anyway. A forced approval never consults a plan either way, except the
+                    # external/schedules taint lock when that taint is one the plan card already showed.
+                    if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
                                               desk_id=run.desk_id if run else None)
                         # Progress, for a supervisor deciding whether another turn is worth it: a

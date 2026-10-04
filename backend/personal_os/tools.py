@@ -25,7 +25,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import mac
+from . import egress, mac
 from .embed import rrf
 from . import fsx
 from . import skillbuild
@@ -394,7 +394,8 @@ def _chrome_ipv4(host: str) -> str | None:
 
 def _allowed_hosts(settings: dict[str, Any]) -> set[str]:
     """The user's standing per-host trust, from settings only. A host the model or a fetched page surfaced is not enough."""
-    return {h for h in (str(x).strip().lower().lstrip(".") for x in (settings.get("fetchAllowlist") or ())) if h}
+    # A value stored before PUT /settings validated it ("com", "*") cannot widen the list.
+    return {h for x in (settings.get("fetchAllowlist") or ()) if (h := egress.normalize_entry(str(x).strip().lstrip(".")))}
 
 
 def _norm_url(url: str) -> str | None:
@@ -429,7 +430,7 @@ def _allowed_urls(ctx: dict[str, Any]) -> set[str]:
 
 
 TAINTED_HINT = ("Fetch a result URL exactly as web_search returned it, or answer from what you already fetched. "
-                "The user can also paste the link, or add the host under Settings → fetchAllowlist.")
+                "The user can also paste the link, or add the host under Settings → Tools → Allowed hosts after reading untrusted content.")
 
 
 def _check_url(url: str, ctx: dict[str, Any], settings: dict[str, Any], redirect: bool = False) -> tuple[str, str]:

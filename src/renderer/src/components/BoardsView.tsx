@@ -201,7 +201,7 @@ export default function BoardsView(): JSX.Element {
           )}
           {board && (renamingBoard
             ? <input className="no-drag" autoFocus aria-label="Board name" defaultValue={board.name}
-                onBlur={(e) => { const name = e.target.value.trim(); setRenamingBoard(false); if (name && name !== board.name) void api.boards.update(board.id, { name }).then(loadBoard).catch((err) => toast(err.message, 'error')) }}
+                onBlur={(e) => { const name = e.target.value.trim(); setRenamingBoard(false); if (name && name !== board.name) void api.boards.update(board.id, { name }).then(() => { void loadBoard(); void loadList() }).catch((err) => toast(err.message, 'error')) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { (e.target as HTMLInputElement).value = board.name; (e.target as HTMLInputElement).blur() } }} />
             : <button className="icon-btn" title="Rename board" aria-label={`Rename board ${board.name}`} onClick={() => setRenamingBoard(true)}><Pencil size={14} /></button>
           )}

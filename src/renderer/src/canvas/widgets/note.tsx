@@ -36,6 +36,8 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [saveError, setSaveError] = useState('')
   /** Saves in flight, and whether one has finished, so the label never says 'saved' before the server does. */
   const inFlight = useRef(0)
+  /** Number of the newest save, so an older save failing late never puts back text a newer save replaced. */
+  const lastSave = useRef(0)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   /** Unsaved body, or null when the note on the server matches what is on screen. */
   const pending = useRef<string | null>(null)
@@ -52,11 +54,13 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       onTitle(line)
     }
     inFlight.current++
+    const seq = ++lastSave.current
     setSaveState('saving')
     void api.notes.update(id, { body: next })
       .then((n) => { setNote(n); setSaveError('') })
       .catch((e) => {
         // Put the text back so Retry, the next keystroke or closing the window sends it again.
+        if (seq !== lastSave.current) return
         if (pending.current === null) pending.current = next
         setSaveError((e as Error).message || 'Could not save this note')
       })

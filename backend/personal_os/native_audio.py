@@ -278,9 +278,12 @@ class Capture:
         engine.prepare()
         if device_id or uid:
             resolved = device_id or _device_id_for_uid(uid)
-            if resolved and not _set_input_device(node, resolved):
+            if not resolved or not _set_input_device(node, resolved):
                 if device_id:
                     raise RuntimeError("could not attach the system-audio tap to AVAudioEngine")
+                # A chosen mic that is gone (unplugged, stale uid) is an error, never the default
+                # input: that would record a different room under the chosen device's name.
+                raise RuntimeError(f"input {uid} is not present")
         hw = node.outputFormatForBus_(0)
         rate = float(hw.sampleRate() or 0.0)
         channels = int(hw.channelCount() or 0)
@@ -631,7 +634,7 @@ def _set_input_device(node: Any, device_id: int) -> bool:
 
 
 def _device_id_for_uid(uid: str) -> int:
-    """Core Audio object ID for an AVFoundation uniqueID. 0 if not found (engine uses default)."""
+    """Core Audio object ID for an AVFoundation uniqueID. 0 if not found (the caller refuses it)."""
     if not uid or not IS_MAC:
         return 0
     try:

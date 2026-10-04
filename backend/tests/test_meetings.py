@@ -428,6 +428,23 @@ def test_an_action_item_becomes_a_todo_exactly_once() -> None:
     assert repo.dismiss_action_item(second["id"])["status"] == "dismissed"
 
 
+def test_an_overlapping_promote_does_not_create_a_second_todo() -> None:
+    repo, _ = _svc(_tmp())
+    mid = repo.create(title="Pricing call")["id"]
+    item = repo.add_action_items(mid, None, [{"text": "send the deck"}])[0]
+    todos = _Todos()
+    real = todos.create
+
+    def create(**kw: object) -> dict:
+        # A double click: the second request lands while the first is still creating the todo.
+        repo.promote_action_item(item["id"], todos)
+        return real(**kw)
+
+    todos.create = create  # type: ignore[method-assign]
+    assert repo.promote_action_item(item["id"], todos)["todo_id"] == "todo1"
+    assert len(todos.calls) == 1
+
+
 def test_config_validates_custom_templates_recipes_and_language() -> None:
     _, svc = _svc(_tmp())
     cfg = svc.set_config({"customTemplates": [{"id": "x", "name": "Brief", "instructions": "Short."}],
@@ -570,8 +587,17 @@ def test_auto_stop_is_time_based_and_respects_the_grace_window() -> None:
     asyncio.run(svc._auto_stop(cfg))
     assert stopped == []                                    # still within the grace window
 
+    # Recording started after the slot ended (a manual Record on an old row): only the length
+    # cap applies, or the next tick would cut it off.
+    after = repo.create(title="Started after its slot", scheduled_end=time.time() - grace - 60)["id"]
+    svc.pool.sessions = {after: _FakeSession(after)}
+    asyncio.run(svc._auto_stop(cfg))
+    assert stopped == []
+
     late = repo.create(title="Finished a while ago", scheduled_end=time.time() - grace - 60)["id"]
-    svc.pool.sessions = {late: _FakeSession(late)}
+    ran_over = _FakeSession(late)
+    ran_over.started_at = time.time() - grace - 600
+    svc.pool.sessions = {late: ran_over}
     asyncio.run(svc._auto_stop(cfg))
     assert stopped == [late]
 
@@ -583,6 +609,46 @@ def test_auto_stop_is_time_based_and_respects_the_grace_window() -> None:
     svc.pool.sessions = {forever: session}
     asyncio.run(svc._auto_stop(cfg))
     assert stopped == [late, forever]
+
+
+def _failed_segment(repo: meetings.Meetings, **create: object) -> tuple[str, str]:
+    mid = repo.create(title="Pricing call", **create)["id"]
+    started = time.time() - 600
+    repo.mark_started(mid, "/nowhere/recordings/x", ["mic"], started_at=started)
+    seg = repo.add_segment(mid, "mic", 0, 0.0, 20.0, started, "/nowhere/0.wav", 4096, duration_ms=20_000)
+    repo.finish_segment(seg["id"], state="failed", error="502", wav_path="/nowhere/0.wav", wav_bytes=4096)
+    return mid, seg["id"]
+
+
+def test_a_replay_keeps_the_wav_of_a_recording_that_asked_to_keep_audio() -> None:
+    repo, svc = _svc(_tmp())                                # global keepAudio is off
+    mid, _ = _failed_segment(repo, keep_audio=True)
+    with stt_is("agreed"):
+        assert svc.retranscribe(mid, 3) == 1
+    assert repo.segments(mid)[0]["wav_path"] == "/nowhere/0.wav", "kept audio was deleted"
+
+
+def test_the_tick_and_the_route_do_not_replay_the_same_segment_twice() -> None:
+    import threading
+    repo, svc = _svc(_tmp())
+    mid, _ = _failed_segment(repo)
+    calls: list[int] = []
+    with stt_is("agreed"):
+        canned = meetings.stt.transcribe
+
+        def slow(*a: object, **k: object) -> dict:
+            calls.append(1)
+            time.sleep(0.4)
+            return canned(*a, **k)
+
+        meetings.stt.transcribe = slow  # type: ignore[assignment]
+        first = threading.Thread(target=svc.retranscribe, args=("", 3))
+        first.start()
+        time.sleep(0.1)
+        svc.retranscribe(mid, 20)
+        first.join()
+    assert len(calls) == 1, "the second replay worked from a stale list of failed rows"
+    assert repo.segments(mid)[0]["text"] == "agreed"
 
 
 def test_recover_finalizes_what_a_quit_left_mid_flight() -> None:

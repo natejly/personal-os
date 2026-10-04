@@ -3424,7 +3424,7 @@ export const useStore = create<State>((set, get) => {
     setPalantirMode: async (on) => {
       try {
         set({ activity: await api.activity.palantir(on) })
-        get().toast(on ? 'Palantir mode on — recording everything' : 'Palantir mode off — previous settings restored')
+        get().toast(on ? 'Record everything on' : 'Record everything off — previous settings restored')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

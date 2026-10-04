@@ -45,6 +45,28 @@ def test_can_capture_sine_everywhere() -> None:
     assert native_audio.can_capture("sine") is True
 
 
+def test_a_missing_mic_uid_is_an_error_not_the_default_input() -> None:
+    class _Node:
+        pass
+
+    class _Engine:
+        def alloc(self): return self
+        def init(self): return self
+        def inputNode(self): return _Node()
+        def prepare(self): pass
+
+    real = (native_audio._av_engine_cls, native_audio._device_id_for_uid)
+    native_audio._av_engine_cls = lambda: _Engine()  # type: ignore[assignment]
+    native_audio._device_id_for_uid = lambda uid: 0  # type: ignore[assignment]
+    try:
+        native_audio.Capture("mic", uid="UnpluggedUSB_UID")._start_engine("UnpluggedUSB_UID")
+        raise AssertionError("an unplugged mic fell back to the default input")
+    except RuntimeError as e:
+        assert "not present" in str(e), e
+    finally:
+        native_audio._av_engine_cls, native_audio._device_id_for_uid = real
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
@@ -57,3 +79,4 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+

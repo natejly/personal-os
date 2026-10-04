@@ -28,6 +28,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1262,19 +1263,29 @@ class Meetings:
         back to the meeting is `meeting_action_items.todo_id`, which is where it belongs.
         """
         with self.db.tx() as c:
+            # Claim first, as the tx's first statement: two overlapping requests (a double click)
+            # would otherwise both see todo_id NULL and each create a todo and a Google task.
+            claimed = c.execute("UPDATE meeting_action_items SET status='adding' WHERE id=? "
+                                "AND todo_id IS NULL AND status='proposed'", (item_id,)).rowcount == 1
             r = c.execute("SELECT * FROM meeting_action_items WHERE id=?", (item_id,)).fetchone()
             if not r:
                 return None
             item = dict(r)
             m = c.execute("SELECT title, project_id FROM meetings WHERE id=?", (item["meeting_id"],)).fetchone()
-        if item["todo_id"]:
+        if not claimed:
             return item
         meeting_title = " ".join(str((m["title"] if m else "") or "").replace("\r", " ").split())[:200] or "Untitled meeting"
         title = " ".join(str(item.get("text") or "").replace("\r", " ").split())[:500] or "Untitled action"
-        todo = todos.create(
-            title=title, project_id=project_id if project_id is not None else (m["project_id"] if m else None),
-            notes=f"From meeting: {meeting_title}", due=_due_or_none(item["due"]), priority=2,
-            source="meeting")
+        try:
+            todo = todos.create(
+                title=title, project_id=project_id if project_id is not None else (m["project_id"] if m else None),
+                notes=f"From meeting: {meeting_title}", due=_due_or_none(item["due"]), priority=2,
+                source="meeting")
+        except Exception:
+            with self.db.tx() as c:
+                c.execute("UPDATE meeting_action_items SET status='proposed' WHERE id=? AND status='adding'",
+                          (item_id,))
+            raise
         with self.db.tx() as c:
             c.execute("UPDATE meeting_action_items SET status='added', todo_id=? WHERE id=?", (todo["id"], item_id))
             return row_to_dict(c.execute("SELECT * FROM meeting_action_items WHERE id=?", (item_id,)).fetchone())
@@ -1355,6 +1366,8 @@ class MeetingService:
         self._suggest: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self._enhancing: set[str] = set()
         self._summarizing: set[str] = set()
+        # The 45s tick and the Retranscribe route replay the same failed rows from separate threads.
+        self._replay_lock = threading.Lock()
 
     def _emit(self, kind: str, meeting_id: str, **extra: Any) -> None:
         """Tell the app a recording moved. Never raises: a dead listener must not cost a transcript."""
@@ -1369,6 +1382,10 @@ class MeetingService:
     # ---- config ----
     def config(self) -> dict[str, Any]:
         return config_for(self.db)
+
+    def keeps_audio(self, meeting_id: str, cfg: dict[str, Any]) -> bool:
+        """The global setting or this recording's own flag; either one keeps its wavs."""
+        return bool(cfg.get("keepAudio") or (self.meetings.get(meeting_id) or {}).get("keep_audio"))
 
     def set_config(self, patch: dict[str, Any]) -> dict[str, Any]:
         """Persist a config change. It NEVER touches a live recording.
@@ -1778,7 +1795,7 @@ class MeetingService:
                          "was closed, so the transcript is incomplete. It fills in as they finish.")
         out = self.meetings.finalize(meeting_id, transcript, status="ready", error="; ".join(notes))
         self._emit("status", meeting_id, status="ready")
-        if drained and cfg.get("diarize") and cfg.get("keepAudio"):
+        if drained and cfg.get("diarize") and self.keeps_audio(meeting_id, cfg):
             # Only retained audio can be diarized; a missing backend is a quiet no-op.
             with contextlib.suppress(Exception):
                 await self.diarize(meeting_id)
@@ -2074,6 +2091,18 @@ class MeetingService:
         cfg = self.config()
         if stt.resolve_backend(cfg, self.data_dir) == "off":
             return 0
+        # Serialized, snapshot included: a second replay working from a stale list found the wav
+        # the first one had just transcribed and deleted, and overwrote its text with 'empty'.
+        # The tick (no meeting id) skips a busy turn instead of waiting, so a long user replay
+        # never holds up the next nudge and auto-stop.
+        if not self._replay_lock.acquire(blocking=bool(meeting_id)):
+            return 0
+        try:
+            return self._replay(meeting_id, limit, cfg)
+        finally:
+            self._replay_lock.release()
+
+    def _replay(self, meeting_id: str, limit: int, cfg: dict[str, Any]) -> int:
         live = self.pool.live()
         touched: set[str] = set()
         done = 0
@@ -2097,7 +2126,7 @@ class MeetingService:
                 continue
             res = stt.transcribe(path, settings=self.settings(), cfg=cfg, data_dir=self.data_dir)
             text = str(res["text"] or "").strip()
-            keep = bool(res["error"]) or bool(cfg["keepAudio"])
+            keep = bool(res["error"]) or self.keeps_audio(seg["meeting_id"], cfg)
             if not keep:
                 with contextlib.suppress(OSError):
                     path.unlink(missing_ok=True)
@@ -2409,7 +2438,10 @@ class MeetingService:
             return
         grace = float(cfg["autoStopGraceSeconds"] or 0)
         elapsed = now() - (session.started_at or now())
-        past_end = bool(m["scheduled_end"]) and now() > float(m["scheduled_end"]) + grace
+        # Only a recording that began before the slot ended is cut at its end: one started after
+        # it (a late call, a manual Record on an old row) would otherwise stop on the next tick.
+        end = float(m["scheduled_end"] or 0)
+        past_end = bool(end) and (session.started_at or 0) < end and now() > end + grace
         if past_end or elapsed > float(cfg["maxMeetingSeconds"]):
             log.info("meetings: auto-stopping %s (%s)", m["id"], "scheduled end" if past_end else "max length")
             await self.stop(m["id"])

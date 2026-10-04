@@ -377,6 +377,19 @@ def test_pause_blocks_recording_and_expires_on_its_own() -> None:
         assert "In Cursor" in m.now_line()
 
 
+def test_a_config_restart_keeps_the_pause() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    m.db.set_settings({"activity": {**m.config(), "signals": {"apps": False}}})
+    m.running = True
+    m.pause(minutes=30)
+    m.restart()                              # what set_config does on any settings edit
+    try:
+        assert m.status()["paused"] is True, "a settings edit silently resumed recording"
+    finally:
+        m.stop()
+    assert m.paused is False                 # an explicit stop does end it
+
+
 def test_now_line_reports_being_away_once_input_stops() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.running = True

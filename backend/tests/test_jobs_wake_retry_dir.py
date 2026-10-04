@@ -415,3 +415,99 @@ def test_schedule_task_can_watch_a_folder_and_still_refuses_a_hidden_one(home_di
     assert bad.get("error"), bad
     both = asyncio.run(tool.fn({}, name="x", prompt="y", watch_dir=home_dir, in_minutes=5))
     assert both.get("error"), both
+
+
+# ---------------- mail trigger ----------------
+class FakeMail:
+    """Google.gmail_threads_recent for one search: the matching threads, and a count of the looks."""
+
+    def __init__(self) -> None:
+        self.threads: list[dict[str, Any]] = []
+        self.looks = 0
+
+    def __call__(self, query: str) -> list[dict[str, Any]]:
+        self.looks += 1
+        return list(self.threads)
+
+    def add(self, tid: str, subject: str, mid: str, labels: list[str] | None = None) -> None:
+        self.threads = [t for t in self.threads if t["thread_id"] != tid]
+        self.threads.insert(0, {"thread_id": tid, "subject": subject,
+                                "messages": [{"id": mid, "from": "Landlord <ll@example.com>", "labels": labels or ["INBOX"]}]})
+
+
+def mail_tick(at: float, mail: Any) -> list[dict[str, Any]]:
+    holder = type("W", (), {})()
+    holder.sched = Scheduler(jobs, appmod._launch_job, mail=mail)  # noqa: SLF001
+    return tick(at, holder)
+
+
+def mail_job() -> dict[str, Any]:
+    return jobs.create(f"mail {time.time()}", "", "Deal with the landlord mail.", kind="mail",
+                       mail_query="from:landlord", timezone="UTC", enabled=True, at=T0)
+
+
+def test_mail_job_baselines_then_fires_once_per_new_thread_with_the_subject_fenced() -> None:
+    m = FakeMail()
+    m.add("t1", "Old rent receipt", "m1")
+    job = mail_job()
+    assert mail_tick(T0 + 1, m) == [], "the first look only takes a baseline"
+    m.add("t2", "Boiler visit Tuesday", "m2")
+    m.add("t1", "Re: Old rent receipt", "m3", labels=["SENT"])  # the user's own reply is not news
+    fired = mail_tick(T0 + 301, m)
+    assert len(fired) == 1 and fired[0]["trigger"] == "mail" and fired[0]["collapsed"] == 1
+    assert [x["subject"] for x in fired[0]["mail"]] == ["Boiler visit Tuesday"]
+    prompt = appmod._job_prompt(jobs.get(job["id"]), fired[0])  # noqa: SLF001
+    fenced = prompt.split("```")[1]
+    assert "Boiler visit Tuesday" in fenced and "t2" in fenced and "landlord mail" not in fenced
+    assert prompt.endswith("Deal with the landlord mail.")
+    assert mail_tick(T0 + 601, m) == [], "the same thread does not fire twice"
+    assert len(job_runs(job["id"])) == 1
+
+
+def test_mail_job_looks_at_most_every_five_minutes_and_never_books_an_os_wake() -> None:
+    m = FakeMail()
+    job = mail_job()
+    for at in (T0 + 1, T0 + 60, T0 + 200):
+        mail_tick(at, m)
+    assert m.looks == 1
+    mail_tick(T0 + 302, m)
+    assert m.looks == 2
+    assert jobs.get(job["id"])["next_due_at"] == T0 + 602
+    assert jobs.earliest_due() is None, "a mail poll is not a slot to wake the machine for"
+
+
+def test_mail_job_fails_closed_when_google_is_not_connected() -> None:
+    assert not appmod.google.status()["connected"]
+    job = mail_job()
+    s = Scheduler(jobs, appmod._launch_job, clock=lambda: T0 + 1, mail=appmod._mail_threads)  # noqa: SLF001
+    assert asyncio.run(s.tick()) == []
+    row = jobs.get(job["id"])
+    assert row["last_skip_reason"] == "google_disconnected" and row["last_fired_at"] is None
+
+
+def test_changing_the_search_takes_a_fresh_baseline() -> None:
+    m = FakeMail()
+    job = mail_job()
+    mail_tick(T0 + 1, m)
+    m.add("t9", "Lease renewal", "m9")
+    jobs.update(job["id"], {"mail_query": "from:agent"}, at=T0 + 2)
+    assert mail_tick(T0 + 3, m) == [], "mail already there when the search changed does not fire"
+
+
+def test_mail_run_proposes_its_external_calls() -> None:
+    args = two_proposal_rounds()
+    m = FakeMail()
+    job = mail_job()
+    mail_tick(T0 + 1, m)
+    m.add("t5", "Please confirm", "m5")
+    assert len(mail_tick(T0 + 400, m)) == 1
+    check_two_proposals(job_runs(job["id"])[0]["run_id"], args)
+
+
+def test_mail_job_api_needs_a_search_and_no_cron() -> None:
+    assert client.post("/jobs", json={"name": "m", "prompt": "p", "kind": "mail"}).status_code == 400
+    assert client.post("/jobs", json={"name": "m", "prompt": "p", "kind": "mail", "mail_query": "from:x",
+                                      "cron": "0 * * * *"}).status_code == 400
+    r = client.post("/jobs", json={"name": "m", "prompt": "p", "kind": "mail", "mail_query": " from:x "})
+    assert r.status_code == 200 and r.json()["mail_query"] == "from:x" and "mail_seen" not in r.json()
+    client.delete(f"/jobs/{r.json()['id']}")

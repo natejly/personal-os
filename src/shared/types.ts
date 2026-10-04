@@ -1940,15 +1940,20 @@ export interface RunInfo {
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
 
+export type JobKind = 'cron' | 'once' | 'watch' | 'mail'
+
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
   id: string
   name: string
   /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off; 'watch' fires when
-   *  files appear or change in `watch_dir` (and on `cron` too, when it has one). */
-  kind: 'cron' | 'once' | 'watch'
-  /** Empty for a one-off, and for a folder job with no clock. */
+   *  files appear or change in `watch_dir` (and on `cron` too, when it has one); 'mail' fires when a thread
+   *  matching `mail_query` is new or has a new message. */
+  kind: JobKind
+  /** Empty for a one-off, for a mail job, and for a folder job with no clock. */
   cron: string
+  /** A Gmail search, for kind 'mail'. Polled at most every five minutes. */
+  mail_query?: string | null
   /** The single instant a one-off runs at; null for a repeating job. */
   run_at: number | null
   timezone: string
@@ -2022,7 +2027,7 @@ export interface JobRunSummary {
   status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   job_id: string | null
   job: string
-  kind: 'cron' | 'once' | 'watch'
+  kind: JobKind
   due_at: number | null
   fired_at: number
   late: boolean

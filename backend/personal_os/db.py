@@ -561,7 +561,8 @@ class Database:
                      "allowed_tools": "TEXT", "expires_at": "REAL", "watch_dir": "TEXT", "watch_seen": "TEXT",
                      "model": "TEXT", "budget": "TEXT",
                      # When a run of this job is worth an OS notification: 'problems' | 'always' | 'never'.
-                     "notify": "TEXT NOT NULL DEFAULT 'problems'"},
+                     "notify": "TEXT NOT NULL DEFAULT 'problems'",
+                     "mail_query": "TEXT", "mail_seen": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

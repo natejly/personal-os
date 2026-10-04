@@ -282,6 +282,8 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
         : job.kind === 'watch'
           ? <span className="muted small" title={job.watch_dir ?? ''}>watching {tildePath(job.watch_dir ?? '')}{job.cron && <> · <code>{job.cron}</code></>}</span>
+          : job.kind === 'mail'
+            ? <code className="muted small" title="Runs when matching mail arrives">{job.mail_query}</code>
           : <code className="muted small">{job.cron}</code>}
       <span className="muted small">
         {spent
@@ -396,7 +398,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', dir: '', mode: 'once' as 'once' | 'repeat' | 'folder', onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail', onlyTools: false }
 
 /** `/Users/me/Downloads` -> `~/Downloads`, for display. */
 function tildePath(p: string): string {
@@ -447,20 +449,21 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
 }
 
 /** Schedule a task by hand (a one-off instant by default, a repeating schedule if it should repeat, or a folder to
- * watch: a typed path the backend refuses outside home or hidden, and the toast says why), or, given `job`, edit that
+ * watch: a typed path the backend refuses outside home or hidden, and the toast says why, or a Gmail search to run on
+ * as matching mail arrives), or, given `job`, edit that
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
 function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
   const { createJob, updateJob } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
-    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '' }
+    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: job.mail_query ?? '' }
     : BLANK)
   const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [picked, setPicked] = useState<string[]>(['current_time'])
   const cron = presetCron(sched)
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : !!f.when)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : f.mode === 'mail' ? !!f.query.trim() : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -473,8 +476,10 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       ? { kind: 'cron' as const, cron }
       : f.mode === 'folder'
         ? { kind: 'watch' as const, watch_dir: f.dir.trim() }
-        // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
-        : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
+        : f.mode === 'mail'
+          ? { kind: 'mail' as const, mail_query: f.query.trim() }
+          // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
+          : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
     let ok: boolean
     if (job) {
       const patch = diffJob<Job>(job, { ...common, ...schedule })
@@ -504,12 +509,17 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
           <option value="once">Once</option>
           <option value="repeat">Repeat</option>
           {!job && <option value="folder">When files appear in a folder</option>}
+          <option value="mail">When matching mail arrives</option>
         </select>
         {f.mode === 'repeat'
           ? <SchedulePicker value={sched} onChange={setSched} timezone={job?.timezone} />
           : f.mode === 'folder'
             ? <input type="text" placeholder="Folder, e.g. ~/Downloads" value={f.dir} aria-label="Folder to watch"
                 onChange={(e) => setF({ ...f, dir: e.target.value })} />
+            : f.mode === 'mail'
+            ? <input type="text" placeholder="Gmail search, e.g. from:landlord" value={f.query} maxLength={500}
+                aria-label="Gmail search" title="Checked every five minutes; mail already there when you save does not count"
+                onChange={(e) => setF({ ...f, query: e.target.value })} />
             : <>
                 {spent && <span className="muted small">Run again at…</span>}
                 <input type="datetime-local" value={f.when} aria-label={spent ? 'Run again at' : 'When it should run'}

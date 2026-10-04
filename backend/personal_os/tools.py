@@ -671,6 +671,7 @@ async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, 
 class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
     subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
+    known_tools: Callable[[], set[str]] | None = None  # built-ins plus offered connector slugs, for skill lint; set by app.py
     desk_starter: Any = None  # async (ctx, title, brief, mode, doc_ids) -> result, wired in app.py for desk_start
     workflows: Any = None  # workflows.Workflows and its Engine, commands.Commands: wired in app.py
     workflow_engine: Any = None
@@ -2942,7 +2943,8 @@ def _register_skills(self: Toolbox) -> None:
                 "hint": "pass an id or exact name from skill_list, or use skill_draft to propose a new one"}
 
     def _lint(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
-        return skillbuild.lint_skill(name, description, procedure, known_tools=set(self.specs),
+        return skillbuild.lint_skill(name, description, procedure,
+                                     known_tools=self.known_tools() if self.known_tools else set(self.specs),
                                      existing=self.skills.list(), skill_id=skill_id)
 
     async def skill_list(ctx: dict[str, Any], query: str = "", status: str = "") -> Any:

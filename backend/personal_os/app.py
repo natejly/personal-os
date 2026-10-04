@@ -8292,8 +8292,12 @@ def delete_skill(skill_id: str) -> dict[str, bool]:
 
 
 def _known_tools() -> set[str]:
-    """Every tool name the assistant could actually call, so the lint can catch an invented one."""
-    return set(toolbox.specs)
+    """Every tool name the assistant could actually call, so the lint can catch an invented one.
+    Connector tools count too, except a quarantined one, which is not offered."""
+    return set(toolbox.specs) | {t["slug"] for t in mcp_drift.offerable(mcp_store.tools())}
+
+
+toolbox.known_tools = _known_tools  # skill_draft / skill_revise lint against the same set
 
 
 def _lint_skill(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:

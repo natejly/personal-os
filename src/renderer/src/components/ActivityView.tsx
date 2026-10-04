@@ -592,7 +592,7 @@ function PatternRow({ p }: { p: ActivityPattern }): JSX.Element {
  * the two panels disagreeing about what an empty value means.
  *
  * `devices` is deliberately the narrower `{index, name}` shape: `/meetings/status` adds a
- * `loopback` flag to its rows and `/activity/devices` does not, so the common shape is this one.
+ * `loopback` flag to its rows and `/activity/status`'s `audio_devices` does not, so the common shape is this one.
  */
 export function AudioDevicePicker({ devices, micValue, outputValue, onChange, nativeMic, nativeSystem }: {
   devices: { index: string; name: string }[]
@@ -867,7 +867,9 @@ export default function ActivityView(): JSX.Element {
             )}
           </section>
 
-          <h4 className="act-h">Habits <span className="muted small">— written into your memory, so chats already know them</span></h4>
+          <h4 className="act-h">Habits <span className="muted small">{cfg.insights.autoMemory
+            ? '— written into your memory, so chats already know them'
+            : '— kept here; turn on Write confident habits into memory to share them with chats'}</span></h4>
           {!insights?.habits.length && (
             <p className="empty-hint">
               No habits yet. They are written once a pattern is confident enough, and each one owns a single row in

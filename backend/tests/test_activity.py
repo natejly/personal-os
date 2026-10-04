@@ -54,6 +54,11 @@ def _monitor(tmp: Path, reply: str = "") -> activity.Monitor:
     return m
 
 
+def _enable(m: activity.Monitor) -> None:
+    """Flip the master switch in settings without starting the collectors."""
+    m.db.set_settings({"activity": {**m.config(), "enabled": True}})
+
+
 # ---------------------------------------------------------------- the gate
 
 
@@ -292,6 +297,8 @@ def test_context_block_is_empty_when_off_and_when_opted_out() -> None:
     assert m.context_block() == ""                      # never ran, nothing recorded
 
     m.store.set_profile("### Tools\n- Lives in Cursor")
+    assert m.context_block() == ""                      # a saved profile stays out while the monitor is off
+    _enable(m)
     assert "Lives in Cursor" in m.context_block()
 
     m.set_config({"injectContext": False})
@@ -300,6 +307,7 @@ def test_context_block_is_empty_when_off_and_when_opted_out() -> None:
 
 def test_context_block_carries_now_profile_and_recent_periods() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
+    _enable(m)
     m.running = True
     m.last_focus = {"app": "Cursor", "title": "activity.py", "since": time.time() - 300}
     m.store.set_profile("### Tools\n- Lives in Cursor")
@@ -318,6 +326,7 @@ def test_context_block_carries_now_profile_and_recent_periods() -> None:
 
 def test_a_token_in_the_live_window_title_is_stripped() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
+    _enable(m)
     m.running = True
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     m.last_focus = {"app": "Terminal", "title": f"export {pat}", "since": time.time() - 30}
@@ -337,6 +346,7 @@ def test_build_context_includes_activity_only_when_the_chat_wants_it() -> None:
 
     tmp = Path(tempfile.mkdtemp())
     m = _monitor(tmp)
+    _enable(m)
     m.running = True
     m.last_focus = {"app": "Cursor", "title": "", "since": time.time() - 60}
     m.store.set_profile("### Tools\n- Lives in Cursor")
@@ -356,6 +366,17 @@ def test_build_context_includes_activity_only_when_the_chat_wants_it() -> None:
 
     system, used = build_context(**common, conv_settings={}, activity=None)  # monitor absent
     assert used["activity"] is None
+
+
+def test_activity_tools_are_offered_only_while_the_monitor_is_on() -> None:
+    from personal_os.tools import Toolbox
+
+    m = _monitor(Path(tempfile.mkdtemp()))
+    tb = Toolbox(None, None, None, lambda: {}, activity=m)  # type: ignore[arg-type]
+    names = [n for n in tb.specs if n.startswith("activity_")]
+    assert names and not any(tb.available(n) for n in names)
+    _enable(m)
+    assert all(tb.available(n) for n in names)
 
 
 # ---------------------------------------------------------------- lifecycle

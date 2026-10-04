@@ -2211,14 +2211,13 @@ export interface ActivityHabit {
 export type InsightKind = 'automation' | 'platform' | 'hygiene'
 export type InsightStatus = 'new' | 'accepted' | 'done' | 'dismissed' | 'snoozed'
 /** `prompt` is the common one and it acts on nothing: it hands back a message to send. */
-export type InsightActionType = 'prompt' | 'todo' | 'memory' | 'setting' | 'none'
+export type InsightActionType = 'prompt' | 'todo' | 'memory' | 'none'
 
 export interface InsightAction {
   type: InsightActionType
   prompt?: string
   title?: string
   content?: string
-  how?: string
 }
 
 /** A proposal, never a change. Dismissing one is permanent; a refresh will not raise it again. */
@@ -2264,7 +2263,6 @@ export interface ActivityInsights {
 export interface ActivityApplyResult {
   type: InsightActionType
   prompt?: string
-  how?: string
   todo?: Todo
   memory?: Memory
   suggestion: ActivitySuggestion
@@ -2716,12 +2714,6 @@ export interface MeetingCandidate {
   meeting_id: string | null
   /** Invitees other than the user; local only, they become the doc header. */
   attendees?: { email: string; name?: string }[]
-}
-
-/** One frame of the per-meeting SSE stream. */
-export interface MeetingStreamEvent {
-  event: 'segment' | 'status' | 'error' | 'revision' | 'end'
-  data: unknown
 }
 
 /** Reply tracker row (`/mail/watch`): who owes whom an answer. */

@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { installRejectionToasts } from './lib/rejections'
-import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
+import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
@@ -17,6 +17,7 @@ import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
+import { insertIntoComposer } from './lib/composerInsert'
 import type { UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 
@@ -566,8 +567,6 @@ export interface State {
   flushMeetingNotes: () => Promise<void>
   /** The 2s tick: the live status plus the segment tail from `meetingCursor`. */
   pollMeetingLive: () => Promise<void>
-  /** Attach to one meeting's SSE. Idempotent per meeting; a no-op stream today. */
-  watchMeeting: (meetingId: string) => Promise<void>
   enhanceMeeting: (id: string, force?: boolean) => Promise<void>
   acceptMeetingRevision: (revisionId: string) => Promise<void>
   rejectMeetingRevision: (revisionId: string) => Promise<void>
@@ -880,41 +879,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
   }
 }
 
-/** The slice one meeting stream event can move. Nothing else, so the reducer stays testable. */
-type MeetingWatch = Pick<State, 'activeMeeting' | 'meetingSegments' | 'meetingCursor' | 'meetingStatus'>
-
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
-/** `MeetingStreamEvent.data` is `unknown`, because the bus is a seam: the frames are declared here
- *  and nothing publishes them yet, so every one is checked rather than cast. */
-const isSegment = (v: unknown): v is MeetingSegment => isRecord(v) && typeof v.id === 'string' && typeof v.meeting_id === 'string' && typeof v.seq === 'number'
-const isStatus = (v: unknown): v is MeetingStatusInfo => isRecord(v) && isRecord(v.config) && isRecord(v.counts)
-const isRevision = (v: unknown): v is NonNullable<FullMeeting['pending']> =>
-  isRecord(v) && typeof v.id === 'string' && typeof v.meeting_id === 'string' && typeof v.after === 'string'
-
-/**
- * Every meeting mutation a stream event makes, as one new slice. No side effects — a toast or a
- * refetch belongs to `watchMeeting`, which is what makes this safe to run on a replayed frame.
- */
-const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatch => {
-  switch (ev.event) {
-    case 'segment': {
-      if (!isSegment(ev.data) || ev.data.meeting_id !== s.activeMeeting?.id) return s
-      // `applyCursor` is the same fold the 2s poll uses, so a pushed row and a polled row that
-      // describe the same segment collapse into one line rather than two.
-      return { ...s, meetingSegments: applyCursor(s.meetingSegments, [ev.data]), meetingCursor: Math.max(s.meetingCursor, ev.data.cursor ?? 0) }
-    }
-    case 'status':
-      return isStatus(ev.data) ? { ...s, meetingStatus: ev.data } : s
-    case 'revision': {
-      if (!isRevision(ev.data) || !s.activeMeeting || ev.data.meeting_id !== s.activeMeeting.id) return s
-      // Only a proposal still waiting is `pending`; an applied one arrives with the meeting refetch.
-      return { ...s, activeMeeting: { ...s.activeMeeting, pending: ev.data.status === 'pending' ? ev.data : s.activeMeeting.pending, has_pending: ev.data.status === 'pending' } }
-    }
-    default:
-      // 'error' and 'end' are the loop's business: one toasts, the other just lets the generator finish.
-      return s
-  }
-}
 
 export { adjacentChatId }
 
@@ -927,9 +892,6 @@ export const useStore = create<State>((set, get) => {
    */
   let menuWired = false
   let inited = false
-  /** The live meeting SSE subscription. Store-local, like `Streaming.abort`: a running
-   *  AbortController must never cross the IPC bus. */
-  let meetingWatch: { id: string; abort: AbortController } | null = null
   /** Which meeting the Record click that opened the consent modal was for; `undefined` means
    *  "create one". Kept out of state because the modal must not be able to re-target it. */
   let consentIntent: string | undefined
@@ -2912,7 +2874,7 @@ export const useStore = create<State>((set, get) => {
       const q = query ?? get().meetingQuery
       if (q !== get().meetingQuery) set({ meetingQuery: q })
       try {
-        set({ meetings: await api.meetings.list(get().dataScope, q) })
+        set({ meetings: await api.meetings.list(get().dataScope, q, true) })
       } catch { /* the recorder bar re-runs this every 5s; one flaky request must not toast */ }
     },
     setMeetingQuery: (query) => set({ meetingQuery: query }),
@@ -2963,12 +2925,9 @@ export const useStore = create<State>((set, get) => {
           meetingCursor: 0
         })
         await loadSegments(id)
-        // A meeting that is still recording or settling gets the tick and the stream; one that is
-        // finished needs neither, and would otherwise poll a row nothing is writing to.
-        if (SETTLING.includes(m.status)) {
-          void get().refreshMeetingStatus()
-          void get().watchMeeting(id)
-        }
+        // A meeting that is still recording or settling gets the tick; one that is finished does
+        // not, and would otherwise poll a row nothing is writing to.
+        if (SETTLING.includes(m.status)) void get().refreshMeetingStatus()
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -3001,7 +2960,6 @@ export const useStore = create<State>((set, get) => {
           meetingSegments: [],
           meetingCursor: 0
         })
-        void get().watchMeeting(id)
         await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus()])
       } catch (e) {
         get().toast(startFailure(e), 'error')
@@ -3118,36 +3076,6 @@ export const useStore = create<State>((set, get) => {
         if (!rows.length || get().activeMeeting?.id !== id) return
         set((st) => ({ meetingSegments: applyCursor(st.meetingSegments, rows), meetingCursor: lastCursor(rows, st.meetingCursor) }))
       } catch { /* a 2s poll that toasts would paper the screen over one flaky request */ }
-    },
-    watchMeeting: async (meetingId) => {
-      // One subscription per meeting: a second would fold every pushed frame in twice. Nothing
-      // publishes to the meeting bus yet, so today this opens and ends at once — the transcript
-      // pane is carried by `pollMeetingLive`, and this is the seam that replaces it.
-      if (meetingWatch?.id === meetingId) return
-      meetingWatch?.abort.abort()
-      const abort = new AbortController()
-      meetingWatch = { id: meetingId, abort }
-      try {
-        for await (const ev of meetingStream(meetingId, 0, abort.signal)) {
-          set((st) => {
-            const next = applyMeetingEvent(st, ev)
-            return next === st ? {} : next
-          })
-          if (ev.event === 'error') {
-            const d = ev.data
-            get().toast(isRecord(d) && typeof d.message === 'string' ? d.message : 'The recording reported an error', 'error')
-          } else if (ev.event === 'end') {
-            void get().refreshMeetings()
-            void get().refreshMeetingsPending()
-          }
-        }
-      } catch (e) {
-        // An aborted signal is a newer subscription or a view teardown, not a failure.
-        if (!abort.signal.aborted) get().toast((e as Error).message, 'error')
-      } finally {
-        // Abort-identity guarded: a newer subscription has already replaced this one.
-        if (meetingWatch?.abort === abort) meetingWatch = null
-      }
     },
     enhanceMeeting: async (id, force = false) => {
       set({ meetingBusy: true })
@@ -3541,10 +3469,10 @@ export const useStore = create<State>((set, get) => {
         await get().loadActivityInsights()
         if (out.type === 'prompt' && out.prompt) {
           // Setting the thing up is a conversation with tool approvals in it, so the suggestion
-          // hands the message over rather than acting: a fresh chat, pre-loaded, nothing sent yet
-          // until the user is looking at it.
+          // hands the message over rather than acting: a fresh chat with the prompt in its
+          // composer, sent only when the user presses send.
           get().newChat(null)
-          await get().send(out.prompt)
+          insertIntoComposer(out.prompt)
           return
         }
         if (out.type === 'todo' && out.todo) {
@@ -3554,7 +3482,7 @@ export const useStore = create<State>((set, get) => {
           await get().refreshMemories()
           get().toast('Saved to memory')
         } else {
-          get().toast(out.how || 'Marked as accepted')
+          get().toast('Marked as accepted')
         }
       } catch (e) {
         get().toast((e as Error).message, 'error')

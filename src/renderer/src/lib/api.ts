@@ -11,10 +11,10 @@ import type {
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
-  ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
+  ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
-  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
+  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview
 } from '@shared/types'
@@ -594,8 +594,6 @@ export const api = {
     rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }),
     refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
     context: () => req<ActivityContextFile>('/activity/context'),
-    devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
-    permissions: () => req<ActivityCapability[]>('/activity/permissions'),
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
     categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
@@ -612,7 +610,6 @@ export const api = {
     setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
       req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
     applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
-    deleteInsight: (id: string) => req<{ ok: boolean }>(`/activity/insights/${id}`, { method: 'DELETE' }),
     forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
   },
   cowork: {
@@ -719,7 +716,8 @@ export const api = {
   },
   /** Recorded calls. `status`/`preflight`/`pending` are the only ones safe to poll; everything else is a user action. */
   meetings: {
-    list: (s: Scope = 'all', q = '') => req<Meeting[]>(`/meetings?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    /** `includeDocs` adds recordings made inside a doc; the Meetings rail shows them, Home does not. */
+    list: (s: Scope = 'all', q = '', includeDocs = false) => req<Meeting[]>(`/meetings?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}&include_docs=${includeDocs}`),
     get: (id: string) => req<FullMeeting>(`/meetings/${id}`),
     create: (m: { title?: string; project_id?: string | null; template?: string; status?: string; calendar_event_id?: string | null; calendar_id?: string | null; calendar_link?: string; conference_link?: string; attendees?: unknown[]; scheduled_start?: number | null; scheduled_end?: number | null }) =>
       req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
@@ -736,10 +734,7 @@ export const api = {
     consent: () => req<MeetingStatusInfo>('/meetings/consent', { method: 'POST' }),
     /** The whole preflight, not just its `selftest` key: a passing round trip also clears what it blocked. */
     selftest: () => req<MeetingPreflight>('/meetings/selftest', { method: 'POST' }),
-    devices: (refresh = false) => req<{ index: string; name: string; loopback: boolean }[]>(`/meetings/devices?refresh=${refresh}`),
     suggest: () => req<MeetingCandidate[]>('/meetings/suggest'),
-    search: (q: string, s: Scope = 'all', limit = 10) =>
-      req<{ meeting_id: string; title: string; status: string; started_at: number | null; snippet: string; field: string; score: number }[]>(`/meetings/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(s)}&limit=${limit}`),
     pending: () => req<{ pending: number }>('/meetings/pending'),
     start: (id: string) => req<FullMeeting>(`/meetings/${id}/start`, { method: 'POST' }),
     /** Blocks while the transcription backlog drains (up to `drainSeconds`), so give it time. */
@@ -748,12 +743,9 @@ export const api = {
     resume: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/resume`, { method: 'POST' }),
     /** `since` is a rowid cursor: 0 is the whole tail with cursors, then pass back the last row's. */
     segments: (id: string, since = 0, limit = 200) => req<MeetingSegment[]>(`/meetings/${id}/segments?since=${since}&limit=${limit}`),
-    transcript: (id: string, offset = 0, limit = 500) =>
-      req<{ meeting_id: string; text: string; lines: string[]; total: number; offset: number; count: number; has_more: boolean }>(`/meetings/${id}/transcript?offset=${offset}&limit=${limit}`),
     /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
     enhance: (id: string, force = false, template?: string) =>
       req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }),
-    revisions: (id: string, limit = 100) => req<MeetingRevision[]>(`/meetings/${id}/revisions?limit=${limit}`),
     accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
     actions: (id: string) => req<MeetingActionItem[]>(`/meetings/${id}/actions`),
@@ -969,16 +961,5 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
 export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
   for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
-  }
-}
-
-/**
- * The per-meeting event stream. Nothing publishes to the meeting bus yet, so today this opens, ends
- * at once and the transcript pane keeps polling `/segments`; the generator ships so switching over
- * is a store change rather than a new protocol.
- */
-export async function* meetingStream(meetingId: string, since = 0, signal?: AbortSignal): AsyncGenerator<MeetingStreamEvent> {
-  for await (const { event, data } of sseStream(`/meetings/${meetingId}/stream?since=${since}`, signal)) {
-    yield { event, data } as MeetingStreamEvent
   }
 }

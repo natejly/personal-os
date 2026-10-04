@@ -12,7 +12,6 @@ import DiffView from './DiffView'
 import ProjectChip from './ProjectChip'
 import ScopeSelect from './ScopeSelect'
 import MeetingRecorderBar from './MeetingRecorderBar'
-import MeetingSettings from './MeetingSettings'
 import MeetingConsentModal from './MeetingConsentModal'
 import { formatOffset, mergeSegments, recorderState, speakerLabel, type RecorderState } from '../lib/transcript'
 import '../styles/meetings.css'
@@ -78,6 +77,7 @@ function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDel
   onDelete: (id: string) => void
   showScope: boolean
 }): JSX.Element {
+  const openDoc = useStore((s) => s.openDoc)
   const groups = useMemo(() => {
     const m = new Map<string, Meeting[]>()
     for (const x of meetings) {
@@ -107,6 +107,10 @@ function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDel
                 <span className="mtg-row-title">{m.title || 'Untitled meeting'}</span>
                 <span className="mtg-row-meta">
                   {showScope && <ProjectChip projectId={m.project_id} showPersonal />}
+                  {m.doc_id && (
+                    <button className="tag" title="Recorded in a doc. Click to open it"
+                      onClick={(e) => { e.stopPropagation(); void openDoc(m.doc_id!) }}>doc</button>
+                  )}
                   {m.duration_ms > 0 ? fmtDur(m.duration_ms) : STATUS_LABEL[m.status] ?? m.status} · {fmtWhen(meetingWhen(m))}
                 </span>
               </span>
@@ -158,7 +162,7 @@ export default function MeetingsView(): JSX.Element {
   const {
     refreshMeetings, openMeeting, deleteMeeting, startRecording, editMeetingNotes, flushMeetingNotes,
     enhanceMeeting, acceptMeetingRevision, rejectMeetingRevision, promoteActionItems, dismissActionItem,
-    retranscribeMeeting, deleteMeetingAudio, toggleSidebar, setLibraryScope, toast
+    retranscribeMeeting, deleteMeetingAudio, toggleSidebar, setLibraryScope, toast, openSettings
   } = useStore()
 
   const [transcriptOpen, setTranscriptOpen] = useState(false)
@@ -243,7 +247,7 @@ export default function MeetingsView(): JSX.Element {
   // The master switch blocks both ways: the backend refuses `start` with a blocker row, so every
   // Record affordance says why rather than failing on the click.
   const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
-  const OFF_TITLE = 'The meeting recorder is off. Turn it on in the Meetings panel.'
+  const OFF_TITLE = 'The meeting recorder is off. Turn it on in Settings → Meetings.'
   const blockers = meetingPreflight?.blockers ?? []
   const copy = (text: string): void => { void navigator.clipboard.writeText(text); toast('Copied') }
 
@@ -276,7 +280,10 @@ export default function MeetingsView(): JSX.Element {
             {/* Also here, not only beside the notepad: a live recording must have a reachable Stop
                 whatever is open, including nothing. The bar renders null when nothing is live. */}
             <MeetingRecorderBar />
-            <MeetingSettings />
+            <p className="empty-hint">
+              Recorder, transcription and notes settings live in
+              <button className="link-btn" onClick={() => openSettings('meetings')}>Open settings</button>
+            </p>
           </section>
         ) : (
           <section className="mtg-main">

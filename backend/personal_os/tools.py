@@ -2092,6 +2092,8 @@ def _register_activity(self: Toolbox) -> None:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
     R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",
         _obj({"minutes": {"type": "number", "default": 30}}, []), activity_pause, "activity", "external"))
+    for n in ("activity_recent", "activity_access", "activity_insights", "activity_report", "activity_pause"):
+        self.specs[n].available_fn = lambda: self.activity.config().get("enabled") is True
 
 
 Toolbox._register_working = _register_working  # type: ignore[attr-defined]

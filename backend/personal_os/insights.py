@@ -717,11 +717,10 @@ Return ONLY a JSON object:
      "effort": "low|medium|high",
      "confidence": 0.0-1.0,
      "evidence": ["pattern id", "..."],
-     "action": {"type": "prompt|todo|memory|setting|none",
+     "action": {"type": "prompt|todo|memory|none",
                 "prompt": "a ready-to-send message to the assistant that sets this up",
                 "title": "todo title when type=todo",
-                "content": "memory text when type=memory",
-                "how": "what the user clicks when type=setting"}}
+                "content": "memory text when type=memory"}}
   ]
 }
 
@@ -1154,7 +1153,7 @@ class Insights:
             kind = kind if kind in ("automation", "platform", "hygiene") else "automation"
             action = raw.get("action") if isinstance(raw.get("action"), dict) else {}
             atype = str((action or {}).get("type") or "none")
-            if atype not in ("prompt", "todo", "memory", "setting", "none"):
+            if atype not in ("prompt", "todo", "memory", "none"):
                 atype = "none"
             action = {**(action or {}), "type": atype}
             if atype == "prompt":
@@ -1240,13 +1239,8 @@ class Insights:
             result["prompt"] = _line(action.get("prompt") or f"{s['title']}. {s['detail']}", 1500)
             self.set_status(sid, "accepted", "sent to chat")
         else:
-            result["how"] = str(action.get("how") or s["detail"])
             self.set_status(sid, "accepted", "acknowledged")
         return {**result, "suggestion": self.get(sid)}
-
-    def delete(self, sid: str) -> None:
-        with self.db.tx() as c:
-            c.execute("DELETE FROM activity_suggestions WHERE id=?", (sid,))
 
     def purge_patterns(self, older_than_seconds: float = 0.0) -> None:
         """Drop the stored pattern snapshot. It holds raw window titles (the recurring-window

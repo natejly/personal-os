@@ -251,10 +251,6 @@ bus = RunBus(run_store)
 bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
-# A second, independent bus, keyed by MEETING id. Nothing in RunBus is conversation-specific - _runs
-# is a plain dict[str, Run] and Run.__init__ only stores the id (runs.py:46-48, 123-127) - so a
-# meeting's live segments get their own stream without sharing a key space with chat.
-meeting_bus = RunBus()
 # Active chat streams so they can be aborted from the client. A Run when the reply is on the bus
 # (stop goes through the bus, which also wakes the provider read); a bare Event for a stream with no run.
 _active: dict[str, asyncio.Event | Run] = {}
@@ -4973,7 +4969,6 @@ async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
-    await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
     await toolbox.shell.shutdown()  # host shell jobs: SIGTERM then SIGKILL to each group
@@ -6537,12 +6532,6 @@ class PermissionIn(BaseModel):
     browser: str = ""
 
 
-@app.get("/activity/permissions")
-def activity_permissions() -> list[dict[str, Any]]:
-    """The macOS permission rows on their own. Read-only: this never prompts."""
-    return activity.permissions()
-
-
 @app.post("/activity/permissions/request")
 def activity_permission_request(body: PermissionIn) -> dict[str, Any]:
     """Ask macOS for one permission - the only route that can put a system dialog on screen, and
@@ -6624,14 +6613,6 @@ def activity_context() -> dict[str, Any]:
     return {"path": str(monitor.md_path), "markdown": monitor.read_markdown(), "injected": monitor.context_block()}
 
 
-@app.get("/activity/devices")
-def activity_devices() -> list[dict[str, str]]:
-    # ttl=0 only here: audio_devices() is TTL-cached for 20s so one status() poll stops spawning
-    # two 15-second ffmpeg probes, but this route answers an explicit "what is plugged in now" and
-    # a device the user just connected must not be missing from the picker.
-    return activity.audio_devices(ttl=0)
-
-
 @app.post("/activity/purge")
 def activity_purge(body: PurgeIn) -> dict[str, Any]:
     return {"deleted": monitor.purge(body.scope), "status": monitor.status()}
@@ -6686,12 +6667,6 @@ def activity_insight_apply(sid_: str) -> dict[str, Any]:
         return monitor.insights.apply(sid_)
     except KeyError as e:
         raise HTTPException(404, "No such suggestion") from e
-
-
-@app.delete("/activity/insights/{sid_}")
-def activity_insight_delete(sid_: str) -> dict[str, bool]:
-    monitor.insights.delete(sid_)
-    return {"ok": True}
 
 
 @app.delete("/activity/habits/{hid}")
@@ -6884,10 +6859,7 @@ def meeting_status() -> dict[str, Any]:
     return meeting_svc.status()
 
 
-# Both verbs on purpose. It reads like a GET, src/shared/types.ts documents it as a POST, and a 405
-# here would show up in the panel as "Start is permanently blocked" with nothing to fix.
 @app.get("/meetings/preflight")
-@app.post("/meetings/preflight")
 async def meeting_preflight(force: bool = False) -> dict[str, Any]:
     """Capabilities plus a real round trip, cached ten minutes. Threaded: it runs ffmpeg and an
     HTTP request with a 120s timeout, neither of which belongs on the event loop."""
@@ -6924,12 +6896,6 @@ async def meeting_selftest() -> dict[str, Any]:
     return await asyncio.to_thread(meeting_svc.preflight, True)
 
 
-@app.get("/meetings/devices")
-def meeting_devices(refresh: bool = False) -> list[dict[str, Any]]:
-    """The audio inputs ffmpeg can see. refresh=true re-probes instead of using the 20s cache."""
-    return meeting_svc.devices(refresh)
-
-
 @app.get("/meetings/suggest")
 async def meeting_suggest() -> list[dict[str, Any]]:
     """Calendar events happening right now that are worth taking notes on. No LLM, 60s cached.
@@ -6941,13 +6907,6 @@ async def meeting_suggest() -> list[dict[str, Any]]:
     if not st["connected"] or not _google_has(st, "calendar"):
         return []
     return await meeting_svc.suggest()
-
-
-@app.get("/meetings/search")
-async def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
-    """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
-    scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return await meeting_index.search(settings(), q, scope, _clamp(limit))
 
 
 @app.get("/meetings/pending")
@@ -7174,29 +7133,6 @@ def meeting_segments(id: str, since: int = -1, offset: int = 0, limit: int = 200
     return meeting_store.segments(id, max(0, offset), limit, channel)
 
 
-@app.get("/meetings/{id}/stream")
-async def stream_meeting(id: str, since: int = 0) -> StreamingResponse:
-    """The seam for pushing segments instead of polling: the bus is keyed by meeting id and nothing
-    publishes to it yet, so this answers an empty stream rather than 404ing."""
-    run = meeting_bus.get(id)
-    return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
-@app.get("/meetings/{id}/transcript")
-def meeting_transcript(id: str, offset: int = 0, limit: int = 500) -> dict[str, Any]:
-    """The rolled-up transcript, by line. An hour of speech is far more than one response should
-    carry, and the column is only ever rewritten on finalize, so paging it is a pure read."""
-    m = meeting_store.get(id, include_hidden=False)
-    if not m:
-        raise HTTPException(404)
-    lines = (m["transcript"] or "").splitlines()
-    off, lim = max(0, int(offset)), max(1, min(int(limit), 2000))
-    win = lines[off:off + lim]
-    return {"meeting_id": id, "text": "\n".join(win), "lines": win, "total": len(lines),
-            "offset": off, "count": len(win), "has_more": off + len(win) < len(lines)}
-
-
 @app.post("/meetings/{id}/enhance")
 async def enhance_meeting(id: str, force: bool = False, template: str | None = None) -> dict[str, Any]:
     """Cache-or-generate, like /recap: an existing proposal is the answer unless ?force=true.
@@ -7227,13 +7163,6 @@ async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]
     if not m.get("doc_id"):
         raise HTTPException(400, "Only a recording made in a doc can be summarized into it.")
     return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
-
-
-@app.get("/meetings/{id}/revisions")
-def meeting_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
-    if not meeting_store.get(id, include_hidden=False):
-        raise HTTPException(404)
-    return meeting_store.revisions(id, _clamp(limit))
 
 
 @app.get("/meetings/{id}/actions")

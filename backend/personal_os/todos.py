@@ -291,6 +291,11 @@ class Todos:
             fields["estimate_min"] = int(fields["estimate_min"]) if fields["estimate_min"] else None
         before = self.get(id)
         completing = bool(before and fields.get("done") and not before["done"] and before.get("repeat"))
+        relink = before is not None and "calendar_event_id" in fields
+        if relink:
+            # A caller placed the event itself: the mirror adopts it rather than rewriting it against
+            # the old event's signature, and a replaced event is tombstoned so the mirror deletes it.
+            fields["calendar_sig"] = None
         if "done" in fields:
             fields["done"] = int(bool(fields["done"]))
             fields["completed_at"] = now() if fields["done"] else None
@@ -298,6 +303,8 @@ class Todos:
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
             c.execute(f"UPDATE todos SET {sets} WHERE id=?", (*fields.values(), id))
+            if relink and before and before.get("calendar_event_id") not in (None, fields["calendar_event_id"]):
+                self._tombstone(c, {"calendar_event_id": before["calendar_event_id"], "calendar_id": before.get("calendar_id")})
             if completing:
                 c.execute("UPDATE todos SET repeat=NULL WHERE id=?", (id,))
         if completing and before:

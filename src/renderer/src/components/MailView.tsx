@@ -62,6 +62,8 @@ export default function MailView(): JSX.Element {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<GmailMessage | null>(null)
   const [full, setFull] = useState<GmailFullMessage | null>(null)
+  // A slow body fetch can land after another message was opened; only the latest one's is kept.
+  const openedId = useRef<string | null>(null)
   const [snoozed, setSnoozed] = useState<string[]>([])
   const [compose, setCompose] = useState<Compose | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -143,8 +145,10 @@ export default function MailView(): JSX.Element {
   }
 
   const userLabels = labels.filter((l) => l.type === 'user')
-  const patchLocal = (id: string, patch: Partial<GmailMessage>): void =>
+  const patchLocal = (id: string, patch: Partial<GmailMessage>): void => {
     setMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)))
+    setOpen((o) => (o?.id === id ? { ...o, ...patch } : o))  // the reader's Star/Unstar reads `open`
+  }
 
   const modify = async (m: GmailMessage, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }): Promise<void> => {
     try {
@@ -163,10 +167,11 @@ export default function MailView(): JSX.Element {
 
   const openMessage = (m: GmailMessage): void => {
     setOpen(m)
+    openedId.current = m.id
     const key = `mailbody:${m.id}`
     const cached = readView<GmailFullMessage>(key)
     setFull(cached)
-    api.google.gmailGet(m.id).then((full) => { writeView(key, full); setFull(full) }).catch((e) => toast((e as Error).message, 'error'))
+    api.google.gmailGet(m.id).then((full) => { writeView(key, full); if (openedId.current === m.id) setFull(full) }).catch((e) => toast((e as Error).message, 'error'))
     if (m.unread) void modify(m, { mark_read: true })
   }
 

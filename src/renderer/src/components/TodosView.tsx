@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X } from 'lucide-react'
+import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X, ChevronDown } from 'lucide-react'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
@@ -16,6 +16,7 @@ export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const tasksSync = useStore((s) => s.tasksSync)
+  const googleConnected = useStore((s) => !!s.google?.connected)
   const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync, toast } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
@@ -103,14 +104,17 @@ export default function TodosView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
-          {tasksSync?.config.enabled && (
+          {tasksSync?.config.enabled && googleConnected && (
             <button className="icon-btn" onClick={() => void runTasksSync()} disabled={tasksSync.syncing}
               title={tasksSync.last_error ? `Google Tasks sync failed: ${tasksSync.last_error}` : 'Sync with Google Tasks now'}>
               <RefreshCw size={14} className={tasksSync.syncing ? 'spin' : ''} />
             </button>
           )}
           <SendToSpace items={[{ kind: 'todos' }]} />
-          <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')} title="Urgency scores due date, priority and age"><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
+          <label className="model-picker" title="Urgency scores due date, priority and age">
+            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
+            <ChevronDown size={14} />
+          </label>
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>

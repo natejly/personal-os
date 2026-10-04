@@ -17,6 +17,7 @@ import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import { withoutTodoEvents } from './CalendarWeek'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -205,6 +206,7 @@ export default function HomeView(): JSX.Element {
   const TodosCard = moduleHome('todos')?.home?.Card
   const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
+  const allTodos = useStore((s) => s.todos)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap, openMemory } = useStore()
@@ -239,7 +241,8 @@ export default function HomeView(): JSX.Element {
   }
 
   const today = new Date().toDateString()
-  const events = d?.calendar ?? []
+  // A due todo is already in the Todos card; its all-day mirror event would list it twice.
+  const events = withoutTodoEvents(d?.calendar ?? [], [...allTodos, ...(d?.todos ?? [])])
   const todayEvents = events.filter((e) => dayKey(e.start) === today)
   const laterEvents = events.filter((e) => dayKey(e.start) !== today)
 

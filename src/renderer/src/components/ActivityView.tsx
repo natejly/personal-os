@@ -162,13 +162,13 @@ function Capabilities({ caps, onGrant, onOpen }: {
 function RecordEverythingCard({ on, missing, onSet }: { on: boolean; missing: string[]; onSet: (on: boolean) => void }): JSX.Element {
   const [confirming, setConfirming] = useState(false)
   return (
-    <section className={`act-card palantir ${on ? 'armed' : ''}`}>
+    <section className={`act-card record-all ${on ? 'armed' : ''}`}>
       <div className="act-card-head static">
         <Eye size={14} />
         <b>Record everything</b>
         {on && <span className="act-pill warn">recording everything</span>}
       </div>
-      <div className="act-palantir-body">
+      <div className="act-record-all-body">
         <p className="muted small">
           One switch for everything: all six signals on — including the keylogger, the microphone and system audio —
           redaction off, and both “never record” lists emptied, so password managers and sign-in pages get recorded
@@ -191,7 +191,7 @@ function RecordEverythingCard({ on, missing, onSet }: { on: boolean; missing: st
           ? <button className="ghost-btn danger" onClick={() => onSet(false)}><EyeOff size={14} /> Turn record everything off</button>
           : confirming
             ? (
-              <div className="act-palantir-confirm">
+              <div className="act-record-all-confirm">
                 <p><b>Record everything, with the filters down?</b></p>
                 <div className="act-danger">
                   <button className="ghost-btn danger" onClick={() => { setConfirming(false); onSet(true) }}>
@@ -660,7 +660,7 @@ export default function ActivityView(): JSX.Element {
     toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
     refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
-    grantActivityPermission, openActivitySettings, setPalantirMode,
+    grantActivityPermission, openActivitySettings, setRecordEverything,
     loadActivityInsights, refreshActivityInsights, setInsightStatus, applyInsight, forgetActivityHabit
   } = useStore()
   const [tab, setTab] = useState<Tab>('overview')
@@ -778,7 +778,7 @@ export default function ActivityView(): JSX.Element {
           <RecordEverythingCard
             on={st.palantir}
             missing={st.capabilities.filter((c) => c.state && c.state !== 'granted' && c.state !== 'n/a').map((c) => c.label)}
-            onSet={(on) => void setPalantirMode(on)}
+            onSet={(on) => void setRecordEverything(on)}
           />
 
           <section className="act-card">

@@ -499,6 +499,9 @@ class Desks:
             if not c.execute("SELECT 1 FROM desks WHERE id=?", (id,)).fetchone():
                 return None
             c.execute(f"UPDATE desks SET {sets} WHERE id=?", (*fields.values(), id))
+            if status not in NEEDS_YOU:
+                # Answered somewhere else (an approval in the Agent inbox, say): the old ask is not waiting any more.
+                c.execute("UPDATE desk_events SET seen=1 WHERE desk_id=? AND seen=0 AND needs_you=1", (id,))
             if event:
                 self._event(c, id, _STATUS_KIND.get(status, "status"), _body(status, reason, error),
                             needs_you=status in NEEDS_YOU, run_id=fields.get("run_id"),

@@ -8,7 +8,7 @@ export interface Project {
   color: string
   tools: Record<string, ToolOverride>
   created_at: number
-  stats?: { conversations: number; memories: number; nodes: number; documents: number }
+  stats?: { conversations: number; memories: number; nodes: number; documents: number; docs?: number }
 }
 
 export interface ContextUsed {
@@ -2169,7 +2169,7 @@ export interface ActivityConfig {
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
   profileEveryHours: number
-  /** Palantir mode: every signal on, redaction off, both exclusion lists emptied. */
+  /** Record-everything mode: every signal on, redaction off, both exclusion lists emptied. */
   palantir: boolean
   insights: ActivityInsightConfig
 }
@@ -2334,7 +2334,7 @@ export interface ActivityStatus {
   audio_devices: { index: string; name: string }[]
   /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
   secure_input: boolean
-  /** Palantir mode is on: every signal recording and the gate's filters down. */
+  /** Record-everything mode is on: every signal recording and the gate's filters down. */
   palantir: boolean
   /** Redactions so far today, by entity. Counts only. */
   redactions?: Record<string, number>

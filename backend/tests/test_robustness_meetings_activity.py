@@ -406,16 +406,16 @@ def test_purge_drops_the_pattern_snapshot_with_its_events() -> None:
     assert not m.insights.patterns()
 
 
-# ---------------------------------------------------------------- 10. palantir restore
+# ---------------------------------------------------------------- 10. record-everything restore
 
 
-def test_exclusion_edits_during_palantir_survive_turning_it_off() -> None:
+def test_exclusion_edits_during_record_everything_survive_turning_it_off() -> None:
     m = _monitor("")
     m.set_config({"excludeApps": ["OldApp"]})
-    m.set_palantir(True)
+    m.set_record_everything(True)
     m.set_config({"excludeApps": ["NewApp"], "redact": True})
     assert m.config()["excludeApps"] == []                # the mode is still flat
-    m.set_palantir(False)
+    m.set_record_everything(False)
     assert m.config()["excludeApps"] == ["NewApp"] and m.config()["redact"] is True
     m.stop()
 

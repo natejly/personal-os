@@ -31,7 +31,7 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'calendar', label: 'Calendar' },
   homeRow('todos'),
   homeRow('health'),
-  { key: 'inbox', label: 'Inbox' },
+  { key: 'inbox', label: 'Unread mail' },
   { key: 'mailwatch', label: 'Waiting mail' },
   { key: 'plan', label: 'Day plan' },
   { key: 'gtasks', label: 'Google Tasks' },

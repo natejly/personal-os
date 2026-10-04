@@ -92,7 +92,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Insights: habits worth remembering and automations worth offering, mined from the same data.
     # See insights.py. Proposals only - nothing here ever acts on its own.
     "insights": dict(insights_mod.DEFAULTS),
-    # Palantir mode: every signal on and the gate's discretionary filters stood down. Never on by
+    # Record-everything mode: every signal on and the gate's discretionary filters stood down. Never on by
     # default, and it keeps what it replaced in palantirRestore so switching it off puts the old
     # settings back instead of guessing at defaults.
     "palantir": False,
@@ -219,7 +219,7 @@ class Gate:
         return out
 
     def scrub_url(self, url: str) -> str:
-        """A page address with its secrets taken out. Unchanged when redaction is off (Palantir)."""
+        """A page address with its secrets taken out. Unchanged when redaction is off (record-everything mode)."""
         if not url or not self.cfg().get("redact", True):
             return url or ""
         return redact_mod.sanitize_url(url)
@@ -1540,7 +1540,7 @@ class Monitor:
             self.start()
         return cfg
 
-    def set_palantir(self, on: bool) -> dict[str, Any]:
+    def set_record_everything(self, on: bool) -> dict[str, Any]:
         """One switch for "record everything".
 
         On: all six signals, redaction off, and both exclusion lists emptied - so the password
@@ -1582,7 +1582,7 @@ class Monitor:
                 "excludeRules": list(r.get("excludeRules", [])),
             }
         self.db.set_settings({"activity": new})   # a full replace: the restore snapshot must clear
-        log.info("activity: palantir mode %s", "ON - recording everything" if on else "off - previous settings back")
+        log.info("activity: record-everything mode %s", "ON - recording everything" if on else "off - previous settings back")
         self.set_config({})                       # re-reads the stored config and restarts collectors
         return self.status()
 

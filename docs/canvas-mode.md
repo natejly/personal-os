@@ -1,6 +1,7 @@
 # Canvas Mode — design & build plan
 
-Status: proposal, nothing built yet. Written 2026-09-29 against the tree as it stands
+Status: **shipped 2026-09-30**, kept as the original build plan. The classic/canvas mode toggle was
+removed: canvases are Spaces in the sidebar, and ⌘⇧C toggles Spaces. Written 2026-09-29 against the tree as it stood
 (`src/renderer/src/App.tsx` view-router, single-session `store.ts`, FastAPI backend in `backend/personal_os/`).
 
 ---
@@ -31,7 +32,7 @@ Five pillars:
 
 | Decision | Choice | Why | Reversal cost |
 |---|---|---|---|
-| Canvas vs. classic | **Both.** A `mode: 'classic' \| 'canvas'` toggle (⌘⇧C), classic stays the default until canvas is solid | Every existing view keeps working while canvas is half-built; no big-bang cutover | Low — flipping the default is one line |
+| Canvas vs. classic | **Both** (superseded: the mode toggle was removed; ⌘⇧C now toggles Spaces). A `mode: 'classic' \| 'canvas'` toggle (⌘⇧C), classic stays the default until canvas is solid | Every existing view keeps working while canvas is half-built; no big-bang cutover | Low — flipping the default is one line |
 | Canvas geometry | **Unbounded canvas-space pixels**, viewport pans/zooms over it | Window positions survive resizing the app window; zoom-out doubles as an overview | Medium — coordinates are persisted |
 | Zoom | CSS `transform: scale()` on the canvas layer, 50 %–200 %, ⌘-scroll | Live DOM stays live and crisp; no canvas/WebGL rewrite | Low |
 | Window chrome | Real traffic lights (red/amber/green), centred 13 px semibold title, 30 px bar | This is the single strongest "it's a desktop" signal, and the ask is explicitly Apple design language | Low |
@@ -587,7 +588,7 @@ channel (`store.ts:246`), which already handles this pattern.
 
 | Shortcut | Action |
 |---|---|
-| ⌘⇧C | Toggle Canvas / Classic |
+| ⌘⇧C | Toggle Spaces (originally Canvas / Classic) |
 | ⌃⌘N | New space |
 | ⌃← / ⌃→ | Previous / next space |
 | ⌃1…⌃9 | Jump to space *n* |

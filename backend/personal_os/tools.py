@@ -415,7 +415,7 @@ def _allowed_urls(ctx: dict[str, Any]) -> set[str]:
 
 
 TAINTED_HINT = ("Fetch a result URL exactly as web_search returned it, or answer from what you already fetched. "
-                "The user can also paste the link, or add the host under Settings → fetchAllowlist.")
+                "The user can also paste the link.")
 
 
 def _check_url(url: str, ctx: dict[str, Any], settings: dict[str, Any], redirect: bool = False) -> tuple[str, str]:
@@ -654,9 +654,6 @@ class Toolbox:
             self._register_cowork()
         if meetings is not None:
             self._register_meetings()
-        if artifacts is not None:
-            from . import artifact_tools
-            artifact_tools.register(self, artifacts)
         from . import subagents
         subagents.register(self)
         from . import shell
@@ -1870,10 +1867,11 @@ def _register_boards(self: Toolbox) -> None:
         col = next((c for c in b["columns"] if column and c["name"].lower() == column.lower()), None)
         card = self.boards.add_card(b["id"], col["id"] if col else None, title, description, due, priority)
         return {"added": card["title"], "id": card["id"], "column": (col or b["columns"][0])["name"]}
-    R("board_add_card", ToolSpec("board_add_card", "Add a card to a kanban board (optionally into a named column).",
+    R("board_add_card", ToolSpec("board_add_card", "Add a card to a kanban board (optionally into a named column). Boards are work queues; a personal "
+        "task or reminder with a due date goes in todo_add, because only todos reach Today, Calendar and Google Tasks.",
         _obj({"board": {"type": "string"}, "title": {"type": "string"}, "column": {"type": "string"}, "description": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer", "default": 2}}, ["board", "title"]), board_add_card, "boards", "writes",
         examples=[{"board": "Work", "title": "Fix the login bug", "column": "To do", "priority": 1},
-                  {"board": "Home", "title": "Book the plumber", "due": "2026-10-10"}]))
+                  {"board": "Q4 launch", "title": "Draft the release notes", "due": "2026-10-10"}]))
 
     async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str, token: str | None = None) -> Any:
         b = self.boards.find_board(board)
@@ -2066,7 +2064,7 @@ def _register_activity(self: Toolbox) -> None:
         rows = act.permissions()
         return {
             "signals_on": [k for k, v in (self.activity.config().get("signals") or {}).items() if v],
-            "palantir_mode": bool(self.activity.config().get("palantir")),
+            "record_everything_mode": bool(self.activity.config().get("palantir")),
             "permissions": [{"id": r["id"], "label": r["label"], "state": r["state"],
                              "gates": r["signals"], "fix": r["fix"]} for r in rows],
             "missing": [r["label"] for r in rows if not r["ok"]],
@@ -2164,7 +2162,7 @@ def _register_docs(self: Toolbox) -> None:
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
                 for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
-    R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
+    R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the app's Files view (its markdown editor) — their notes, drafts and documents. Uploads (PDFs and other files added under Settings → Knowledge base or a project's Knowledge tab) are a different store: use search_documents for those. Start here when they mention 'my notes', 'my files', 'my essay' or 'the doc' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:

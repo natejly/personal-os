@@ -92,9 +92,12 @@ class Projects:
     def stats(self, project_id: str | None) -> dict[str, int]:
         where, args = _scope_clause(project_id, include_global=False)
         with self.db.tx() as c:
-            soft = ("conversations", "memories", "documents")  # the tables that can sit in the trash
+            soft = ("conversations", "memories", "documents", "docs")  # the tables that can sit in the trash
             q = lambda t: c.execute(f"SELECT COUNT(*) FROM {t} WHERE {where}" + (" AND deleted_at IS NULL" if t in soft else ""), args).fetchone()[0]  # noqa: E731
-            return {"conversations": q("conversations"), "memories": q("memories"), "nodes": q("kg_nodes"), "documents": q("documents")}
+            has_docs = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docs'").fetchone()
+            # documents = uploaded files; docs = what the user writes in Files (created by docs.py, absent in bare test DBs)
+            return {"conversations": q("conversations"), "memories": q("memories"), "nodes": q("kg_nodes"), "documents": q("documents"),
+                    "docs": q("docs") if has_docs else 0}
 
 
 # ---------------- Conversations ----------------

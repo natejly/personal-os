@@ -2019,14 +2019,14 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .primary-btn.sm { font-size: 12px; padding: 4px 9px; }
 .act-grant-all { display: flex; flex-direction: column; gap: 5px; padding: 0 12px 10px; }
 
-/* Palantir mode: the one control that turns protections off, so it looks like it. */
-.act-card.palantir { border-color: rgba(229,72,77,0.35); }
-.act-card.palantir.armed { border-color: var(--danger); background: rgba(229,72,77,0.05); }
-.act-card.palantir .act-card-head svg { color: var(--danger); }
-.act-palantir-body { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
-.act-palantir-body > button { align-self: flex-start; margin-top: 3px; }
-.act-palantir-confirm { padding: 9px 10px; border: 1px solid rgba(229,72,77,0.4); border-radius: 8px; background: rgba(229,72,77,0.07); font-size: 12px; }
-.act-palantir-confirm p { margin: 0 0 7px; }
+/* Record-everything mode: the one control that turns protections off, so it looks like it. */
+.act-card.record-all { border-color: rgba(229,72,77,0.35); }
+.act-card.record-all.armed { border-color: var(--danger); background: rgba(229,72,77,0.05); }
+.act-card.record-all .act-card-head svg { color: var(--danger); }
+.act-record-all-body { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
+.act-record-all-body > button { align-self: flex-start; margin-top: 3px; }
+.act-record-all-confirm { padding: 9px 10px; border: 1px solid rgba(229,72,77,0.4); border-radius: 8px; background: rgba(229,72,77,0.07); font-size: 12px; }
+.act-record-all-confirm p { margin: 0 0 7px; }
 
 .act-profile { padding: 0 12px 10px; font-size: 13px; color: var(--text-muted); }
 .act-profile h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin: 10px 0 4px; }

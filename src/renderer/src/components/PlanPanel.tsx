@@ -33,16 +33,16 @@ export default function PlanPanel({ conversationId }: { conversationId?: string 
     void setPlanSteps(cid, steps.map((s, j) => (i === j ? { ...s, status: NEXT[s.status] } : s)))
 
   return (
-    <section className="plan-panel" aria-label="Plan">
+    <section className="plan-panel" aria-label="Checklist">
       <header>
         <button className="plan-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <ListChecks size={14} />
-          <b>Plan</b>
+          <b>Checklist</b>
           <span className="muted">{done}/{steps.length}</span>
         </button>
         <div className="plan-bar" aria-hidden><span style={{ width: `${Math.round((done / steps.length) * 100)}%` }} /></div>
-        <button className="icon-btn" title="Clear the plan" aria-label="Clear the plan" onClick={() => void clearPlan(cid)}><X size={14} /></button>
+        <button className="icon-btn" title="Clear the checklist" aria-label="Clear the checklist" onClick={() => void clearPlan(cid)}><X size={14} /></button>
       </header>
       {open && (
         <ol className="plan-steps">

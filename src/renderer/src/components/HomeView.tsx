@@ -343,7 +343,7 @@ export default function HomeView(): JSX.Element {
           {on('health') && HealthCard && <HealthCard data={d} />}
 
           {on('inbox') && <section className="widget">
-            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            <header><Mail size={14} /> Unread mail {google?.connected && <span className="muted small">last 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
             {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => openSettings('integrations')} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
@@ -405,7 +405,7 @@ export default function HomeView(): JSX.Element {
                 {d!.projects.map((p) => (
                   <li key={p.id} onClick={() => openProject(p.id)}>
                     <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
-                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural(p.stats?.documents ?? 0, 'doc')}</span>
+                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural(p.stats?.docs ?? 0, 'doc')} · {plural(p.stats?.documents ?? 0, 'file')}</span>
                   </li>
                 ))}
               </ul>

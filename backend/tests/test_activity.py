@@ -478,10 +478,10 @@ def test_requesting_an_unknown_permission_is_refused_without_prompting() -> None
     assert activity.SETTINGS_URLS["accessibility"].endswith("Privacy_Accessibility")
 
 
-def test_palantir_mode_turns_everything_on_and_stands_the_gate_down() -> None:
+def test_record_everything_mode_turns_everything_on_and_stands_the_gate_down() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.set_config({"excludeApps": ["1Password", "Signal"], "signals": {"apps": True, "text": False}})
-    m.set_palantir(True)
+    m.set_record_everything(True)
     cfg = m.config()
     assert all(cfg["signals"][s] for s in activity.SIGNALS)   # every signal, including the heavy ones
     assert cfg["redact"] is False
@@ -493,14 +493,14 @@ def test_palantir_mode_turns_everything_on_and_stands_the_gate_down() -> None:
     assert m.gate.scrub("my password is hunter2") == "my password is hunter2"
 
 
-def test_palantir_mode_puts_back_exactly_what_it_replaced() -> None:
+def test_record_everything_mode_puts_back_exactly_what_it_replaced() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.set_config({"excludeApps": ["Signal"], "excludeTitlePatterns": ["payroll"],
                   "signals": {"apps": True, "input": False, "text": False}})
     before = m.config()
-    m.set_palantir(True)
-    m.set_palantir(True)          # a repeat enable must not snapshot the flattened values
-    m.set_palantir(False)
+    m.set_record_everything(True)
+    m.set_record_everything(True)          # a repeat enable must not snapshot the flattened values
+    m.set_record_everything(False)
     after = m.config()
     for k in ("signals", "redact", "excludeApps", "excludeTitlePatterns"):
         assert after[k] == before[k], k

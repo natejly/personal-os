@@ -574,6 +574,16 @@ def test_desk_ask_moves_the_desk_to_needs_you() -> None:
           f"an approval with no answer does not park the desk on the question, got {state['status']}/{state['status_reason']}")
 
 
+def test_leaving_needs_you_clears_the_old_ask() -> None:
+    did = make_desk("Waits on an approval", start=False)["desk"]["id"]
+    desks.set_status(did, "needs_approval", reason="approval")
+    check([e for e in j("GET", "/cowork/inbox") if e["desk_id"] == did], "an approval puts the desk in the inbox")
+    # The approval was answered elsewhere (the Agent inbox); the desk runs on and its old ask must not linger.
+    desks.set_status(did, "working", reason="resumed")
+    check(not [e for e in j("GET", "/cowork/inbox") if e["desk_id"] == did],
+          "a status outside Needs you marks the desk's waiting rows seen")
+
+
 def test_a_steer_does_not_double_charge_the_turn() -> None:
     """A steered reply closes its current segment with its own `done` and carries on in a fresh
     assistant message. _run_desk read every `done` as end-of-turn, so one turn was charged twice
@@ -751,6 +761,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_desk_ask_moves_the_desk_to_needs_you,
          test_ask_as_it_goes_cards_each_change_instead_of_planning_first,
          test_seen_clears_the_desks_needs_you_badge,
+         test_leaving_needs_you_clears_the_old_ask,
          test_a_steer_does_not_double_charge_the_turn,
          test_desk_done_with_an_output_lands_in_review,
          test_accept_is_exactly_once_and_reads_the_promotion_back,

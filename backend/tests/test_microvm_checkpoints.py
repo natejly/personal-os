@@ -224,6 +224,14 @@ def test_tools_registered_and_wired() -> None:
     assert llm.DEFAULT_SETTINGS["sandboxKeepDays"] == 14
 
 
+def test_exec_result_carries_the_keys_the_tool_card_reads() -> None:
+    sb, _ = make()
+    out = sb.exec("c1", "true")
+    assert {"stdout", "stderr", "exit_code", "timed_out"} <= set(out) and "network" not in out
+    sb, _ = make({"sandboxNetwork": True})
+    assert sb.exec("c1", "true")["network"] is True
+
+
 def test_export_file_binary_round_trip_and_limits(tmp_path: Any) -> None:
     import asyncio
 

@@ -1050,8 +1050,14 @@ def mcp_set_grant(slug: str, body: McpGrantIn) -> dict[str, Any]:
 
 @app.delete("/mcp/tools/{slug}/grant")
 def mcp_clear_grant(slug: str, scope: str = "global", scope_id: str | None = None) -> dict[str, Any]:
-    mcp_store.clear_grant(slug, scope, scope_id)
-    return mcp_store.effective_mode(slug)
+    if scope not in MCP_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(MCP_SCOPES)}")
+    if scope != "global" and not scope_id:
+        raise HTTPException(400, f"a {scope} grant needs scope_id")
+    # 404 rather than a quiet 200: a revoke that matched nothing leaves the grant standing.
+    if not mcp_store.clear_grant(slug, scope, scope_id):
+        raise HTTPException(404, "No such grant")
+    return mcp_store.effective_mode(slug, scope_id if scope == "project" else None, scope_id if scope == "chat" else None)
 
 
 @app.on_event("startup")
@@ -3859,19 +3865,67 @@ def _untrashed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 @app.get("/approvals")
 async def list_approvals(status: str | None = "pending", run_id: str | None = None, limit: int = 100,
-                         desk_id: str | None = None) -> list[dict[str, Any]]:
+                         desk_id: str | None = None, order: str = "asc") -> list[dict[str, Any]]:
     """Approval rows, pending by default -- including ones whose run was interrupted, so they can still be answered.
-    `live` says whether a run in this process is waiting on it."""
-    if status not in (None, "", "all", "pending", "approved", "denied"):
-        raise HTTPException(400, "status must be pending, approved, denied or all")
-    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id)
+    `live` says whether a run in this process is waiting on it. status=decided is every answered row;
+    order=desc puts the latest decision first, so a limit keeps the newest rather than the oldest."""
+    if status not in (None, "", "all", "pending", "approved", "denied", "decided"):
+        raise HTTPException(400, "status must be pending, approved, denied, decided or all")
+    if order not in ("asc", "desc"):
+        raise HTTPException(400, "order must be asc or desc")
+    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id,
+                               newest_first=order == "desc")
     if status == "pending":
         rows = _untrashed(rows)
+    titles = _conversation_titles({a["conversation_id"] for a in rows if a.get("conversation_id")})
     # A plan card is read back through its plan, not through the approval row: action_plans stays the
     # one place a plan lives, and the row carries only the id that gets you there.
-    return [{**a, "live": a["call_id"] in _approvals,
+    return [{**a, "live": a["call_id"] in _approvals, "conversation_title": titles.get(a.get("conversation_id") or ""),
              "plan_id": (plans.by_call(a["call_id"]) or {}).get("plan_id") if a["tool"] == PLAN_TOOL else None}
             for a in rows]
+
+
+def _conversation_titles(ids: set[str]) -> dict[str, str]:
+    if not ids:
+        return {}
+    with db.tx() as c:
+        return {r["id"]: r["title"] for r in c.execute(
+            f"SELECT id, title FROM conversations WHERE id IN ({','.join('?' * len(ids))})", tuple(ids)).fetchall()}
+
+
+@app.get("/permissions/grants")
+def permission_grants() -> dict[str, Any]:
+    """Every standing grant in one place: what runs without a card, and where each one was given."""
+    session = permrules.SESSION.list()
+    with db.tx() as c:
+        chats = c.execute("SELECT id, title, json_extract(settings, '$.tools') AS tools FROM conversations "
+                          "WHERE json_extract(settings, '$.tools') IS NOT NULL ORDER BY updated_at DESC").fetchall()
+        projs = c.execute("SELECT id, name, tools FROM projects WHERE tools NOT IN ('', '{}') ORDER BY name").fetchall()
+    titles = _conversation_titles(set(session))
+    cfg = settings()
+    return {
+        "session": [{"conversation_id": k, "title": titles.get(k, ""), "keys": v} for k, v in session.items()],
+        "chat_overrides": [{"conversation_id": r["id"], "title": r["title"], "tool": t, "mode": m}
+                           for r in chats for t, m in (json.loads(r["tools"] or "{}") or {}).items()],
+        "project_overrides": [{"project_id": r["id"], "title": r["name"], "tool": t, "mode": m}
+                              for r in projs for t, m in (json.loads(r["tools"] or "{}") or {}).items()],
+        "global": cfg.get("tools") or {},
+        "mcp": mcp_store.grants(),
+        "rules": cfg.get("permissionRules") or {"allow": [], "ask": [], "deny": []},
+    }
+
+
+@app.delete("/permissions/session/{conv_id}")
+def revoke_session_grant(conv_id: str, key: str | None = None) -> dict[str, Any]:
+    """Take back 'allow for this chat session': one key, or every key the chat holds. Only ever narrows."""
+    if key is None:
+        had = conv_id in permrules.SESSION.list()
+        permrules.SESSION.clear(conv_id)
+    else:
+        had = permrules.SESSION.remove(conv_id, key)
+    if not had:
+        raise HTTPException(404, "No such session grant")
+    return {"ok": True, "keys": permrules.SESSION.list().get(conv_id, [])}
 
 
 # async, so the waiting run's future is resolved on the loop that owns it rather than from a threadpool.

@@ -332,9 +332,11 @@ class RunStore:
         return self.approval(r["call_id"]) if n else None
 
     def approvals(self, status: str | None = "pending", run_id: str | None = None, limit: int = 100,
-                  desk_id: str | None = None) -> list[dict[str, Any]]:
+                  desk_id: str | None = None, newest_first: bool = False) -> list[dict[str, Any]]:
         where, params = [], []
-        if status:
+        if status == "decided":
+            where.append("status<>'pending'")
+        elif status:
             where.append("status=?")
             params.append(status)
         if run_id:
@@ -343,7 +345,8 @@ class RunStore:
         if desk_id:
             where.append("desk_id=?")
             params.append(desk_id)
-        sql = "SELECT call_id FROM approvals" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY created_at LIMIT ?"
+        sql = "SELECT call_id FROM approvals" + (" WHERE " + " AND ".join(where) if where else "") + (
+            " ORDER BY COALESCE(decided_at, created_at) DESC" if newest_first else " ORDER BY created_at") + " LIMIT ?"
         return [a for a in (self.approval(r["call_id"]) for r in self._all(sql, (*params, max(1, min(int(limit), 500))))) if a]
 
     # ---- idempotency ----

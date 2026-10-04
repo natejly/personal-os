@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import type { McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@shared/types'
+import type { McpGrant, McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@shared/types'
 
 /** A connector that is coming up gets polled; one that has settled does not. */
 const POLL_MS = 2500
@@ -144,7 +144,29 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
   )
 }
 
-function ToolRow({ tool, onMode, onAccept }: { tool: McpTool; onMode: (mode: ToolMode) => void; onAccept: () => void }): JSX.Element {
+/** A tool's project and chat grants (an approval card's "always for this chat" lands here), each revocable. */
+function ScopedGrants({ tool, grants, onRevoke }: { tool: McpTool; grants: McpGrant[]; onRevoke: (g: McpGrant) => void }): JSX.Element | null {
+  const projects = useStore((s) => s.projects)
+  const conversations = useStore((s) => s.conversations)
+  if (!grants.length) return null
+  const title = (g: McpGrant): string =>
+    (g.scope === 'project' ? projects.find((p) => p.id === g.scope_id)?.name : conversations.find((c) => c.id === g.scope_id)?.title) || g.scope_id
+  return (
+    <ul className="mcp-scoped-grants">
+      {grants.map((g) => (
+        <li key={g.id} className="small">
+          <span className="muted">{g.scope === 'project' ? 'Project' : 'Chat'}</span> {title(g)}: <b>{g.mode}</b>
+          {g.schema_hash && g.schema_hash !== tool.schema_hash && <span className="tag ask">stale</span>}
+          <button className="ghost-btn small" onClick={() => onRevoke(g)}>Revoke</button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ToolRow({ tool, grants, onMode, onAccept, onRevoke }: {
+  tool: McpTool; grants: McpGrant[]; onMode: (mode: ToolMode) => void; onAccept: () => void; onRevoke: (g: McpGrant) => void
+}): JSX.Element {
   const eff = tool.effective
   const gone = !!tool.missing_since
   return (
@@ -158,6 +180,7 @@ function ToolRow({ tool, onMode, onAccept }: { tool: McpTool; onMode: (mode: Too
         <small>{tool.description || <i className="muted">no description</i>}</small>
         <small className="muted mono">{tool.slug}</small>
         <DriftBanner tool={tool} onAccept={onAccept} />
+        <ScopedGrants tool={tool} grants={grants} onRevoke={onRevoke} />
       </span>
       <div className="seg">
         {(['on', 'ask', 'off'] as ToolMode[]).map((m) => (
@@ -179,12 +202,14 @@ export default function McpSettings(): JSX.Element {
   const [logs, setLogs] = useState<Record<string, string[]>>({})
   const [busy, setBusy] = useState<string>('')
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [grants, setGrants] = useState<McpGrant[]>([])
   const nameRef = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async (): Promise<McpServer[]> => {
     try {
-      const list = await api.mcp.servers()
+      const [list, t] = await Promise.all([api.mcp.servers(), api.mcp.tools()])
       setServers(list)
+      setGrants(t.grants.filter((g) => g.scope !== 'global'))
       return list
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -252,6 +277,12 @@ export default function McpSettings(): JSX.Element {
   const setMode = (slug: string, mode: ToolMode): Promise<void> =>
     run(`grant-${slug}`, async () => {
       await api.mcp.setGrant(slug, mode, 'global')
+      await refresh()
+    })
+
+  const revokeGrant = (g: McpGrant): Promise<void> =>
+    run(`revoke-${g.id}`, async () => {
+      await api.mcp.clearGrant(g.tool_slug, g.scope, g.scope_id)
       await refresh()
     })
 
@@ -357,7 +388,8 @@ export default function McpSettings(): JSX.Element {
                 {s.tools.length > 0 ? (
                   <div className="tool-perms">
                     <h5>Tools</h5>
-                    {s.tools.map((t) => <ToolRow key={t.slug} tool={t} onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} />)}
+                    {s.tools.map((t) => <ToolRow key={t.slug} tool={t} grants={grants.filter((g) => g.tool_slug.toLowerCase() === t.slug.toLowerCase())}
+                      onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} onRevoke={(g) => void revokeGrant(g)} />)}
                   </div>
                 ) : (
                   <p className="muted empty">{s.live.ready ? 'This server offers no tools.' : 'Tools appear once the server connects.'}</p>

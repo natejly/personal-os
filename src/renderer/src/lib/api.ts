@@ -1,6 +1,6 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
-  ApprovalDecision, PermissionEvaluation, PlanEdit,
+  ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
@@ -169,6 +169,13 @@ export const api = {
   /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
   evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
     req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
+  /** Every standing grant: session keys, chat/project/global tool modes, MCP grants and the rules. */
+  permissionGrants: () => req<PermissionGrants>('/permissions/grants'),
+  /** Revoke 'allow for this chat session': one key, or all of the chat's keys when `key` is omitted. */
+  revokeSessionGrant: (convId: string, key?: string) =>
+    req<{ ok: boolean; keys: string[] }>(`/permissions/session/${encodeURIComponent(convId)}${key ? `?key=${encodeURIComponent(key)}` : ''}`, { method: 'DELETE' }),
+  /** Answered approvals, the latest decision first. */
+  decidedApprovals: (limit = 50) => req<PendingApproval[]>(`/approvals?status=decided&order=desc&limit=${limit}`),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */
@@ -345,13 +352,13 @@ export const api = {
     check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }, NO_TIMEOUT),
     /** The same check on a config that has not been saved, so trust can be decided first. */
     checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }, NO_TIMEOUT),
-    tools: () => req<{ tools: McpTool[] }>('/mcp/tools'),
+    tools: () => req<{ tools: McpTool[]; grants: McpGrant[] }>('/mcp/tools'),
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
     acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
-    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global') =>
-      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}`, { method: 'DELETE' })
+    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}${scopeId ? `&scope_id=${encodeURIComponent(scopeId)}` : ''}`, { method: 'DELETE' })
   },
   google: {
     status: () => req<GoogleStatus>('/integrations/google/status'),

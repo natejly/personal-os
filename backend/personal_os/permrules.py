@@ -988,6 +988,19 @@ class SessionGrants:
     def clear(self, conv: str | None = None) -> None:
         self._g.pop(conv, None) if conv else self._g.clear()
 
+    def remove(self, conv: str, key: str) -> bool:
+        """Revoke one key; the chat's other grants stand. False when it was not granted."""
+        ks = self._g.get(conv)
+        if not ks or key not in ks:
+            return False
+        ks.discard(key)
+        if not ks:
+            del self._g[conv]
+        return True
+
+    def list(self) -> dict[str, list[str]]:
+        return {c: sorted(ks) for c, ks in self._g.items() if ks}
+
 
 SESSION = SessionGrants()
 

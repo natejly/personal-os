@@ -742,7 +742,7 @@ export default function ActivityView(): JSX.Element {
           <span>{st.counts.summaries} summaries</span>
           <span>last rollup {ago(st.last_rollup)}</span>
           {st.secure_input && <span className="act-pill ok"><Shield size={11} /> password field focused — keystrokes dropped</span>}
-          {st.palantir && <span className="act-pill warn"><Eye size={11} /> Recording everything</span>}
+          {st.recordEverything && <span className="act-pill warn"><Eye size={11} /> Recording everything</span>}
         </div>
         {!st.platform_supported && <p className="act-warn"><AlertTriangle size={13} /> The collectors are macOS-only. Everything else in the app works normally.</p>}
         {st.last_error && <p className="act-warn"><AlertTriangle size={13} /> {st.last_error}</p>}
@@ -776,7 +776,7 @@ export default function ActivityView(): JSX.Element {
           />
 
           <RecordEverythingCard
-            on={st.palantir}
+            on={st.recordEverything}
             missing={st.capabilities.filter((c) => c.state && c.state !== 'granted' && c.state !== 'n/a').map((c) => c.label)}
             onSet={(on) => void setRecordEverything(on)}
           />
@@ -962,7 +962,7 @@ export default function ActivityView(): JSX.Element {
             Each signal is separate and off until you switch it on. Read what a signal captures before enabling it —
             the heavier ones are marked, and they mean exactly what they say.
           </p>
-          {st.palantir && (
+          {st.recordEverything && (
             <p className="act-warn">
               <AlertTriangle size={13} /> Record everything has every signal on. Turning one off here leaves it on;
               turn the mode off on the Overview tab to restore the signals you had before.
@@ -1023,7 +1023,7 @@ export default function ActivityView(): JSX.Element {
 
       {tab === 'privacy' && (
         <div className="page-body">
-          {st.palantir && (
+          {st.recordEverything && (
             <p className="act-warn">
               <AlertTriangle size={13} /> Record everything is on: redaction is off and both “never record” lists are
               empty. Editing them here leaves the mode on — turn it off on the Overview tab to get your previous

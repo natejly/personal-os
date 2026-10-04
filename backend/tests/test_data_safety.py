@@ -52,6 +52,15 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(_version(self.d), migrations.latest())
         self.assertEqual(backups.list_backups(self.d), [])
 
+    def test_activity_keys_are_renamed_and_values_kept(self) -> None:
+        db = Database(self.d)
+        old = {"palantir": True, "palantirRestore": {"redact": True}, "enabled": True}
+        with db.tx() as c:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('activity', ?)", (json.dumps(old),))
+            migrations._activity_record_everything_keys(c)
+        cfg = db.get_settings()["activity"]
+        self.assertEqual(cfg, {"recordEverything": True, "recordEverythingRestore": {"redact": True}, "enabled": True})
+
     def test_existing_database_is_adopted_without_data_loss(self) -> None:
         _old_db(self.d)
         self.assertEqual(_version(self.d), 0)

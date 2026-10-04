@@ -667,6 +667,9 @@ kbd {
 .chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
 .composer-wrap:not(.compact) .composer-footer { padding: 6px 8px 0; }
 .skip-perms.on { color: var(--danger); }
+.private-chat.on { color: var(--accent); }
+.convo-private { flex: none; color: var(--text-faint); }
+.private-banner { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
 .composer-wrap:not(.compact) .chat-control { font-size: 12px; height: 24px; }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }

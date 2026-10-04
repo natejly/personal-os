@@ -568,6 +568,9 @@ export interface ConversationSettings {
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
+  /** Set only when the chat is created. Memory, graph, voice and auto-learn are then forced off for good,
+   *  and the chat is left out of chat search. */
+  private?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean

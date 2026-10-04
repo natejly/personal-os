@@ -175,6 +175,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** The next new chat is private: it is created with `private`, which only creation can set. */
+  draftPrivate: boolean
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -1580,11 +1582,12 @@ export const useStore = create<State>((set, get) => {
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
     if (!id) {
-      // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
+      // No conversation to PATCH yet. Effort, fast mode and private are the settings a draft can still carry,
       // so park them and let `send` apply them to the conversation it is about to create.
       set((s) => ({
         draftEffort: patch.effort ?? s.draftEffort,
-        draftFast: patch.fast ?? s.draftFast
+        draftFast: patch.fast ?? s.draftFast,
+        draftPrivate: patch.private ?? s.draftPrivate
       }))
       return
     }
@@ -1618,6 +1621,7 @@ export const useStore = create<State>((set, get) => {
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    draftPrivate: false,
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -1929,7 +1933,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2198,7 +2202,7 @@ export const useStore = create<State>((set, get) => {
       let created: (id: string | null) => void = () => undefined
       draftCreate = new Promise((r) => { created = r })
       try {
-        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel)
+        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel, get().draftPrivate)
       } catch (e) {
         draftCreate = null
         created(null)
@@ -2237,7 +2241,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false,
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]

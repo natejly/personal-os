@@ -755,6 +755,10 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
     "sandboxKeepDays": (0, 3_650),
+    "retrievalMinSimilarity": (0, 1),
+    "retrievalPerDocCap": (1, 10),
+    "retrievalCandidates": (5, 50),
+    "fetchCacheSeconds": (0, 86_400),
 }
 SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
 # An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
@@ -838,6 +842,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, "sandboxImage must be an image reference such as python:3.12-slim")
         elif k == "sandboxNetwork" and v not in ("off", "proxy", "open"):
             raise HTTPException(422, "sandboxNetwork must be 'off', 'proxy' or 'open'")
+        elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
+            raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")
@@ -5515,7 +5521,7 @@ async def embed_backfill() -> dict[str, Any]:
     current model. Idempotent."""
     docs.backfill_chunks()
     embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
-    await retriever.contextualize_pending(settings())  # no-op unless contextualChunks; never raises
+    await retriever.contextualize_all(settings())  # no-op unless contextualChunks; never raises
     return await retriever.embed_pending(settings())
 
 

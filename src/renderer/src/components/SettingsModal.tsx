@@ -27,6 +27,7 @@ import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
+import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
 
 type Tab = SettingsTab
 
@@ -50,14 +51,32 @@ const CONTEXT_DEFAULTS = { contextWindow: 128000, compactAt: 0.7, compactKeepRec
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
-/** Read-only: how much of the library has vectors for the current embedding model. */
+/** How much of the library has vectors for the current embedding model, and a button to rebuild it. */
 function IndexStatusLine(): JSX.Element | null {
   const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
-  useEffect(() => { api.documents.indexStatus().then(setSt).catch(() => undefined) }, [])
+  const [busy, setBusy] = useState(false)
+  const toast = useStore((s) => s.toast)
+  const load = (): void => { api.documents.indexStatus().then(setSt).catch(() => undefined) }
+  useEffect(load, [])
+  const rebuild = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await rebuildIndex()
+      if (r.error) toast(r.error, 'error')
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(false)
+      load()
+    }
+  }
   if (!st) return null
   const total = st.chunks + (st.doc_chunks ?? 0)
   const done = st.embedded + (st.doc_embedded ?? 0)
-  return <p className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</p>
+  return <div className="test-row">
+    <span className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</span>
+    <button className="ghost-btn" type="button" onClick={() => void rebuild()} disabled={busy}><RotateCcw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild index'}</button>
+  </div>
 }
 
 export default function SettingsModal(): JSX.Element {
@@ -264,9 +283,10 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
               {knowledgeTab === 'documents' && <label className="toggle-row plain modal-free">
-                <span className="toggle-text"><b>Contextual chunks</b><small>When you run the embedding backfill, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
+                <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Applies to new and re-indexed passages; Rebuild index covers the rest. Costs one model call per chunk. Off by default.</small></span>
                 <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
               </label>}
+              {knowledgeTab === 'documents' && <AdvancedRetrieval draft={draft} patch={patch} models={models} />}
               <div className="knowledge-body modal-free">
                 {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
               </div>

@@ -645,7 +645,11 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
-    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
+    /** Re-chunk every uploaded file with the current chunker. */
+    reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),
+    /** Blurb (when contextualChunks) and embed every passage still missing them. Runs as long as the library takes. */
+    embedBackfill: () => req<{ embedded: number; remaining: number; error?: string }>('/documents/embed-backfill', { method: 'POST' }, NO_TIMEOUT)
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),

@@ -1201,8 +1201,23 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
-  /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
+  /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean
+  /** Document search: 'hybrid' (keywords + embeddings) or 'bm25' (keywords only). */
+  retrievalMode?: 'hybrid' | 'bm25'
+  /** Reorder fused candidates with retrievalRerankModel before trimming. */
+  retrievalRerank?: boolean
+  retrievalRerankModel?: string
+  /** 0-1: vector-only hits below this similarity are dropped. */
+  retrievalMinSimilarity?: number
+  /** 1-10 passages per document in one search. */
+  retrievalPerDocCap?: number
+  /** 5-50 candidates per ranker before fusion. */
+  retrievalCandidates?: number
+  /** Also retrieve from the user's own Docs, not just uploaded files. */
+  useDocsInContext?: boolean
+  /** Embed meeting text for by-meaning meeting search (sends it to the embedding provider). */
+  meetingEmbeddings?: boolean
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */

@@ -56,7 +56,7 @@ export default function PlanModeToggle({ conversationId }: { conversationId?: st
 
   return (
     <button
-      className={`ghost-btn plan-mode ${mode}`}
+      className={`composer-ctl plan-mode ${mode}`}
       aria-pressed={mode !== 'off'}
       title={`${LABEL[mode]} (⌘⇧P)`}
       onClick={() => cycle.current()}

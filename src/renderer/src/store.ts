@@ -54,8 +54,11 @@ export const readDocMode = (): DocMode => {
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections. 'memory' holds the Memory panel above the learning and search-index controls. */
-export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'modules' | 'behavior' | 'data'
+/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
+ *  'memory' holds the Memory panel above the learning and search-index controls.
+ *  'modules' is the tab labelled Views; the id is kept so existing callers keep working. */
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'appearance' | 'advanced' | 'data' | 'trash'
+export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 
 /**

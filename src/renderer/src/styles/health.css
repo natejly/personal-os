@@ -31,16 +31,18 @@
 .hl-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .hl-dot-line { stroke: var(--accent); stroke-width: 5; stroke-linecap: round; }
 
-.hl-quick { align-self: stretch; }
-.hl-quick.seg button { flex: 1; min-width: 0; }
+/* Every tile's quick-log row is one height, whether it holds a number box, five steps or Yes / No. */
+.hl-quick { align-self: stretch; height: 30px; }
+.hl-quick.seg { align-items: stretch; }
+.hl-quick.seg button { flex: 1; min-width: 0; min-height: 0; padding-block: 0; }
 .hl-quick.seg button:disabled { opacity: 0.6; }
 .hl-quick-num { display: flex; gap: 6px; }
 .hl-quick-num input {
-  flex: 1; min-width: 0; height: 30px; padding: 4px 8px; border-radius: 8px;
+  flex: 1; min-width: 0; height: 100%; padding: 4px 8px; border-radius: 8px;
   background: var(--bg-input); border: 1px solid var(--border-strong); outline: 0; font-variant-numeric: tabular-nums;
 }
 .hl-quick-num input:focus { border-color: var(--accent); }
-.hl-quick-num .ghost-btn { height: 30px; flex-shrink: 0; }
+.hl-quick-num .ghost-btn { height: 100%; padding-block: 0; flex-shrink: 0; }
 
 /* ---------- Detail ---------- */
 .hl-detail { margin-top: 18px; padding: 14px 16px 16px; border-radius: 12px; background: var(--bg-elev); border: 1px solid var(--border); }
@@ -98,6 +100,9 @@
 .hl-mrow select, .hl-new select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; }
 .hl-in { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; outline: 0; font-size: 12.5px; min-width: 0; }
 .hl-in:focus, .hl-mrow select:focus { border-color: var(--accent); }
+/* One height for everything in a metric row, Save included. */
+.hl-mrow .hl-in, .hl-mrow select, .hl-mrow .primary-btn { height: 30px; }
+.hl-mrow .primary-btn { padding-block: 0; }
 .hl-in.name { flex: 1 1 140px; }
 .hl-in.unit { flex: 0 1 80px; width: 80px; }
 .hl-in.goal { flex: 0 1 80px; width: 80px; }

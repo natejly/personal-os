@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
@@ -13,6 +13,7 @@ import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { firstPrompts } from './onboarding/steps'
 import { useStickToBottom } from '../lib/stickToBottom'
@@ -35,11 +36,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const pending = usePendingSends(conversationId)
   // A chat with no row yet: its first message is shown (with the dots) in place of the greeting.
   const draftPending = useStore((s) => (!conversationId && s.focusedConversationId === null ? s.draftPendingSend : null))
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const toggleSidebar = useStore((s) => s.toggleSidebar)
   const toggleContext = useStore((s) => s.toggleContext)
   const renameChat = useStore((s) => s.renameChat)
   const retitleChat = useStore((s) => s.retitleChat)
@@ -73,7 +72,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   return (
     <main className="chat">
       <header className="chat-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <div className="chat-title no-drag">
           {convo && editingTitle ? (
             <>

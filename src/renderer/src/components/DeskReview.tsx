@@ -232,7 +232,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         <span className="spacer" />
         {undecided.length > 0 && (
           <button className="link small" onClick={() => setPicked(picked.length === undecided.length ? [] : undecided.map((o) => o.id))}>
-            {picked.length === undecided.length ? 'none' : 'all'}
+            {picked.length === undecided.length ? 'Select none' : 'Select all'}
           </button>
         )}
       </header>

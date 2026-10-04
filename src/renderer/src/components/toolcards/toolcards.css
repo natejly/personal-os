@@ -1,22 +1,22 @@
 /* Tool cards: compact, native-feeling cards inside a chat bubble. Colours come from the app's variables only,
    so light and dark both work with no overrides. */
 .tc-card { overflow: hidden; font-size: 13px; color: var(--text); }
-.tc-card.awaiting { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+/* The waiting edge and wash come from .tool-event.awaiting (styles.css), shared with every pending card. */
 .tc-card.warn.awaiting { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
 .tc-card:focus-within { border-color: var(--border-strong); }
 .tc-card.awaiting:focus-within { border-color: var(--accent); }
 
 .tc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tc-icon { display: inline-flex; color: var(--accent); flex-shrink: 0; }
-.tc-title { font-weight: 600; }
+.tc-title { font-size: 13px; font-weight: 600; }
 .tc-subject { color: var(--text-muted); min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-edited { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
 
 .tc-status { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); white-space: nowrap; }
 .tc-status.awaiting { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-.tc-status.done, .tc-status.verified { background: rgba(70,167,88,0.15); color: var(--ok); }
+.tc-status.done, .tc-status.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .tc-status.denied { background: var(--hover); color: var(--text-muted); }
-.tc-status.failed, .tc-status.unverified { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tc-status.failed, .tc-status.unverified { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 
 .tc-body { padding: 10px 12px; }
 .tc-section { margin-top: 8px; }
@@ -30,14 +30,16 @@
 .tc-was { color: var(--text-faint); font-size: 11px; text-decoration: line-through; }
 .tc-long { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tc-long.mono, .mono { font-family: var(--mono); font-size: 12px; }
-.tc-more { background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font-size: 11px; cursor: pointer; }
+/* Inline with the text it expands, so the 24px target is an invisible expander, not a taller line. */
+.tc-more { position: relative; background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font-size: 11px; cursor: pointer; }
+.tc-more::before { content: ''; position: absolute; inset: -6px -4px; }
 .tc-more:hover { text-decoration: underline; }
 .tc-muted { color: var(--text-faint); font-size: 11px; font-style: normal; }
 @media (max-width: 520px) { .tc-arg { grid-template-columns: 1fr; gap: 2px; } }
 
 /* result */
 .tc-result { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg-input); }
-.tc-result.err { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); background: rgba(229,72,77,0.07); }
+.tc-result.err { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .tc-result.err svg { margin-top: 2px; flex-shrink: 0; }
 .tc-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
 
@@ -63,7 +65,7 @@
 
 /* raw call */
 .tc-details { border-top: 1px solid var(--border); font-size: 12px; }
-.tc-details summary { cursor: pointer; padding: 6px 12px; color: var(--text-faint); list-style: none; }
+.tc-details summary { cursor: pointer; min-height: 24px; padding: 6px 12px; color: var(--text-faint); list-style: none; }
 .tc-details summary::-webkit-details-marker { display: none; }
 .tc-details summary::before { content: '▸'; display: inline-block; width: 12px; transition: transform 0.12s; }
 .tc-details[open] summary::before { transform: rotate(90deg); }

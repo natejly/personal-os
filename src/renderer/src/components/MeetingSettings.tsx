@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertTriangle, Check, Copy, FileText, Mic, RefreshCw, Shield, Sparkles, Trash2, Zap
+  AlertTriangle, Check, Copy, FileText, Mic, RefreshCw, Shield, Sparkles, Trash2, Volume2, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -102,14 +102,13 @@ function CapRow({ cap, onCopy }: { cap: MeetingCapability; onCopy: (text: string
   )
 }
 
-export default function MeetingSettings({ variant = 'page' }: { variant?: 'page' | 'modal' }): JSX.Element {
+export default function MeetingSettings(): JSX.Element {
   const meetingStatus = useStore((s) => s.meetingStatus)
   const meetingPreflight = useStore((s) => s.meetingPreflight)
   const meetingBusy = useStore((s) => s.meetingBusy)
   const setMeetingConfig = useStore((s) => s.setMeetingConfig)
   const loadMeetingPreflight = useStore((s) => s.loadMeetingPreflight)
   const deleteMeetingAudio = useStore((s) => s.deleteMeetingAudio)
-  const startRecording = useStore((s) => s.startRecording)
   const toast = useStore((s) => s.toast)
   const [test, setTest] = useState<{ state: 'idle' | 'running' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
 
@@ -120,9 +119,6 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
     return <div className="mtg-settings"><p className="muted">Loading the meeting recorder…</p></div>
   }
 
-  // `start` is refused outright while the master switch is off (meetings.py inserts an `enabled`
-  // blocker at index 0), so the button says why instead of offering a click that 409s.
-  const recorderOff = !cfg.enabled
   const patch = (p: Partial<MeetingConfig>): void => void setMeetingConfig(p)
   const copy = (text: string): void => {
     void navigator.clipboard.writeText(text)
@@ -156,7 +152,6 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
   }
 
   const caps = meetingPreflight?.capabilities ?? []
-  const blockers = meetingPreflight?.blockers ?? []
   const hasLoopback = meetingStatus.devices.some((d) => d.loopback)
   const nativeSystem = (caps.find((c) => c.id === 'loopback')?.detail ?? '').includes('process tap')
   const nativeMic = (caps.find((c) => c.id === 'ffmpeg')?.detail ?? '').includes('AVAudioEngine')
@@ -164,31 +159,6 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
 
   return (
     <div className="mtg-settings">
-      {variant === 'page' && (
-        <div className="mtg-intro">
-          <h2><Mic size={18} /> Take notes on a meeting</h2>
-          <p className="muted">
-            Type whatever matters while the call runs. The recorder captures the audio in short
-            clips, transcribes each one, and afterwards proposes a tidied-up version of your notes as
-            a diff you accept or reject. What you typed is never overwritten.
-          </p>
-          <p className="muted small">
-            Recording is off until you turn it on, nothing starts on its own, and no tool the
-            assistant can call is able to start, stop or pause it.
-          </p>
-          <div className="add-row">
-            <button className="primary-btn" disabled={meetingBusy || recorderOff}
-                    title={recorderOff ? 'The meeting recorder is off. Turn it on below.' : undefined}
-                    onClick={() => void startRecording()}>
-              <Mic size={14} /> Record a meeting
-            </button>
-            {blockers.length > 0 && (
-              <span className="act-pill warn">{blockers.length} blocker{blockers.length === 1 ? '' : 's'}</span>
-            )}
-          </div>
-        </div>
-      )}
-
       <h4 className="act-h">What this machine can do</h4>
       <p className="muted small">
         A row that is not ok blocks Start rather than degrading quietly. {!hasSystemAudio && (
@@ -221,16 +191,24 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
         <span className="switch" />
       </label>
-      <div className="mtg-sources">
-        <label>
-          <input type="checkbox" checked={cfg.sources.includes('mic')} onChange={() => toggleSource('mic')} />
-          Capture my microphone
-        </label>
-        <label>
-          <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasSystemAudio} />
-          Capture system audio{!hasSystemAudio && ' (needs macOS 14.2+ or a loopback device)'}
-        </label>
-      </div>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
+          <b>Capture my microphone</b>
+          <small>Your side of the call.</small>
+        </span>
+        <input type="checkbox" checked={cfg.sources.includes('mic')} onChange={() => toggleSource('mic')} />
+        <span className="switch" />
+      </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Volume2 size={15} /></span>
+        <span className="toggle-text">
+          <b>Capture system audio</b>
+          <small>{hasSystemAudio ? 'The far end of the call.' : 'Needs macOS 14.2+ or a loopback device.'}</small>
+        </span>
+        <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasSystemAudio} />
+        <span className="switch" />
+      </label>
       <AudioDevicePicker
         devices={meetingStatus.devices} micValue={cfg.micDevice} outputValue={cfg.outputDevice}
         nativeMic={nativeMic} nativeSystem={nativeSystem}

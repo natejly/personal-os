@@ -232,8 +232,8 @@ function UndoButton({ undo }: { undo: NonNullable<ToolEvent['undo']> }): JSX.Ele
     }
   }
   return state === 'restored'
-    ? <span className="tag">{external ? 'Undone' : 'Restored'}</span>
-    : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}
+    ? <span className="tag tool-undo">{external ? 'Undone' : 'Restored'}</span>
+    : <button className="ghost-btn sm tool-undo" disabled={state === 'busy'} onClick={() => void go(false)}
         title={undo.notifies ? 'Guests are emailed about the undo, as they were about the change' : undefined}>
         <Undo2 size={12} /> Undo{undo.notifies ? ' (emails guests)' : ''}
       </button>
@@ -292,7 +292,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   function genericRow(t: ToolEvent): JSX.Element {
     const d = describeCall(t.name, t.arguments)
     return (
-      <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
+      <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
         <button className="tool-head" aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
@@ -303,7 +303,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
           {t.plan ? (
             <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
+          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
         </button>
         {t.error && !open[t.id] && <div className="tool-err">{errorLine(t.error)}</div>}
         {t.images && t.images.length > 0 && (
@@ -345,14 +345,16 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
     // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
     // A pending question keeps the answer box below; once it is answered (or running) its card shows the question and choices.
     const Card = hasCard(t) ? TOOL_CARDS[t.name] : undefined
+    const asking = !!t.pending && !!t.needs_approval
     return (
       <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
         {Card ? (
           <>
-            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)}
+            {/* The grants line renders inside the card's own box, so one question has one place to answer it. */}
+            <Card event={t} pending={asking} decide={decideFor(t)}
+              rules={asking ? <ApprovalRules event={t} conversationId={conversationId} /> : undefined}
               conversationId={conversationId} streaming={streaming} browserSession={t.id === lastBrowser ? browserSession : undefined} />
             {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
-            {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>
         ) : <Row render={() => genericRow(t)} />}
         <OutputFiles event={t} conversationId={conversationId} />

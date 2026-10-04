@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CalendarEvent, Todo } from '@shared/types'
-import { fmtMin, fmtTime, hourWindow, localDay, movedSpan, resizedSpan, selectionSlot, slotIso, snapMin, withoutTodoEvents } from './CalendarWeek'
+import { HOUR_PX, eventSpan, fmtHour, fmtMin, fmtTime, hourHeight, hourWindow, localDay, movedSpan, resizedSpan, selectionSlot, slotIso, snapMin, withoutTodoEvents } from './CalendarWeek'
 
 test('localDay uses the local calendar date, not UTC', () => {
   const d = new Date(2026, 8, 30, 0, 30, 0)
@@ -126,4 +126,27 @@ test('a resize moves only the bottom edge, never above its own start', () => {
   assert.deepEqual(resizedSpan(540, 600, 60, 20 * 60), { startMin: 540, endMin: 660 })
   assert.deepEqual(resizedSpan(540, 600, -600, 20 * 60), { startMin: 540, endMin: 555 })
   assert.deepEqual(resizedSpan(540, 600, 600, 20 * 60), { startMin: 540, endMin: 1200 })
+})
+
+test('the gutter labels an hour off the same clock as the events, without minutes', () => {
+  assert.ok(!fmtHour(9).includes(':'))
+  assert.notEqual(fmtHour(9), fmtHour(21))
+})
+
+test('the hour height fills the space below the header, and never drops under the minimum', () => {
+  // 11 visible hours in 880px of room: 80px each, so the grid ends where the window does.
+  assert.equal(hourHeight(880, 11), 80)
+  // A full day in a short window keeps the minimum and scrolls instead.
+  assert.equal(hourHeight(600, 24), HOUR_PX)
+  // Not laid out yet (or a hidden pane): fall back rather than divide into nonsense.
+  assert.equal(hourHeight(0, 12), HOUR_PX)
+  assert.equal(hourHeight(NaN, 12), HOUR_PX)
+  assert.equal(hourHeight(500, 0), HOUR_PX)
+})
+
+test('eventSpan is the minutes an event covers on its day, at least one drag slot', () => {
+  assert.deepEqual(eventSpan(ev(at(9, 30), at(11))), { startMin: 570, endMin: 660 })
+  assert.deepEqual(eventSpan(ev(at(9), at(9, 5))), { startMin: 540, endMin: 555 })
+  // Past midnight the span keeps running, which is what pins the block to the bottom of its day.
+  assert.deepEqual(eventSpan(ev(at(23), at(1, 0, new Date(2026, 9, 1)))), { startMin: 1380, endMin: 1500 })
 })

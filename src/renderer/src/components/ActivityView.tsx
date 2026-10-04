@@ -3,7 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle, BellOff, Brain, CalendarClock, Check, ChevronRight, Clock, Eye, EyeOff, FileText,
-  Globe, Keyboard, Lightbulb, ListPlus, MonitorDot, Mic, PanelLeftOpen, Pause, Play, RefreshCw,
+  Globe, Keyboard, Lightbulb, ListPlus, MonitorDot, Mic, Pause, Play, RefreshCw,
   Repeat, Send, Shield, Speaker, Sparkles, Trash2, TrendingUp, X, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -13,6 +13,7 @@ import type {
   ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
 } from '@shared/types'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 
 /** The activity monitor: what it records, what it inferred, and every switch that turns it off.
  *
@@ -100,7 +101,7 @@ function Capabilities({ caps, onGrant, onOpen }: {
       <button className="act-card-head" onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={13} className={open ? 'rot90' : ''} />
         <b>Access on this machine</b>
-        <span className={`act-pill ${blocking.length ? 'warn' : bad.length ? '' : 'ok'}`}>
+        <span className={`act-pill ${blocking.length ? 'bad' : bad.length ? '' : 'ok'}`}>
           {blocking.length ? `${blocking.length} blocking` : bad.length ? `${bad.length} optional missing` : 'full access'}
         </span>
       </button>
@@ -111,9 +112,8 @@ function Capabilities({ caps, onGrant, onOpen }: {
               <button className="primary-btn sm" onClick={() => grantable.forEach((c) => onGrant(c.id))}>
                 <Shield size={13} /> Ask for everything missing
               </button>
-              <span className="muted small">
-                macOS asks one dialog at a time, and the grant lands on the app bundle — Grain, or Electron in
-                a dev build. Restart the app afterwards so the keystroke tap is created with the grants in place.
+              <span className="muted small" title="The grant lands on the app bundle: Grain, or Electron in a dev build. The keystroke tap is only created with the grants in place, which is why a restart is needed.">
+                macOS asks one dialog at a time. Restart the app afterwards.
               </span>
             </div>
           )}
@@ -556,7 +556,7 @@ function SuggestionCard({ s, patterns, onApply, onStatus }: {
             <button className="ghost-btn sm" onClick={() => onStatus('snoozed')} title="Hide it for a week">
               <BellOff size={13} /> Not now
             </button>
-            <button className="ghost-btn sm danger" onClick={() => onStatus('dismissed')} title="Never suggest this again">
+            <button className="ghost-btn sm" onClick={() => onStatus('dismissed')} title="Never suggest this again">
               <X size={13} /> Dismiss
             </button>
             <span className="muted small">effort: {s.effort}</span>
@@ -655,9 +655,8 @@ export default function ActivityView(): JSX.Element {
   const insights = useStore((s) => s.activityInsights)
   const insightsBusy = useStore((s) => s.activityInsightsBusy)
   const busy = useStore((s) => s.activityBusy)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
-    toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
+    loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
     refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
     grantActivityPermission, openActivitySettings, setRecordEverything,
@@ -687,7 +686,7 @@ export default function ActivityView(): JSX.Element {
     return (
       <main className="page">
         <header className="page-header drag">
-          {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+          <SidebarToggle />
           <h2><MonitorDot size={16} /> Activity</h2>
           <AppSwitcher />
         </header>
@@ -713,7 +712,7 @@ export default function ActivityView(): JSX.Element {
   return (
     <main className="page activity-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><MonitorDot size={16} /> Activity</h2>
         <div className="no-drag header-right">
           {st.running && (
@@ -762,11 +761,12 @@ export default function ActivityView(): JSX.Element {
 
       {tab === 'overview' && (
         <div className="page-body">
-          <p className="muted small">
-            The monitor watches what you do on this machine, summarizes it every {cfg.rollupMinutes} minutes, and
-            writes the result to <code>{st.md_path}</code> — which is what gets fed into your chats. Raw samples are
-            deleted after {cfg.retentionHours}h. Nothing is uploaded anywhere: the only network call is the
-            summarization request to the LLM endpoint you already configured.
+          {/* Two sentences; the file's path is one click away on the tab that shows the file. */}
+          <p className="muted small act-intro">
+            Watches what you do on this Mac and summarizes it every {cfg.rollupMinutes} minutes into
+            the <button className="link" title={st.md_path} onClick={() => setTab('context')}>context file</button> your
+            chats read. Raw samples are deleted after {cfg.retentionHours}h, and the only thing that leaves this
+            machine is the summarization request to your own model endpoint.
           </p>
 
           <Capabilities

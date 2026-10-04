@@ -5,7 +5,6 @@ import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
 import { MeetingIndicator } from './MeetingsView'
-import ChatPulse from './ChatPulse'
 import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { viewHidden } from '../moduleToggles'
@@ -18,6 +17,25 @@ import ChatRow from './ChatRow'
 import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { inboxBadge } from '../lib/inboxBadge'
+import { rowButton } from '../lib/rowButton'
+
+/** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
+const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
+const readCollapsed = (): Set<string> => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+const writeCollapsed = (ids: Set<string>): void => {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Per-viewer convenience only; without it the groups are open again next launch.
+  }
+}
 
 /** The first matching excerpt under a search result, with the matched words marked. */
 function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
@@ -84,7 +102,6 @@ export default function Sidebar(): JSX.Element {
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
   const settings = useStore((s) => s.settings)
-  const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
   const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
   /** Desks with something unseen that needs you: the one badge worth interrupting for. */
@@ -129,7 +146,8 @@ export default function Sidebar(): JSX.Element {
   }, [query, composed])
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
-  const [recentsOpen, setRecentsOpen] = useState(true)
+  const [chatsOpen, setChatsOpen] = useState(true)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   useEffect(() => {
     if (searching) searchRef.current?.focus()
   }, [searching])
@@ -152,6 +170,19 @@ export default function Sidebar(): JSX.Element {
     return m
   }, [conversations, projectDocs])
   const projectById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
+  // The group you are in cannot fold away under you: its header would be the only trace of where you are.
+  const activeProjectId = view === 'project' ? projectViewId
+    : view === 'chat' ? conversations.find((c) => c.id === focusedId)?.project_id ?? null
+      : null
+  const toggleCollapsed = (id: string): void => {
+    setCollapsed((prev) => {
+      // Rebuilt from the live projects, so a deleted project's id does not linger in storage.
+      const next = new Set([...prev].filter((x) => projectById[x]))
+      if (!next.delete(id)) next.add(id)
+      writeCollapsed(next)
+      return next
+    })
+  }
 
   const convById = useMemo(() => Object.fromEntries(conversations.map((c) => [c.id, c])), [conversations])
   const { pinned, groups } = useMemo(() => partitionChats(conversations, query), [conversations, query])
@@ -184,7 +215,7 @@ export default function Sidebar(): JSX.Element {
   useEffect(() => {
     if (searchTick === seenTick.current) return
     seenTick.current = searchTick
-    setRecentsOpen(true)
+    setChatsOpen(true)
     setSearching(true)
     // Already showing: the effect on `searching` will not fire, so focus and select here.
     searchRef.current?.focus()
@@ -202,7 +233,6 @@ export default function Sidebar(): JSX.Element {
     // the badge has to be right before you have been there.
     if (v === 'cowork') return needsYou || null
     if (v === 'library') return skillCandidates || null
-    if (v === 'docs') return docCount
     // Load-bearing, not cosmetic: without it a Meetings row would show no review count.
     if (v === 'meetings') return meetingsPending || null
     return null
@@ -232,7 +262,12 @@ export default function Sidebar(): JSX.Element {
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
-      {/* One scroller for nav, projects, and chats. Recents used to be the only part
+      {/* Above the scroller, so the one action every session starts with never scrolls away. */}
+      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
+        <MessageSquarePlus size={15} /><span>New chat</span><kbd>⌘N</kbd>
+      </button>
+
+      {/* One scroller for nav, projects, and chats. The chat list used to be the only part
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav">
@@ -259,25 +294,36 @@ export default function Sidebar(): JSX.Element {
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
             const rows = rowsByProject[p.id] ?? []
+            const pinned = activeProjectId === p.id
+            const open = pinned || !collapsed.has(p.id)
             return (
-              <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} aria-current={view === 'project' && projectViewId === p.id ? 'page' : undefined} onClick={() => openProject(p.id)} role="button" tabIndex={0}
+              <div key={p.id} className={`project-group${open ? '' : ' collapsed'}`}>
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} aria-current={view === 'project' && projectViewId === p.id ? 'page' : undefined} {...rowButton(() => openProject(p.id))}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
-                  <Folder size={13} style={{ color: p.color }} />
+                  {/* The folder is the disclosure: hovering the row swaps it for a chevron, and the name still opens the project. */}
+                  <button className="project-twist" aria-expanded={open} aria-disabled={pinned}
+                    aria-label={`${open ? 'Collapse' : 'Expand'} ${p.name}`}
+                    title={pinned ? 'Stays open while you are in this project' : open ? 'Collapse' : 'Expand'}
+                    onClick={(e) => { e.stopPropagation(); if (!pinned) toggleCollapsed(p.id) }}>
+                    <Folder size={13} className="twist-folder" style={{ color: p.color }} />
+                    <ChevronRight size={13} className={`twist-chevron${open ? ' rot90' : ''}`} />
+                  </button>
                   <span className="project-name">{p.name}</span>
                 </div>
-                <div className="project-rows">
-                  {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
-                  {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
-                    <div key={`d${r.id}`} className="convo-item sub" onClick={() => void openDoc(r.id)} role="button" tabIndex={0}>
-                      <span className="convo-title">{r.title}</span>
-                      <FileText size={12} className="row-kind" />
-                    </div>
-                  ) : (
-                    <ChatRow key={`c${r.id}`} conv={convById[r.id]} sub active={r.id === focusedId && view === 'chat'} />
-                  )))}
-                  {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
-                </div>
+                {open && (
+                  <div className="project-rows">
+                    {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
+                    {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
+                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))}>
+                        <span className="convo-title">{r.title}</span>
+                        <FileText size={12} className="row-kind" />
+                      </div>
+                    ) : (
+                      <ChatRow key={`c${r.id}`} conv={convById[r.id]} sub active={r.id === focusedId && view === 'chat'} />
+                    )))}
+                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -285,16 +331,16 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <button className="section-toggle" aria-expanded={recentsOpen} onClick={() => setRecentsOpen((o) => !o)}>
-          <ChevronRight size={12} className={recentsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Recents
+        <button className="section-toggle" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
+          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Chats
         </button>
         <button
           className={`icon-btn sm${searching ? ' on' : ''}`}
-          aria-label="Search recents"
+          aria-label="Search chats"
           aria-expanded={searching}
-          title="Search recents"
+          title="Search chats"
           onClick={() => {
-            setRecentsOpen(true)
+            setChatsOpen(true)
             setSearching((on) => {
               if (on) setQuery('')
               return !on
@@ -304,16 +350,13 @@ export default function Sidebar(): JSX.Element {
           <Search size={13} />
         </button>
       </div>
-      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
-        <MessageSquarePlus size={16} /><span>New chat</span><kbd>⌘N</kbd>
-      </button>
-      {recentsOpen && (<>
+      {chatsOpen && (<>
       {searching && (
         <label className="search">
           <input
             ref={searchRef}
             placeholder="Search"
-            aria-label="Search recents"
+            aria-label="Search chats"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onCompositionStart={() => { composing.current = true }}
@@ -351,8 +394,7 @@ export default function Sidebar(): JSX.Element {
           <section>
             <h4>In messages</h4>
             {inMessages.map((h) => (
-              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} aria-current={h.id === focusedId && view === 'chat' ? 'page' : undefined} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
-                onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openConversation(h.id) } }}>
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} aria-current={h.id === focusedId && view === 'chat' ? 'page' : undefined} {...rowButton(() => openConversation(h.id))}>
                 <span className="convo-title">
                   {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
                   {h.title}
@@ -367,8 +409,7 @@ export default function Sidebar(): JSX.Element {
           <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
           {archivedOpen && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
           {archivedOpen && shownArchived.map((c) => (
-            <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}
-              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(c.id) } }}>
+            <div key={c.id} className="convo-item archived" {...rowButton(() => void selectChat(c.id))}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
               <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id).then(() => setArchived((a) => a.filter((x) => x.id !== c.id))) }}><Trash2 size={13} /></button>

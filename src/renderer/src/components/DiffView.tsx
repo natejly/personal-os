@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, X, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react'
+import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react'
 import type { DocRevision } from '@shared/types'
 import { diffLines, diffStat, hunks, toUnified, type DiffLine, type WordPart } from '../lib/diff'
 
@@ -175,15 +175,16 @@ export default function DiffView({
         )}
       </div>
 
+      {/* The decision leads, primary first, as on every other card; the view toggle trails. */}
       <footer>
+        {pending && onAccept && <button className="primary-btn sm" onClick={onAccept}>Accept</button>}
+        {pending && onReject && <button className="ghost-btn sm" onClick={onReject}>Reject</button>}
+        <span className="spacer" />
         {lines.some((l) => l.op === 'same') && (
           <button className="link small" onClick={() => setWhole((w) => !w)}>
             {whole ? 'Show changes only' : 'Show the whole file'}
           </button>
         )}
-        <span className="spacer" />
-        {pending && onReject && <button className="ghost-btn" onClick={onReject}><X size={13} /> Reject</button>}
-        {pending && onAccept && <button className="primary-btn" onClick={onAccept}><Check size={13} /> Accept</button>}
       </footer>
     </div>
   )

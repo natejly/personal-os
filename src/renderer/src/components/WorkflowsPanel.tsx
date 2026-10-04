@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { rowButton } from '../lib/rowButton'
+import { ConfirmDelete } from './SkillsPanel'
 import type { Workflow, WorkflowRun, WorkflowRunStatus, WorkflowStepStatus } from '@shared/types'
 
 const TEMPLATE = JSON.stringify({
@@ -19,6 +21,11 @@ const TEMPLATE = JSON.stringify({
 const RUN_LABEL: Record<WorkflowRunStatus, string> = {
   awaiting_approval: 'waiting for your approval', running: 'running', waiting_approval: 'waiting for you', done: 'done',
   failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted', stale: 'out of date'
+}
+/** A run's status in the app-wide `--st-*` vocabulary, for the dot that leads its row. */
+const RUN_TONE: Record<WorkflowRunStatus, 'needs-you' | 'working' | 'done' | 'failed' | 'idle'> = {
+  awaiting_approval: 'needs-you', running: 'working', waiting_approval: 'needs-you', done: 'done',
+  failed: 'failed', cancelled: 'idle', interrupted: 'failed', stale: 'idle'
 }
 const STEP_MARK: Record<WorkflowStepStatus, string> = {
   pending: '·', running: '…', waiting_approval: '?', done: '✓', failed: '✗', skipped: '–', blocked: '⊘'
@@ -41,23 +48,23 @@ function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }):
 
   return (
     <div className={`skill-row wf-run ${run.status}`}>
-      <div className="skill-head" onClick={() => setOpen(!open)} role="button" tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter') setOpen(!open) }}>
+      <div className="skill-head" aria-expanded={open} {...rowButton(() => setOpen(!open))}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className={`wf-dot ${RUN_TONE[run.status]}`} aria-hidden />
         <span className="skill-name">{run.name}</span>
         <span className="skill-desc muted">{Object.entries(run.params).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ')}</span>
         <small className="muted">{RUN_LABEL[run.status]} · {new Date(run.created_at * 1000).toLocaleString()}</small>
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
           {run.status === 'awaiting_approval' && (
-            <button className="primary-btn small" title="Approve exactly this plan and start it"
+            <button className="primary-btn sm" title="Approve exactly this plan and start it"
               onClick={() => void act(() => api.workflows.approveRun(run.id, run.plan_digest))}><Check size={13} /> Approve and run</button>
           )}
           {['interrupted', 'failed', 'cancelled'].includes(run.status) && run.approved_digest && (
-            <button className="small" title="Continue from the first step that is not done"
+            <button className="ghost-btn sm" title="Continue from the first step that is not done"
               onClick={() => void act(() => api.workflows.resumeRun(run.id))}><RotateCw size={13} /> Resume</button>
           )}
           {(LIVE.includes(run.status) || run.status === 'awaiting_approval') && (
-            <button className="small" onClick={() => void act(() => api.workflows.cancelRun(run.id))}><Square size={13} /> Cancel</button>
+            <button className="ghost-btn sm" onClick={() => void act(() => api.workflows.cancelRun(run.id))}><Square size={13} /> Cancel</button>
           )}
         </div>
       </div>
@@ -84,8 +91,8 @@ function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }):
           {waiting.map((s) => (
             <div key={s.step_id} className="row-actions">
               <span className="muted small">Step {s.step_id} is waiting for you.</span>
-              <button className="primary-btn small" onClick={() => void act(() => api.approve(s.approval_call_id!, 'allow'))}><Check size={13} /> Allow</button>
-              <button className="small" onClick={() => void act(() => api.approve(s.approval_call_id!, 'deny'))}><X size={13} /> Deny</button>
+              <button className="primary-btn sm" onClick={() => void act(() => api.approve(s.approval_call_id!, 'allow'))}><Check size={13} /> Approve</button>
+              <button className="ghost-btn sm" onClick={() => void act(() => api.approve(s.approval_call_id!, 'deny'))}><X size={13} /> Deny</button>
             </div>
           ))}
           {run.status === 'done' && cur.result != null && <pre className="muted small">{typeof cur.result === 'string' ? cur.result : JSON.stringify(cur.result, null, 2)}</pre>}
@@ -124,8 +131,8 @@ function Editor({ wf, onDone }: { wf: Workflow | null; onDone: () => void }): JS
         ? <ul className="muted small">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
         : <p className="muted small">Valid. Saving changes the plan hash, so runs proposed earlier will need to be proposed again.</p>}
       <div className="row-actions">
-        <button className="primary-btn small" disabled={errors.length > 0} onClick={() => void save()}>Save</button>
-        <button className="small" onClick={onDone}>Cancel</button>
+        <button className="primary-btn sm" disabled={errors.length > 0} onClick={() => void save()}>Save</button>
+        <button className="ghost-btn sm" onClick={onDone}>Cancel</button>
       </div>
     </div>
   )
@@ -148,7 +155,7 @@ function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => void })
         </label>
       ))}
       <div className="row-actions">
-        <button className="primary-btn small" onClick={() => void propose()}><Play size={13} /> Review the plan</button>
+        <button className="primary-btn sm" onClick={() => void propose()}><Play size={13} /> Review the plan</button>
         <span className="muted small">Nothing starts until you approve the plan.</span>
       </div>
     </div>
@@ -166,7 +173,9 @@ export default function WorkflowsPanel(): JSX.Element {
     setWfs(w)
     setRuns(r)
   }, [])
-  useEffect(() => { void load().catch(() => undefined) }, [load])
+  // The empty state waits for the first answer, so it never flashes over a list that is on its way.
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => { void load().catch(() => undefined).finally(() => setLoaded(true)) }, [load])
   const active = runs.some((r) => LIVE.includes(r.status))
   useEffect(() => {
     if (!active) return
@@ -177,41 +186,60 @@ export default function WorkflowsPanel(): JSX.Element {
   const remove = async (w: Workflow): Promise<void> => {
     try { await api.workflows.delete(w.id); await load() } catch (e) { toast((e as Error).message, 'error') }
   }
+  const adding = mode?.kind === 'edit' && mode.id === 'new'
+  const empty = loaded && wfs.length === 0 && runs.length === 0 && !adding
 
   return (
     <div className="library-panel">
-      <div className="add-row">
-        <div className="muted small">
-          <p>A workflow is a saved plan of steps. You approve a run before anything happens, every step goes through the same permissions as chat, and a run that stops can be resumed without repeating finished steps.</p>
-          <details><summary>How approval works</summary>An approval covers the exact steps and inputs you were shown, checked by a fingerprint (hash), so a run whose steps change has to be approved again.</details>
-        </div>
-        <button className="primary-btn small" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={13} /> New workflow</button>
-      </div>
-      {mode?.kind === 'edit' && mode.id === 'new' && <div className="skill-row"><Editor wf={null} onDone={() => { setMode(null); void load() }} /></div>}
-      <section className="skill-section">
-        <h4>Saved workflows</h4>
-        {wfs.length === 0 && <div className="empty-hint"><p className="muted small">None yet.</p></div>}
-        {wfs.map((w) => (
-          <div key={w.id} className="skill-row">
-            <div className="skill-head">
-              <span className="skill-name">{w.name}</span>
-              <span className="skill-desc muted">{w.description}</span>
-              <div className="skill-actions no-drag">
-                <button className="small" onClick={() => setMode(mode?.id === w.id && mode.kind === 'run' ? null : { kind: 'run', id: w.id })}><Play size={13} /> Run</button>
-                <button className="icon-btn ghost" aria-label={`Edit ${w.name}`} onClick={() => setMode(mode?.id === w.id && mode.kind === 'edit' ? null : { kind: 'edit', id: w.id })}><Pencil size={13} /></button>
-                <button className="icon-btn ghost danger" aria-label={`Delete ${w.name}`} onClick={() => void remove(w)}><Trash2 size={13} /></button>
-              </div>
-            </div>
-            {mode?.id === w.id && mode.kind === 'edit' && <Editor wf={w} onDone={() => { setMode(null); void load() }} />}
-            {mode?.id === w.id && mode.kind === 'run' && <ParamForm wf={w} onProposed={() => { setMode(null); void load() }} />}
+      {!empty && (
+        <div className="library-toolbar">
+          <div className="library-toolbar-row">
+            <button className="primary-btn" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={14} /> New workflow</button>
           </div>
-        ))}
-      </section>
-      <section className="skill-section">
-        <h4>Runs</h4>
-        {runs.length === 0 && <div className="empty-hint"><p className="muted small">No runs yet. Run a workflow to review its plan here.</p></div>}
-        {runs.map((r) => <RunCard key={r.id} run={r} onChange={() => void load()} />)}
-      </section>
+          <div className="muted small">
+            <p>A workflow is a saved plan of steps. You approve a run before anything happens, every step goes through the same permissions as chat, and a run that stops can be resumed without repeating finished steps.</p>
+            <details><summary>How approval works</summary>An approval covers the exact steps and inputs you were shown, checked by a fingerprint (hash), so a run whose steps change has to be approved again.</details>
+          </div>
+        </div>
+      )}
+      {adding && <div className="skill-row"><Editor wf={null} onDone={() => { setMode(null); void load() }} /></div>}
+      {empty && (
+        <div className="empty-state">
+          <WorkflowIcon size={28} />
+          <h2>No workflows yet</h2>
+          <p>A workflow is a saved plan of steps. Nothing runs until you approve its plan, and a run that stops can be resumed where it left off.</p>
+          <button className="primary-btn" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={14} /> New workflow</button>
+        </div>
+      )}
+      {wfs.length > 0 && (
+        <section className="skill-section">
+          <h4>Saved workflows <span className="count">{wfs.length}</span></h4>
+          {wfs.map((w) => (
+            <div key={w.id} className="skill-row">
+              <div className="skill-head static">
+                <span className="skill-name">{w.name}</span>
+                <span className="skill-desc muted">{w.description}</span>
+                <div className="skill-actions no-drag">
+                  <button className={`ghost-btn sm${mode?.id === w.id && mode.kind === 'run' ? ' on' : ''}`} onClick={() => setMode(mode?.id === w.id && mode.kind === 'run' ? null : { kind: 'run', id: w.id })}><Play size={13} /> Run</button>
+                  <button className={`icon-btn ghost${mode?.id === w.id && mode.kind === 'edit' ? ' on' : ''}`} aria-label={`Edit ${w.name}`} title="Edit" onClick={() => setMode(mode?.id === w.id && mode.kind === 'edit' ? null : { kind: 'edit', id: w.id })}><Pencil size={13} /></button>
+                  <ConfirmDelete label={w.name} onDelete={() => void remove(w)} />
+                </div>
+              </div>
+              {mode?.id === w.id && mode.kind === 'edit' && <Editor wf={w} onDone={() => { setMode(null); void load() }} />}
+              {mode?.id === w.id && mode.kind === 'run' && <ParamForm wf={w} onProposed={() => { setMode(null); void load() }} />}
+            </div>
+          ))}
+        </section>
+      )}
+      {/* Runs only make sense once there is something to run; an empty heading over an empty list
+          said nothing the line under it does not. */}
+      {(wfs.length > 0 || runs.length > 0) && (
+        <section className="skill-section">
+          <h4>Runs {runs.length > 0 && <span className="count">{runs.length}</span>}</h4>
+          {runs.length === 0 && <p className="muted small">No runs yet. Run a workflow to review its plan here.</p>}
+          {runs.map((r) => <RunCard key={r.id} run={r} onChange={() => void load()} />)}
+        </section>
+      )}
     </div>
   )
 }

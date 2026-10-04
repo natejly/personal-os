@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
+import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
@@ -39,14 +39,77 @@ const argText = (args: Record<string, unknown>): string =>
   TEXT_KEYS.filter((k) => typeof args[k] === 'string' && args[k])
     .map((k) => `${k}: ${args[k] as string}`)
     .join('\n') || JSON.stringify(args)
+/** The same arguments on one line, for the collapsed row. */
+const argLine = (args: Record<string, unknown>): string => argText(args).replace(/\s*\n\s*/g, ' · ').replace(/\s+/g, ' ').slice(0, 240)
+/** A run's report as one plain line: enough to tell runs apart without opening them. */
+const oneLine = (text: string): string => text.replace(/[#*_`>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+
+/** The app-wide status vocabulary (`--st-*`), as the dot that leads every row. */
+type Tone = 'needs-you' | 'working' | 'done' | 'failed' | 'idle'
+const Dot = ({ tone, label }: { tone: Tone; label: string }): JSX.Element =>
+  <span className={`inbox-dot ${tone}`} role="img" aria-label={label} title={label} />
+
+/** The row's disclosure: everything past the one line (arguments, the report) sits behind it. */
+const Disclosure = ({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }): JSX.Element => (
+  <button className="icon-btn sm" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} ${what}`} title={`${open ? 'Hide' : 'Show'} ${what}`} onClick={onToggle}>
+    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+  </button>
+)
+
+/** Cards a bare Approve cannot decide: a plan has steps to read and edit, a question wants an answer. These, and any card
+ * of a desk, open where they are decided instead. */
+const OPEN_ONLY = new Set(['propose_plan', 'desk_ask', 'ask_user'])
+
+function ApprovalRow({ a, onDesk, onChat }: {
+  a: AgentInboxData['needs_you']['approvals'][number]
+  onDesk: (deskId: string) => void
+  onChat: (conversationId: string) => void
+}): JSX.Element {
+  const approveTool = useStore((s) => s.approveTool)
+  const [open, setOpen] = useState(false)
+  const line = argLine(a.args)
+
+  return (
+    <li className="inbox-item">
+      <div className="inbox-row">
+        <Dot tone="needs-you" label="Waiting on your approval" />
+        <span className="inbox-tool">{a.tool}</span>
+        <span className="inbox-line" title={line}>{line}</span>
+        {a.forced && <span className="chip warn">untrusted content in that chat</span>}
+        <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
+        {a.desk_id || OPEN_ONLY.has(a.tool) ? (
+          <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}
+            onClick={() => { if (a.desk_id) onDesk(a.desk_id); else if (a.conversation_id) onChat(a.conversation_id) }}>
+            Open {a.desk_id ? 'desk' : 'chat'} <ArrowRight size={13} />
+          </button>
+        ) : (
+          <>
+            <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
+              <Check size={13} /> Approve
+            </button>
+            <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
+              <X size={13} /> Deny
+            </button>
+            {/* Arguments cannot be edited here; the chat's card can. */}
+            {a.conversation_id && <button className="link small" onClick={() => onChat(a.conversation_id as string)}>Open chat</button>}
+          </>
+        )}
+        <Disclosure open={open} what="the arguments" onToggle={() => setOpen((v) => !v)} />
+      </div>
+      {open && <pre className="inbox-args">{argText(a.args)}</pre>}
+    </li>
+  )
+}
 
 function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }): JSX.Element {
   const decideProposal = useStore((s) => s.decideProposal)
+  const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const editable = p.editable ? TEXT_KEYS.filter((k) => typeof p.args[k] === 'string') : []
+  const line = argLine(p.args)
 
   const decide = async (accept: boolean): Promise<void> => {
     setBusy(true)
@@ -55,22 +118,27 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
     setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
   }
+  // Closing the row ends the edit too: Accept must never send text from boxes that are not on screen.
+  const toggle = (): void => {
+    if (open) setEditing(false)
+    setOpen(!open)
+  }
 
   return (
     <li className="inbox-item">
-      <div className="inbox-item-head">
+      <div className="inbox-row">
+        <Dot tone="needs-you" label="Waiting on you" />
         <span className="inbox-tool">{p.tool}</span>
-        <span className="muted small">
+        <span className="inbox-line" title={line}>{line}</span>
+        <span className="muted small inbox-when">
           {p.source ? `from ${p.source.kind === 'desk' ? `desk ${p.source.name}` : p.source.name} · ` : ''}proposed {fmtWhen(p.created_at)}
         </span>
         {onOpen && <button className="link small" onClick={onOpen}>Open</button>}
-        <span style={{ flex: 1 }} />
-        <button className="icon-btn sm" title={!editable.length ? 'This one runs as proposed' : editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
-          onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
-        <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
         <button className="primary-btn sm" disabled={busy} onClick={() => void decide(true)}><Check size={13} /> Accept</button>
+        <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
+        <Disclosure open={open} what="the details" onToggle={toggle} />
       </div>
-      {editing ? (
+      {open && (editing ? (
         <div className="inbox-edit">
           {editable.map((k) => (
             <label key={k}>
@@ -79,11 +147,19 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
                 onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} />
             </label>
           ))}
-          <p className="muted small">Accept sends exactly what is in these boxes.</p>
+          <div className="inbox-edit-foot">
+            <p className="muted small">Accept sends exactly what is in these boxes.</p>
+            <button className="ghost-btn sm" disabled={busy} onClick={() => setEditing(false)}>Stop editing</button>
+          </div>
         </div>
       ) : (
-        <pre className="inbox-args">{argText(p.args)}</pre>
-      )}
+        <>
+          <pre className="inbox-args">{argText(p.args)}</pre>
+          {editable.length > 0 && (
+            <button className="ghost-btn sm inbox-edit-btn" disabled={busy} onClick={() => setEditing(true)}><Pencil size={12} /> Edit before accepting</button>
+          )}
+        </>
+      ))}
       {err && <p className="error small" role="alert">{err}</p>}
     </li>
   )
@@ -92,17 +168,22 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  // An unread problem opens itself; reading it (Mark all read included) collapses it.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
-  useEffect(() => { if (r.seen) setOpen(false) }, [r.seen])  // read collapses it, Mark all read included
+  useEffect(() => { if (r.seen) setOpen(false) }, [r.seen])
+  const tone: Tone = failed ? 'failed' : r.pending_proposals > 0 || r.status === 'awaiting_approval' ? 'needs-you' : r.status === 'running' ? 'working' : 'done'
+  const toneLabel = failed
+    ? (r.status === 'interrupted' ? 'Interrupted' : 'Failed')
+    : tone === 'needs-you' ? 'Waiting on you' : tone === 'working' ? 'Running' : 'Done'
+  const line = r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : `It wrote nothing. ${r.tool_calls} tool call${r.tool_calls === 1 ? '' : 's'}.`
 
   return (
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
-      <div className="inbox-item-head">
-        <button className="icon-btn sm" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
+      <div className="inbox-row">
+        <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
+        <span className="inbox-line" title={line}>{line}</span>
         {r.manual && <span className="chip">by hand</span>}
         {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
         {r.late && (
@@ -111,15 +192,15 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           </span>
         )}
         {failed && <span className="chip bad"><AlertTriangle size={11} /> {r.status === 'interrupted' ? 'interrupted' : 'failed'}</span>}
-        {r.pending_proposals > 0 && <span className="chip">{r.pending_proposals} waiting on you</span>}
-        <span style={{ flex: 1 }} />
-        <span className="muted small">{fmtWhen(r.fired_at)}</span>
-        {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        {r.pending_proposals > 0 && <span className="chip needs">{r.pending_proposals} waiting on you</span>}
+        <span className="muted small inbox-when">{fmtWhen(r.fired_at)}</span>
+        {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
         {!r.seen && (
           <button className="icon-btn sm" title="Mark read" aria-label={`Mark ${r.job} read`} onClick={() => void markInboxRunSeen(r.run_id)}>
             <Check size={13} />
           </button>
         )}
+        <Disclosure open={open} what="the report" onToggle={() => setOpen((v) => !v)} />
       </div>
       {open && (
         <>
@@ -140,6 +221,10 @@ const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
   running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
 }
 const skipReason = (why: string): string => why.replace('previous run still running', 'still running')
+/** Every outcome gets a colour, success included: an unmarked chip read as "no status". */
+const STATUS_CHIP: Record<JobRunRecord['status'], string> = {
+  running: 'working', done: 'ok', error: 'bad', interrupted: 'bad', timed_out: 'bad'
+}
 
 /** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
 function JobHistory({ job }: { job: Job }): JSX.Element {
@@ -182,7 +267,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
           {!!stats.skipped && ` · ${stats.skipped} skipped`}
-          <span style={{ flex: 1 }} />
+          <span className="spacer" />
           <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
         </div>
       )}
@@ -195,7 +280,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
         </div>
       ) : (
         <div key={r.run_id} className="job-history-run small">
-          <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
+          <span className={`chip ${STATUS_CHIP[r.status]}`}>{STATUS_LABEL[r.status]}</span>
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
@@ -209,8 +294,8 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
           )}
-          <span style={{ flex: 1 }} />
-          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+          <span className="spacer" />
+          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
         </div>
       ))}
     </li>
@@ -280,15 +365,14 @@ function JobRow({ job }: { job: Job }): JSX.Element {
 
   return (
     <>
-    <li className={spent ? 'spent' : undefined}>
-      {spent ? (
-        <span className="chip-check-row ev-title">{job.name}</span>
-      ) : (
-        <label className="chip-check-row">
-          <input type="checkbox" checked={job.enabled} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
-          <span className="ev-title">{job.name}</span>
+    <li className={`job-row${spent ? ' spent' : ''}`}>
+      {spent ? <span className="job-switch-gap" /> : (
+        <label className="switch-wrap" title={job.enabled ? 'Turn this task off' : 'Turn this task on'}>
+          <input type="checkbox" checked={job.enabled} aria-label={`${job.name} enabled`} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
+          <span className="switch" />
         </label>
       )}
+      <span className="job-name ev-title" title={job.name}>{job.name}</span>
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
         : job.kind === 'watch'
@@ -304,41 +388,48 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {skipReason(job.last_skip_reason)}</span>
       )}
-      {(job.kind === 'cron' || job.kind === 'once') && (
-        <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
-          aria-label={`Edit ${job.name}`} onClick={() => setEditing((v) => !v)}>
-          <Pencil size={12} />
-        </button>
+      {job.target === 'desk' && (
+        <span className="muted small" title="Each fire opens a desk with this prompt as its brief">desk · {AUTONOMY.find((a) => a.value === (job.desk_autonomy ?? 'plan'))?.label}</span>
       )}
-      <select className="small" value={job.notify ?? 'problems'} aria-label={`Notifications for ${job.name}`}
-        title="When a run of this job sends a system notification"
-        onChange={(e) => void saveNotify(e.target.value as JobNotifyMode)}>
-        <option value="problems">Notify on problems</option>
-        <option value="always">Notify every run</option>
-        <option value="never">Never notify</option>
-      </select>
-      {job.target !== 'desk' && (
-        <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
-          aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
-          <Wrench size={12} />
+      {/* Run and History are the two a row is opened for, so they stay put. The rest appear when the
+          row is hovered or holds focus; they keep their space, so nothing shifts when they do. */}
+      <span className="job-more">
+        {(job.kind === 'cron' || job.kind === 'once') && (
+          <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
+            aria-label={`Edit ${job.name}`} aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
+            <Pencil size={12} />
+          </button>
+        )}
+        <select className="small" value={job.notify ?? 'problems'} aria-label={`Notifications for ${job.name}`}
+          title="When a run of this job sends a system notification"
+          onChange={(e) => void saveNotify(e.target.value as JobNotifyMode)}>
+          <option value="problems">Notify on problems</option>
+          <option value="always">Notify every run</option>
+          <option value="never">Never notify</option>
+        </select>
+        {job.target !== 'desk' && (
+          <>
+            <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
+              aria-label={`Tools for ${job.name}`} aria-expanded={toolsOpen} onClick={() => setToolsOpen((v) => !v)}>
+              <Wrench size={12} />
+            </button>
+            <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+              onClick={() => void preview()}>
+              <Eye size={12} />
+            </button>
+          </>
+        )}
+        <button className="icon-btn sm danger" title="Delete" aria-label={`Delete ${job.name}`}
+          onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
+          <Trash2 size={12} />
         </button>
-      )}
-      {job.target === 'desk'
-        ? <span className="muted small" title="Each fire opens a desk with this prompt as its brief">desk · {AUTONOMY.find((a) => a.value === (job.desk_autonomy ?? 'plan'))?.label}</span>
-        : <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
-            onClick={() => void preview()}>
-            <Eye size={12} />
-          </button>}
+      </span>
       <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
-        onClick={() => setHistory((v) => !v)}>
+        aria-expanded={history} onClick={() => setHistory((v) => !v)}>
         <History size={12} />
       </button>
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
-      </button>
-      <button className="icon-btn sm" title="Delete" aria-label={`Delete ${job.name}`}
-        onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
-        <Trash2 size={12} />
       </button>
     </li>
     {toolsOpen && (
@@ -561,14 +652,10 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
   )
 }
 
-/** Cards a bare Allow cannot decide: a plan has steps to read and edit, a question wants an answer. These, and any card
- * of a desk, open where they are decided instead. */
-const OPEN_ONLY = new Set(['propose_plan', 'desk_ask', 'ask_user'])
-
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
@@ -622,8 +709,8 @@ export default function AgentInbox(): JSX.Element | null {
     <section className="agent-inbox">
       <header>
         <Inbox size={14} /> Agent inbox
-        {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
-        <span style={{ flex: 1 }} />
+        {box.counts.needs_you > 0 && <span className="chip needs">{box.counts.needs_you} need{box.counts.needs_you === 1 ? 's' : ''} you</span>}
+        <span className="spacer" />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
         {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job; a slot missed while asleep runs as soon as it wakes">Jobs run while the Mac is awake and Grain is open</span>}
         <button className={`ghost-btn sm ${showJobs ? 'on' : ''}`} aria-expanded={showJobs} onClick={toggleJobs}>
@@ -635,7 +722,7 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-jobs">
           <h5>
             Scheduled tasks <span className="muted small">{box.scheduler.timezone}</span>
-            <span style={{ flex: 1 }} />
+            <span className="spacer" />
             <button className={`icon-btn sm ${adding ? 'on' : ''}`} title="Schedule a task" aria-label="Schedule a task"
               onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
           </h5>
@@ -653,61 +740,35 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-group">
           <h5>Needs you</h5>
           <ul className="inbox-list">
-            {approvals.map((a) => (
-              <li className="inbox-item" key={a.call_id}>
-                <div className="inbox-item-head">
-                  <span className="inbox-tool">{a.tool}</span>
-                  <span className="muted small">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
-                  {a.forced && <span className="chip warn">untrusted content in that chat</span>}
-                  <span style={{ flex: 1 }} />
-                  {a.desk_id || OPEN_ONLY.has(a.tool) ? (
-                    <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}
-                      onClick={() => { if (a.desk_id) goDesk(a.desk_id); else if (a.conversation_id) goChat(a.conversation_id) }}>
-                      Open {a.desk_id ? 'desk' : 'chat'} <ArrowRight size={13} />
-                    </button>
-                  ) : (
-                    <>
-                      <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
-                        <X size={13} /> Deny
-                      </button>
-                      <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
-                        <Check size={13} /> Approve
-                      </button>
-                      {/* Arguments cannot be edited here; the chat's card can. */}
-                      {a.conversation_id && <button className="link small" onClick={() => goChat(a.conversation_id as string)}>open chat</button>}
-                    </>
-                  )}
-                </div>
-                <pre className="inbox-args">{argText(a.args)}</pre>
-              </li>
-            ))}
+            {approvals.map((a) => <ApprovalRow key={a.call_id} a={a} onDesk={goDesk} onChat={goChat} />)}
             {deskRows.map((e) => (
               <li className="inbox-item" key={e.id}>
-                <div className="inbox-item-head">
+                <div className="inbox-row">
+                  <Dot tone="needs-you" label="Waiting on you" />
                   <span className="inbox-job"><Users size={12} /> {e.desk_title || 'Desk'}</span>
-                  <span className="muted small">{e.body || e.kind} · {fmtWhen(e.created_at)}</span>
-                  <span style={{ flex: 1 }} />
-                  <button className="icon-btn sm" title="Mark seen" aria-label="Mark seen" onClick={() => void markDeskSeen(e.desk_id)}><X size={13} /></button>
+                  <span className="inbox-line" title={e.body || e.kind}>{e.body || e.kind}</span>
+                  <span className="muted small inbox-when">{fmtWhen(e.created_at)}</span>
                   <button className="primary-btn sm" onClick={() => goDesk(e.desk_id)}>{e.kind === 'review' ? 'Review' : 'Open'} <ArrowRight size={13} /></button>
+                  <button className="icon-btn sm" title="Mark seen" aria-label="Mark seen" onClick={() => void markDeskSeen(e.desk_id)}><X size={13} /></button>
                 </div>
               </li>
             ))}
             {paused.map((p) => (
               <li className="inbox-item" key={p.id}>
-                <div className="inbox-item-head">
+                <div className="inbox-row">
+                  <Dot tone="failed" label="Paused after failing" />
                   <span className="inbox-job">{p.name}</span>
-                  <span className="chip bad"><AlertTriangle size={11} /> Paused: {p.reason}</span>
-                  <span style={{ flex: 1 }} />
+                  <span className="inbox-line" title={p.reason}>Paused: {p.reason}</span>
                   <button className="primary-btn sm" onClick={() => void setJobEnabled(p.id, true)}><Play size={13} /> Resume</button>
                 </div>
               </li>
             ))}
             {bulk.map(([jobId, g]) => (
               <li className="inbox-item" key={`bulk-${jobId}`}>
-                <div className="inbox-item-head">
+                <div className="inbox-row">
+                  <Dot tone="needs-you" label="Waiting on you" />
                   <span className="inbox-job">{g.name}</span>
-                  <span className="chip">{g.n} proposals</span>
-                  <span style={{ flex: 1 }} />
+                  <span className="inbox-line">{g.n} proposals</span>
                   <button className="ghost-btn sm"
                     onClick={() => { if (confirm(`Reject all ${g.n} proposals from “${g.name}”?`)) void rejectJobProposals(jobId) }}>
                     <X size={13} /> Reject all from {g.name}
@@ -722,10 +783,10 @@ export default function AgentInbox(): JSX.Element | null {
             ))}
             {elsewhere.map((q) => (
               <li className="inbox-item" key={q.key}>
-                <div className="inbox-item-head">
+                <div className="inbox-row">
+                  <Dot tone="needs-you" label="Waiting on you" />
                   <span className="inbox-job">{q.label}</span>
-                  <span className="chip">{q.count}</span>
-                  <span style={{ flex: 1 }} />
+                  <span className="inbox-line">{q.count} waiting</span>
                   <button className="ghost-btn sm" onClick={() => goQueue(q.key)}>Review <ArrowRight size={13} /></button>
                 </div>
               </li>
@@ -740,7 +801,7 @@ export default function AgentInbox(): JSX.Element | null {
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}
             {away.length} run{away.length === 1 ? '' : 's'}</span>
             {(box.counts.unseen_runs ?? 0) > 0 && (
-              <button className="link small" style={{ marginLeft: 'auto' }} onClick={() => void markInboxRunSeen(null)}>Mark all read</button>
+              <><span className="spacer" /><button className="link small" onClick={() => void markInboxRunSeen(null)}>Mark all read</button></>
             )}</h5>
           <ul className="inbox-list">{away.map((r) => <RunCard key={r.run_id} r={r} />)}</ul>
         </div>

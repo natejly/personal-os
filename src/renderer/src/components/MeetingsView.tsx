@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Columns2, Copy, GitCompare, ListChecks, Mic, PanelLeftOpen, RefreshCw,
+  AlertTriangle, Columns2, Copy, GitCompare, ListChecks, Mic, RefreshCw,
   Sparkles, Trash2, Search, Speaker, Upload, X
 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
@@ -16,6 +16,9 @@ import MeetingConsentModal from './MeetingConsentModal'
 import { formatOffset, mergeSegments, recorderState, speakerLabel, type RecorderState } from '../lib/transcript'
 import '../styles/meetings.css'
 import AppSwitcher from './AppSwitcher'
+import ResizeHandle from './ResizeHandle'
+import { rowButton } from '../lib/rowButton'
+import SidebarToggle from './SidebarToggle'
 
 /**
  * Meetings: the notepad you type in during a call, the transcript beside it, and the enhanced
@@ -41,7 +44,9 @@ const fmtDay = (ts: number): string => {
 }
 const fmtWhen = (ts: number): string => {
   const s = Date.now() / 1000 - ts
-  return s < 60 ? 'just now'
+  // A meeting still to come is named by its time, not by how long "ago" it is.
+  return s < 0 ? new Date(ts * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : s < 60 ? 'just now'
     : s < 3600 ? `${Math.round(s / 60)}m ago`
     : s < 86400 ? `${Math.round(s / 3600)}h ago`
     : new Date(ts * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
@@ -59,9 +64,10 @@ const INDICATOR_TITLE: Record<RecorderState, string> = {
   stalled: 'The meeting recording stopped capturing'
 }
 
-/** What the status says when there is no duration to show instead. */
+/** What the status says when there is no duration to show instead. `scheduled` says nothing: it is
+ *  every row that has not been recorded, and the time beside it already tells that story. */
 const STATUS_LABEL: Record<string, string> = {
-  scheduled: 'scheduled', recording: 'recording', stopped: 'stopped',
+  scheduled: '', recording: 'recording', stopped: 'stopped',
   transcribing: 'transcribing', enhancing: 'enhancing', failed: 'failed', notes_only: 'notes only'
 }
 
@@ -91,13 +97,13 @@ function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDel
 
   return (
     <div className="mtg-list">
-      <label className="search mini"><Search size={12} /><input placeholder="Search meetings" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
+      <label className="search mini"><Search size={12} /><input placeholder="Search meetings" aria-label="Search meetings" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
       {meetings.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No meetings yet.'}</p>}
       {groups.map(([day, items]) => (
         <section key={day}>
           <div className="mtg-day">{day}</div>
           {items.map((m) => (
-            <div key={m.id} className={`mtg-row ${m.id === activeId ? 'active' : ''}`} onClick={() => onOpen(m.id)} role="button" tabIndex={0}>
+            <div key={m.id} className={`mtg-row ${m.id === activeId ? 'active' : ''}`} {...rowButton(() => onOpen(m.id))}>
               {m.status === 'recording'
                 ? <span className="mtg-dot live" title="Recording now" />
                 : m.has_pending ? <span className="mtg-dot pending" title="Enhanced notes awaiting review" />
@@ -111,12 +117,12 @@ function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDel
                     <button className="tag" title="Recorded in a doc. Click to open it"
                       onClick={(e) => { e.stopPropagation(); void openDoc(m.doc_id!) }}>doc</button>
                   )}
-                  {m.duration_ms > 0 ? fmtDur(m.duration_ms) : STATUS_LABEL[m.status] ?? m.status} · {fmtWhen(meetingWhen(m))}
+                  {[m.duration_ms > 0 ? fmtDur(m.duration_ms) : STATUS_LABEL[m.status] ?? m.status, fmtWhen(meetingWhen(m))].filter(Boolean).join(' · ')}
                 </span>
               </span>
               {/* The live row stays undeletable: deleting it drops the row the recorder bar — the
                   only Stop in the app — is mounted on, leaving capture running with no control. */}
-              <button className="icon-btn ghost xs danger" disabled={m.id === liveId}
+              <button className="icon-btn ghost xs danger" disabled={m.id === liveId} aria-label={`Delete ${m.title || 'Untitled meeting'}`}
                 title={m.id === liveId ? 'Stop the recording before deleting this meeting' : 'Delete'}
                 onClick={(e) => { e.stopPropagation(); if (confirm(`Delete “${m.title || 'Untitled meeting'}”? Its transcript, audio and enhanced notes go too.`)) onDelete(m.id) }}>
                 <Trash2 size={12} />
@@ -154,7 +160,6 @@ export default function MeetingsView(): JSX.Element {
   const meetingBusy = useStore((s) => s.meetingBusy)
   const meetingConsentOpen = useStore((s) => s.meetingConsentOpen)
   const libraryScope = useStore((s) => s.libraryScope)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   // The search text lives in the store so the recorder bar's 5s rail refresh re-issues it instead
   // of replacing the filtered list with everything.
   const query = useStore((s) => s.meetingQuery)
@@ -162,7 +167,7 @@ export default function MeetingsView(): JSX.Element {
   const {
     refreshMeetings, openMeeting, deleteMeeting, startRecording, editMeetingNotes, flushMeetingNotes,
     enhanceMeeting, acceptMeetingRevision, rejectMeetingRevision, promoteActionItems, dismissActionItem,
-    retranscribeMeeting, deleteMeetingAudio, toggleSidebar, setLibraryScope, toast, openSettings
+    retranscribeMeeting, deleteMeetingAudio, setLibraryScope, loadMeetingPreflight, toast, openSettings
   } = useStore()
 
   const [transcriptOpen, setTranscriptOpen] = useState(false)
@@ -221,6 +226,8 @@ export default function MeetingsView(): JSX.Element {
 
   const scope: Scope = libraryScope
   useEffect(() => { void refreshMeetings(query) }, [refreshMeetings, query, scope])
+  // What blocks a recording is checked here, so the page can say so before Record is pressed.
+  useEffect(() => { void loadMeetingPreflight() }, [loadMeetingPreflight])
   // Anything still buffered belongs on disk before this view goes away -- and before the window does,
   // since the save is debounced and a quit or a switch-away right after typing would lose the tail.
   useEffect(() => {
@@ -249,12 +256,14 @@ export default function MeetingsView(): JSX.Element {
   const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
   const OFF_TITLE = 'The meeting recorder is off. Turn it on in Settings → Meetings.'
   const blockers = meetingPreflight?.blockers ?? []
+  // The switch being off is one more thing to set up, unless the preflight already lists it.
+  const setupCount = blockers.length + (recorderOff && !blockers.some((b) => b.id === 'enabled') ? 1 : 0)
   const copy = (text: string): void => { void navigator.clipboard.writeText(text); toast('Copied') }
 
   return (
     <main className="page mtg-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><Mic size={16} /> Meetings</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
@@ -274,16 +283,31 @@ export default function MeetingsView(): JSX.Element {
             showScope={scope === 'all'}
           />
         </aside>
+        {/* The rail scrolls, so its handle lives on the body, pinned to the column edge. */}
+        <ResizeHandle id="mtg-side-w" defaultSize={240} min={170} max={480} grows="right" label="Meeting list width" className="mtg-side-edge" />
 
         {!m ? (
           <section className="mtg-empty">
             {/* Also here, not only beside the notepad: a live recording must have a reachable Stop
                 whatever is open, including nothing. The bar renders null when nothing is live. */}
             <MeetingRecorderBar />
-            <p className="empty-hint">
-              Recorder, transcription and notes settings live in
-              <button className="link-btn" onClick={() => openSettings('meetings')}>Open settings</button>
-            </p>
+            <div className="empty-state">
+              <Mic size={28} />
+              <h2>No meeting open</h2>
+              <p>Pick a meeting on the left, or record one and type what matters while it runs.</p>
+              <button className="primary-btn" disabled={meetingBusy || liveId !== '' || recorderOff}
+                title={recorderOff ? OFF_TITLE : undefined} onClick={() => void startRecording()}>
+                <Mic size={14} /> Record
+              </button>
+              {/* The checklist itself lives in Settings; here it is one line, and only when it matters. */}
+              {setupCount > 0 ? (
+                <button className="link mtg-setup" onClick={() => openSettings('meetings')}>
+                  {setupCount === 1 ? '1 thing needs' : `${setupCount} things need`} setting up before you can record
+                </button>
+              ) : (
+                <button className="link mtg-setup" onClick={() => openSettings('meetings')}>Recorder, transcription and notes settings</button>
+              )}
+            </div>
           </section>
         ) : (
           <section className="mtg-main">
@@ -300,7 +324,7 @@ export default function MeetingsView(): JSX.Element {
               <h3 className="mtg-title">{m.title || 'Untitled meeting'}</h3>
               <ProjectChip projectId={m.project_id} />
               <span className="mtg-save-state">{meetingSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span>
-              <span className="mtg-spacer" />
+              <span className="spacer" />
               {m.status === 'scheduled' && liveId === '' && (
                 <button className="ghost-btn" disabled={meetingBusy || recorderOff}
                   title={recorderOff ? OFF_TITLE : undefined} onClick={() => void startRecording(m.id)}>
@@ -318,12 +342,12 @@ export default function MeetingsView(): JSX.Element {
                 </>
               )}
               <button className={`icon-btn ghost ${transcriptOpen ? 'on' : ''}`} title={`Transcript (${m.segment_count} clip${m.segment_count === 1 ? '' : 's'})`}
-                onClick={() => setTranscriptOpen((t) => !t)}>
+                aria-label="Transcript" aria-pressed={transcriptOpen} onClick={() => setTranscriptOpen((t) => !t)}>
                 <Speaker size={14} />
               </button>
               {canReview && (
                 <button className={`icon-btn ghost ${reviewOpen ? 'on' : ''}`} title="Enhanced notes and action items"
-                  onClick={() => setReviewOpen((r) => !r)}>
+                  aria-label="Enhanced notes and action items" aria-pressed={reviewOpen} onClick={() => setReviewOpen((r) => !r)}>
                   <Sparkles size={14} />
                 </button>
               )}

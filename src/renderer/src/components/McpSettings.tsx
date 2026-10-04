@@ -161,7 +161,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
         </ul>
       )}
       <div className="row-actions">
-        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
+        <button className="primary-btn sm" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
         <span className="muted small">Accepting does not turn the tool on: it still asks first.</span>
       </div>
     </details>
@@ -206,9 +206,9 @@ function ToolRow({ tool, grants, onMode, onAccept, onRevoke }: {
         <DriftBanner tool={tool} onAccept={onAccept} />
         <ScopedGrants tool={tool} grants={grants} onRevoke={onRevoke} />
       </span>
-      <div className="seg">
+      <div className="seg" role="group" aria-label={`Permission for ${tool.name}`}>
         {(['on', 'ask', 'off'] as ToolMode[]).map((m) => (
-          <button key={m} className={eff.mode === m ? 'on' : ''} disabled={gone} onClick={() => onMode(m)}>{m}</button>
+          <button key={m} type="button" className={eff.mode === m ? 'on' : ''} aria-pressed={eff.mode === m} disabled={gone} onClick={() => onMode(m)}>{m}</button>
         ))}
       </div>
     </div>
@@ -360,7 +360,7 @@ export default function McpSettings(): JSX.Element {
         connector <b>asks before it runs</b> until you say otherwise.
       </p>
 
-      {servers.length === 0 && !adding && <p className="muted empty">No connectors yet.</p>}
+      {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors yet. Add one to give the assistant more tools.</p>}
 
       {servers.map((s) => {
         const signin = needsSignIn(s)

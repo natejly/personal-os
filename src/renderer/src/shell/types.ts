@@ -2,7 +2,7 @@
  * The frontend half of a feature module (docs/module-manifest.md). One ModuleDef carries every
  * surface a feature puts into the shell, and the shell reads them from `MODULES` instead of naming
  * the feature: App.tsx renders `view`, the Sidebar lists `nav`, Today renders `home`, the canvas
- * catalog takes `widget`, and Settings → Modules derives its toggles from `home` and `view`.
+ * catalog takes `widget`, and Settings → Views derives its toggles from `home` and `view`.
  *
  * Pilot scope: `View` and `WidgetKind` are still closed unions, so a module can only fill a slot
  * whose id already exists in them. Store slices (e.g. `todos` in store.ts) are not moved yet.
@@ -15,7 +15,7 @@ import type { WidgetDef } from '../canvas/registry'
 export interface ModuleView {
   id: View
   Component: FC
-  /** May be hidden from the sidebar under Settings → Modules (Home and Chat are the shell and may not). */
+  /** May be hidden from the sidebar under Settings → Views (Home and Chat are the shell and may not). */
   optional?: boolean
 }
 

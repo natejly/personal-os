@@ -108,6 +108,9 @@ export default function Onboarding(): JSX.Element {
 
   const blocker = stepBlocker(state, provider)
   const canNext = !blocker && state.step !== 'done'
+  // Leaving the Google step unconnected, or the about step empty, is a skip, and the one forward button
+  // says so: it steps back to a quiet style so the step's own action stays the main one.
+  const skipping = (state.step === 'google' && !google?.connected) || (state.step === 'about' && !state.about.trim())
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
@@ -263,14 +266,12 @@ export default function Onboarding(): JSX.Element {
             <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'back' })}><ArrowLeft size={13} /> Back</button>
           )}
           <span className="ob-spacer" />
-          {state.step === 'google' && !google?.connected && <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'next' })}>Skip for now</button>}
-          {state.step === 'about' && !state.about.trim() && <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'next' })}>Skip for now</button>}
           {state.step === 'test' && state.test.state === 'fail' && <button type="button" className="primary-btn" data-autofocus onClick={() => void runTest()}><RefreshCw size={13} /> Try again</button>}
           {state.step === 'done' ? (
             <button type="button" className="primary-btn" data-autofocus disabled={saved.state !== 'ok'} onClick={finish}>Start chatting <ArrowRight size={13} /></button>
           ) : !(state.step === 'test' && state.test.state === 'fail') && (
-            <button type="button" className="primary-btn" disabled={!canNext} onClick={advance}>
-              {state.step === 'welcome' ? 'Get started' : state.step === 'google' && google?.connected ? 'Continue' : 'Continue'} <ArrowRight size={13} />
+            <button type="button" className={skipping ? 'ghost-btn' : 'primary-btn'} disabled={!canNext} onClick={advance}>
+              {state.step === 'welcome' ? 'Get started' : skipping ? 'Skip for now' : 'Continue'} <ArrowRight size={13} />
             </button>
           )}
         </div>

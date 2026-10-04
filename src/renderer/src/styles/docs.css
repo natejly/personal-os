@@ -47,7 +47,7 @@
 .doc-group-row {
   position: relative;
   display: flex; align-items: center; gap: 5px;
-  padding: 5px 6px; margin-top: 2px; border-radius: 7px;
+  padding: 5px 6px; margin-top: 2px; border-radius: 8px;
   color: var(--text); font-size: 12.5px;
 }
 .doc-group-row:first-child { margin-top: 0; }
@@ -67,7 +67,7 @@
 .doc-folder-row {
   position: relative;
   display: flex; align-items: center; gap: 4px;
-  padding: 4px 6px; border-radius: 7px;
+  padding: 4px 6px; border-radius: 8px;
   color: var(--text-muted); font-size: 12.5px;
   cursor: grab;
 }
@@ -91,7 +91,7 @@
   position: absolute; top: 100%; right: 4px; z-index: 5;
   display: flex; flex-direction: column; min-width: 150px; padding: 4px;
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  box-shadow: var(--shadow-float);
 }
 .doc-folder-menu button {
   text-align: left; padding: 6px 8px; border-radius: 6px;
@@ -102,7 +102,7 @@
 
 .doc-row {
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer;
   color: var(--text-muted);
 }
 .doc-row[draggable='true']:active { cursor: grabbing; }
@@ -122,7 +122,7 @@
 .doc-hit-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
 .doc-hit-snippet mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 2px; }
 .doc-row .icon-btn.xs { opacity: 0; flex: none; }
-.doc-row:hover .icon-btn.xs, .doc-row .icon-btn.xs.starred { opacity: 1; }
+.doc-row:hover .icon-btn.xs, .doc-row:focus-within .icon-btn.xs, .doc-row .icon-btn.xs.starred { opacity: 1; }
 .doc-row .icon-btn.starred { color: var(--warn); }
 
 /* An assistant edit waiting on this doc. */
@@ -135,13 +135,6 @@
 
 /* ---- main pane ---- */
 .docs-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.docs-empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; padding: 40px; text-align: center; color: var(--text-faint);
-}
-.docs-empty h2 { margin: 4px 0 0; color: var(--text); }
-.docs-empty p { max-width: 46ch; margin: 0; }
-.docs-empty .primary-btn { margin-top: 10px; }
 
 .doc-tabs {
   display: flex; gap: 2px; padding: 4px 6px 0;
@@ -149,13 +142,18 @@
 }
 .doc-tab {
   display: flex; align-items: center; gap: 5px;
-  padding: 5px 8px; border: 0; border-radius: 7px 7px 0 0;
+  padding: 5px 8px; border: 0; border-radius: 8px 8px 0 0;
   background: none; color: var(--text-faint); cursor: pointer;
   font: inherit; font-size: 12px; white-space: nowrap;
 }
 .doc-tab:hover { background: var(--hover); color: var(--text); }
 .doc-tab.active { background: var(--bg-elev); color: var(--text); }
-.doc-tab .tab-x { display: inline-flex; opacity: 0.5; border-radius: 4px; }
+/* An 18px box (the tab stays its height) with a 24px target around it. */
+.doc-tab .tab-x {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; margin: -1px -3px -1px 0; opacity: 0.5; border-radius: 4px;
+}
+.doc-tab .tab-x::before { content: ''; position: absolute; inset: -3px; }
 .doc-tab .tab-x:hover { opacity: 1; background: var(--hover); }
 
 .doc-toolbar {
@@ -201,7 +199,10 @@
 /* Stacked panes have no vertical divider to move. */
 .docs-body:has(.docs-history) .doc-split-edge { display: none; }
 .doc-panes.split .docs-render { border-left: 1px solid var(--border); }
-.docs-render { overflow-y: auto; padding: 18px 22px; min-height: 0; }
+/* A reading column of about 72 characters, centred: with the preview on its own the pane is far
+   wider than a line should be. The side padding is what narrows it, so every block shares one edge
+   whatever its own font size, and in a narrow split pane it falls back to the plain gutter. */
+.docs-render { overflow-y: auto; padding: 18px max(22px, calc((100% - 72ch) / 2)); min-height: 0; }
 .docs-render > .muted { color: var(--text-faint); }
 
 /* ---- editor: textarea over a highlighted mirror ---- */
@@ -229,9 +230,11 @@
 .md-gutter .cur { color: var(--text); }
 .md-surface { grid-row: 1; grid-column: 2; position: relative; min-height: 0; overflow: hidden; }
 
+/* The text column is capped near 88 characters and centred. The padding does it, identically on both
+   layers, so the mirror and the textarea wrap at the same place. */
 .md-mirror, .md-input {
   position: absolute; inset: 0;
-  margin: 0; padding: var(--ed-pad);
+  margin: 0; padding: var(--ed-pad) max(var(--ed-pad), calc((100% - 88ch) / 2));
   border: 0; overflow: auto;
   font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
   white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
@@ -255,6 +258,8 @@
   /* One line however narrow the pane: the hints truncate first, never a word per line. */
   white-space: nowrap; overflow: hidden; min-width: 0;
 }
+/* Counters never wrap; the shortcut reminder is the part that gives way in a narrow pane. */
+.md-status > span { white-space: nowrap; }
 .md-hints { margin-left: auto; opacity: 0.75; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* focus mode: the gutter and status bar go, everything outside the current paragraph fades */
@@ -267,9 +272,9 @@
 .tk-head { color: var(--accent); font-weight: 600; }
 .tk-bullet, .tk-punct { color: var(--accent); }
 .tk-quote { color: var(--text-muted); font-style: italic; }
-.tk-code, .tk-fence { color: #7fb8a8; }
-.tk-math { color: #c39ae0; }
-.tk-link { color: #74a8e8; }
+.tk-code, .tk-fence { color: var(--tk-code); }
+.tk-math { color: var(--tk-math); }
+.tk-link { color: var(--tk-link); }
 .tk-strong { font-weight: 700; }
 .tk-em { font-style: italic; }
 .tk-strike { text-decoration: line-through; opacity: 0.7; }
@@ -315,13 +320,13 @@
 
 /* ---- diff card ---- */
 .diff-card {
-  border: 1px solid var(--border); border-radius: 9px;
+  border: 1px solid var(--border); border-radius: 10px;
   background: var(--bg-elev); margin-bottom: 10px; overflow: hidden;
 }
-.diff-card.pending { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.diff-card.pending { border-color: var(--await-border); }
 .diff-card > header, .diff-card > footer {
   display: flex; align-items: center; gap: 7px;
-  padding: 6px 8px; font-size: 11px;
+  padding: 6px 8px 6px 12px; font-size: 11px;
 }
 .diff-card > header { border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .diff-card > footer { border-top: 1px solid var(--border); }
@@ -347,7 +352,7 @@
 
 .diff-body {
   max-height: 46vh; overflow: auto;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
 }
 .diff-body .pad { padding: 8px; }
 .diff-hunk + .diff-hunk { border-top: 1px dashed var(--border); }

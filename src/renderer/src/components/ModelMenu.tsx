@@ -170,7 +170,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
       <button
         ref={triggerRef}
         type="button"
-        className="model-menu-trigger"
+        className="composer-ctl model-menu-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Model ${label}`}
@@ -181,7 +181,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
         <ChevronDown size={12} className="model-menu-chevron" />
       </button>
-      {effortShown && <label className="model-menu-effort">
+      {effortShown && <label className="composer-ctl model-menu-effort">
         <span>Reasoning</span>
         <select
           className="chat-control"

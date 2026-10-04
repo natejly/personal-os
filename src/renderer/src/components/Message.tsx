@@ -163,7 +163,7 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
   return (
     <div className="files-changed" title={ch.files.map((f) => `${f.status} ${f.path}`).slice(0, 30).join('\n')}>
       <FileText size={12} /> Files changed ({ch.count}) ·{' '}
-      <button className="ghost-btn" disabled={busy} onClick={go}>{undone ? 'Redo' : 'Undo'}</button>
+      <button className="ghost-btn sm" disabled={busy} onClick={go}>{undone ? 'Redo' : 'Undo'}</button>
       {note && <span className="files-changed-note">{note}</span>}
     </div>
   )
@@ -214,7 +214,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
-      <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
+      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a mark. */}
+      {!isUser && <div className="avatar"><Sparkles size={14} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (
@@ -223,19 +224,22 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             <div className="user-bubble"><div className="user-text">{message.content}</div></div>
           )
         ) : (
-          <div className="markdown">
+          <div className="msg-body">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             <BodyBoundary resetKey={message.id}>
               {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
+              {/* Only the rendered text lives in .markdown: its element rules (p, ul, li) out-rank the
+                  single-class rules the cards above are styled with. Its streaming class draws the cursor. */}
               {message.content ? (
-                <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
+                <div className={streaming ? 'markdown streaming' : 'markdown'}>
+                  <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
+                </div>
               ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
                 <Thinking />
               ) : null}
             </BodyBoundary>
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
-            {streaming && message.content && <span className="cursor" />}
             {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
@@ -249,8 +253,10 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
         {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
-        {!streaming && !editing && (
-          <div className="msg-actions">
+        {/* Always mounted and only hidden while the reply streams: the row's height is reserved, so
+            nothing lands below the fold when the stream ends. */}
+        {!editing && (
+          <div className={streaming ? 'msg-actions streaming' : 'msg-actions'} aria-hidden={streaming || undefined}>
             {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
             {message.model && (
               <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>

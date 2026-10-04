@@ -137,10 +137,11 @@ export default function UsageView(): JSX.Element {
   return (
     <div className="usage">
       <div className="usage-head">
-        <div className="usage-ranges">
-          {RANGES.map((d) => <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>{d}d</button>)}
+        <div className="seg" role="group" aria-label="Range">
+          {RANGES.map((d) => <button key={d} type="button" className={days === d ? 'active' : ''} aria-pressed={days === d} title={`Last ${d} days`} onClick={() => setDays(d)}>{d}d</button>)}
         </div>
-        <button className="icon-btn ghost" aria-label="Refresh usage" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
+        <span className="spacer" />
+        <button className="icon-btn" aria-label="Refresh usage" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
       </div>
 
       {empty ? (
@@ -181,7 +182,7 @@ export default function UsageView(): JSX.Element {
         </>
       )}
 
-      <h4 className="usage-sub">Prices</h4>
+      <h4>Prices</h4>
       <p className="muted small">Read from your LiteLLM proxy. Saving re-prices the whole history.</p>
       <PriceEditor report={report} onSaved={(prices) => setReport((r) => (r ? { ...r, prices } : r))} />
     </div>

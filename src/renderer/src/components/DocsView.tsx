@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
+  FileText, Files, PanelRight, X, Columns2, Eye, Pencil,
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
@@ -31,6 +31,7 @@ import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
 import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
+import SidebarToggle from './SidebarToggle'
 
 const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads'], ['pages', 'Pages']]
 
@@ -61,13 +62,12 @@ export default function DocsView(): JSX.Element {
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
   const docFocusId = useStore((s) => s.docFocusId)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const section = useStore((s) => s.filesSection)
   const libraryScope = useStore((s) => s.libraryScope)
   const { openFiles, setLibraryScope } = useStore()
   const {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
-    setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, openDailyNote
+    setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote
   } = useStore()
   // Select the status itself, not `liveDoc(status)`: that builds a new object on every call, and a
   // selector whose result is never identical re-renders forever the moment a recording is live.
@@ -317,7 +317,7 @@ export default function DocsView(): JSX.Element {
   return (
     <main className="page docs-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         {section === 'notes' && <button
           className={`icon-btn no-drag ${treeOpen ? 'on' : ''}`} title={treeOpen ? 'Hide file tree' : 'Show file tree'}
           aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}
@@ -352,10 +352,10 @@ export default function DocsView(): JSX.Element {
         )}
 
         {!activeDoc ? (
-          <section className="docs-empty">
-            <FileText size={30} />
+          <section className="empty-state">
+            <FileText size={28} />
             <h2>Nothing open</h2>
-            <p className="muted">Pick a file on the left, or start a new one.</p>
+            <p>{treeOpen ? 'Pick a file on the left, or start a new one.' : 'Show the file tree to pick a file, or start a new one.'}</p>
             <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} />
           </section>
         ) : (
@@ -365,7 +365,7 @@ export default function DocsView(): JSX.Element {
                 {tabDocs.map((d) => (
                   <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
                     <FileText size={11} />{d.title || 'Untitled'}
-                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={10} /></span>
+                    <span className="tab-x" role="button" title="Close tab" aria-label={`Close ${d.title || 'Untitled'}`} onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={11} /></span>
                   </button>
                 ))}
               </div>
@@ -374,6 +374,7 @@ export default function DocsView(): JSX.Element {
             <div className="doc-toolbar">
               <input
                 className="doc-title-input"
+                aria-label="Title"
                 value={title}
                 placeholder="Untitled"
                 onChange={(e) => editDocTitle(e.target.value)}

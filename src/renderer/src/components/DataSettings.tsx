@@ -72,19 +72,23 @@ export default function DataSettings(): JSX.Element {
       </div>
 
       {info?.pending_restore && (
-        <p className="muted" role="status">
-          A restore is waiting for the next start. <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>{' '}
-          <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
-        </p>
+        <div className="data-row pending" role="status">
+          <span className="toggle-text"><b>A restore is waiting</b><small>It is applied the next time Grain starts.</small></span>
+          <div className="button-row">
+            <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
+            <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>
+          </div>
+        </div>
       )}
 
       {info?.restore_failed && !info.pending_restore && (
-        <p className="muted" role="alert">
-          The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.{' '}
+        <div className="data-row pending" role="alert">
+          <span className="toggle-text"><b>The last restore was not applied</b><small>The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.</small></span>
           <button className="ghost-btn" onClick={() => void cancelRestore()}>Dismiss</button>
-        </p>
+        </div>
       )}
 
+      {info && info.backups.length > 0 && <h4>Backups</h4>}
       {info && info.backups.length > 0 && (
         <ul className="data-list" aria-label="Backups">
           {info.backups.map((b) => {
@@ -92,13 +96,14 @@ export default function DataSettings(): JSX.Element {
             return (
               <li key={b.name} className="data-row">
                 <span className="toggle-text"><b>{when}</b><small>{KIND_LABEL[b.kind] ?? b.kind} · {formatBytes(b.size)}</small></span>
-                <button className="ghost-btn" onClick={() => void restore(b.name, when)}><RotateCcw size={14} /> Restore…</button>
+                <button className="ghost-btn sm" onClick={() => void restore(b.name, when)}><RotateCcw size={13} /> Restore…</button>
               </li>
             )
           })}
         </ul>
       )}
 
+      <h4>Export and location</h4>
       <div className="data-row">
         <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, pasted images, kept meeting audio, desk outputs, and conversations, memories and files as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included. The export still holds your personal data, so keep it private.</small></span>
         <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>

@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { askLocked, type ApprovalDecision, type ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 
-/** The one action row of an ask card: why it asked, Approve / Deny (only when `decide` is given; a dedicated card
- *  has its own), a note for the denial, then the grants: "Always in this chat", and the rules it can save (editable,
- *  shown verbatim) or else "Always". Forced cards (taint, plan mode, a repeated call) and external writes get no
- *  whole-tool grant; a forced card saves no rule either: the backend would answer it once anyway. */
+/** The action rows of an ask card: why it asked, Approve / Deny (only when `decide` is given; a dedicated card
+ *  has its own), then one quiet "Don't ask again" line holding the grants: "in this chat", and the rules it can
+ *  save (editable, shown verbatim) or else "in every chat", plus a denial with a note to the model. Forced cards
+ *  (taint, plan mode, a repeated call) and external writes get no whole-tool grant; a forced card saves no rule
+ *  either: the backend would answer it once anyway. */
 export default function ApprovalRules({ event, conversationId, decide }: {
   event: ToolEvent
   conversationId: string
@@ -20,6 +21,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
   const wholeTool = !event.forced && !askLocked(perm?.danger) && !askLocked(danger)
+  const anyGrant = wholeTool || canSave
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return
     setBusy(true)
@@ -43,25 +45,33 @@ export default function ApprovalRules({ event, conversationId, decide }: {
           ))}
         </div>
       )}
-      <div className="approval-actions">
-        {decide && (
-          <>
-            <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
-            <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
-          </>
+      {decide && (
+        <div className="approval-actions">
+          <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
+          <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
+        </div>
+      )}
+      <div className="approval-more">
+        {anyGrant && <span className="approval-more-label">Don&apos;t ask again:</span>}
+        {wholeTool && (
+          <button type="button" className="link" disabled={busy} title="Always allow this tool in this chat"
+            onClick={() => void grant('always_chat')()}>in this chat</button>
         )}
-        {!noting && <button type="button" className="link small" title="Deny with a note to the model" onClick={() => setNoting(true)}>add note</button>}
-        {wholeTool && <button type="button" className="ghost-btn" disabled={busy} onClick={() => void grant('always_chat')()}>Always in this chat</button>}
         {canSave ? (
-          <button type="button" className="ghost-btn" disabled={busy} onClick={() => void grant('always_rule', { rules: rules.map((r) => r.trim()).filter(Boolean) })()}>
-            Always allow {rules.length === 1 ? <code>{rules[0]}</code> : `these ${rules.length} rules`}
+          <button type="button" className="link" disabled={busy} title="Save and always allow what matches"
+            onClick={() => void grant('always_rule', { rules: rules.map((r) => r.trim()).filter(Boolean) })()}>
+            for {rules.length === 1 ? <code>{rules[0]}</code> : `these ${rules.length} rules`}
           </button>
-        ) : wholeTool && <button type="button" className="ghost-btn" disabled={busy} onClick={() => void grant('always_global')()}>Always</button>}
+        ) : wholeTool && (
+          <button type="button" className="link" disabled={busy} title="Always allow this tool, in every chat"
+            onClick={() => void grant('always_global')()}>in every chat</button>
+        )}
+        {!noting && <button type="button" className="link approval-deny-note" disabled={busy} title="Deny with a note to the model" onClick={() => setNoting(true)}>Deny with a note…</button>}
       </div>
       {noting && (
         <form className="approval-actions" onSubmit={(e) => { e.preventDefault(); void run(() => approveTool(event.id, 'deny', conversationId, { note: note.trim() || undefined }))() }}>
           <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Tell the model what to do instead" aria-label="Note to the model" />
-          <button type="submit" className="ghost-btn danger" disabled={busy}>Deny and send</button>
+          <button type="submit" className="ghost-btn sm danger" disabled={busy}>Deny and send</button>
         </form>
       )}
     </div>

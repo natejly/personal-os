@@ -12,6 +12,7 @@ import {
   parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group, type Row, type TreeNode
 } from '../lib/docTree'
 import ProjectChip from './ProjectChip'
+import { rowButton } from '../lib/rowButton'
 
 /**
  * What is being dragged, for the duration of the drag. `dataTransfer` only hands its payload over on
@@ -247,9 +248,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       key={d.id}
       className={`doc-row ${d.id === activeId ? 'active' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
-      onClick={() => void openDoc(d.id)}
-      role="button"
-      tabIndex={0}
+      {...rowButton(() => void openDoc(d.id))}
       draggable
       onDragStart={(e) => {
         dragging = { kind: 'doc', id: d.id, scope: scopeOf(d), folder: d.folder }

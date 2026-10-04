@@ -36,7 +36,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
 
   return (
     <div className="perm-rules">
-      <h5>Permission rules</h5>
+      <h4>Permission rules</h4>
       <p className="muted small">
         A rule is <code>Tool</code> or <code>Tool(pattern)</code>: <code>Bash(git push *)</code>, <code>Read(~/Documents/**)</code>, <code>Edit(~/Projects/app/**)</code>, <code>Agent(researcher)</code>.
         <code>*</code> matches any run of characters, <code>?</code> one. A command line is split on <code>&amp;&amp; || ; |</code> and every part is judged.
@@ -44,11 +44,11 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
       </p>
       {KINDS.map((k) => (
         <div key={k.key} className="perm-rule-group">
-          <b>{k.label}</b> <small className="muted">{k.hint}</small>
+          <span className="toggle-text"><b>{k.label}</b><small>{k.hint}</small></span>
           <ul>
             {rules[k.key].map((r) => (
               <li key={r}><code>{r}</code>
-                <button className="icon-btn" aria-label={`Remove ${r}`} onClick={() => onChange({ ...rules, [k.key]: rules[k.key].filter((x) => x !== r) })}><X size={12} /></button>
+                <button type="button" className="icon-btn sm" aria-label={`Remove ${r}`} title="Remove" onClick={() => onChange({ ...rules, [k.key]: rules[k.key].filter((x) => x !== r) })}><X size={12} /></button>
               </li>
             ))}
           </ul>
@@ -58,9 +58,9 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
           </form>
         </div>
       ))}
-      {bad && <p className="error small">{bad}</p>}
+      {bad && <p className="small err" role="alert">{bad}</p>}
       <div className="perm-rule-test">
-        <b>Test a call</b>
+        <span className="toggle-text"><b>Test a call</b><small>The test reads the rules you have saved. Rules are conveniences; the sandbox is the boundary.</small></span>
         <form className="perm-rule-add" onSubmit={(e) => { e.preventDefault(); void test() }}>
           <select value={tool} onChange={(e) => { setTool(e.target.value as TesterTool); setResult(null) }} aria-label="Tool to test">
             {TESTERS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
@@ -77,7 +77,6 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
             {result.subjects.length > 0 && <><br /><small className="muted">Matched on {result.subjects.map((s) => <code key={s}>{s} </code>)}</small></>}
           </p>
         )}
-        <small className="muted">The test reads the rules you have saved. Rules are conveniences; the sandbox is the boundary.</small>
       </div>
     </div>
   )

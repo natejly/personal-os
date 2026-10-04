@@ -4,6 +4,17 @@
   --radius: 10px;
   --sidebar-w: 260px;
   --page-agent-w: 380px;
+  /* The reading column: messages, the composer and the plan panel all share it. */
+  --chat-col: 760px;
+  /* One status vocabulary for runs, desks, jobs and inbox rows. */
+  --st-working: var(--warn);
+  --st-needs-you: var(--accent);
+  --st-done: var(--ok);
+  --st-failed: var(--danger);
+  --st-idle: var(--text-faint);
+  /* A card that is waiting on the user: same edge and wash wherever it appears. */
+  --await-border: color-mix(in srgb, var(--accent) 45%, transparent);
+  --await-fill: color-mix(in srgb, var(--accent) 8%, transparent);
   /* Native form controls / dropdowns follow the app theme. */
   color-scheme: dark;
 
@@ -29,12 +40,19 @@
   --zone-border: color-mix(in srgb, var(--accent) 55%, transparent);
   /* Scope chips / calendar events: the flat #3b9edb is 4.3:1 on its own tint. */
   --info: #7cc2ea;
+  /* Markdown syntax in the doc editor. The light values are darker: these are 2.1-2.5:1 on white. */
+  --tk-code: #7fb8a8;
+  --tk-math: #c39ae0;
+  --tk-link: #74a8e8;
   --user-bubble: #2f2d2a;
   --danger: #e5484d;
   --ok: #46a758;
   --warn: #febc2e;
   --hover: rgba(255, 255, 255, 0.06);
   --active: rgba(255, 255, 255, 0.1);
+  /* Floating chrome (menus, popovers, toasts, the dock): it overlays content, so it gets depth.
+     Defined here rather than in canvas.css so views that never load the canvas can use it. */
+  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.34);
 }
 
 :root[data-theme='light'] {
@@ -57,9 +75,17 @@
   --focus-ring: #5a7d5c;
   /* Scope chips: the dark-theme blue is far too light on a light tint. */
   --info: #1c6890;
+  --tk-code: #2f7d6b;
+  --tk-math: #7d4bb0;
+  --tk-link: #2c6cb8;
+  /* The dark theme's status colours are text on white here: #febc2e is 1.7:1. These are 5.3:1 or better. */
+  --danger: #c62a2f;
+  --ok: #2b7a3d;
+  --warn: #8a5a00;
   --user-bubble: #ebe8e2;
   --hover: rgba(0, 0, 0, 0.05);
   --active: rgba(0, 0, 0, 0.09);
+  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
 }
 @media (prefers-color-scheme: light) {
   :root[data-theme='system'] {
@@ -82,9 +108,16 @@
     --focus-ring: #5a7d5c;
     /* Scope chips: the dark-theme blue is far too light on a light tint. */
     --info: #1c6890;
+    --tk-code: #2f7d6b;
+    --tk-math: #7d4bb0;
+    --tk-link: #2c6cb8;
+    --danger: #c62a2f;
+    --ok: #2b7a3d;
+    --warn: #8a5a00;
     --user-bubble: #ebe8e2;
     --hover: rgba(0, 0, 0, 0.05);
     --active: rgba(0, 0, 0, 0.09);
+    --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
   }
 }
 
@@ -270,7 +303,8 @@ kbd {
 .settings-btn { font-weight: 400; color: var(--text-muted); }
 .settings-btn:hover { color: var(--text); }
 .new-chat:hover, .settings-btn:hover { background: var(--hover); }
-.settings-btn.on { background: var(--active); color: var(--text); }
+/* The first row, pinned above the scroller: nav-row metrics, but full-strength text so it leads. */
+.new-chat { margin: 0 10px 2px; color: var(--text); flex-shrink: 0; }
 .new-chat kbd, .settings-btn kbd { opacity: 0; transition: opacity 0.12s; }
 .new-chat:hover kbd, .settings-btn:hover kbd,
 .new-chat:focus-visible kbd, .settings-btn:focus-visible kbd { opacity: 1; }
@@ -307,7 +341,9 @@ kbd {
 .convo-item.active { background: var(--active); }
 .convo-item .ghost { opacity: 0; }
 /* The hover-only delete must not set the row height: at 28px it made chat rows 40px tall. */
-.convo-item .icon-btn { width: 22px; height: 22px; margin: -2px -4px -2px 0; flex-shrink: 0; }
+.convo-item .icon-btn { position: relative; width: 22px; height: 22px; margin: -2px -4px -2px 0; flex-shrink: 0; }
+/* 22px to look at, 24px to hit, without the row growing to fit it. */
+.convo-item .icon-btn::before { content: ''; position: absolute; inset: -1px; }
 .convo-item .ghost:focus-visible { opacity: 1; }
 .convo-list h4.pinned-head { display: flex; align-items: center; gap: 5px; }
 .convo-list h4.archived-head { margin: 8px 0 2px; }
@@ -362,7 +398,8 @@ kbd {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
 }
-.sidebar-collapsed .chat-header { padding-left: 84px; }
+/* With the sidebar hidden the window's traffic lights sit over the left end of every title bar. */
+.sidebar-collapsed .chat-header, .sidebar-collapsed .page-header { padding-left: 84px; }
 .chat-title { flex: 1; min-width: 0; display: flex; }
 .title-btn {
   display: flex; align-items: center; gap: 6px;
@@ -380,6 +417,8 @@ kbd {
   border-radius: 6px; padding: 4px 8px; outline: 0; width: 320px;
 }
 .header-right { display: flex; align-items: center; gap: 8px; }
+/* Pushes whatever follows it to the far end of any flex row. */
+.spacer { flex: 1; }
 /* Todos / Calendar / Mail: the last thing in every title bar, set off from the view's own controls. */
 .app-switcher {
   display: flex; align-items: center; gap: 2px;
@@ -391,7 +430,7 @@ kbd {
 .app-badge {
   position: absolute; top: 1px; right: 0;
   min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
-  background: var(--accent); color: #fff;
+  background: var(--accent-solid); color: var(--on-accent);
   font-size: 9px; font-weight: 600; line-height: 14px; text-align: center;
   pointer-events: none;
 }
@@ -414,27 +453,31 @@ kbd {
 .model-picker select:hover { border-color: var(--border-strong); }
 .model-picker svg { position: absolute; right: 8px; pointer-events: none; }
 
-/* Cursor-style model picker: trigger, searchable list, Edit panel for effort and Fast. */
-.model-menu { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 0 1 auto; }
-.model-menu-effort {
+/* The controls under the text box (model, reasoning, plan mode) share one quiet look: 24px tall,
+   borderless, 12px, tinted only on hover. */
+.composer-ctl {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
-  color: var(--text-faint); font: 12px var(--font);
+  height: 24px; padding: 0 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text-muted); font: 12px var(--font);
+  white-space: nowrap; cursor: pointer;
 }
+.composer-ctl:hover, .composer-ctl:focus-within, .composer-ctl[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+
+/* Model picker: trigger, searchable list, Edit panel for effort and Fast. */
+.model-menu { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 0 1 auto; }
+/* The label and its select read as one control; the select draws no box of its own. */
+.model-menu-effort { padding-right: 2px; }
+.model-menu-effort > span { color: var(--text-faint); }
 .model-menu-effort .chat-control {
   max-width: none;
   appearance: none;
-  padding-right: 16px;
+  padding: 0 16px 0 2px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 2px center;
   background-size: 8px 6px;
 }
-.model-menu-trigger {
-  display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; max-width: 100%;
-  height: 24px; padding: 0 6px 0 8px; border: 0; border-radius: 6px;
-  background: transparent; color: var(--text-muted); font: 12px var(--font); cursor: pointer;
-}
-.model-menu-trigger:hover, .model-menu-trigger[aria-expanded='true'] { background: var(--hover); color: var(--text); }
+.model-menu-trigger { min-width: 0; flex: 0 1 auto; max-width: 100%; padding-right: 6px; }
 .model-menu-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-menu-suffix { color: var(--text-faint); flex-shrink: 0; }
 .model-menu-chevron { flex-shrink: 0; opacity: 0.7; }
@@ -442,7 +485,7 @@ kbd {
   position: fixed; z-index: 80; width: 280px;
   max-height: calc(100vh - 16px);
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); padding: 4px;
+  box-shadow: var(--shadow-float); padding: 4px;
 }
 .model-menu-pop { display: flex; flex-direction: column; overflow: hidden; }
 .model-menu-params { width: 220px; overflow-y: auto; }
@@ -467,7 +510,7 @@ kbd {
 .model-menu-row-end { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .model-menu-check { color: var(--text-muted); }
 .model-menu-edit {
-  border: 0; border-radius: 5px; padding: 2px 6px;
+  border: 0; border-radius: 5px; padding: 2px 6px; min-height: 24px;
   background: transparent; color: var(--text-muted); font: 11px var(--font); cursor: pointer;
 }
 .model-menu-row:hover .model-menu-edit,
@@ -502,15 +545,22 @@ kbd {
 .page-agent .composer-wrap.compact .composer { border-radius: 12px; }
 
 .messages { flex: 1; overflow-y: auto; }
-.messages-inner { max-width: 760px; margin: 0 auto; padding: 24px 24px 12px; }
-.empty-state {
+/* The gutter is reserved on both sides from the start: the scrollbar appearing when a reply first
+   overflows no longer narrows the column mid-stream, and the column stays centred over the composer. */
+.chat-main > .messages { scrollbar-gutter: stable both-edges; }
+.messages-inner { max-width: var(--chat-col); margin: 0 auto; padding: 24px 24px 12px; }
+/* The new-chat screen. Not .empty-state: that is the page-level pattern, with its own spacing. */
+.chat-empty {
   height: 100%;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
+  padding: 0 24px;
   color: var(--text-muted);
 }
-.empty-state h1 { font-size: 30px; font-weight: 500; color: var(--text); margin: 0 0 8px; letter-spacing: -0.01em; }
-.empty-state p { margin: 0; }
+.chat-empty h1 { font-size: 30px; font-weight: 500; color: var(--text); margin: 0 0 8px; letter-spacing: -0.01em; text-align: center; }
+.chat-empty p { margin: 0; }
+.chat-starters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; max-width: 560px; }
+.chat-starters .ghost-btn { text-align: left; }
 
 .msg { display: flex; gap: 12px; margin-bottom: 22px; }
 .avatar {
@@ -521,6 +571,10 @@ kbd {
 }
 .msg.assistant .avatar { background: var(--accent-solid); color: var(--on-accent); }
 .bubble { min-width: 0; flex: 1; }
+/* An assistant reply: reasoning, tool rows and cards, then the text. The rhythm is set here so the
+   cards share it without sitting inside .markdown, whose element rules would restyle their lists. */
+.msg-body { line-height: 1.65; word-break: break-word; }
+.msg-body > :last-child { margin-bottom: 0; }
 .msg.user .bubble {
   display: flex; flex-direction: column; align-items: flex-end;
   flex: 0 1 auto;
@@ -534,14 +588,17 @@ kbd {
   max-width: 100%;
 }
 .msg.user { flex-direction: row-reverse; }
-.user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+.user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 .msg-actions {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  margin-top: 4px; opacity: 0; transition: opacity 0.15s;
+  min-height: 28px; margin-top: 4px; opacity: 0; transition: opacity 0.15s;
 }
-.msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
+/* Shown on hover or keyboard focus, and always under the newest reply, where they are most wanted. */
+.msg:hover .msg-actions, .msg:focus-within .msg-actions, .msg.assistant:last-child .msg-actions { opacity: 1; }
+/* While the reply streams the row keeps its height but cannot be seen, focused or clicked. */
+.msg-actions.streaming { visibility: hidden; }
 .msg.user .msg-actions { justify-content: flex-end; }
-.files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted, var(--text)); }
+.files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .files-changed-note { margin-left: 6px; opacity: 0.8; }
 .msg-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .day-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-size: 11px; color: var(--text-faint); }
@@ -556,7 +613,7 @@ kbd {
 .msg-error {
   display: flex; align-items: center; gap: 6px;
   color: var(--danger); font-size: 13px; margin-top: 8px;
-  background: rgba(229, 72, 77, 0.1); padding: 8px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent); padding: 8px 10px; border-radius: 8px;
 }
 .render-fallback {
   white-space: pre-wrap; word-break: break-word; font: inherit; margin: 6px 0 0;
@@ -587,10 +644,18 @@ kbd {
 .thinking span:nth-child(2) { animation-delay: 0.15s; }
 .thinking span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-4px); opacity: 1; } }
-.cursor {
+.cursor,
+.markdown.streaming > :is(p, h1, h2, h3, h4):last-child::after,
+.markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
+.markdown.streaming > blockquote:last-child > p:last-child::after {
   display: inline-block; width: 7px; height: 15px; background: var(--accent);
   vertical-align: text-bottom; margin-left: 2px; animation: pulse 0.8s infinite;
 }
+/* The streaming cursor rides the end of the last line of text instead of dropping to a line of its
+   own under the block. A reply that currently ends in a code block, table or chart shows none. */
+.markdown.streaming > :is(p, h1, h2, h3, h4):last-child::after,
+.markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
+.markdown.streaming > blockquote:last-child > p:last-child::after { content: ''; }
 
 /* ---------- Markdown ---------- */
 .markdown { line-height: 1.65; word-break: break-word; }
@@ -601,11 +666,13 @@ kbd {
 .markdown h1 { font-size: 20px; } .markdown h2 { font-size: 17px; } .markdown h3 { font-size: 15px; }
 .markdown ul, .markdown ol { padding-left: 22px; margin: 0 0 12px; }
 .markdown li { margin: 3px 0; }
+.markdown li > ul, .markdown li > ol { margin-bottom: 0; }
 .markdown blockquote {
   margin: 0 0 12px; padding: 4px 14px;
   border-left: 3px solid var(--border-strong); color: var(--text-muted);
 }
 .markdown .ai-run { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--accent); color: var(--text-muted); }
+.markdown blockquote > :last-child { margin-bottom: 0; }
 .markdown code {
   font-family: var(--mono); font-size: 12.5px;
   background: var(--hover); padding: 2px 5px; border-radius: 4px;
@@ -615,7 +682,7 @@ kbd {
 .md-table-scroll table { margin: 0; }
 .md-table-scroll th, .md-table-scroll td { word-break: normal; overflow-wrap: break-word; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px 10px; }
-.markdown th { background: var(--hover); }
+.markdown th { background: var(--hover); text-align: left; }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .code-block {
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -630,7 +697,8 @@ kbd {
 .code-block pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.5; }
 
 /* ---------- Composer ---------- */
-.composer-wrap { padding: 8px 24px 22px; max-width: 808px; width: 100%; margin: 0 auto; }
+/* Same column and side padding as .messages-inner, so the edges of the box line up with the transcript. */
+.composer-wrap { padding: 8px 24px 22px; max-width: var(--chat-col); width: 100%; margin: 0 auto; }
 .notice {
   font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 8px;
 }
@@ -660,32 +728,32 @@ kbd {
   padding: 6px 2px 0;
   min-width: 0;
 }
+/* A native select inside a .composer-ctl: the wrapper draws the hover and the size, so this is text only. */
 .chat-control {
   max-width: 48%;
-  height: 22px;
+  height: 24px;
   padding: 0 4px;
-  font: 11px var(--font);
-  color: var(--text-faint);
-  background: transparent;
-  border: 1px solid transparent;
+  font: 12px var(--font);
+  color: inherit;
+  background-color: transparent;
+  border: 0;
   border-radius: 6px;
   outline: 0;
   cursor: pointer;
   text-overflow: ellipsis;
-  transition: color var(--dur-hover) ease, background var(--dur-hover) ease, border-color var(--dur-hover) ease;
 }
-.chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
 .composer-wrap:not(.compact) .composer-footer { padding: 6px 8px 0; }
 .skip-perms.on { color: var(--danger); }
 .private-chat.on { color: var(--accent); }
 .convo-private { flex: none; color: var(--text-faint); }
 .private-banner { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
-.composer-wrap:not(.compact) .chat-control { font-size: 12px; height: 24px; }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }
+/* The composer holds focus almost all the time, so its focused state is a firmer edge and not the
+   3px halo other fields get: a ring that never goes away stops meaning anything. */
 .composer:focus-within {
-  border-color: transparent;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .composer .smart-ta { min-width: 0; min-height: 24px; }
 /* The saved-command menu a leading '/' opens (CaretMenu without an anchor) hangs above the text box. */
@@ -697,6 +765,7 @@ kbd {
   flex: 1; resize: none; background: none; border: 0; outline: 0;
   line-height: 1.5; max-height: 240px; padding: 4px 0;
 }
+.composer textarea::placeholder { color: var(--text-faint); }
 .send {
   width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   background: var(--accent-solid); color: var(--on-accent);
@@ -722,7 +791,7 @@ kbd {
 .icon-btn:hover { background: var(--hover); color: var(--text); }
 .ghost-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 10px; border-radius: 8px; font-size: 13px; white-space: nowrap;
+  padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; white-space: nowrap;
   color: var(--text-muted); border: 1px solid var(--border);
 }
 .ghost-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
@@ -777,13 +846,15 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
    `.modal input` stretched the visually hidden checkbox to full width. */
 .modal label.toggle-row { flex-direction: row; align-items: center; gap: 16px; }
 .modal label.toggle-row .toggle-text { gap: 2px; font-size: 13px; }
-.modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.45; }
+.modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.5; }
 .modal label.memory-mode-opt { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .modal .toggle-row input { width: 1px; padding: 0; border: 0; }
 /* Same for checkbox rows and "Hold for [n] seconds": keep the box or field beside its text. */
 .modal label.check:not(.modal-free *), .modal label.chip-check-row:not(.modal-free *), .modal label.inline:not(.modal-free *) { flex-direction: row; align-items: center; white-space: normal; }
 .modal label.chip-check-row:not(.modal-free *) { margin-bottom: 0; }
 .modal label.inline input { width: 110px; }
+/* A switch that cannot be flipped right now (no system audio to capture, say) reads as unavailable. */
+.toggle-row:has(input:disabled) { opacity: 0.55; cursor: default; }
 .accent-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 2px; }
 .accent-swatch {
   width: 28px; height: 28px; padding: 0; border-radius: 50%;
@@ -792,7 +863,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 }
 .accent-swatch.on { border-color: var(--text); }
 .accent-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.accent-name { font-size: 12px; color: var(--text-muted); }
 .input-row { display: flex; gap: 6px; align-items: center; }
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
@@ -821,9 +891,63 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-tabs button.active { background: var(--hover); color: var(--text); font-weight: 500; }
 .settings-tabs button.active svg { color: var(--accent); }
 .settings-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The rail is grouped; each group opens with a small label. */
+.settings-tab-group { padding: 14px 10px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.settings-tab-group:first-child { padding-top: 2px; }
 .settings-pane { flex: 1; min-width: 0; overflow-y: auto; }
-.settings-pane section { border-bottom: 0; padding: 20px 28px; }
-.settings-modal footer { position: static; }
+/* `.settings-modal` is in the selector to outrank `.modal section`, which otherwise sets the padding. */
+.settings-modal .settings-pane > section { border-bottom: 0; padding: 20px 28px 28px; }
+/* A card inside a tab is not a tab: it keeps its own padding, not the pane's. */
+.settings-pane > section section:not(.modal-free *) { padding: 0; }
+/* One rhythm for every tab: a column with a single gap, and nothing inside brings a margin of its own.
+   The Knowledge base tab lays itself out (.knowledge-section). */
+.settings-pane > section:not(.knowledge-section),
+.settings-pane .mtg-settings, .settings-pane .usage, .settings-pane .perm-rules, .settings-pane .workspace-roots {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.settings-pane > section:not(.knowledge-section) > *,
+.settings-pane > section .mtg-settings > *, .settings-pane > section .usage > *,
+.settings-pane > section .perm-rules > *, .settings-pane > section .workspace-roots > * { margin: 0; }
+/* The tab's title is a heading, so the uppercase eyebrow is left to the sections under it. */
+.settings-pane h3:not(.modal-free *) { font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
+.settings-pane > section:not(.knowledge-section) > h3 { margin-bottom: -8px; }
+.settings-pane .knowledge-head h3:not(.modal-free *) { margin: 0 auto 0 0; }
+.settings-pane h4:not(.modal-free *) { margin: 12px 0 -4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.settings-pane .trash-group h4 { margin: 12px 0 4px; }
+/* What a setting is, and one line about it: the same block beside a switch, above a field, left of a control. */
+.settings-pane .toggle-text:not(.modal-free *) { gap: 2px; min-width: 0; font-size: 13px; }
+.settings-pane .toggle-text:not(.modal-free *) b { font-weight: 500; color: var(--text); }
+.settings-pane .toggle-text:not(.modal-free *) small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.settings-pane label.toggle-row { padding: 0; }
+/* Above a field the block is only as tall as its text; `flex: 1` is for the row layouts. */
+.settings-pane label:not(.toggle-row):not(.setting-row) > .toggle-text { flex: none; }
+/* A setting with a compact control is a row: label and description left, control right at its own width. */
+.settings-pane .setting-row, .settings-pane label.setting-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-pane .setting-row > .toggle-text { flex: 1; }
+.settings-pane .setting-row > :not(.toggle-text) { flex: none; }
+.settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
+.settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
+.num-unit { display: inline-flex; align-items: center; gap: 8px; }
+.num-unit em { font-style: normal; font-size: 12px; color: var(--text-muted); }
+.settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Short rows that belong together (the Views switches) sit in one bordered list. */
+.setting-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; }
+.settings-pane .setting-list > label.toggle-row { margin: 0; padding: 9px 12px; }
+.setting-list > * + * { border-top: 1px solid var(--border); }
+/* The activity-style field (Meetings) is the same row here; `.modal label` had stacked it. */
+.settings-pane label.act-field { flex-direction: row; align-items: center; gap: 16px; padding: 0; border-bottom: 0; }
+.settings-pane .act-field b { color: var(--text); }
+.settings-pane .act-field small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.settings-pane .act-field > input, .settings-pane .act-field > select { flex: 0 1 280px; width: 280px; }
+/* A list with nothing in it yet, inside a pane or a card: one quiet line rather than a full-page empty state. */
+.empty-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px; border: 1px dashed var(--border-strong); border-radius: 10px; color: var(--text-muted); font-size: 13px; }
+.empty-row svg { flex-shrink: 0; color: var(--text-faint); }
+/* Focus is parked on the dialog itself after "Keep editing"; a ring around the whole window says nothing. */
+.settings-modal[tabindex]:focus-visible { outline: 0 !important; }
+.settings-modal footer { position: static; align-items: center; }
+/* "Unsaved changes", and the question asked before a draft is thrown away, sit left of the buttons. */
+.settings-modal .footer-note { margin-right: auto; font-size: 13px; color: var(--text-muted); }
+.settings-modal .footer-note.ask { color: var(--text); font-weight: 500; }
 /* The knowledge graph and the memory list need room side by side: this tab widens the dialog. */
 .modal.settings-modal.wide-pane { width: min(1240px, calc(100vw - 60px)); height: min(860px, calc(100vh - 60px)); }
 /* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
@@ -845,6 +969,10 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   .settings-body { flex-direction: column; }
   .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
   .settings-tabs button { flex: 0 0 auto; }
+  /* In the strip a group label is an inline marker between runs of tabs. */
+  .settings-tab-group, .settings-tab-group:first-child { flex: 0 0 auto; align-self: center; padding: 0 4px 0 12px; }
+  .settings-tab-group:first-child { padding-left: 2px; }
+  .settings-modal .settings-pane > section { padding-left: 14px; padding-right: 14px; }
 }
 
 ::-webkit-scrollbar { width: 10px; }
@@ -852,21 +980,25 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
 /* ---------- Backend error ---------- */
-.backend-error { max-width: 520px; margin: 0 auto; padding: 120px 24px; text-align: center; color: var(--text-muted); }
+/* The boot and could-not-start screens borrow the shell's box but not its sidebar grid: as a grid
+   their one child landed in the 260px sidebar column. Auto margins centre it and, unlike
+   justify-content, leave the top reachable when the window is shorter than the card. */
+.app.loading { display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
+.app.loading > svg { margin: auto; }
+.boot-drag { position: absolute; top: 0; left: 0; right: 0; height: 52px; }
+.backend-error { width: 100%; max-width: 520px; margin: auto; padding: 48px 24px; text-align: center; color: var(--text-muted); }
 .backend-error h2 { color: var(--text); margin: 12px 0 4px; }
 .backend-error pre { text-align: left; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap; color: var(--danger); }
 .backend-error code { font-family: var(--mono); font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
-.support-settings { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
-.support-settings h4 { margin: 12px 0 0; font-size: 13px; color: var(--text); }
-.support-settings .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.support-settings .button-row button { display: inline-flex; align-items: center; gap: 6px; }
-.backend-actions { display: flex; gap: 8px; justify-content: center; -webkit-app-region: no-drag; }
-.backend-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 10px 10px; color: var(--text-muted); box-shadow: 0 8px 24px rgba(0,0,0,0.3); -webkit-app-region: no-drag; }
+/* The card is a drag region so the window can be moved from it; its controls have to opt back out,
+   or the window manager swallows their clicks. */
+.backend-error-actions, .backend-error details { -webkit-app-region: no-drag; }
+.backend-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 10px 10px; color: var(--text-muted); box-shadow: var(--shadow-float); -webkit-app-region: no-drag; }
 
 /* ---------- Toasts ---------- */
 /* Top right under the 52px page header: at the bottom, a narrow window put the stack over the composer's controls. */
 .toasts { position: fixed; top: 64px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 300; }
-.toast { background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); max-width: 360px; animation: slide-in 0.2s ease; }
+.toast { background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: var(--shadow-float); max-width: 360px; animation: slide-in 0.2s ease; }
 .toast.error { border-color: var(--danger); color: var(--danger); }
 .toast.learned { border-color: var(--accent); }
 .toast { display: flex; align-items: center; gap: 12px; }
@@ -891,7 +1023,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 
 /* Rendered inside .toasts, so the two share one bottom-right stack. */
 .pending-sends { display: flex; flex-direction: column; gap: 8px; }
-.pending-send { display: flex; align-items: flex-start; gap: 10px; width: 360px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-left: 2px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); animation: slide-in 0.2s ease; }
+.pending-send { display: flex; align-items: flex-start; gap: 10px; width: 360px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-left: 2px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; box-shadow: var(--shadow-float); animation: slide-in 0.2s ease; }
 .pending-send.unproven, .pending-send.failed, .pending-send.expired { border-left-color: var(--danger); }
 .pending-icon { color: var(--text-muted); margin-top: 1px; }
 .pending-send.unproven .pending-icon, .pending-send.failed .pending-icon, .pending-send.expired .pending-icon { color: var(--danger); }
@@ -903,21 +1035,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .pending-actions .ghost-btn { padding: 4px 7px; font-size: 12px; gap: 4px; }
 
 /* ---------- Project switcher ---------- */
-.project-switcher { position: relative; margin: 2px 10px 6px; }
-.project-current { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--hover); font-weight: 600; }
-.project-current:hover { background: var(--active); }
-.project-current svg.rot { transform: rotate(180deg); }
-.project-current > svg { color: var(--text-muted); margin-left: auto; transition: transform 0.15s; }
-.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+/* The switcher itself is gone; its popover shell is what the space and send-to menus are built on. */
 .popover-backdrop { position: fixed; inset: 0; z-index: 30; }
-.project-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 31; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); }
-.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left; }
-.project-item:hover { background: var(--hover); }
-.project-item.active { background: var(--active); }
-.project-item.new { color: var(--text-muted); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; padding-top: 9px; }
-.project-stats { font-size: 11px; color: var(--text-faint); }
-.project-item .ghost { opacity: 0; }
-.project-item:hover .ghost { opacity: 1; }
+.project-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 31; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: var(--shadow-float); }
 
 /* ---------- Sidebar spaces ---------- */
 .section-actions { display: flex; gap: 2px; align-items: center; }
@@ -939,10 +1059,11 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .nav-item.active { background: var(--active); color: var(--text); }
 /* --text-faint drops to 3.85:1 over the lighter .active row background. */
 .nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.new-chat { margin-top: 4px; margin-bottom: 6px; color: var(--text); }
-.icon-btn.on { background: var(--active); color: var(--text); }
+/* One pressed look for every toggle button, whichever way the component marks it. */
+.icon-btn.on, .icon-btn.active, .icon-btn[aria-pressed='true'],
+.ghost-btn.on, .ghost-btn.active, .ghost-btn[aria-pressed='true'] { background: var(--active); color: var(--text); }
 .icon-btn.danger:hover { color: var(--danger); }
-.ghost-btn.danger { color: var(--danger); border-color: rgba(229,72,77,0.4); }
+.ghost-btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .ghost-btn.full { width: 100%; justify-content: center; margin-top: 12px; }
 
 /* ---------- Chat body + context drawer ---------- */
@@ -968,7 +1089,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .toggle-text small { color: var(--text-faint); font-size: 11px; }
 .switch { width: 32px; height: 18px; border-radius: 9px; background: var(--border-strong); position: relative; flex-shrink: 0; transition: background 0.15s; }
 .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
-.toggle-row input:checked + .switch { background: var(--ok); }
+.toggle-row input:checked + .switch { background: var(--accent-solid); }
 .toggle-row input:checked + .switch::after { transform: translateX(14px); }
 .toggle-row.plain { margin-bottom: 12px; }
 .ctx-tabs { display: flex; gap: 4px; padding: 10px 14px 0; }
@@ -979,7 +1100,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ctx-preview input { width: 100%; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; outline: 0; margin-bottom: 10px; }
 .ctx-used { padding: 10px 14px; }
 .ctx-meter { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-bottom: 6px; }
-.ctx-meter-fill { height: 100%; background: var(--accent, #d97757); opacity: .7; }
+.ctx-meter-fill { height: 100%; background: var(--accent); opacity: .7; }
 .ctx-meter-fill.hot { opacity: 1; }
 .ctx-summary { margin-top: 6px; font-size: 12px; }
 .ctx-summary pre { white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 6px 0; font-size: 11px; color: var(--text-faint); }
@@ -989,11 +1110,11 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ctx-used h5 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12px; color: var(--text-muted); }
 .ctx-used h5 .link { margin-left: auto; font-size: 11px; }
 .ctx-used ul { list-style: none; margin: 0; padding: 0; }
-.ctx-used li { padding: 5px 8px; border-radius: 6px; background: var(--hover); margin-bottom: 4px; font-size: 12px; line-height: 1.45; }
+.ctx-used li { padding: 5px 8px; border-radius: 6px; background: var(--hover); margin-bottom: 4px; font-size: 12px; line-height: 1.5; }
 .ctx-used li.stale { opacity: 0.5; text-decoration: line-through; }
 .ctx-used li em { color: var(--accent); font-style: normal; }
 .chunk-preview { color: var(--text-faint); font-size: 11px; margin-top: 3px; max-height: 60px; overflow: hidden; white-space: pre-wrap; }
-.ctx-chip { display: inline-flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-faint); padding: 2px 8px; border-radius: 10px; background: var(--hover); }
+.ctx-chip { display: inline-flex; gap: 8px; align-items: center; min-height: 24px; font-size: 11px; line-height: 1.2; color: var(--text-faint); padding: 2px 8px; border-radius: 12px; background: var(--hover); }
 .ctx-chip span { display: inline-flex; align-items: center; gap: 3px; }
 .ctx-chip:hover { color: var(--text); }
 /* An inline [n] citation in a reply: opens the passage it came from. */
@@ -1039,7 +1160,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .add-row select, .mem-meta select, .add-inline input, .node-panel select, .node-panel input, .node-panel textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: 0; }
 .check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
-.tag.global { background: rgba(59,158,219,0.15); color: var(--info); }
+.tag.global { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
 button.tag:hover:not(:disabled) { background: var(--active); }
 button.tag:disabled { cursor: default; }
 
@@ -1052,6 +1173,17 @@ button.tag:disabled { cursor: default; }
 .mem-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-faint); }
 .mem-meta select { padding: 2px 6px; font-size: 11px; border-radius: 6px; }
 .mem-actions { display: flex; flex-direction: column; gap: 2px; }
+/* Secondary tools under the add row: history on the left, tidy-up on the right. */
+.mem-tools { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.mem-tools .muted { margin: 0; }
+/* A tidy-up suggestion is waiting on the user, so it wears the waiting border and keeps its two
+   answers under the text, where a narrow split pane still has room for them. */
+.mem-row.proposal { flex-direction: column; border: 1px dashed var(--await-border); background: var(--await-fill); }
+.mem-row.proposal .mem-actions { flex-direction: row; justify-content: flex-end; gap: 6px; }
+/* A replaced or forgotten memory stays quiet: outlined, not filled. */
+.mem-row.history { background: none; border: 1px solid var(--border); }
+.mem-row.proposal .mem-main p, .mem-row.history .mem-main p { cursor: default; }
+.mem-main p.mem-before { text-decoration: line-through; color: var(--text-muted); }
 
 /* ---------- Voice (writing style) ---------- */
 .style-body { display: flex; flex-direction: column; gap: 18px; }
@@ -1063,7 +1195,7 @@ button.tag:disabled { cursor: default; }
 /* Same switch as .toggle-row, inline beside a button: the real checkbox is visually hidden. */
 .toggle-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; position: relative; }
 .toggle-inline input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
-.toggle-inline input:checked + .switch { background: var(--ok); }
+.toggle-inline input:checked + .switch { background: var(--accent-solid); }
 .toggle-inline input:checked + .switch::after { transform: translateX(14px); }
 .toggle-inline input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .style-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
@@ -1093,8 +1225,8 @@ button.tag:disabled { cursor: default; }
 .doc-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
 .doc-card .ghost { opacity: 0; }
-.doc-card:hover .ghost { opacity: 1; }
-.doc-preview { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; max-height: 52px; overflow: hidden; }
+.doc-card:hover .ghost, .doc-card .ghost:focus-visible { opacity: 1; }
+.doc-preview { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; max-height: 52px; overflow: hidden; }
 .doc-meta { font-size: 11px; color: var(--text-faint); }
 .modal.wide { width: 760px; }
 
@@ -1116,9 +1248,16 @@ button.tag:disabled { cursor: default; }
 .color-row { display: flex; gap: 8px; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; }
 .swatch.on { border-color: var(--text); }
+/* The per-project tool overrides, folded behind a one-line summary of how many differ. */
+.project-tools summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--text-faint); border-radius: 6px; }
+.project-tools summary::-webkit-details-marker { display: none; }
+.project-tools summary svg { flex-shrink: 0; transition: transform 0.15s; }
+.project-tools[open] summary svg { transform: rotate(90deg); }
+.modal .project-tools summary h3 { margin: 0; }
+.modal .project-tools summary .muted { margin: 0 0 0 auto; }
+.project-tools[open] summary { margin-bottom: 10px; }
 
 /* ---------- Graph ---------- */
-.memory-panel .page-header .search { width: 170px; }
 .add-inline { display: flex; align-items: center; gap: 2px; }
 .add-inline input { width: 140px; padding: 5px 10px; }
 .graph-body { flex: 1; display: flex; min-height: 0; }
@@ -1169,13 +1308,18 @@ button.tag:disabled { cursor: default; }
 .section-row .ghost { opacity: 0.6; }
 .section-row:hover .ghost { opacity: 1; }
 .project-list { padding: 0 10px; }
-.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 13px; text-align: left; }
+/* One row shape for a project header, a space row and a popover menu item. */
+.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: left; }
 .project-item:hover { background: var(--hover); }
 .project-item.active { background: var(--active); }
-.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-item .ghost { opacity: 0; }
+.project-item:hover .ghost { opacity: 1; }
+.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .project-item .count, .tabs .count { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .search.mini { margin: 0; height: 24px; width: 110px; padding: 0 8px; font-size: 12px; }
-.project-tag { background: var(--hover); font-weight: 500; }
+/* The label leans toward the project colour instead of taking it: mixed with --text it stays readable on
+   both themes, where the raw pastel is about 1.5:1 on a light surface. */
+.project-tag { background: var(--hover); font-weight: 500; color: color-mix(in srgb, var(--chip, var(--text-muted)) 40%, var(--text)); }
 .project-tag:disabled { cursor: default; }
 .link.small { font-size: 11px; }
 .project-hero { padding: 6px 24px 0; border-bottom: 1px solid var(--border); }
@@ -1195,7 +1339,6 @@ textarea.instructions { width: 100%; background: var(--bg-input); border: 1px so
 textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Memory panel (memory list + knowledge graph in one panel) ---------- */
-.memory-panel .page-header .header-right { gap: 8px; }
 .memory-body { flex: 1; display: flex; min-height: 0; }
 .memory-body .graph-body { flex: 1; min-width: 0; }
 .mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
@@ -1227,17 +1370,19 @@ textarea.instructions:focus { border-color: var(--accent); }
 .seg button + button { border-left: 1px solid var(--border-strong); }
 .seg button:last-child { border-right: 0; }
 .seg button:hover { color: var(--text); background: var(--hover); }
-.seg button.active { background: var(--bg-input); color: var(--text); }
-.seg button.on { background: var(--accent-solid); color: var(--on-accent); }
+/* One selected look, whichever class the component uses: a neutral raised cell. The accent fill is
+   kept for primary actions, so a view switch never competes with the button beside it. */
+.seg button.active, .seg button.on, .seg button[aria-pressed='true'] { background: var(--active); color: var(--text); font-weight: 500; }
+.seg .count { font-size: 11px; font-weight: 400; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 /* Floating graph controls, so the canvas keeps the full pane */
 .graph-tools { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
-.graph-tools input { width: 150px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; font-size: 12px; outline: 0; }
+.graph-tools input { width: 150px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 9px; font-size: 12px; outline: 0; }
 .graph-tools input:focus { border-color: var(--accent); }
 .graph-tools .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 
 /* ---------- Tool events in messages ---------- */
-.reasoning { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12px; margin: 0 0 12px; }
+.reasoning { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); font-size: 12px; margin: 0 0 12px; }
 .reasoning.live { border-color: var(--accent); }
 .reasoning-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--text-muted); text-align: left; }
 .reasoning-head:hover { color: var(--text); }
@@ -1247,16 +1392,22 @@ textarea.instructions:focus { border-color: var(--accent); }
 .reasoning-label { font-weight: 600; }
 .reasoning-body {
   max-height: 220px; overflow-y: auto; padding: 0 10px 10px;
-  font-family: var(--mono); font-size: 11px; line-height: 1.55;
-  color: var(--text-faint); white-space: pre-wrap; word-break: break-word;
+  font-size: 12px; line-height: 1.5;
+  color: var(--text-muted); white-space: pre-wrap; word-break: break-word;
 }
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }
 .tool-doc-diff .diff-card { margin-bottom: 0; }
 .tool-doc-diff .diff-body { max-height: 240px; }
-.tool-event { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12px; }
-.tool-event.error { border-color: rgba(229,72,77,0.5); }
-.tool-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--text-muted); text-align: left; }
+.tool-event { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); font-size: 12px; }
+/* A finished, successful call is a line in a list, not a box: only a call that is running, waiting
+   or failed keeps its card, so the eye lands on the rows that still need something. */
+.tool-event:not(.tc-card):not(.pending):not(.error) { border-color: transparent; background: none; }
+.tool-event:not(.tc-card):not(.pending):not(.error) > .tool-head:hover { background: var(--hover); }
+.tool-event.error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+/* Waiting on the user: the row itself is the card, with the one waiting edge and wash. */
+.tool-event.awaiting { border-color: var(--await-border); background-image: linear-gradient(var(--await-fill), var(--await-fill)); }
+.tool-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; color: var(--text-muted); text-align: left; }
 .tool-head:hover { color: var(--text); }
 .tool-head svg.rot90 { transform: rotate(90deg); }
 .tool-head > svg { transition: transform 0.15s; flex-shrink: 0; }
@@ -1266,13 +1417,17 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-group-rows { display: flex; flex-direction: column; gap: 4px; padding: 0 0 6px 14px; }
 .tool-group-rows > .tool-event { border: 0; background: transparent; }
 .tool-err { padding: 0 10px 6px 30px; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.tool-event.pending .tool-name::after { content: ' running'; font-weight: 400; color: var(--text-faint); }
+.tool-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Not while it waits for approval: that row already says "needs approval", and nothing is running. */
+.tool-event.pending:not(.awaiting) .tool-name::after { content: ' running…'; font-weight: 400; color: var(--text-faint); }
+/* Undo sits under the call it reverses, at its natural width: indented to the row's label inside a
+   generic row, flush with the card's edge under a dedicated card. */
+.tool-undo { align-self: flex-start; }
+.tool-events > .tool-undo { margin: 0 0 4px; }
+.tool-event > .tool-undo { margin: 0 10px 8px 30px; }
 .thinking.mini { padding: 0; }
 .thinking.mini span { width: 4px; height: 4px; }
 .tool-body { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 10px 10px; }
-.tool-col h6 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
-.tool-col pre { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto; }
 @media (max-width: 900px) { .tool-body { grid-template-columns: 1fr; } }
 
 /* ---------- Tool permissions ---------- */
@@ -1280,30 +1435,35 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-group > summary { cursor: pointer; }
 .tool-group > summary h5 { display: inline-flex; }
 .tool-group h5 { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.tool-group:first-child h5 { margin-top: 0; }
 .tool-perm { display: flex; align-items: center; gap: 8px; }
+.tool-perm.row { gap: 16px; }
 .tool-perms.compact .tool-perm { padding: 3px 0; font-size: 12px; }
 .tool-perms.compact .tool-perm.off { opacity: 0.55; }
-.tool-perm-name { flex: 1; display: flex; flex-direction: column; text-transform: capitalize; }
-.tool-perm-name small { color: var(--text-faint); font-size: 10px; text-transform: none; }
+/* Names arrive already worded for a person ("Search documents"), so nothing is re-cased here. */
+.tool-perm-name { flex: 1; display: flex; flex-direction: column; }
+.tool-perm-name small { color: var(--text-faint); font-size: 10px; }
+/* The description was written for the model; two lines are enough to recognise the tool, the rest is in its title. */
+.tool-perm .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tool-perm .seg { flex: none; }
+.tool-perm .seg button { min-width: 40px; text-transform: capitalize; }
 .tool-perms.compact select { font-size: 11px; padding: 3px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-strong); width: auto; }
 .tool-perm b small { font-weight: 400; }
 .ctx-tools { padding: 0 0 6px 24px; }
 
 /* ---------- Home / dashboard ---------- */
 .page-body.wide { max-width: 1180px; }
-/* ---------- shell modularity (Today customize popover + Settings module grid) ---------- */
+/* ---------- shell modularity (Today customize popover) ---------- */
 .home-customize-wrap { position: relative; display: inline-flex; }
 .home-customize {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 31;
   min-width: 190px; padding: 10px 12px; border-radius: 10px;
   background: var(--bg-elev); border: 1px solid var(--border-strong);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-float);
 }
 .home-customize h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
 .chip-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; color: var(--text); }
 .chip-check-row input { accent-color: var(--accent); }
-.module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
-.module-head { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
 
 .home-hero { padding: 8px 0 18px; }
 .home-hero h1 { font-size: 28px; font-weight: 500; margin: 0 0 14px; letter-spacing: -0.01em; }
@@ -1314,11 +1474,21 @@ textarea.instructions:focus { border-color: var(--accent); }
 .widget { border-radius: 12px; background: var(--bg-elev); padding: 14px 16px; min-height: 120px; }
 .widget > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text); }
 .widget > header .link { margin-left: auto; }
+/* A canvas window's body is also called `.widget`, and it is `height: 100%` of its window. On Today
+   that resolved against the page for a card outside the grid, which then filled the viewport. */
+.home .widget { height: auto; }
+/* A card above the grid gets the gap the grid would have given it, and no floor: the 120px minimum
+   is there to keep a row of grid cards level. */
+.home .page-body > .widget { margin-bottom: 16px; min-height: 0; }
+/* Google is not connected: one strip says so once, in place of four cards each saying it. */
+.home-connect { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 12px 10px 16px; border: 1px dashed var(--border-strong); border-radius: 12px; }
+.home-connect p { flex: 1; margin: 0; font-size: 13px; color: var(--text-muted); }
+.home-connect b { font-weight: 600; color: var(--text); }
 .widget-empty p { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .events, .mails, .proj-list, .mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .events li, .proj-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
-.proj-list li { cursor: pointer; }
-.proj-list li:hover, .mails li:hover { background: var(--hover); }
+.proj-list li, .events li[role='button'] { cursor: pointer; }
+.proj-list li:hover, .mails li:hover, .events li[role='button']:hover { background: var(--hover); }
 .ev-time { color: var(--text-muted); font-variant-numeric: tabular-nums; width: 68px; flex-shrink: 0; font-size: 12px; }
 .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-sep { font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 8px 8px 2px !important; }
@@ -1327,7 +1497,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .mail-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-snippet { color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mem-list li { padding: 5px 8px; border-radius: 8px; background: var(--hover); line-height: 1.4; }
-.spin { animation: spin 0.8s linear infinite; }
+.spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- Todos ---------- */
@@ -1349,13 +1519,16 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-check:hover { background: var(--hover); }
 .todo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .todo-title { cursor: text; line-height: 1.4; }
-.todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; outline: 0; font: inherit; }
+/* The edit field's border and padding are pulled back out with negative margins, and it keeps the
+   title's line height, so the text stays exactly where it was and the row does not grow. */
+.todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; margin: -4px -7px; min-width: 0; outline: 0; font: inherit; line-height: 1.4; }
 .todo-notes { font-size: 12px; color: var(--text-muted); }
 .todo-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); padding: 2px 6px; border-radius: 8px; cursor: pointer; }
+.todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; font-size: 11px; color: var(--text-faint); padding: 2px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .todo-due:hover { background: var(--hover); color: var(--text); }
-.todo-due.today { color: var(--accent); }
-.todo-est, .todo-tags { font-size: 11px; padding: 2px 4px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; }
+/* The chip is coloured by urgency: due today in the accent, overdue in red, anything later plain. */
+.todo-due.today { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.todo-est, .todo-tags { min-height: 24px; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; outline: 0; }
 .todo-est { width: 52px; }
 /* Empty row fields stay out of the way until the row is hovered or being edited. */
 .todo:not(:hover):not(:focus-within) :is(.todo-est, .todo-tags):placeholder-shown { opacity: 0; }
@@ -1372,11 +1545,15 @@ textarea.instructions:focus { border-color: var(--accent); }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 .todo-repeat, .todo-urgency { display: inline-flex; align-items: center; font-size: 11px; color: var(--text-faint); }
-.todo-due.overdue { color: var(--danger); }
+.todo-due.overdue { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .todo-due input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-.todo-prio { font-size: 11px; padding: 2px 4px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }
+.todo-prio { min-height: 24px; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }
 .todo .ghost { opacity: 0; }
-.todo:hover .ghost { opacity: 1; }
+.todo:hover .ghost, .todo:focus-within .ghost { opacity: 1; }
+/* A control with nothing set (no date, no estimate, the default priority) stays out of the way until
+   the row is hovered or focused. Opacity rather than display: its space is kept, so nothing reflows. */
+.todo .quiet { opacity: 0; transition: opacity 0.12s; }
+.todo:hover .quiet, .todo:focus-within .quiet { opacity: 1; }
 .todo-section { margin-bottom: 10px; }
 /* The title input is the flexible one; the date field is fixed. Both selectors above
    (.add-row > input) also match the date field, hence the explicit flex reset here. */
@@ -1394,11 +1571,13 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .integration-head > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .integration-head small { color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
 .integration-warn { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--danger); }
-.tasks-sync { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.tasks-sync-row { display: flex; align-items: center; gap: 8px; }
+.tasks-sync { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* The column's gap spaces these; the switch rows bring a bottom margin from the dialog's label rule. */
+.modal .tasks-sync label.toggle-row:not(.modal-free *) { margin: 0; }
+.tasks-sync-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tasks-sync-row select { max-width: 180px; }
 .tasks-sync-row small { margin-left: auto; }
-.g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
+.g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
 .g-logo-sm { width: 18px; height: 18px; border-radius: 4px; font-size: 12px; margin-right: 2px; }
 .setup { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .setup summary { cursor: pointer; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
@@ -1433,7 +1612,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
    sits on --bg-elev, where that grey is 1.98:1 in the light theme. */
 .chart-block .code-head { color: var(--text-muted); }
 .chart-block.placeholder { display: flex; align-items: center; gap: 8px; padding: 14px; color: var(--text-faint); font-size: 12px; }
-.chart-block.error { border-color: rgba(229,72,77,0.5); }
+.chart-block.error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .chart-block pre { margin: 0; padding: 12px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .chart-err { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; color: var(--danger); }
 .chart-tools { display: flex; gap: 2px; }
@@ -1443,7 +1622,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .chart-canvas .recharts-tooltip-item { color: var(--text) !important; }
 .chart-canvas .recharts-surface { overflow: visible; }
 .chart-table { max-height: 320px; overflow: auto; }
-.chart-table table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 0; }
+/* display: table undoes .markdown table's scrolling block; .chart-table is the scroller here. */
+.chart-table table { display: table; width: 100%; border-collapse: collapse; font-size: 12px; margin: 0; }
 .chart-table th, .chart-table td { padding: 5px 12px; border-bottom: 1px solid var(--border); text-align: left; }
 .chart-table th { position: sticky; top: 0; background: var(--bg-elev); color: var(--text-muted); font-weight: 600; }
 .chart-table td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
@@ -1515,30 +1695,49 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .trace-meta { margin: 8px 0 2px 23px; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto; color: var(--text-muted); }
 
 /* ---------- Approvals ---------- */
-.approval { margin: 0 10px 10px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
-.approval-text { font-size: 13px; margin-bottom: 6px; }
+.approval { margin: 0 10px 10px; padding: 10px 12px; border-radius: 10px; background: var(--await-fill); border: 1px solid var(--await-border); }
+/* Inside a tool row the row is already the waiting card (.tool-event.awaiting), so the question
+   drops its own box: one edge, one wash, one place to answer. */
+.tool-event.awaiting > .approval, .tool-event.awaiting > .aplan { margin: 0; padding: 2px 10px 10px; border: 0; border-radius: 0; background: none; }
+.approval-text { font-size: 13px; line-height: 1.5; margin-bottom: 6px; }
 .approval-args { margin: 0 0 8px; font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 160px; overflow: auto; }
+/* Row one of every approval: the primary action first, then the plain refusal. Nothing else. */
 .approval-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* Row two, deliberately quieter: the standing grants and the denial with a note, as text links.
+   A grant outlives this one call, so it must never look like the default answer. */
+.approval-more { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; font-size: 12px; line-height: 1.3; color: var(--text-faint); }
+.approval-more .link { min-height: 24px; color: var(--text-muted); }
+.approval-more .link:hover:not(:disabled) { color: var(--text); }
+.approval-more .link:disabled { opacity: 0.5; cursor: default; }
+.approval-more .link code { font-family: var(--mono); font-size: 11px; }
+/* Set apart from the grants when there are any; on a forced card it is the only link and stays left. */
+.approval-more-label ~ .approval-deny-note { margin-left: auto; }
+/* The same line inside a dedicated card, whose sections carry their own 12px side padding. */
+.tc-card > .approval-rules, .mc > .approval-rules { margin: 0; padding: 0 12px 8px; }
+/* A mail result card has no buttons of its own to sit under, so the line gets its own strip. */
+.mc-results > .approval-rules { padding-top: 8px; border-top: 1px solid var(--border); }
 .tag.ask { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .tag.plan { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text-muted); }
 
 /* Read-back verdict on an external write (verify.py): proved, or conspicuously not. */
-.tag.verified { background: rgba(70,167,88,0.15); color: var(--ok); }
-.tag.unproven { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tag.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.tag.unproven, .tag.bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 
-/* One card for a whole plan: the arguments are the card, so they are shown, not summarised. */
-.plan-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
-.plan-head > svg { color: var(--accent); flex-shrink: 0; }
+/* One card for a whole plan: the arguments are the card, so they are shown, not summarised.
+   .plan-head / .plan-steps / .plan-step are shared names with the plan panel above the composer, so
+   both sets are scoped to their own root (.plan-approval here, .plan-panel there) and never mix. */
+.plan-approval .plan-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+.plan-approval .plan-head > svg { color: var(--accent); flex-shrink: 0; }
+.plan-approval .plan-head b { font-weight: 600; }
 .plan-count { margin-left: auto; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
-.plan-steps { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.plan-step { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg-input); }
-.plan-step.dropped { opacity: 0.45; }
+.plan-approval .plan-steps { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.plan-approval .plan-step { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg-input); }
+.plan-approval .plan-step.dropped { opacity: 0.45; }
 .plan-step-head { display: flex; align-items: center; gap: 6px; }
-.plan-keep { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; }
+.plan-keep { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; min-height: 24px; }
 .plan-keep input { accent-color: var(--accent); }
 .plan-tool { font-size: 12px; font-weight: 600; text-transform: capitalize; }
-.plan-step-head .ghost-btn.tiny { margin-left: auto; }
-.ghost-btn.tiny { padding: 1px 6px; font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; }
+.plan-step-head .ghost-btn.sm { margin-left: auto; }
 .plan-why { font-size: 11px; color: var(--text-faint); margin: 2px 0 0 22px; }
 .plan-args { margin: 4px 0 0 22px; font-size: 11.5px; display: flex; flex-direction: column; gap: 2px; }
 .plan-arg { display: flex; gap: 6px; align-items: baseline; }
@@ -1550,7 +1749,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .plan-note { width: 100%; margin: 0 0 8px; font-size: 11.5px; padding: 5px 7px; border-radius: 6px;
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
 .plan-warn { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--danger); margin: 2px 0; }
-.tag.p1, .tag.overdue { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tag.p1, .tag.overdue { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 .tool-perm.row { justify-content: space-between; padding: 6px 0; }
 .tool-perm.unavailable { opacity: 0.5; }
 .tool-perm.unavailable .tool-perm-name::after, .tool-perm.unavailable .toggle-text > b::after { content: ' · not connected'; color: var(--text-faint); font-weight: 400; font-size: 11px; }
@@ -1559,6 +1758,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .mcp > p { margin: 0; }
 .mcp .empty { font-size: 12px; }
+/* The column aligns its children to the start; the empty line spans it like the server cards do. */
+.mcp > .empty-row { align-self: stretch; }
 .mcp-server { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); }
 .mcp-server.open { border-color: var(--border-strong); }
 .mcp-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
@@ -1572,7 +1773,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp .dot.bad { background: var(--danger); }
 .switch-wrap { display: inline-flex; align-items: center; flex-shrink: 0; }
 .switch-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
-.switch-wrap input:checked + .switch { background: var(--ok); }
+.switch-wrap input:checked + .switch { background: var(--accent-solid); }
 .switch-wrap input:checked + .switch::after { transform: translateX(14px); }
 .switch-wrap input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mcp-detail { margin: 0 10px 8px; font-size: 11.5px; }
@@ -1583,23 +1784,23 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mcp-log { margin: 0; max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; color: var(--text-muted); }
 .mcp-report { border-radius: 8px; padding: 8px 10px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); }
-.mcp-report.warn { background: rgba(254,188,46,0.08); border-color: rgba(254,188,46,0.4); }
-.mcp-report.fail, .mcp-report.error { background: rgba(229,72,77,0.08); border-color: rgba(229,72,77,0.4); }
-.mcp-report.pass { background: rgba(70,167,88,0.08); border-color: rgba(70,167,88,0.35); }
+.mcp-report.warn { background: color-mix(in srgb, var(--warn) 8%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.mcp-report.fail, .mcp-report.error { background: color-mix(in srgb, var(--danger) 8%, transparent); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.mcp-report.pass { background: color-mix(in srgb, var(--ok) 8%, transparent); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .mcp-report-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .mcp-report-head b::first-letter { text-transform: uppercase; }
 .mcp-report-head .muted { font-size: 11.5px; }
 .mcp-findings { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .mcp-findings li { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; }
 .mcp-findings .tag { flex-shrink: 0; }
-.mcp-findings li.fail .tag { background: rgba(229,72,77,0.15); color: var(--danger); }
-.mcp-findings li.warn .tag { background: rgba(254,188,46,0.15); color: var(--warn); }
+.mcp-findings li.fail .tag { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.mcp-findings li.warn .tag { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
 .mcp-findings code { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
 .mcp-drift { margin-top: 6px; font-size: 12px; border-left: 2px solid var(--warn, #c98a2b); padding-left: 8px; }
 .mcp-drift.quarantined { border-left-color: var(--danger, #c0392b); }
 .mcp-drift summary { cursor: pointer; }
-.mcp-diff { margin: 6px 0; padding: 6px 8px; white-space: pre-wrap; font-size: 11px; background: var(--surface-2, rgba(127,127,127,.08)); border-radius: 6px; }
-.mcp-diff .add { color: var(--success, #2e8b57); }
+.mcp-diff { margin: 6px 0; padding: 6px 8px; white-space: pre-wrap; font-size: 11px; background: var(--hover); border-radius: 6px; }
+.mcp-diff .add { color: var(--ok); }
 .mcp-diff .del { color: var(--danger, #c0392b); }
 .mcp-limits { margin-top: 8px; }
 .mcp-limits summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
@@ -1627,11 +1828,26 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 /* A group reads as a header and its recent lines: the folder carries the project colour, so no dot
    or count competes with the name, and the rows under it are indented to the header's text, not to
    its icon. */
-.icon-btn.xs { width: 16px; height: 16px; margin-left: -4px; }
+/* 16px to look at, 24px to hit: the box stays small enough for a tree row, the target does not. */
+.icon-btn.xs { position: relative; width: 16px; height: 16px; margin-left: -4px; }
+.icon-btn.xs::before { content: ''; position: absolute; inset: -4px; }
 .project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }
-.project-group .project-item { gap: 8px; font-weight: 500; }
+/* The gap separates one group's rows from the next header; a folded group has no rows to separate. */
+.project-group.collapsed + .project-group { margin-top: 0; }
+.project-group .project-item { font-weight: 500; }
 .project-group .project-item svg { flex-shrink: 0; }
+/* The folder doubles as the group's disclosure. It keeps the folder's 13px box so the name column does
+   not move, and reaches 25px for the pointer. */
+.project-twist { position: relative; display: inline-flex; width: 13px; height: 13px; padding: 0; flex-shrink: 0; border-radius: 4px; color: var(--text-muted); }
+.project-twist::before { content: ''; position: absolute; inset: -6px; }
+.project-twist svg { transition: transform 0.15s; }
+.project-twist .rot90 { transform: rotate(90deg); }
+.project-twist .twist-chevron { display: none; }
+.project-item:hover .project-twist .twist-chevron, .project-twist:focus-visible .twist-chevron { display: block; }
+.project-item:hover .project-twist .twist-folder, .project-twist:focus-visible .twist-folder { display: none; }
+.project-twist:hover { color: var(--text); }
+.project-twist[aria-disabled='true'] { cursor: default; }
 .project-rows { padding-left: 21px; }
 .convo-item.sub { padding: 4px 8px; font-size: 12.5px; color: var(--text-muted); }
 .convo-item.sub:hover, .convo-item.sub.active { color: var(--text); }
@@ -1653,20 +1869,37 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .agent-inbox h5 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 600; }
 .agent-inbox h5 .small { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; }
 .agent-inbox > p.muted { margin: 2px 0 0; font-size: 13px; }
-.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 5px 6px 5px 10px; }
 .inbox-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 /* A read run: one line, quieter. */
 .inbox-item.seen { padding: 4px 10px; color: var(--text-muted); }
 .inbox-item.seen .inbox-item-head { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+/* One line per row: status dot, what it is, a summary that gives way first, then the one action.
+   Arguments and reports sit behind the disclosure at the end, so the list scans as a list. */
+.inbox-row { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 13px; }
+.inbox-row > * { flex-shrink: 0; }
+.inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-idle); }
+.inbox-dot.needs-you { background: var(--st-needs-you); }
+.inbox-dot.working { background: var(--st-working); }
+.inbox-dot.done { background: var(--st-done); }
+.inbox-dot.failed { background: var(--st-failed); }
 .inbox-tool { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--text); }
 .inbox-job { font-weight: 600; }
+.inbox-tool, .inbox-job { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-row > .inbox-line { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12.5px; }
+.inbox-when { white-space: nowrap; }
+/* 11px of underlined text is the label; the target is the 24px box around it. */
+.agent-inbox .link.small { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; }
 .inbox-args {
-  margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
-  font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; color: var(--text-muted);
+  margin: 6px 4px 4px 0; padding: 6px 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; color: var(--text-muted);
 }
-.inbox-summary { font-size: 13px; margin-top: 6px; }
-.inbox-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.inbox-edit-btn { margin: 2px 0 4px; }
+.inbox-item > .msg-error, .inbox-item > p.muted { margin: 6px 4px 4px 0; }
+.inbox-summary { font-size: 13px; margin: 6px 4px 4px 0; }
+.inbox-edit { display: flex; flex-direction: column; gap: 6px; margin: 8px 4px 4px 0; }
+.inbox-edit-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .inbox-edit label { display: flex; flex-direction: column; gap: 2px; }
 .inbox-edit textarea {
   width: 100%; resize: vertical; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 12.5px;
@@ -1677,7 +1910,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-jobs h5 { margin-top: 2px; }
 .inbox-jobs ul { list-style: none; margin: 0; padding: 0; }
 .inbox-jobs li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.inbox-jobs li .chip-check-row { flex: 1; min-width: 0; }
+.inbox-jobs li.job-row { min-height: 28px; }
+.job-name { flex: 1; min-width: 0; }
+/* A spent one-off has no switch; the gap keeps its name in the same column as the others. */
+.job-switch-gap { width: 32px; flex-shrink: 0; }
+.job-row > .icon-btn { margin-left: -6px; }
+/* Tools, Preview and Delete wait for the row to be hovered or focused. An open Tools panel keeps
+   its button lit, so what is open is never hidden. */
+.job-more { display: inline-flex; align-items: center; gap: 4px; opacity: 0; transition: opacity 0.12s; }
+.job-row:hover .job-more, .job-row:focus-within .job-more, .job-more:has(.on) { opacity: 1; }
 .inbox-jobs li.job-history { display: block; padding: 4px 0 8px 22px; border-left: 2px solid var(--border); margin-left: 6px; }
 .job-history-stats { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
 .job-history-run { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
@@ -1701,10 +1942,14 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px;
   border: 1px solid var(--border-strong); font-size: 11.5px; color: var(--text-muted); white-space: nowrap;
 }
-.chip.warn { color: var(--warn); border-color: rgba(254, 188, 46, 0.4); }
-.chip.bad { color: var(--danger); border-color: rgba(229, 72, 77, 0.4); }
-.primary-btn.sm, .ghost-btn.sm { padding: 3px 9px; font-size: 12px; gap: 4px; }
-.primary-btn.sm { display: inline-flex; align-items: center; }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+/* Status chips, in the --st-* vocabulary: running, finished, and waiting on the user. */
+.chip.working { color: var(--st-working); border-color: color-mix(in srgb, var(--st-working) 40%, transparent); }
+.chip.ok { color: var(--st-done); border-color: color-mix(in srgb, var(--st-done) 40%, transparent); }
+.chip.needs { color: var(--st-needs-you); border-color: var(--await-border); background: var(--await-fill); }
+/* The one small button size. `.small` is the older spelling of the same thing. */
+.primary-btn.sm, .ghost-btn.sm, .primary-btn.small, .ghost-btn.small { min-height: 24px; padding: 3px 9px; font-size: 12px; gap: 4px; }
 
 /* ---------- Kanban ---------- */
 /* Scroll stays inside the board area: the scrollbar sits above the window edge and
@@ -1714,7 +1959,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcol { width: 272px; flex-shrink: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; max-height: 100%; }
 .kcol.over { border-color: var(--accent); }
 .kcol > header { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; font-weight: 600; font-size: 13px; }
-.kcol-name { flex: 1; }
+.kcol-name { flex: 1; min-width: 0; line-height: 1.4; }
 .kcol-cards { padding: 4px 8px 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
 .kcard { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: grab; font-size: 13px; }
 .kcard:hover { border-color: var(--border-strong); }
@@ -1732,6 +1977,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Calendar ---------- */
 .cal-page { overflow: hidden; }
+/* Title, the navigation, then the range it moves through: the range takes the stretch the h2 has on
+   other pages, and clips with an ellipsis rather than mid-word. */
+.cal-page .page-header h2 { flex: none; }
+.cal-nav { display: flex; align-items: center; gap: 2px; }
+.cal-nav .ghost-btn { margin-right: 4px; }
+.cal-range { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .cal-body { flex: 1; min-height: 0; display: flex; }
 .cal-cals {
   width: 196px; flex: 0 0 196px; overflow: auto;
@@ -1773,11 +2024,13 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-allday-label { font-size: 10px; color: var(--text-faint); padding: 6px 4px; text-align: right; }
 .cal-allday { border-left: 1px solid var(--border); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cal-allday.drop-over, .cal-col.drop-over { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
-.cal-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59,158,219,0.25); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; max-width: 100%; }
+.cal-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--info) 25%, transparent); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; max-width: 100%; }
 .cal-chip.todo { background: var(--hover); color: var(--text-muted); }
 .cal-chip.todo.p1 { color: var(--danger); }
 .cal-corner { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; }
-.cal-hours-toggle { font-size: 9.5px; letter-spacing: 0.03em; color: var(--text-faint); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; cursor: pointer; }
+.cal-hours-toggle { position: relative; min-width: 28px; min-height: 22px; font-size: 10px; letter-spacing: 0.03em; color: var(--text-faint); background: none; border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; cursor: pointer; }
+/* A 22px box with a 24px target, like .todo-check. */
+.cal-hours-toggle::before { content: ''; position: absolute; inset: -2px; }
 .cal-hours-toggle:hover { color: var(--text); background: var(--hover); }
 .cal-hours { position: relative; }
 .cal-hour { font-size: 10px; color: var(--text-faint); text-align: right; padding-right: 6px; transform: translateY(-6px); }
@@ -1789,10 +2042,11 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 .cal-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); z-index: 1; }
 .cal-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.cal-event { position: absolute; left: 3px; right: 3px; background: rgba(59,158,219,0.28); border-left: 3px solid #3b9edb; border-radius: 5px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; z-index: 1; }
+/* `left`/`right` are the lone-block case; overlapping blocks get an inline left and width (calendarLayout.ts). */
+.cal-event { position: absolute; left: 3px; right: 3px; min-width: 0; background: color-mix(in srgb, var(--info) 28%, transparent); border-left: 3px solid var(--info); border-radius: 5px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; z-index: 1; }
 .cal-event b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-event span { color: var(--text-muted); font-size: 10.5px; }
-.cal-event:hover { background: rgba(59,158,219,0.4); }
+.cal-event:hover { background: color-mix(in srgb, var(--info) 40%, transparent); }
 /* Short blocks have no room for a second line, so the time sits after the title. */
 .cal-event.compact { flex-direction: row; align-items: baseline; gap: 5px; padding: 2px 6px; }
 .cal-event.compact b { min-width: 0; flex: 0 1 auto; }
@@ -1806,12 +2060,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-grid.dragging { user-select: none; }
 .cal-create { position: absolute; left: 3px; right: 3px; display: flex; gap: 4px; z-index: 3; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 6px; padding: 4px; }
 .cal-create input { flex: 1; background: none; border: 0; outline: 0; font-size: 12px; }
-.cal-ghost {
-  position: absolute; left: 2px; right: 2px; z-index: 2; pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
-  border: 1px solid var(--accent); border-radius: 5px;
-  padding: 2px 6px; font-size: 11px; color: var(--text); overflow: hidden;
-}
 .event-editor footer { flex-wrap: wrap; }
 
 /* ---------- Event editor ---------- */
@@ -1828,10 +2076,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .ev-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
 .ev-chip {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
-  background: var(--hover); border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px;
+  background: var(--hover); border: 1px solid var(--border); border-radius: 999px; padding: 1px 3px 1px 10px;
 }
 .ev-chip.optional { opacity: 0.7; }
-.ev-chip button { display: inline-flex; align-items: center; font-size: 10px; color: var(--text-faint); border-radius: 999px; padding: 1px 5px; }
+/* 22px boxes with a 24px target; the chip's own padding shrinks so it does not grow around them. */
+.ev-chip button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; min-height: 22px; font-size: 11px; color: var(--text-faint); border-radius: 999px; padding: 0 6px; }
+.ev-chip button::before { content: ''; position: absolute; inset: -1px; }
 .ev-chip button:hover { background: var(--active); color: var(--text); }
 .ev-meet { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; font-size: 13px; color: var(--text-muted); }
 .ev-meet a { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -1843,17 +2093,16 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .ev-reminders .ghost-btn { align-self: flex-start; }
 .ev-colors { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
 .ev-swatch {
+  position: relative;
   width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent;
   display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto;
 }
+.ev-swatch::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
 .ev-swatch.on { border-color: var(--text); }
 .ev-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 .ev-scope, .ev-rsvp { display: flex; align-items: center; gap: 10px; }
 .ev-scope .muted.small, .ev-rsvp .muted.small { margin: 0; }
-.ev-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
-.ev-seg button { padding: 5px 12px; font-size: 12px; color: var(--text-muted); }
-.ev-seg button + button { border-left: 1px solid var(--border-strong); }
-.ev-seg button.on { background: var(--active); color: var(--text); }
+.ev-scope .seg button, .ev-rsvp .seg button { padding-inline: 12px; }
 .ev-notify { width: auto !important; font-size: 12px; }
 .modal footer .ev-notify {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 8px; outline: 0;
@@ -1904,18 +2153,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Usage & cost (Settings) ---------- */
 .usage-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.usage-ranges { display: flex; gap: 4px; }
-.usage-ranges button { padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-muted); background: var(--hover); }
-.usage-ranges button.active { background: var(--active); color: var(--text); font-weight: 600; }
-.usage-head .icon-btn { margin-left: auto; }
-.spin { animation: spin 0.9s linear infinite; }
 .usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .usage-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); }
 .usage-tile-label { font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .usage-tile-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-tile-sub { font-size: 10.5px; color: var(--text-faint); }
 .usage-charts { display: flex; flex-direction: column; }
-.usage-sub { margin: 18px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-faint); }
 .usage-prices { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
 .usage-prices table { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* --text-faint is only 4.01:1 over the --hover header fill. */
@@ -1959,11 +2202,25 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
 .mail-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .mail-toolbar select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; font-size: 12px; outline: 0; max-width: 180px; }
-.mail-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.mail-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elev); cursor: pointer; color: var(--text-muted); min-width: 0; }
+.mail-toolbar .toolbar-sep { width: 1px; height: 16px; margin: 0 2px; background: var(--border-strong); }
+/* One joined group with hairlines between rows, the same idiom as a todo section. */
+.mail-list { display: flex; flex-direction: column; font-size: 13px; }
+.mail-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 7px 10px; background: var(--bg-elev); cursor: pointer; color: var(--text-muted); min-width: 0; }
+.mail-row:first-child { border-radius: 10px 10px 0 0; }
+.mail-row:last-child { border-radius: 0 0 10px 10px; }
+.mail-row:first-child:last-child { border-radius: 10px; }
+.mail-row + .mail-row { box-shadow: inset 0 0.5px 0 var(--border); }
 .mail-row:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.mail-row.unread { box-shadow: inset 2.5px 0 0 var(--accent); }
-.mail-row.unread .mail-row-from, .mail-row.unread .mail-row-subject { color: var(--text); font-weight: 600; }
+/* Inside the group a ring 2px out would be painted over by the next row. */
+.mail-list .mail-row:focus-visible { outline-offset: -2px; }
+/* A row that only holds its own buttons (Needs reply): nothing to open, so no pointer. */
+.mail-row.static { cursor: default; }
+/* Unread is a heavier sender and a dot. The dot's slot is always there, so read and unread rows line
+   up; `-lead` is the same width as dot + star for rows that have neither. */
+.mail-row-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.mail-row.unread .mail-row-dot { background: var(--accent); }
+.mail-row.unread .mail-row-from { color: var(--text); font-weight: 600; }
+.mail-row-lead { width: 41px; flex-shrink: 0; }
 .mail-row-from { width: 170px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-row-subject { color: var(--text); }
@@ -1971,9 +2228,20 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-row-date { flex-shrink: 0; font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; width: 64px; text-align: right; }
 .mail-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .mail-row .ghost { opacity: 0; }
-.mail-row:hover .ghost, .mail-row .star.on { opacity: 1; }
+.mail-row:hover .ghost, .mail-row:focus-within .ghost, .mail-row .star.on { opacity: 1; }
+/* A starred star is a state of the message, not a pressed button: accent, and no filled cell at rest. */
 .mail-row .star.on { color: var(--accent); }
-.mail-meta { margin: 0 0 12px; font-size: 13px; line-height: 1.6; }
+.mail-row .star.on:not(:hover) { background: none; }
+.mail-watch { margin-bottom: 6px; }
+.mail-watch .section-h { margin-top: 2px; }
+.mail-meta { margin: 0 0 14px; font-size: 13px; line-height: 1.6; }
+/* The subject is the dialog's title: it wraps rather than pushing the close button off the edge. */
+.mail-reader header, .mail-compose header { align-items: flex-start; gap: 12px; }
+.mail-reader header h2, .mail-compose header h2 { min-width: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.mail-reader header .icon-btn, .mail-compose header .icon-btn { flex: none; margin: -3px -6px -3px 0; }
+/* The message is a reading column: no inner box, a size meant for reading, lines of about 72 characters. */
+.doc-text.mail-body { padding: 0; max-width: 72ch; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.mail-reader footer .starred, .mail-reader footer .starred:hover { color: var(--accent); }
 .modal footer a.ghost-btn { text-decoration: none; }
 
 /* ---------- Smart textarea (AI ghost-text completion) ---------- */
@@ -2042,9 +2310,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-warn svg { flex-shrink: 0; margin-top: 2px; }
 .activity-page .act-hero .tabs { margin-top: 4px; }
 
-.act-pill { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
-.act-pill.ok { background: rgba(70,167,88,0.14); color: var(--ok); }
-.act-pill.warn { background: rgba(254,188,46,0.16); color: var(--warn); }
+/* Pills speak the semantic tokens: fine is --ok, needs attention is --warn, blocking is --danger,
+   and anything optional or merely informative stays neutral. */
+.act-pill { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--hover); color: var(--text-muted); }
+.act-pill.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.act-pill.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.act-pill.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 
 /* Collapsible cards (capabilities, profile) */
 .act-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
@@ -2062,7 +2333,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-caps li.bad > svg { color: var(--warn); }
 .act-caps li b { font-size: 12px; }
 .act-caps li p { margin: 1px 0 0; color: var(--text-muted); }
-.act-fix { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0 !important; padding: 5px 8px; border-radius: 6px; background: rgba(254,188,46,0.09); color: var(--warn) !important; font-size: 11px; }
+.act-fix { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0 !important; padding: 5px 8px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 9%, transparent); color: var(--warn) !important; font-size: 11px; }
 .act-fix svg { flex-shrink: 0; margin-top: 1px; }
 
 /* Access checklist: a missing optional row is amber, a blocking one is red, and every permission
@@ -2070,22 +2341,24 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-caps li.warn > svg { color: var(--warn); opacity: 0.8; }
 .act-caps li.bad > svg { color: var(--danger); }
 .act-state-pill { margin-left: 6px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); font-size: 10px; color: var(--text-muted); vertical-align: 1px; }
-.act-state-pill.granted { color: var(--ok); border-color: rgba(70,167,88,0.4); }
-.act-state-pill.denied { color: var(--danger); border-color: rgba(229,72,77,0.4); }
-.act-state-pill.unasked, .act-state-pill.unknown { color: var(--warn); border-color: rgba(254,188,46,0.4); }
-.act-state-pill.opt { color: var(--text-faint); }
+.act-state-pill.granted { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.act-state-pill.denied { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.act-state-pill.unasked, .act-state-pill.unknown { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.act-state-pill.opt { color: var(--st-idle); }
 .act-cap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
-.ghost-btn.xs, .link.xs { font-size: 11px; padding: 2px 7px; }
-.primary-btn.sm { font-size: 12px; padding: 4px 9px; }
-.act-grant-all { display: flex; flex-direction: column; gap: 5px; padding: 0 12px 10px; }
+/* 11px type in a 24px target. */
+.ghost-btn.xs, .link.xs { display: inline-flex; align-items: center; min-height: 24px; font-size: 11px; padding: 2px 7px; }
+/* The grant-all action is a button, not a banner: its own width, with the one caveat beside it. */
+.act-grant-all { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 12px 10px; }
+.act-intro { margin: 0; max-width: 72ch; line-height: 1.5; }
 
 /* Record-everything mode: the one control that turns protections off, so it looks like it. */
-.act-card.record-all { border-color: rgba(229,72,77,0.35); }
-.act-card.record-all.armed { border-color: var(--danger); background: rgba(229,72,77,0.05); }
+.act-card.record-all { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.act-card.record-all.armed { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .act-card.record-all .act-card-head svg { color: var(--danger); }
 .act-record-all-body { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
 .act-record-all-body > button { align-self: flex-start; margin-top: 3px; }
-.act-record-all-confirm { padding: 9px 10px; border: 1px solid rgba(229,72,77,0.4); border-radius: 8px; background: rgba(229,72,77,0.07); font-size: 12px; }
+.act-record-all-confirm { padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 12px; }
 .act-record-all-confirm p { margin: 0 0 7px; }
 
 .act-profile { padding: 0 12px 10px; font-size: 13px; color: var(--text-muted); }
@@ -2097,7 +2370,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-signals { display: flex; flex-direction: column; gap: 8px; }
 .act-signal { border: 1px solid var(--border); border-radius: 10px; padding: 4px 12px 8px; background: var(--bg-elev); }
 .act-signal.on { border-color: var(--border-strong); }
-.act-signal.heavy.on { border-color: rgba(229,72,77,0.45); background: rgba(229,72,77,0.05); }
+.act-signal.heavy.on { border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .act-signal .toggle-row { padding: 8px 0; align-items: flex-start; }
 .act-signal .toggle-icon { margin-top: 2px; }
 .act-signal .toggle-text small { line-height: 1.5; margin-top: 2px; }
@@ -2109,7 +2382,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-field > span:first-child { flex: 1; display: flex; flex-direction: column; }
 .act-field b { font-size: 13px; font-weight: 500; }
 .act-field small { color: var(--text-faint); font-size: 11px; margin-top: 1px; }
-.act-field input, .act-field select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 8px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
+.act-field input, .act-field select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
 .act-field input:focus, .act-field select:focus { border-color: var(--accent); }
 .act-field select { min-width: 220px; }
 .act-num { display: inline-flex; align-items: center; gap: 6px; }
@@ -2123,11 +2396,13 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
 .act-tag { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 11px; color: var(--text-muted); }
 .act-add { display: flex; gap: 7px; }
-.act-add input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
+.act-add input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 9px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
 .act-add input:focus { border-color: var(--accent); }
 
 .act-danger { display: flex; flex-wrap: wrap; gap: 8px; }
 .primary-btn.danger { background: var(--danger); border-color: var(--danger); }
+/* Without this the shared hover turned a red button accent-green under the pointer. */
+.primary-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 86%, #000); }
 
 /* Timeline of rolled-up periods */
 .act-timeline { display: flex; flex-direction: column; gap: 10px; }
@@ -2135,7 +2410,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-period header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
 .act-period time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .act-period header b { flex: 1; font-size: 13px; }
-.act-period p { margin: 4px 0; font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+.act-period p { margin: 4px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
 .act-period ul { margin: 4px 0; padding-left: 18px; font-size: 12px; color: var(--text-muted); }
 .act-period footer { margin-top: 6px; }
 
@@ -2162,7 +2437,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-text { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
 .act-kind { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--border); color: var(--text-muted); white-space: nowrap; }
 .act-kind.audio { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-.act-kind.input { background: rgba(70,167,88,0.14); color: var(--ok); }
+.act-kind.input { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
 .act-kind.idle { background: transparent; border: 1px solid var(--border-strong); }
 
 /* Sidebar recording indicator */
@@ -2218,9 +2493,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-sug header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .act-sug header b { font-size: 13.5px; }
 .act-sug .act-pill { margin-left: 0; background: var(--bg-input); color: var(--text-muted); }
-.act-sug .act-pill.automation { background: rgba(94,129,244,0.14); color: var(--accent); }
-.act-sug .act-pill.hygiene { background: rgba(254,188,46,0.16); color: var(--warn); }
-.act-impact { font-size: 11px; color: var(--ok); background: rgba(70,167,88,0.12); border-radius: 999px; padding: 1px 7px; }
+.act-sug .act-pill.automation { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.act-sug .act-pill.hygiene { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.act-impact { font-size: 11px; color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border-radius: 999px; padding: 1px 7px; }
 .act-sug-detail { margin: 0; font-size: 12.5px; color: var(--text); }
 .act-sug-why { margin: 0; font-size: 12px; color: var(--text-muted); }
 .act-sug-why b { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; margin-right: 4px; }
@@ -2228,15 +2503,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-evidence .act-tag { padding: 2px 8px; font-size: 10.5px; gap: 4px; }
 .act-sug footer { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding-top: 2px; }
 .act-sug footer .muted { margin-left: auto; }
-.act-state-pill.dismissed { color: var(--danger); border-color: rgba(229,72,77,0.4); }
-.act-state-pill.accepted, .act-state-pill.done { color: var(--ok); border-color: rgba(70,167,88,0.4); }
-.act-state-pill.snoozed { color: var(--warn); border-color: rgba(254,188,46,0.4); }
+/* A suggestion you ruled on: taken up is done; dismissed or snoozed is set aside, not an error. */
+.act-state-pill.accepted, .act-state-pill.done { color: var(--st-done); border-color: color-mix(in srgb, var(--st-done) 40%, transparent); }
+.act-state-pill.dismissed, .act-state-pill.snoozed { color: var(--st-idle); }
 
-.act-indicator { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--danger); background: rgba(229,72,77,0.09); }
-.act-indicator:hover { background: rgba(229,72,77,0.16); }
+.act-indicator { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.act-indicator:hover { background: color-mix(in srgb, var(--danger) 15%, transparent); }
 .act-indicator.live .act-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }
-.act-indicator.paused { color: var(--warn); background: rgba(254,188,46,0.1); }
-.act-indicator.paused:hover { background: rgba(254,188,46,0.18); }
+.act-indicator.paused { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.act-indicator.paused:hover { background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .act-indicator.paused .act-dot { background: var(--warn); }
 /* ---------- Form controls (one select treatment everywhere) ---------- */
 /* .model-picker draws its own chevron in markup, so it stays out of these lists. */
@@ -2294,6 +2569,7 @@ select:focus-visible {
 .search input:focus-visible,
 .kcol.new input:focus-visible,
 .cal-create input:focus-visible,
+.space-tab input:focus-visible,
 .smart-ta.bare textarea:focus-visible,
 .md-input:focus-visible { box-shadow: none !important; }
 .search:focus-within { box-shadow: 0 0 0 1px var(--focus-ring); }
@@ -2327,27 +2603,31 @@ select:focus-visible {
 }
 
 /* ---------- Plan panel (the chat's plan artifact) ---------- */
+/* Scoped to .plan-panel throughout: the plan approval card uses the same .plan-head / .plan-steps /
+   .plan-step names for a different layout, and unscoped rules here used to restyle it. */
 .plan-panel {
-  max-width: 808px; width: 100%; margin: 0 auto; padding: 8px 24px 0;
+  max-width: var(--chat-col); width: 100%; margin: 0 auto; padding: 8px 24px 0;
   font-size: 12.5px;
 }
 .plan-panel > header { display: flex; align-items: center; gap: 10px; }
-.plan-head {
-  display: flex; align-items: center; gap: 6px;
+.plan-panel .plan-head {
+  display: flex; align-items: center; gap: 6px; min-height: 24px;
   border: 0; background: none; padding: 2px 0; cursor: pointer;
   color: var(--text-muted); font: inherit;
 }
-.plan-head:hover { color: var(--text); }
-.plan-head b { font-weight: 600; }
+.plan-panel .plan-head:hover { color: var(--text); }
+.plan-panel .plan-head b { font-weight: 600; }
 .plan-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
-.plan-steps {
+.plan-panel .plan-steps {
   list-style: none; margin: 6px 0 0; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
   max-height: 180px; overflow-y: auto;
 }
-.plan-step { display: flex; align-items: flex-start; gap: 7px; padding: 3px 0; }
-.plan-check { border: 0; background: none; padding: 1px 0 0; cursor: pointer; color: var(--text-faint); line-height: 1; }
+.plan-panel .plan-step { display: flex; align-items: flex-start; gap: 7px; padding: 3px 0; }
+/* 13px to look at, 24px to hit: the expander keeps the step rows as dense as they were. */
+.plan-check { position: relative; border: 0; background: none; padding: 1px 0 0; cursor: pointer; color: var(--text-faint); line-height: 1; }
+.plan-check::before { content: ''; position: absolute; inset: -5px; }
 .plan-step.in_progress .plan-check { color: var(--accent); }
 .plan-step.done .plan-check { color: var(--ok); }
 .plan-check:hover { color: var(--text); }
@@ -2357,17 +2637,24 @@ select:focus-visible {
 .plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
 
 /* ---------- Skills review (procedural memory) ---------- */
-.skills-review h4 { margin: 14px 0 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
-.skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 /* ---------------- Library: skills and what has been made ----------------
    The connectors shelf renders McpSettings; its add form is styled under .mcp-add. */
+/* The shelves are sections of the page: underline tabs under the header, their labels on the
+   header's own 16px gutter. */
+.library-tabs { flex-shrink: 0; padding: 0 4px; border-bottom: 1px solid var(--border); }
 .library-panel { display: flex; flex-direction: column; gap: 14px; }
-.library-panel .add-row { align-items: flex-start; }
-.library-panel .add-row .muted.small { flex: 1; line-height: 1.5; }
+.library-panel .add-row { align-items: center; }
 .library-panel .search { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 12px; outline: 0; }
+/* A shelf's own actions: one row of same-height buttons, then what the shelf is in a muted line. */
+.library-toolbar { display: flex; flex-direction: column; gap: 6px; }
+.library-toolbar > p { margin: 0; max-width: 72ch; line-height: 1.5; }
+.library-toolbar-row { display: flex; align-items: center; gap: 8px; }
+.empty-state .library-toolbar-row { margin-top: 10px; }
+.empty-state .library-toolbar-row .primary-btn { margin-top: 0; }
 
 .skill-section { display: flex; flex-direction: column; gap: 6px; }
 .skill-section h4 { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.skill-section h4 .count { font-size: 11px; font-weight: 400; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .skill-section > p { margin: -2px 0 4px; }
 
 .skill-row { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
@@ -2375,19 +2662,28 @@ select:focus-visible {
 .skill-row.rejected { opacity: 0.6; }
 .skill-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; cursor: pointer; }
 .skill-head:hover { background: var(--hover); }
+/* A head that opens nothing (a saved workflow: its buttons do the opening) does not act clickable. */
+.skill-head.static { cursor: default; }
+.skill-head.static:hover { background: none; }
 .skill-name { font-weight: 500; white-space: nowrap; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .skill-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .skill-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
-.skill-actions button.small { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--border-strong); }
-.skill-actions button.small:hover:not(:disabled) { background: var(--hover); }
-.skill-actions .primary-btn.small { border-color: transparent; }
+/* The armed half of a two-step delete: "Delete?" then "Keep", where the bin was. */
+.confirm-del { display: inline-flex; align-items: center; gap: 4px; }
 
+/* A workflow run's status, in the --st-* vocabulary. */
+.wf-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--st-idle); }
+.wf-dot.needs-you { background: var(--st-needs-you); }
+.wf-dot.working { background: var(--st-working); }
+.wf-dot.done { background: var(--st-done); }
+.wf-dot.failed { background: var(--st-failed); }
 .wf-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
 .wf-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .wf-mark { width: 14px; text-align: center; color: var(--text-muted); }
-.wf-step.done .wf-mark { color: var(--ok); }
-.wf-step.failed .wf-mark, .wf-step.blocked .wf-mark { color: var(--danger); }
-.wf-step.waiting_approval .wf-mark { color: var(--accent); }
+.wf-step.running .wf-mark { color: var(--st-working); }
+.wf-step.done .wf-mark { color: var(--st-done); }
+.wf-step.failed .wf-mark, .wf-step.blocked .wf-mark { color: var(--st-failed); }
+.wf-step.waiting_approval .wf-mark { color: var(--st-needs-you); }
 .skill-body { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 .skill-body.standalone { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-elev); }
 .skill-body label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
@@ -2395,7 +2691,7 @@ select:focus-visible {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
   padding: 8px 10px; outline: 0; color: var(--text); font: inherit;
 }
-.skill-body textarea { resize: vertical; line-height: 1.55; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.skill-body textarea { resize: vertical; line-height: 1.5; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
 .skill-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .skill-findings li { padding-left: 8px; border-left: 2px solid var(--warn); }
 .skill-findings li.error { border-left-color: var(--danger); }
@@ -2404,10 +2700,8 @@ select:focus-visible {
 .skill-intent button { display: inline-flex; align-items: center; gap: 4px; }
 .skill-preview { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; font-family: var(--mono, ui-monospace, monospace); }
 .skill-body input:focus, .skill-body textarea:focus { border-color: var(--accent); }
+/* Buttons in these rows are the shared .primary-btn.sm / .ghost-btn.sm; there is no local size. */
 .row-actions { display: flex; align-items: center; gap: 8px; }
-.row-actions button.small { font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border-strong); }
-.row-actions button.small:disabled { opacity: 0.5; }
-.row-actions .primary-btn.small { border-color: transparent; }
 
 .skill-title { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: none; padding: 0; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
 .skill-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2419,6 +2713,11 @@ select:focus-visible {
 .skill-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
 .skill-edit textarea { font-family: var(--mono); font-size: 12px; }
 .skill-edit-actions { display: flex; align-items: center; gap: 10px; }
+.made-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.made-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
+.made-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
+.made-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.made-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 
 /* ---------- Page agent (⌘I) ---------- */
 .page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
@@ -2432,31 +2731,41 @@ select:focus-visible {
 .page-agent-empty { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
 .page-agent-hint { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); font-size: 12px; }
 .page-agent-hint:hover { background: var(--active); color: var(--text); }
+/* The panel is 380px wide: an avatar column would spend a tenth of it to say what the header already does. */
+.page-agent .msg .avatar { display: none; }
 /* Permission rules: the approval card's rule block and the Settings editor. */
 /* Inset like .approval so the deny row lines up under the card it belongs to. */
 .approval-rules { margin: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
-.approval-rules p { margin: 0; }
+.approval-rules p { margin: 0; line-height: 1.5; }
 .approval-rule input, .perm-rule-add input { width: 100%; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.approval-rule input { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); }
 /* The deny note is plain English, not a rule: the UI font and a normal field. */
-.approval-rules form input { width: 100%; padding: 6px 10px; font-size: 13px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; }
+.approval-rules form input { width: 100%; min-width: 0; padding: 6px 10px; font-size: 13px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; }
 .approval-rules form { flex: 1; }
 .perm-rules { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
-.perm-rule-group ul { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.perm-rule-group li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.perm-rule-group, .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
+.perm-rule-group ul, .workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.perm-rule-group ul:empty { display: none; }
+/* A saved rule or folder: one quiet row, its text on the left and the remove button on the right. */
+.perm-rule-group li, .workspace-roots .plain-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 8px; background: var(--hover); font-size: 12px; }
+.perm-rule-group li code, .workspace-roots .plain-list li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
 .perm-rule-add { display: flex; gap: 6px; align-items: center; }
 .perm-rule-add select { flex: none; }
 .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
+.perm-rule-test p { margin: 0; }
 .workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
-.workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; }
-.workspace-roots .chip-check-row { justify-content: space-between; cursor: default; }
 .workspace-roots-add { display: flex; gap: 8px; }
 .workspace-roots-add input { flex: 1; min-width: 0; }
 /* Settings → Data */
-.data-row { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.data-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .data-row .toggle-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
-.data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
-.data-row .ghost-btn { flex: none; white-space: nowrap; }
-.data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.data-row .toggle-text small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.data-row .ghost-btn, .data-row .button-row { flex: none; white-space: nowrap; }
+/* A staged restore is waiting on the user: restart to apply it, or cancel. */
+.data-row.pending { padding: 10px 12px; border: 1px dashed var(--await-border); border-radius: 10px; background: var(--await-fill); }
+.data-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+.data-list .data-row { padding: 9px 12px; }
+.data-list .data-row + .data-row { border-top: 1px solid var(--border); }
 
 /* todo structure: tags, blocked marker, subtask input, saved filters */
 .todo-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }

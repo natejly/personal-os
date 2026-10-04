@@ -58,11 +58,11 @@ export default function TrashPanel(): JSX.Element {
   return (
     <section>
       <h3>Trash</h3>
-      <p className="muted small">
+      <p className="muted">
         Deleted chats, projects, docs, memories and todos wait here for {list?.retention_days ?? 30} days, then are erased.
         Deleting a project sends its chats, memories and uploads here too; its files and todos move to Personal.
       </p>
-      {list && list.total === 0 && <p className="empty-state">Nothing in the trash.</p>}
+      {list && list.total === 0 && <p className="empty-row"><Trash2 size={15} /> Nothing in the trash.</p>}
       {list && GROUPS.map(({ key, label }) => list.groups[key].length > 0 && (
         <div className="trash-group" key={key}>
           <h4>{label}</h4>
@@ -70,14 +70,14 @@ export default function TrashPanel(): JSX.Element {
             <div className="trash-row" key={`${it.type}:${it.id}`}>
               <span className="trash-title" title={it.title}>{it.title}</span>
               <small>{detail(it)}</small>
-              <button className="ghost-btn" onClick={() => void restore(it)}><RotateCcw size={13} /> Restore</button>
-              <button className="icon-btn ghost danger" aria-label={`Delete ${it.title} forever`} title="Delete forever" onClick={() => forever(it)}><Trash2 size={13} /></button>
+              <button className="ghost-btn sm" onClick={() => void restore(it)}><RotateCcw size={13} /> Restore</button>
+              <button className="icon-btn sm danger" aria-label={`Delete ${it.title} forever`} title="Delete forever" onClick={() => forever(it)}><Trash2 size={13} /></button>
             </div>
           ))}
         </div>
       ))}
       {list && list.total > 0 && (
-        <p style={{ marginTop: 16 }}><button className="ghost-btn danger" onClick={() => void empty()}><Trash2 size={14} /> Empty trash</button></p>
+        <div className="button-row"><button className="ghost-btn danger" onClick={() => void empty()}><Trash2 size={14} /> Empty trash</button></div>
       )}
     </section>
   )

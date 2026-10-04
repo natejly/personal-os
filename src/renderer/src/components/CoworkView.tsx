@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Archive, PanelLeftOpen, Plus, Users, X } from 'lucide-react'
+import { Archive, Plus, Users, X } from 'lucide-react'
 import type { DeskAutonomy, DeskInputRef } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import ScopeSelect from './ScopeSelect'
@@ -7,6 +7,7 @@ import DeskRail, { AUTONOMY, railOrder } from './DeskRail'
 import DeskDetail from './DeskDetail'
 import '../styles/cowork.css'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 
 
 /** The brief, and the four knobs that decide how much rope the desk gets. ⌘↵ submits. */
@@ -135,9 +136,8 @@ export default function CoworkView(): JSX.Element {
   const desks = useStore((s) => s.desks)
   const activeDeskId = useStore((s) => s.activeDeskId)
   const libraryScope = useStore((s) => s.libraryScope)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const showArchived = useStore((s) => s.deskShowArchived)
-  const { refreshDesks, refreshDeskInbox, openDesk, toggleSidebar, setLibraryScope, setDeskShowArchived } = useStore()
+  const { refreshDesks, refreshDeskInbox, openDesk, setLibraryScope, setDeskShowArchived } = useStore()
   const [creating, setCreating] = useState(false)
 
   const scope: Scope = libraryScope
@@ -167,7 +167,7 @@ export default function CoworkView(): JSX.Element {
   return (
     <main className="page cowork-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><Users size={16} /> Cowork</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
@@ -184,20 +184,29 @@ export default function CoworkView(): JSX.Element {
         <AppSwitcher />
       </header>
 
-      <div className="cowork-body">
-        <aside className="cowork-side">
-          <DeskRail desks={desks} activeId={creating ? null : activeDeskId} onOpen={(id) => { setCreating(false); void openDesk(id) }} />
-        </aside>
+      {/* With nothing to list the rail is dropped, so the page says "no desks" once, not twice. */}
+      <div className={`cowork-body${desks.length === 0 ? ' solo' : ''}`}>
+        {desks.length > 0 && (
+          <aside className="cowork-side">
+            <DeskRail desks={desks} activeId={creating ? null : activeDeskId} onOpen={(id) => { setCreating(false); void openDesk(id) }} />
+          </aside>
+        )}
 
         {creating ? (
           <NewDeskCard scope={scope} onDone={() => setCreating(false)} />
         ) : activeDeskId ? (
           <DeskDetail />
         ) : (
-          <section className="cowork-empty">
+          <section className="empty-state">
             <Users size={30} />
-            <h2>No desk open</h2>
-            <p className="muted">Start one when you have a task to hand off.</p>
+            <h2>{desks.length > 0 ? 'No desk open' : showArchived ? 'No archived desks' : 'No desks yet'}</h2>
+            <p>
+              {desks.length > 0
+                ? 'Pick one from the list, or start a new one.'
+                : showArchived
+                  ? 'A desk you archive is kept here, with its conversation and files.'
+                  : 'A desk takes a task off your hands: it works in its own folder and brings the result back for you to review.'}
+            </p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
           </section>
         )}

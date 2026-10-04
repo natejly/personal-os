@@ -1,6 +1,6 @@
 /**
  * The module list against the shell's own lists: every id a module claims is unique, and each one
- * lands in the slot the shell reads it from (Settings → Modules, the canvas catalog).
+ * lands in the slot the shell reads it from (Settings → Views, the canvas catalog).
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'

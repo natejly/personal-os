@@ -239,7 +239,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
     <div className="graph-body">
       <div className="graph-canvas" ref={wrapRef} onWheel={onWheel} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
         <div className="graph-tools">
-          <input placeholder="New entity" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
+          <input placeholder="New entity" aria-label="New entity name" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
           <button className="icon-btn" aria-label="Add entity" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
           <span className="sep" />
           <button className={`icon-btn ${history ? 'active' : ''}`} aria-label="Show ended relations" aria-pressed={history} title="History: show relations that no longer hold" onClick={() => setHistory((h) => !h)}><History size={15} /></button>

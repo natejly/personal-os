@@ -349,7 +349,7 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
             {isEdit && isRecurring && event?.recurring_event_id && (
               <section className="ev-scope">
                 <span className="muted small">Repeating event — change:</span>
-                <div className="ev-seg">
+                <div className="seg">
                   <button className={scope === 'one' ? 'on' : ''} onClick={() => setScope('one')}>This event</button>
                   <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>All events</button>
                 </div>
@@ -436,7 +436,7 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
                       {a.email}{a.self ? ' (you)' : ''}
                       <button title={a.optional ? 'Mark required' : 'Mark optional'}
                         onClick={() => setAttendees(attendees.map((x) => (x.email === a.email ? { ...x, optional: !x.optional } : x)))}>{a.optional ? 'optional' : 'req'}</button>
-                      <button title="Remove" onClick={() => setAttendees(attendees.filter((x) => x.email !== a.email))}><X size={11} /></button>
+                      <button title="Remove" aria-label={`Remove ${a.email}`} onClick={() => setAttendees(attendees.filter((x) => x.email !== a.email))}><X size={11} /></button>
                     </span>
                   ))}
                 </div>
@@ -497,9 +497,9 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
                 <label className="grow">
                   <span>Color</span>
                   <div className="ev-colors">
-                    <button className={`ev-swatch ${colorId === '' ? 'on' : ''}`} title="Calendar color" style={{ background: calColor ?? 'var(--border-strong)' }} onClick={() => setColorId('')}>{colorId === '' && <Check size={11} />}</button>
+                    <button className={`ev-swatch ${colorId === '' ? 'on' : ''}`} title="Calendar color" aria-label="Calendar color" aria-pressed={colorId === ''} style={{ background: calColor ?? 'var(--border-strong)' }} onClick={() => setColorId('')}>{colorId === '' && <Check size={11} />}</button>
                     {Object.entries(palette).map(([id, hex]) => (
-                      <button key={id} className={`ev-swatch ${colorId === id ? 'on' : ''}`} style={{ background: hex }} onClick={() => setColorId(id)}>{colorId === id && <Check size={11} />}</button>
+                      <button key={id} className={`ev-swatch ${colorId === id ? 'on' : ''}`} aria-label={`Color ${id}`} aria-pressed={colorId === id} style={{ background: hex }} onClick={() => setColorId(id)}>{colorId === id && <Check size={11} />}</button>
                     ))}
                   </div>
                 </label>
@@ -527,7 +527,7 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
             {isEdit && me && (
               <section className="ev-rsvp">
                 <span className="muted small">Going?</span>
-                <div className="ev-seg">
+                <div className="seg">
                   <button className={me.response === 'accepted' ? 'on' : ''} disabled={busy} onClick={() => void respond('accepted')}>Yes</button>
                   <button className={me.response === 'declined' ? 'on' : ''} disabled={busy} onClick={() => void respond('declined')}>No</button>
                   <button className={me.response === 'tentative' ? 'on' : ''} disabled={busy} onClick={() => void respond('tentative')}>Maybe</button>

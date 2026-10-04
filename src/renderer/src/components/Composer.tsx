@@ -34,7 +34,7 @@ interface ComposerProps {
   draftKey?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Message Grain…', draftKey }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Ask anything', draftKey }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
@@ -293,7 +293,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); void attach(e.dataTransfer.files) }}
       >
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void attach(e.target.files); e.target.value = '' }} />
-        <button className="icon-btn" title="Add files to this chat" onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
+        <button className="icon-btn" title="Add files to this chat" aria-label="Add files to this chat" onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
         <SmartTextarea
           kind="chat"
           variant="bare"
@@ -327,6 +327,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             onPick={(i) => setText(`/${slash[i].name} `)}
             items={slash.map((c) => ({ key: c.id, label: `/${c.name}`, hint: ((c.subtask ? 'subtask · ' : '') + c.description).slice(0, 48) }))} />
         )}
+        {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
+            typing mid-reply never changes the width of the text box; Stop sits beside it. */}
         <div className="composer-actions">
           <MicButton scope={box} onText={dictate} />
           {streaming && (
@@ -334,26 +336,25 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
             </button>
           )}
-          {(!streaming || text.trim()) && (
-            <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!text.trim()} onClick={() => submit()}><ArrowUp size={16} /></button>
-          )}
+          <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!text.trim()} onClick={() => submit()}><ArrowUp size={16} /></button>
         </div>
       </div>
       {/* The plan-mode toggle binds ⌘⇧P itself, only for the focused conversation, so several mounted
-          chat widgets do not all cycle at once. An empty page-agent panel has no chat for either to set. */}
+          chat widgets do not all cycle at once. It comes last because its label grows with the mode, and
+          nothing sits after it to be pushed. An empty page-agent panel has no chat for either toggle to set. */}
       <div className="composer-footer">
-        {conversationId !== '\u0000page-agent' && (
-          <>
-            <PlanModeToggle conversationId={conversationId} />
-            <SkipPermissionsToggle conversationId={conversationId} />
-          </>
-        )}
+        {footer}
         {!onSend && (activeId
           ? chatPrivate && <span className="ghost-btn private-chat on" title="Nothing in this chat is remembered, learned from, or found by chat search"><EyeOff size={13} /> Private</span>
           : <button className={`ghost-btn private-chat ${chatPrivate ? 'on' : ''}`} aria-pressed={chatPrivate}
               title="Private: this chat reads no memories and teaches nothing, and chat search skips it. Fixed once the first message is sent."
               onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
-        {footer}
+        {conversationId !== '\u0000page-agent' && (
+          <>
+            <SkipPermissionsToggle conversationId={conversationId} />
+            <PlanModeToggle conversationId={conversationId} />
+          </>
+        )}
       </div>
     </div>
   )

@@ -110,7 +110,7 @@ export default function PendingSends(): JSX.Element | null {
           <div className="pending-actions">
             {s.status === 'holding' && (
               <>
-                <button className="ghost-btn danger" disabled={busy === s.id} onClick={() => void act(s.id, 'cancel')}>
+                <button className="ghost-btn" disabled={busy === s.id} onClick={() => void act(s.id, 'cancel')}>
                   <Undo2 size={13} /> Undo
                 </button>
                 <button className="ghost-btn" disabled={busy === s.id} onClick={() => void act(s.id, 'sendNow')}>

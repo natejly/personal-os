@@ -344,7 +344,7 @@ function ChangeRow({ c, i, editing, on, old, outcome, state, conflicts, onToggle
 }
 
 // ------------------------------------------------------------------ the proposal / write card
-function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
+function ProposalCard({ event, pending, decide, rules }: ToolCardProps): JSX.Element {
   const name = event.name
   const state = cardState(name, event, pending)
   const original = useMemo(() => changesFromArgs(name, argsOf(event)), [name, event])
@@ -464,10 +464,11 @@ function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
           )}
           {blocked && <span className="ccard-warn bad"><AlertCircle size={12} /> {blocked}</span>}
           <div className="ccard-actions">
-            <button className="primary-btn" disabled={busy || !picked.length || !!blocked} onClick={() => void approve()}
+            <button className="primary-btn sm" disabled={busy || !picked.length || !!blocked} onClick={() => void approve()}
               title="⌘↵">{allOn ? (changes.length > 1 ? `Approve all (${picked.length})` : 'Approve') : `Approve selected (${picked.length})`}</button>
-            <button className="ghost-btn danger" disabled={busy} onClick={() => void deny()}>Deny</button>
+            <button className="ghost-btn sm" disabled={busy} onClick={() => void deny()}>Deny</button>
           </div>
+          {rules}
         </footer>
       )}
       <Details event={event} />
@@ -476,15 +477,16 @@ function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
 }
 
 // ------------------------------------------------------------------ read-only results: slots and events
-function AwaitingRead({ decide }: Pick<ToolCardProps, 'decide'>): JSX.Element {
+function AwaitingRead({ decide, rules }: Pick<ToolCardProps, 'decide' | 'rules'>): JSX.Element {
   const [busy, setBusy] = useState(false)
   return (
     <div className="ccard-foot">
       <p className="ccard-muted">This tool is set to ask first. It only reads your calendar.</p>
       <div className="ccard-actions">
-        <button className="primary-btn" disabled={busy} onClick={() => { setBusy(true); void decide(true).finally(() => setBusy(false)) }}>Allow</button>
-        <button className="ghost-btn danger" disabled={busy} onClick={() => { setBusy(true); void decide(false).finally(() => setBusy(false)) }}>Deny</button>
+        <button className="primary-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(true).finally(() => setBusy(false)) }}>Approve</button>
+        <button className="ghost-btn sm" disabled={busy} onClick={() => { setBusy(true); void decide(false).finally(() => setBusy(false)) }}>Deny</button>
       </div>
+      {rules}
     </div>
   )
 }
@@ -550,7 +552,7 @@ function EventsView({ event }: { event: ToolEvent }): JSX.Element {
   )
 }
 
-function ReadCard({ event, pending, decide, conversationId }: ToolCardProps): JSX.Element {
+function ReadCard({ event, pending, decide, conversationId, rules }: ToolCardProps): JSX.Element {
   const state = cardState(event.name, event, pending)
   const isSlots = event.name === 'calendar_find_time'
   const miss = notConnected(event.error)
@@ -566,7 +568,7 @@ function ReadCard({ event, pending, decide, conversationId }: ToolCardProps): JS
         {state === 'failed' && <span className="tag unproven">failed</span>}
       </header>
       {miss ? <ConnectNotice /> : state === 'failed' ? <div className="ccard-warn bad"><AlertCircle size={12} /> {event.error}</div> : null}
-      {state === 'awaiting' && <AwaitingRead decide={decide} />}
+      {state === 'awaiting' && <AwaitingRead decide={decide} rules={rules} />}
       {state === 'done' && (isSlots ? <SlotsView event={event} conversationId={conversationId} /> : <EventsView event={event} />)}
       <Details event={event} />
     </section>

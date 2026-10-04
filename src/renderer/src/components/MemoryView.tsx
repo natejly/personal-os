@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Check, X, Download, Upload } from 'lucide-react'
+import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import type { Memory, MemoryProposal } from '@shared/types'
 import ProjectChip from './ProjectChip'
@@ -64,12 +64,12 @@ function ProposalRow({ p, byId, labels, onApply, onDismiss }: { p: MemoryProposa
     <div className="mem-row proposal">
       <div className="mem-main">
         <div className="mem-meta"><span className="tag"><Sparkles size={10} />{title}</span>{p.rationale && <span className="muted">{p.rationale}</span>}</div>
-        {before.map((t, i) => <p key={i} style={{ textDecoration: 'line-through', opacity: 0.65 }}>{t}</p>)}
+        {before.map((t, i) => <p key={i} className="mem-before">{t}</p>)}
         <p>{after}</p>
       </div>
       <div className="mem-actions">
-        <button className="icon-btn" aria-label={`Apply: ${title}`} title="Apply" onClick={onApply}><Check size={14} /></button>
-        <button className="icon-btn" aria-label={`Dismiss: ${title}`} title="Dismiss" onClick={onDismiss}><X size={14} /></button>
+        <button className="primary-btn sm" aria-label={`Apply: ${title}`} onClick={onApply}>Apply</button>
+        <button className="ghost-btn sm" aria-label={`Dismiss: ${title}`} onClick={onDismiss}>Dismiss</button>
       </div>
     </div>
   )
@@ -81,7 +81,7 @@ function HistoryRow({ m, byId, onRestore }: { m: Memory; byId: Map<string, Memor
   return (
     <div className="mem-row history">
       <div className="mem-main">
-        <p style={{ textDecoration: 'line-through', opacity: 0.65 }}>{m.content}</p>
+        <p className="mem-before">{m.content}</p>
         <div className="mem-meta">
           <span className="muted">{next ? `replaced by “${next.content}”` : 'forgotten'}</span>
           <span className="muted">{m.invalid_at ? new Date(m.invalid_at * 1000).toLocaleDateString() : ''}</span>
@@ -183,16 +183,20 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
           ? 'Project memories are injected into chats in this project, on top of your personal memories.'
           : 'Personal memories go into every chat; project memories only into that project’s chats. Pinned ones are always included; the rest are chosen by recency and relevance.'}
       </p>
-      <label className="muted small" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-        <input type="checkbox" checked={showHistory} onChange={(e) => setShowHistory(e.target.checked)} /> <History size={12} /> Show history
-      </label>
-      <button className="primary-btn" onClick={() => void tidy()} disabled={tidying} title="Look for duplicates and stale dates. Nothing changes until you apply a suggestion.">
-        <Sparkles size={14} /> {tidying ? 'Looking…' : 'Tidy up'}
-        {proposalCount > 0 && <span className="count pending" title={`${proposalCount} suggestion${proposalCount === 1 ? '' : 's'} to review`}>{proposalCount}</span>}
-      </button>
-      <button className="ghost-btn" onClick={() => void exportMemories()} title="Save the memories in this scope to a JSON file"><Download size={14} /> Export</button>
-      <button className="ghost-btn" onClick={() => void importMemories()} title={`Add memories from an exported JSON file${targetProject ? ' to this project' : ' to your personal memories'}`}><Upload size={14} /> Import</button>
-      {tidyNote && <span className="muted small"> {tidyNote}</span>}
+      {/* One row of secondary tools, so Add above stays the only primary action. */}
+      <div className="mem-tools">
+        <label className={`chip-check ${showHistory ? 'on' : ''}`} title="Also list memories that were replaced or forgotten">
+          <input type="checkbox" checked={showHistory} onChange={(e) => setShowHistory(e.target.checked)} /><History size={12} /> History
+        </label>
+        <span className="spacer" />
+        {tidyNote && <span className="muted small" role="status">{tidyNote}</span>}
+        <button className="ghost-btn sm" onClick={() => void tidy()} disabled={tidying} title="Look for duplicates and stale dates. Nothing changes until you apply a suggestion.">
+          <Sparkles size={13} /> {tidying ? 'Looking…' : 'Tidy up'}
+          {proposalCount > 0 && <span className="count pending" title={`${proposalCount} suggestion${proposalCount === 1 ? '' : 's'} to review`}>{proposalCount}</span>}
+        </button>
+        <button className="ghost-btn sm" onClick={() => void exportMemories()} title="Save the memories in this scope to a JSON file"><Download size={13} /> Export</button>
+        <button className="ghost-btn sm" onClick={() => void importMemories()} title={`Add memories from an exported JSON file${targetProject ? ' to this project' : ' to your personal memories'}`}><Upload size={13} /> Import</button>
+      </div>
       {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
       {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories yet.'}</p>}
       {memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}

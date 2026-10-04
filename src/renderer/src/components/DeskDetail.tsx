@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Clock, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronRight, CircleHelp, Clock, FileCheck2, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert } from 'lucide-react'
 import { DESK_LIVE, type DeskAutonomy, type DeskStatus, type FullDesk, type PendingApproval, type ToolEvent } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
@@ -294,7 +294,9 @@ export default function DeskDetail(): JSX.Element | null {
                 {/* Accepting happens on the Output tab, where each output's destination and project are chosen: a
                     header "Accept all" sent everything to a new personal doc whatever was picked there. */}
                 {undecided.length > 0 && tab !== 'output' && (
-                  <button className="primary-btn" onClick={() => setTab('output')}>Review {undecided.length} output{undecided.length === 1 ? '' : 's'}</button>
+                  <button className="primary-btn" onClick={() => setTab('output')}>
+                    <FileCheck2 size={13} /> Review outputs ({undecided.length})
+                  </button>
                 )}
                 <button className="ghost-btn" aria-expanded={sendingBack} onClick={() => setSendingBack((v) => !v)}>Send back</button>
               </>
@@ -332,45 +334,6 @@ export default function DeskDetail(): JSX.Element | null {
         )}
       </header>
 
-      {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
-          card (POST /message routes it onto the approval), so it is the same answer either way. */}
-      {desk.question && !ENDED.includes(desk.status) && !(desk.approvals ?? []).some((a) => a.tool === 'desk_ask') && (
-        <div className="desk-banner ask">
-          <CircleHelp size={14} />
-          <div>
-            <b>It needs an answer</b>
-            <p>{desk.question}</p>
-            <SteerBox deskId={desk.id} live={false} disabled={false} placeholder="Answer it… (⌘↵)" />
-          </div>
-        </div>
-      )}
-      {planPending && tab !== 'plan' && (
-        <div className="desk-banner ask">
-          <CircleHelp size={14} />
-          <div>
-            <b>A plan is waiting for you</b>
-            <p>{desk.plan?.title || 'It drafted a plan'} — nothing consequential runs until you approve it.</p>
-            <button className="ghost-btn desk-banner-action" onClick={() => setTab('plan')}>Review the plan</button>
-          </div>
-        </div>
-      )}
-      <WaitingCards cards={desk.approvals ?? []} conversationId={desk.conversation_id} events={messages.flatMap((m) => m.tool_events ?? [])} />
-      {desk.status === 'queued' && <QueuedBanner deskId={desk.id} />}
-      {desk.status === 'interrupted' && (
-        <div className="desk-banner warn">
-          <TriangleAlert size={14} />
-          <div>
-            <b>Interrupted by a restart</b>
-            <p>
-              Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}
-            </p>
-          </div>
-        </div>
-      )}
-      {desk.last_error && desk.status !== 'interrupted' && (
-        <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
-      )}
-
       <div className="desk-tabs tabs">
         {TABS.map((t, i) => (
           <button key={t.key} className={tab === t.key ? 'active' : ''} title={`${t.label} (${i + 1})`} onClick={() => setTab(t.key)}>
@@ -379,6 +342,49 @@ export default function DeskDetail(): JSX.Element | null {
             {t.key === 'plan' && desk.plan?.status === 'pending' && <span className="dot-badge">1</span>}
           </button>
         ))}
+      </div>
+
+      {/* Below the tabs, so a banner arriving or leaving never moves the tab strip. The band holds
+          whatever the desk is waiting on and is the same on every tab; empty, it takes no room. */}
+      <div className="desk-banners">
+        {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
+            card (POST /message routes it onto the approval), so it is the same answer either way. */}
+        {desk.question && !ENDED.includes(desk.status) && !(desk.approvals ?? []).some((a) => a.tool === 'desk_ask') && (
+          <div className="desk-banner ask">
+            <CircleHelp size={14} />
+            <div>
+              <b>It needs an answer</b>
+              <p>{desk.question}</p>
+              <SteerBox deskId={desk.id} live={false} disabled={false} placeholder="Answer it… (⌘↵)" />
+            </div>
+          </div>
+        )}
+        {planPending && tab !== 'plan' && (
+          <div className="desk-banner ask">
+            <CircleHelp size={14} />
+            <div>
+              <b>A plan is waiting for you</b>
+              <p>{desk.plan?.title || 'It drafted a plan'} — nothing consequential runs until you approve it.</p>
+              <button className="primary-btn sm desk-banner-action" onClick={() => setTab('plan')}>Review the plan</button>
+            </div>
+          </div>
+        )}
+        <WaitingCards cards={desk.approvals ?? []} conversationId={desk.conversation_id} events={messages.flatMap((m) => m.tool_events ?? [])} />
+        {desk.status === 'queued' && <QueuedBanner deskId={desk.id} />}
+        {desk.status === 'interrupted' && (
+          <div className="desk-banner warn">
+            <TriangleAlert size={14} />
+            <div>
+              <b>Interrupted by a restart</b>
+              <p>
+                Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}
+              </p>
+            </div>
+          </div>
+        )}
+        {desk.last_error && desk.status !== 'interrupted' && (
+          <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
+        )}
       </div>
 
       {tab === 'activity' && (

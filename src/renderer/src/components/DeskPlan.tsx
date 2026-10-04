@@ -25,7 +25,6 @@ const MARK: Record<PlanStepStatus, JSX.Element> = {
 export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
   const messageDesk = useStore((s) => s.messageDesk)
   const plan = desk.plan
-
   const [amending, setAmending] = useState(false)
   const amend = (what: string): void => {
     setAmending(false)
@@ -58,7 +57,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
         <b>{plan.title || 'Plan'}</b>
         <span className="muted small">{done}/{live.length} done · {plan.status}</span>
         <span className="spacer" />
-        <button className="ghost-btn" aria-expanded={amending} onClick={() => setAmending((v) => !v)}>Amend plan</button>
+        <button className="ghost-btn sm" aria-expanded={amending} onClick={() => setAmending((v) => !v)}>Amend plan</button>
       </header>
       {amending && (
         <InlineNote placeholder="What should change about the plan? The agent re-plans." submitLabel="Ask to re-plan"

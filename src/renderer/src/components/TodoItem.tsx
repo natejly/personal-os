@@ -5,19 +5,11 @@ import { api } from '../lib/api'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { dragProps } from '../canvas/dnd'
 import ProjectChip from './ProjectChip'
+import { rowButton } from '../lib/rowButton'
 import { localDay } from './CalendarWeek'
+import { dueLabel } from '../lib/dates'
 
-export const dueLabel = (due: string | null): { text: string; cls: string } => {
-  if (!due) return { text: '', cls: '' }
-  const d = new Date(due + 'T00:00:00')
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000)
-  if (diff < 0) return { text: `${-diff}d overdue`, cls: 'overdue' }
-  if (diff === 0) return { text: 'Today', cls: 'today' }
-  if (diff === 1) return { text: 'Tomorrow', cls: '' }
-  if (diff < 7) return { text: d.toLocaleDateString(undefined, { weekday: 'short' }), cls: '' }
-  return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' }
-}
+export { dueLabel }
 
 /** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime.
  *
@@ -90,14 +82,14 @@ export default function TodoItem({ todo, showProject = true, compact = false, de
   const drag = dragProps({ kind: 'todo', id: todo.id, label: todo.title, projectId: todo.project_id })
   return (
     <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} style={depth ? { marginLeft: depth * 20 } : undefined} {...(editing ? {} : drag)}>
-      <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'}>
+      <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'} aria-label={`${todo.done ? 'Reopen' : 'Complete'}: ${todo.title}`}>
         {todo.done ? <Check size={12} /> : null}
       </button>
       <div className="todo-main">
         {editing ? (
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(startTitle.current); setEditing(false) } }} />
+          <input autoFocus aria-label="Todo title" value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(startTitle.current); setEditing(false) } }} />
         ) : (
-          <span className="todo-title" role="button" tabIndex={0} onClick={beginEdit} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); beginEdit() } }}>{todo.title}</span>
+          <span className="todo-title" title="Click to rename" {...rowButton(beginEdit)}>{todo.title}</span>
         )}
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
         {sub !== null && (
@@ -112,7 +104,9 @@ export default function TodoItem({ todo, showProject = true, compact = false, de
         {todo.repeat && <span className="todo-repeat" title={`Repeats every ${todo.repeat.every > 1 ? todo.repeat.every + ' ' : ''}${todo.repeat.unit}${todo.repeat.every > 1 ? 's' : ''}${todo.repeat.mode === 'from_completion' ? ' after completion' : ''}`}><Repeat size={11} /></span>}
         {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
-        <label className={`todo-due ${due.cls}`} title="Due date">
+        {/* `quiet`: a control with nothing set fades out until the row is hovered or focused. Its
+            space is kept, so nothing moves when it comes back. */}
+        <label className={`todo-due ${due.cls} ${todo.due ? '' : 'quiet'}`} title="Due date">
           <Calendar size={11} />
           <span>{due.text || 'no date'}</span>
           <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
@@ -124,12 +118,12 @@ export default function TodoItem({ todo, showProject = true, compact = false, de
         )}
         {!compact && !todo.done && <button className="icon-btn ghost" title="Add subtask" aria-label={`Add subtask to ${todo.title}`} onClick={() => setSub('')}><ListPlus size={13} /></button>}
         {!compact && !todo.done && (
-          <input className="todo-est" type="number" min={0} max={960} step={5} placeholder="min" title="Estimate in minutes (used by Plan my day)" aria-label={`Estimate in minutes for ${todo.title}`}
+          <input className={`todo-est ${todo.estimate_min ? '' : 'quiet'}`} type="number" min={0} max={960} step={5} placeholder="min" title="Estimate in minutes (used by Plan my day)" aria-label={`Estimate in minutes for ${todo.title}`}
             defaultValue={todo.estimate_min ?? ''} key={todo.estimate_min ?? 'none'}
             onBlur={(e) => { const v = Number(e.target.value); if ((v || null) !== (todo.estimate_min ?? null)) void updateTodo(todo.id, v > 0 ? { estimate_min: v } : { clear_estimate: true }) }} />
         )}
         {!compact && (
-          <select className="todo-prio" value={todo.priority} onChange={(e) => void updateTodo(todo.id, { priority: Number(e.target.value) })} title="Priority">
+          <select className={`todo-prio ${todo.priority === 2 ? 'quiet' : ''}`} value={todo.priority} onChange={(e) => void updateTodo(todo.id, { priority: Number(e.target.value) })} title="Priority" aria-label={`Priority of ${todo.title}`}>
             <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
           </select>
         )}

@@ -11,11 +11,13 @@
 .mtg-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--mtg-side-w, 240px) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
-.mtg-body:has(.mtg-enhanced) { grid-template-columns: 260px minmax(0, 1fr) 380px; }
+.mtg-body:has(.mtg-enhanced) { grid-template-columns: var(--mtg-side-w, 240px) minmax(0, 1fr) 380px; }
+.resize-handle.mtg-side-edge { left: calc(var(--mtg-side-w, 240px) - 4px); }
 /* The notepad, the transcript and the review column is three columns too many: stack the inner
    panes instead of squeezing prose into ~30 characters a line. */
 .mtg-body:has(.mtg-enhanced) .mtg-panes.with-transcript {
@@ -44,7 +46,7 @@
 
 .mtg-row {
   display: flex; align-items: center; gap: 6px;
-  padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer;
   color: var(--text-muted);
 }
 .mtg-row:hover { background: var(--hover); color: var(--text); }
@@ -60,7 +62,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mtg-row .icon-btn.xs { opacity: 0; flex: none; }
-.mtg-row:hover .icon-btn.xs { opacity: 1; }
+.mtg-row:hover .icon-btn.xs, .mtg-row:focus-within .icon-btn.xs { opacity: 1; }
 
 /* Live and awaiting-review markers. The recording dot borrows `pulse-dot` from styles.css so the
    rail and the sidebar indicator breathe in step. */
@@ -71,8 +73,12 @@
 
 /* ---- main pane ---- */
 .mtg-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-/* Its own scroller: `.mtg-body` is a grid, so the empty state cannot lean on `.page-body`. */
-.mtg-empty { overflow-y: auto; min-height: 0; padding: 16px 24px 40px; }
+/* Its own scroller: `.mtg-body` is a grid, so the empty state cannot lean on `.page-body`. A column,
+   so the recorder bar (when live) sits on top and the empty state centres in what is left. */
+.mtg-empty { display: flex; flex-direction: column; overflow-y: auto; min-height: 0; }
+/* What still needs setting up, as one quiet line under Record; the checklist is in Settings. */
+.empty-state .mtg-setup { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.empty-state .mtg-setup:hover { color: var(--text); }
 
 .mtg-toolbar {
   display: flex; align-items: center; gap: 6px;
@@ -84,7 +90,6 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mtg-save-state { color: var(--text-faint); font-size: 11px; }
-.mtg-toolbar .mtg-spacer { flex: 1; }
 
 /* The banner is persistent on purpose: a recording that failed must never look like one that worked. */
 .mtg-banner {
@@ -154,8 +159,8 @@
 .mtg-actions > header h4 { flex: 1; margin: 0; font-size: 12px; }
 .mtg-action {
   display: flex; align-items: flex-start; gap: 7px;
-  padding: 6px 7px; border-radius: 7px;
-  font-size: 12.5px; line-height: 1.45;
+  padding: 6px 7px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.5;
 }
 .mtg-action:hover { background: var(--hover); }
 .mtg-action input { margin: 3px 0 0; flex: none; }
@@ -166,36 +171,31 @@
 /* ---- settings panel ---- */
 .mtg-settings { max-width: 720px; }
 .mtg-settings h4 + p.muted { margin-top: 2px; }
-.mtg-intro { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-.mtg-intro h2 { margin: 0; font-size: 18px; }
-.mtg-intro p { max-width: 62ch; }
 .mtg-selftest { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; font-size: 12px; }
 .mtg-selftest .mtg-selftest-msg { color: var(--text-muted); min-width: 0; }
 .mtg-selftest .mtg-selftest-msg.ok { color: var(--ok); }
 .mtg-selftest .mtg-selftest-msg.fail { color: var(--danger); }
-.mtg-sources { display: flex; gap: 16px; padding: 8px 0; }
-.mtg-sources label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
 .mtg-danger {
   display: flex; align-items: center; gap: 12px;
   margin-top: 16px; padding: 10px 12px;
-  border: 1px solid rgba(229, 72, 77, 0.4); border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 10px;
 }
 .mtg-danger-body { flex: 1; display: flex; flex-direction: column; }
 .mtg-danger-body small { color: var(--text-faint); font-size: 11px; }
 
 /* ---- consent ---- */
 .mtg-consent p { margin: 0 0 10px; }
-.mtg-consent ul { margin: 0 0 12px; padding-left: 18px; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.mtg-consent ul { margin: 0 0 12px; padding-left: 18px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .mtg-consent code { overflow-wrap: anywhere; }
 .mtg-consent-ack {
   display: flex; align-items: flex-start; gap: 8px;
-  margin: 0; padding: 10px 11px; border-radius: 9px;
+  margin: 0; padding: 10px 11px; border-radius: 10px;
   background: var(--hover); font-size: 13px; cursor: pointer;
 }
 .mtg-consent-ack input { width: auto; margin: 2px 0 0; flex: none; }
 
 @media (max-width: 1100px) {
-  .mtg-body, .mtg-body:has(.mtg-enhanced) { grid-template-columns: 220px minmax(0, 1fr); }
+  .mtg-body, .mtg-body:has(.mtg-enhanced) { grid-template-columns: var(--mtg-side-w, 220px) minmax(0, 1fr); }
   .mtg-enhanced { display: none; }
   .mtg-panes.with-transcript {
     grid-template-columns: minmax(0, 1fr);
@@ -205,5 +205,5 @@
 }
 
 .mtg-speakers { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
-.mtg-speaker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-dim, inherit); }
+.mtg-speaker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-muted); }
 .mtg-speaker-chip input { width: 90px; border: 0; background: transparent; color: inherit; font: inherit; outline: none; }

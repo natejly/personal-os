@@ -26,11 +26,6 @@
   /* Hairline only: the old blurred drop shadows cast onto adjacent windows, reading as a highlight. */
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.5);
-  /* Floating chrome (menus, dock) still gets depth — it overlays windows, never sits beside them. */
-  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.34);
-  --tl-red: #ff5f57;
-  --tl-yellow: #febc2e;
-  --tl-green: #28c840;
   --tl-off: #565654;
   --spring: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-window: 320ms;
@@ -52,7 +47,6 @@
   --win-highlight: rgba(255, 255, 255, 0.9);
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
   --tl-off: #c9c7c2;
   --grid-dot: rgba(0, 0, 0, 0.2);
   --dock-tile: rgba(255, 255, 255, 0.78);
@@ -66,7 +60,6 @@
     --win-highlight: rgba(255, 255, 255, 0.9);
     --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
     --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-    --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
     --tl-off: #c9c7c2;
     --grid-dot: rgba(0, 0, 0, 0.2);
     --dock-tile: rgba(255, 255, 255, 0.78);
@@ -107,11 +100,10 @@
 /* A drag that crosses an iframe must not hand the pointer stream to another document. */
 .canvas.interacting iframe { pointer-events: none; }
 
-/* Locked: the plane takes no gestures, so it offers no grab cursor and no grip hint. The windows
+/* Locked: the plane takes no gestures, so it offers no grab cursor. The windows
    themselves stay live -- only their chrome goes quiet. */
 .canvas.locked { cursor: default; }
 .canvas.locked .win-move { cursor: default; }
-.canvas.locked .win-grip-dots { opacity: 0.35; }
 
 .canvas-plane {
   position: absolute;
@@ -314,10 +306,10 @@
  * so widgets.css stays the owner of the status state and this is only its colour. After `.focused` on
  * purpose: a focused window that is generating still reads amber.
  */
-.win:has(.ring.working) { --win-signal: var(--tl-yellow); }
-.win:has(.ring.done) { --win-signal: var(--tl-green); }
-.win:has(.ring.error) { --win-signal: var(--tl-red); }
-.win:has(.ring.needs-approval) { --win-signal: var(--accent); }
+.win:has(.ring.working) { --win-signal: var(--st-working); }
+.win:has(.ring.done) { --win-signal: var(--st-done); }
+.win:has(.ring.error) { --win-signal: var(--st-failed); }
+.win:has(.ring.needs-approval) { --win-signal: var(--st-needs-you); }
 .win:has(.ring) {
   border-color: var(--win-signal);
   --win-glow: 0 0 18px -9px var(--win-signal);
@@ -485,7 +477,6 @@
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.win-stub-ref { font-family: var(--mono); font-size: 11px; color: var(--text-muted); word-break: break-all; }
 
 .proxy-card {
   height: 100%;
@@ -567,7 +558,6 @@
   background: var(--material-thin);
   backdrop-filter: var(--material-blur);
 }
-.spaces-bar .spacer { flex: 1; }
 .spaces-inset { flex: 0 0 76px; align-self: stretch; }
 .spaces-bar .icon-btn.on { color: var(--accent); }
 .spaces-bar .app-switch { width: 24px; height: 24px; }
@@ -578,7 +568,7 @@
   align-items: center;
   gap: 6px;
   max-width: 180px;
-  height: 22px;
+  height: 24px;
   padding: 0 9px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -602,6 +592,28 @@
 .space-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
 .space-count { font-size: 10px; color: var(--text-faint); }
 .space-lock { flex: 0 0 11px; color: var(--accent); }
+/* Delete stays out of the tab until the pointer or the keyboard is on it: a trash can beside every
+   name was the loudest thing on the bar. Collapsed to no width, so the tab does not reserve a gap
+   for it; 18px to look at, 24px to hit. */
+.space-tab .space-del {
+  position: relative;
+  flex: none;
+  width: 0;
+  height: 18px;
+  margin-left: -6px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--dur-hover) ease;
+}
+.space-tab:hover .space-del,
+.space-tab .space-del:focus-visible {
+  width: 18px;
+  margin-left: 0;
+  margin-right: -5px;
+  overflow: visible;
+  opacity: 1;
+}
+.space-tab .space-del::before { content: ''; position: absolute; inset: -3px; }
 
 /* ---------- overview ---------- */
 
@@ -709,10 +721,10 @@
   transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease;
   -webkit-app-region: no-drag;
 }
-.popout:has(.ring.working) { --win-signal: var(--tl-yellow); }
-.popout:has(.ring.done) { --win-signal: var(--tl-green); }
-.popout:has(.ring.error) { --win-signal: var(--tl-red); }
-.popout:has(.ring.needs-approval) { --win-signal: var(--accent); }
+.popout:has(.ring.working) { --win-signal: var(--st-working); }
+.popout:has(.ring.done) { --win-signal: var(--st-done); }
+.popout:has(.ring.error) { --win-signal: var(--st-failed); }
+.popout:has(.ring.needs-approval) { --win-signal: var(--st-needs-you); }
 .popout:has(.ring) .popout-body {
   border-color: var(--win-signal);
   box-shadow: 0 0 18px -9px var(--win-signal);
@@ -734,6 +746,7 @@
   -webkit-app-region: no-drag;
 }
 .popout-actions .icon-btn {
+  position: relative;
   width: 22px;
   height: 22px;
   opacity: 0;
@@ -745,6 +758,8 @@
 .popout.tuning .popout-actions .icon-btn,
 .popout-actions .icon-btn:focus-visible { opacity: 1; }
 .popout-actions .icon-btn.on { color: var(--accent); }
+/* 22px to look at, 24px to hit: the 2px gap between them is shared out, so targets never overlap. */
+.popout-actions .icon-btn::before { content: ''; position: absolute; inset: -1px; }
 
 /* The transparency slider, hung under its button. No-drag, or aiming the thumb would move the window. */
 .popout-opacity {
@@ -794,8 +809,6 @@
 /* ---------- motion ---------- */
 
 @keyframes win-open { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
-@keyframes win-close { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.96); } }
-@keyframes win-min { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(40%) scale(0.4); } }
 @keyframes guide-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes zone-in { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
 

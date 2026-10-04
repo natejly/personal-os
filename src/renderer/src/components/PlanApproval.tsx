@@ -59,7 +59,7 @@ export default function PlanApproval({ event, conversationId }: { event: ToolEve
                   <span className="plan-tool">{d.tool.replace(/_/g, ' ')}</span>
                 </label>
                 {edited(d) && d.keep && <span className="tag ask">edited</span>}
-                <button className="ghost-btn tiny" onClick={() => setEditing((o) => ({ ...o, [d.idx]: !o[d.idx] }))} title="Edit this step's arguments">
+                <button className="ghost-btn sm" onClick={() => setEditing((o) => ({ ...o, [d.idx]: !o[d.idx] }))} title="Edit this step's arguments">
                   <Pencil size={11} /> {editing[d.idx] ? 'done' : 'edit'}
                 </button>
               </div>
@@ -71,7 +71,7 @@ export default function PlanApproval({ event, conversationId }: { event: ToolEve
                             aria-label={`Arguments for step ${d.idx + 1}`} />
                   {args === null && <div className="plan-warn"><AlertCircle size={12} /> Not valid JSON yet.</div>}
                   {args !== null && edited(d) && (
-                    <button className="ghost-btn tiny" onClick={() => patch(d.idx, { text: pretty(d.proposed) })}>revert</button>
+                    <button className="ghost-btn sm" onClick={() => patch(d.idx, { text: pretty(d.proposed) })}>revert</button>
                   )}
                 </>
               ) : (
@@ -91,12 +91,12 @@ export default function PlanApproval({ event, conversationId }: { event: ToolEve
       </ol>
       <input className="plan-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note back to the assistant" aria-label="Note to the assistant" />
       <div className="approval-actions">
-        <button className="primary-btn" disabled={busy || bad.length > 0 || kept.length === 0} onClick={() => void send('allow')}>
-          {kept.length === plan.steps.length ? `Approve all ${plan.steps.length}` : `Approve ${kept.length} of ${plan.steps.length}`}
+        <button className="primary-btn sm" disabled={busy || bad.length > 0 || kept.length === 0} onClick={() => void send('allow')}>
+          {kept.length === plan.steps.length ? `Approve all (${plan.steps.length})` : `Approve ${kept.length} of ${plan.steps.length}`}
         </button>
-        <button className="ghost-btn danger" disabled={busy} onClick={() => void send('deny')}>Reject plan</button>
+        <button className="ghost-btn sm" disabled={busy} onClick={() => void send('deny')}>Deny</button>
         {bad.length > 0 && <span className="plan-warn">step {bad.map((i) => i + 1).join(', ')}: fix the JSON first</span>}
-        {bad.length === 0 && kept.length === 0 && <span className="plan-warn">nothing left to approve — reject the plan instead</span>}
+        {bad.length === 0 && kept.length === 0 && <span className="plan-warn">nothing left to approve — deny the plan instead</span>}
       </div>
     </div>
   )

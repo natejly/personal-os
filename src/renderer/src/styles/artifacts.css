@@ -1,31 +1,34 @@
 /* Artifacts: the chat card, the fenced html/svg preview, the viewer and the Library tab. Tokens only, so light and dark follow the app. */
 
-.tool-card-host { border: 0; background: none; }
-
 /* ---------- chat card ---------- */
 .art-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; font-size: 12.5px; }
 .art-card.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
-.art-card-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }
+.art-card.awaiting { border-color: var(--await-border); background-image: linear-gradient(var(--await-fill), var(--await-fill)); }
+.art-card-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
 .art-card-title { font-weight: 600; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
 .art-card-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .art-ver-select, .art-ver select {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px;
   padding: 2px 6px; font-size: 11.5px; max-width: 220px;
 }
-.art-status.working, .art-status.needs-approval { color: var(--warn); }
-.art-status.failed { color: var(--danger); }
-.art-status.created, .art-status.updated { color: var(--ok); }
-.art-card-approve { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-.art-card-approve span { flex: 1; color: var(--text-muted); }
-.art-card-error { display: flex; gap: 6px; align-items: center; margin: 0; padding: 8px 10px; color: var(--danger); border-top: 1px solid var(--border); }
+.art-status.working { color: var(--st-working); }
+.art-status.needs-approval { color: var(--st-needs-you); }
+.art-status.failed { color: var(--st-failed); }
+.art-status.created, .art-status.updated { color: var(--st-done); }
+/* What is asked, then Approve / Deny, then the quieter standing-grant line: one column, one box. */
+.art-card-approve { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.art-card-approve > span { color: var(--text-muted); }
+.art-card-approve-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.art-card-approve .approval-rules { margin-top: 0; }
+.art-card-error { display: flex; gap: 6px; align-items: center; margin: 0; padding: 8px 12px; color: var(--danger); border-top: 1px solid var(--border); }
 .art-frame { display: block; width: 100%; border: 0; border-top: 1px solid var(--border); background: #262624; }
 .art-frame-empty { display: flex; align-items: center; justify-content: center; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12.5px; background: var(--bg-input); }
 .art-details-toggle {
-  display: flex; align-items: center; gap: 4px; width: 100%; padding: 5px 10px; border: 0; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 4px; width: 100%; min-height: 24px; padding: 5px 12px; border: 0; border-top: 1px solid var(--border);
   background: none; color: var(--text-faint); font-size: 11px; cursor: pointer; text-align: left;
 }
 .art-details-toggle:hover { color: var(--text); background: var(--hover); }
-.art-details { margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 11px; background: var(--bg-input); white-space: pre-wrap; word-break: break-word; }
+.art-details { margin: 0; padding: 8px 12px; max-height: 220px; overflow: auto; font-family: var(--mono); font-size: 11px; background: var(--bg-input); white-space: pre-wrap; word-break: break-word; }
 
 /* ---------- fenced html / svg ---------- */
 .art-fence-actions { display: flex; align-items: center; gap: 4px; }
@@ -48,7 +51,6 @@
 .art-view-body .art-frame { flex: 1; height: 100% !important; border-top: 0; }
 .art-source { margin: 0; flex: 1; overflow: auto; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--bg-input); white-space: pre-wrap; word-break: break-word; }
 .art-warn { margin: 0; padding: 6px 14px; font-size: 12px; color: var(--warn); border-bottom: 1px solid var(--border); }
-.icon-btn.on { background: var(--active); }
 
 /* ---------- Library tab ---------- */
 .art-split { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; padding: 0 4px; height: calc(100vh - 150px); min-height: 480px; }

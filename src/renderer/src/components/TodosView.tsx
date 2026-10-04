@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List } from 'lucide-react'
+import { Plus, CheckSquare, RefreshCw, Bookmark, X, ChevronDown, KanbanSquare, List } from 'lucide-react'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
@@ -13,13 +13,13 @@ import AppSwitcher from './AppSwitcher'
 import PlannerPanel from './PlannerPanel'
 import TodoBoard, { type BoardGroup } from './TodoBoard'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
+import SidebarToggle from './SidebarToggle'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const tasksSync = useStore((s) => s.tasksSync)
   const googleConnected = useStore((s) => !!s.google?.connected)
-  const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync, toast } = useStore()
+  const { refreshTodos, addTodo, refreshTasksSync, runTasksSync, toast } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   // A canvas todos window in board view hands its view over on Expand.
@@ -43,8 +43,10 @@ export default function TodosView(): JSX.Element {
     try { const f = await api.todos.saveFilter({ name: `#${name}`, tag: name }); setSaved((s) => [...s, f]) } catch (e) { toast((e as Error).message, 'error') }
   }
   const dropFilter = async (id: string): Promise<void> => { await api.todos.deleteFilter(id).catch(() => undefined); setSaved((s) => s.filter((f) => f.id !== id)) }
+  // The store starts with no todos, which is not the same as there being none.
+  const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => { void refreshTodos(scope, showDone || board, sort) }, [scope, showDone, board, sort, refreshTodos])
+  useEffect(() => { void refreshTodos(scope, showDone || board, sort).finally(() => setLoaded(true)) }, [scope, showDone, board, sort, refreshTodos])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
   // Cleared before the request, so a second Enter (or Enter then Add) cannot post the same todo twice;
@@ -111,7 +113,7 @@ export default function TodosView(): JSX.Element {
   return (
     <main className="page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
           {tasksSync?.config.enabled && googleConnected && (
@@ -121,6 +123,11 @@ export default function TodosView(): JSX.Element {
             </button>
           )}
           <SendToSpace items={[{ kind: 'todos' }]} />
+          {!board && (
+            <label className={`chip-check ${showDone ? 'on' : ''}`}>
+              <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done
+            </label>
+          )}
           <label className="model-picker" title="Urgency scores due date, priority and age">
             <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
             <ChevronDown size={14} />
@@ -131,7 +138,6 @@ export default function TodosView(): JSX.Element {
           </div>
           {board && <label className="model-picker"><select aria-label="Columns" value={groupBy} onChange={(e) => setGroupBy(e.target.value as BoardGroup)}><option value="status">Columns: Status</option><option value="list">Columns: List</option></select><ChevronDown size={14} /></label>}
           {lists.length > 0 && <label className="model-picker"><select aria-label="List" value={list} onChange={(e) => setList(e.target.value)}><option value="">All lists</option>{lists.map((n) => <option key={n} value={n}>{n}</option>)}</select><ChevronDown size={14} /></label>}
-          {!board && <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done</label>}
           <ScopeSelect value={scope} onChange={setScope} />
         </div>
         <AppSwitcher />
@@ -170,7 +176,14 @@ export default function TodosView(): JSX.Element {
             </>}
           </div>
         )}
-        {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
+        {/* No button: the add row right above is the action, and a second filled one would compete with it. */}
+        {loaded && todos.length === 0 && (
+          <div className="empty-state">
+            <CheckSquare size={28} />
+            <h2>{showDone || board ? 'No todos yet' : 'Nothing open'}</h2>
+            <p>Type one in the box above and press Enter, or ask the assistant to keep track of something for you.</p>
+          </div>
+        )}
         {board ? <TodoBoard todos={shown} groupBy={groupBy} list={newList.trim() || list || null} projectId={scope === 'all' || scope === 'personal' ? null : scope} onChanged={() => refreshTodos(scope, true, sort)} />
           : sort === 'urgency' ? section('By urgency', open) : <>
           {section('Overdue', overdue)}

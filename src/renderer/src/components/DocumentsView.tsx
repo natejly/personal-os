@@ -7,12 +7,15 @@ import ProjectChip from './ProjectChip'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
-/** Uploads, for Files -> Uploads, Settings and a project. `embedded` is accepted for those callers; it is the only mode. */
+/**
+ * Uploads, for Files → Uploads, Settings and a project. Always hosted by another view, so it is a body
+ * with no page header of its own; `embedded` is accepted for those callers, it is the only mode.
+ */
 export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
   const { uploadDocuments, deleteDocument, pinDocument, loadScope } = useStore()
-  // Without a project it follows the library scope, which Files -> Uploads picks in its header.
+  // Without a project it follows the library scope, which Files → Uploads picks in its header.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
@@ -22,18 +25,18 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
   const view = async (d: Document): Promise<void> => setOpen(await api.documents.get(d.id))
 
-  const fileInput = (
-    <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
-      onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
-  )
-  const uploadBtn = <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
-
-  const body = (
+  return (
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {fileInput}
-      {documents.length > 0 && <div className="add-row">{uploadBtn}<span className="muted small">Drop more files here.</span></div>}
+      <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
+        onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
+      {documents.length > 0 && (
+        <div className="add-row">
+          <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
+          <span className="muted small">Drop more files here.</span>
+        </div>
+      )}
       {documents.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
@@ -69,5 +72,4 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
       )}
     </div>
   )
-  return body
 }

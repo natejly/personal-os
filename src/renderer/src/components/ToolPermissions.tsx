@@ -2,6 +2,7 @@ import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare,
 import { useState } from 'react'
 import { useStore } from '../store'
 import { askLocked, type ToolMode, type ToolOverride } from '@shared/types'
+import { describeCall, humanizeName } from '../lib/toolDisplay'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
   knowledge: <FileSearch size={13} />, memory: <Brain size={13} />, graph: <Share2 size={13} />, web: <Globe size={13} />, code: <Terminal size={13} />,
@@ -12,6 +13,9 @@ const GROUP_ICON: Record<string, JSX.Element> = {
 }
 export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes: 'writes in-app data', network: 'reads the internet', executes: 'runs sandboxed code', external: 'acts outside the app', plan: 'always asks: the call is the approval card', schedules: 'books work for later' }
 export const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
+
+/** The name a person reads: "Search documents", never the identifier the model calls. */
+const toolLabel = (name: string): string => describeCall(name, null).verb
 
 export const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
 const LOCKED_TIP = 'Actions outside the app always ask'
@@ -37,9 +41,9 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
         return (
           <div key={t.name} className={`tool-perm ${eff === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description + (t.available ? '' : ' (integration not connected)')}>
             <span className="tool-icon">{GROUP_ICON[t.group] ?? <Wrench size={13} />}</span>
-            <span className="tool-perm-name">{t.name.replace(/_/g, ' ')}<small>{DANGER_LABEL[t.danger]}</small></span>
+            <span className="tool-perm-name">{toolLabel(t.name)}<small>{DANGER_LABEL[t.danger]}</small></span>
             {eff === 'ask' && <span className="tag ask">asks</span>}
-            <select title={locked ? LOCKED_TIP : undefined} aria-label={`Permission for ${t.name.replace(/_/g, ' ')}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
+            <select title={locked ? LOCKED_TIP : undefined} aria-label={`Permission for ${toolLabel(t.name)}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
               <option value="inherit">inherit ({MODE_LABEL[base]})</option>
               {!locked && <option value="on">always on</option>}
               <option value="ask">ask each time</option>
@@ -57,7 +61,7 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
   const tools = useStore((s) => s.tools)
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
-  const shown = needle ? tools.filter((t) => `${t.name.replace(/_/g, ' ')} ${t.group} ${t.description}`.toLowerCase().includes(needle)) : tools
+  const shown = needle ? tools.filter((t) => `${toolLabel(t.name)} ${t.name.replace(/_/g, ' ')} ${t.group} ${t.description}`.toLowerCase().includes(needle)) : tools
   const groups = [...new Set(shown.map((t) => t.group))]
   const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
   const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
@@ -69,15 +73,17 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
         const rows = shown.filter((t) => t.group === g)
         return (
           <details key={g} className="tool-group" open={needle ? true : undefined}>
-            <summary><h5>{GROUP_ICON[g]} {g} <small className="muted">{rows.length}</small></h5></summary>
+            <summary><h5>{GROUP_ICON[g] ?? <Wrench size={13} />} {humanizeName(g)} <small className="muted">{rows.length}</small></h5></summary>
             {rows.map((t) => {
               const locked = askLocked(t.danger)
               const mode = capped(t.danger, current(t.name, t.default_mode))
+              const label = toolLabel(t.name)
               return (
-                <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description}>
-                  <span className="toggle-text"><b>{t.name.replace(/_/g, ' ')} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small>{firstSentence(t.description)}</small></span>
-                  <div className="seg" title={locked ? LOCKED_TIP : undefined}>
-                    {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
+                <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
+                  {/* The description is written for the model and runs long: two lines here, all of it on hover. */}
+                  <span className="toggle-text"><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+                  <div className="seg" role="group" aria-label={`Permission for ${label}`} title={locked ? LOCKED_TIP : undefined}>
+                    {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} type="button" className={mode === m ? 'on' : ''} aria-pressed={mode === m} onClick={() => set(t.name, m)}>{m}</button>)}
                   </div>
                 </div>
               )
@@ -90,4 +96,3 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
   )
 }
 
-const firstSentence = (s: string): string => s.split(/(?<=[.!?])\s/)[0] ?? s

@@ -10,8 +10,8 @@ export default function HealthCard({ data: d }: { data: TodayDashboard | null })
   const logged = rows.filter((m) => m.today != null).length
   return (
     <section className="widget">
-      <header><HeartPulse size={14} /> Health <span className="muted small">{logged} of {rows.length} logged today</span><button className="link small" onClick={() => setView('health')}>open</button></header>
-      {rows.length === 0 ? <p className="muted">No metrics shown.</p> : (
+      <header><HeartPulse size={14} /> Health <span className="muted small">{logged} of {rows.length} logged today</span><button className="link small" onClick={() => setView('health')}>View all</button></header>
+      {!d ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="muted">No metrics shown.</p> : (
         <ul className="hl-card">
           {rows.map((m) => {
             const ok = meets(m, m.today)

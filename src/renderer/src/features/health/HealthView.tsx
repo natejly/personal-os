@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, PanelLeftOpen, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from 'lucide-react'
+import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from 'lucide-react'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
@@ -10,6 +10,7 @@ import { Sparkline, TrendChart } from './charts'
 import Sources from './Sources'
 import { dayLabel, delta, fmt, goalText, meets, progress } from './format'
 import '../../styles/health.css'
+import SidebarToggle from '../../components/SidebarToggle'
 
 const ICONS: Record<string, JSX.Element> = {
   sleep: <Moon size={14} />, steps: <Footprints size={14} />, water: <Droplet size={14} />, exercise: <Activity size={14} />,
@@ -24,8 +25,7 @@ type Range = (typeof RANGES)[number]
 const SPARK_DAYS = 14
 
 export default function HealthView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, toast, refreshDashboard } = useStore()
+  const { toast, refreshDashboard } = useStore()
   const [days, setDays] = useState<Range>(30)
   const [today, setToday] = useState(localDay())
   const [rows, setRows] = useState<HealthSummary[] | null>(null)
@@ -89,7 +89,7 @@ export default function HealthView(): JSX.Element {
   return (
     <main className="page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><HeartPulse size={16} /> Health</h2>
         <div className="no-drag header-right">
           <div className="seg" role="group" aria-label="Range">
@@ -108,7 +108,12 @@ export default function HealthView(): JSX.Element {
         {connect && <Sources onSynced={changed} onClose={() => setConnect(false)} />}
         {manage && <MetricManager onChanged={changed} onClose={() => setManage(false)} />}
         {!rows ? <p className="empty-hint big">Loading…</p> : rows.length === 0 ? (
-          <div className="empty-hint big"><p>Every metric is hidden.</p><button className="ghost-btn" onClick={() => setManage(true)}>Choose metrics</button></div>
+          <div className="empty-state">
+            <HeartPulse size={28} />
+            <h2>Every metric is hidden</h2>
+            <p>Hidden metrics keep their history. Choose the ones to show as tiles here and on Today.</p>
+            <button className="primary-btn" onClick={() => setManage(true)}>Choose metrics</button>
+          </div>
         ) : (
           <>
             <div className="hl-tiles">

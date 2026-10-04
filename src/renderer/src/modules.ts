@@ -1,8 +1,8 @@
 /**
  * The one list of what the shell is made of: which cards the Today screen shows and which views the
- * sidebar offers. Both are user-toggleable (Settings → Modules, or the slider button on Today) and
+ * sidebar offers. Both are user-toggleable (Settings → Views, or the slider button on Today) and
  * persist in settings as exceptions — a missing homeWidgets key means "on".
- * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Modules turns them back on.
+ * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Views turns them back on.
  */
 import type { View } from './store'
 import { moduleHome, moduleForView } from './shell/registry'
@@ -24,18 +24,20 @@ function viewRow(view: View): { view: View; label: string } {
   return { view: m.view.id, label: m.label }
 }
 
+/** Each label is its card's title on Today, word for word, so the toggle and the thing it hides read the same. */
 export const HOME_MODULES: HomeModule[] = [
   { key: 'agent', label: 'Agent inbox' },
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
   homeRow('todos'),
   homeRow('health'),
-  { key: 'inbox', label: 'Unread mail' },
+  // "Mail inbox", not "Inbox": the agent inbox is on the same list.
+  { key: 'inbox', label: 'Mail inbox' },
   { key: 'mailwatch', label: 'Waiting mail' },
   { key: 'plan', label: 'Day plan' },
   { key: 'gtasks', label: 'Google Tasks (when sync is off)' },
-  { key: 'drive', label: 'Drive files' },
-  { key: 'meetings', label: 'Upcoming meetings' },
+  { key: 'drive', label: 'Drive' },
+  { key: 'meetings', label: 'Meetings' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
   { key: 'chats', label: 'Recent chats' }

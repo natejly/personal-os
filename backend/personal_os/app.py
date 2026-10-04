@@ -4069,10 +4069,11 @@ def _job_desk(job_id: str, due_at: float) -> dict[str, Any] | None:
 
 
 def _job_open_desk(job_id: str) -> dict[str, Any] | None:
-    """The job's newest desk that has not finished, if any: like a run job, a desk job has at most one instance."""
+    """The job's newest desk that has not finished, if any: like a run job, a desk job has at most one instance.
+    An archived desk does not count: it is gone from the inbox and the desk list, so it must not hold the job back."""
     with db.tx() as c:
         r = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
-                      f"WHERE json_extract(c.settings,'$.jobId')=? AND d.status NOT IN ({','.join('?' * len(DESK_TERMINAL))}) "
+                      f"WHERE json_extract(c.settings,'$.jobId')=? AND d.archived=0 AND d.status NOT IN ({','.join('?' * len(DESK_TERMINAL))}) "
                       "ORDER BY d.created_at DESC LIMIT 1", (job_id, *DESK_TERMINAL)).fetchone()
     return desks.get(r["id"], False) if r else None
 
@@ -4086,7 +4087,10 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
     if (prev := _job_desk(job["id"], due)) is not None:
         return prev.get("run_id")
     if (open_desk := _job_open_desk(job["id"])) is not None:
-        jobs.record_skip(job["id"], f"previous desk still open ({open_desk['status']})")
+        why = f"previous desk still open ({open_desk['status']})"
+        if fire.get("manual"):  # as in JobPolicy.admit: a manual run has no slot to record, the user is told why
+            raise HTTPException(409, f"Not started: {why}")
+        jobs.record_skip(job["id"], why)
         return None
     capped = _over_live_cap()
     out = await _create_desk(DeskIn(brief=_job_prompt(job, fire), title=f"{job['name']} · {_stamp(due)}",

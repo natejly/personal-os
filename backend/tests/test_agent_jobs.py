@@ -845,6 +845,28 @@ def test_a_desk_job_has_at_most_one_open_desk() -> None:
     assert len(job_desks(job["id"])) == 2, "once the previous desk finished, the next slot opens a new one"
 
 
+def test_an_archived_desk_does_not_block_its_job() -> None:
+    job = make_desk_job("archived desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        j("PATCH", f"/cowork/desks/{first[0]['id']}", {"archived": True})
+        tick(T0 + 2 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "an archived desk is out of sight, so it does not block the next slot"
+
+
+def test_run_now_with_a_desk_still_open_is_a_409_and_records_no_skip() -> None:
+    job = make_desk_job("manual desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        before = jobs.get(job["id"])["last_skip_reason"]
+        r = j("POST", f"/jobs/{job['id']}/run", expect=409)
+    assert "previous desk still open" in r["detail"]
+    assert jobs.get(job["id"])["last_skip_reason"] == before, "a manual run has no slot to record a skip on"
+    assert len(job_desks(job["id"])) == 1
+
+
 def test_a_desk_job_cannot_carry_a_tool_allowlist() -> None:
     base = {"name": "narrow", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC"}
     j("POST", "/jobs", {**base, "target": "desk", "allowed_tools": ["current_time"]}, expect=400)

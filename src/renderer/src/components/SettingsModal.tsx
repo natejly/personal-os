@@ -448,8 +448,13 @@ export default function SettingsModal(): JSX.Element {
         </div>
 
         <footer>
-          <button className="ghost-btn" onClick={() => setSettingsOpen(false)}>Cancel</button>
-          <button className="primary-btn" onClick={() => void save()}>Save</button>
+          {/* Trash acts the moment you click, so Cancel/Save would suggest an undo that is not there. */}
+          {tab === 'trash'
+            ? <button className="primary-btn" onClick={() => setSettingsOpen(false)}>Close</button>
+            : <>
+              <button className="ghost-btn" onClick={() => setSettingsOpen(false)}>Cancel</button>
+              <button className="primary-btn" onClick={() => void save()}>Save</button>
+            </>}
         </footer>
       </div>
     </div>

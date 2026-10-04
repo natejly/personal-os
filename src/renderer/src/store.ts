@@ -252,6 +252,8 @@ export interface State {
   /** The same for the title, which autosaves on the same debounce rather than only on blur. */
   docTitleDraft: string | null
   docSaving: boolean
+  /** A doc just made by New or Today's note: DocsView puts the caret in its editor once, then clears it. */
+  docFocusId: string | null
 
   /** Meetings: recorded calls. List rows, plus the one open in the notepad. */
   meetings: Meeting[]
@@ -510,7 +512,7 @@ export interface State {
   deleteDocument: (id: string) => Promise<void>
   pinDocument: (id: string, pinned: boolean) => Promise<void>
 
-  refreshDocs: (q?: string) => Promise<void>
+  refreshDocs: () => Promise<void>
   refreshDocsPending: () => Promise<void>
   openDoc: (id: string) => Promise<void>
   closeDocTab: (id: string) => void
@@ -1220,6 +1222,19 @@ export const useStore = create<State>((set, get) => {
     void get().refreshMeetingsPending()
   }
 
+  /** An assistant edit proposed on the open doc: its review banner and badge show now, not on the next open. */
+  const adoptDocProposal = (preview: string): void => {
+    let id: unknown
+    try { id = (JSON.parse(preview) as { doc_id?: unknown }).doc_id } catch { return }
+    void get().refreshDocsPending()
+    if (typeof id !== 'string' || get().activeDoc?.id !== id) return
+    void api.docs.get(id).then((d) => {
+      // Only `pending` is taken: a proposal leaves the body alone, and the editor may hold unsaved typing.
+      set((st) => (st.activeDoc?.id === id ? { activeDoc: { ...st.activeDoc, pending: d.pending } } : {}))
+      void get().refreshDocRevisions(id)
+    }).catch(() => { /* the banner appears on the next open */ })
+  }
+
   /** One stream event folded into a session: the reducer plus the approval recount and the status verdict. */
   const step = (s: ChatSession, ev: ChatEvent, visible: boolean, seq: number | null): ChatSession => {
     const next = applyEvent(s, ev, visible, seq)
@@ -1346,6 +1361,7 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => step(s, ev, focused, seq))
         const kind = chatNotice(before, get().sessions[convId]?.status ?? before, ev)
         if (kind) announce(convId, run.run_id, kind, focused, notified)
+        if (ev.event === 'tool_result' && ev.data.name === 'doc_edit') adoptDocProposal(ev.data.result_preview)
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
@@ -1592,6 +1608,7 @@ export const useStore = create<State>((set, get) => {
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
+    docFocusId: null,
     meetings: [],
     activeMeeting: null,
     meetingStatus: null,
@@ -2350,7 +2367,7 @@ export const useStore = create<State>((set, get) => {
 
     // Always every scope: the Files tree shows Personal and each project as its own group, so a doc
     // can never be created into a scope the list is filtered away from and look like it vanished.
-    refreshDocs: async (q = '') => set({ docs: await api.docs.list('all', q) }),
+    refreshDocs: async () => set({ docs: await api.docs.list('all') }),
     refreshDocsPending: async () => {
       try {
         set({ docsPending: (await api.docs.pending()).pending })
@@ -2389,7 +2406,8 @@ export const useStore = create<State>((set, get) => {
           view: 'docs',
           docTabs: st.docTabs.includes(doc.id) ? st.docTabs : [...st.docTabs, doc.id],
           activeDoc: doc,
-          docDraft: null
+          docDraft: null,
+          docFocusId: doc.id
         }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
@@ -2401,6 +2419,7 @@ export const useStore = create<State>((set, get) => {
         const { doc } = await dailyNote()
         await get().refreshDocs()
         get().expandTo(doc.project_id ?? '', doc.folder)
+        set({ docFocusId: doc.id })
         await get().openDoc(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2428,9 +2447,13 @@ export const useStore = create<State>((set, get) => {
       const { activeDoc: doc, docDraft, docTitleDraft } = get()
       if (!doc) return set({ docDraft: null, docTitleDraft: null })
       // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
-      const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
-        ? docTitleDraft.trim() : undefined
       const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
+      // Until the title is named by hand it follows the body's first `# ` heading (the placeholder's promise).
+      const h1 = (t: string): string | undefined => /^#\s+(.+)$/m.exec(t)?.[1].trim().slice(0, 200)
+      const follows = docTitleDraft === null && content !== undefined && (doc.title === 'Untitled' || doc.title === h1(doc.content))
+      const heading = follows ? h1(content) : undefined
+      const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
+        ? docTitleDraft.trim() : heading && heading !== doc.title ? heading : undefined
       if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {

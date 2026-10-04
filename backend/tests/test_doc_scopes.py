@@ -95,7 +95,7 @@ check(("", "Studies") in keys(j("GET", "/docs/folders")), "Personal may take a n
 # ---- deleting a folder promotes only its own tree's docs ----
 nested = j("POST", "/docs", {"title": "Deep", "project_id": beta, "folder": "Research/2026"})["id"]
 j("DELETE", f"/docs/folders?path=Research&scope={beta}")
-check(placed(nested) == (beta, "") and placed(mine) == (beta, ""), "Beta's docs moved up to its own root")
+check(placed(nested) == (beta, "2026") and placed(mine) == (beta, ""), "Beta's docs and subfolder moved up to its own root")
 check(placed(a_doc) == (alpha, "Studies"), "Alpha was untouched")
 check((beta, "Research") not in keys(j("GET", "/docs/folders")), "and the folder row is gone")
 

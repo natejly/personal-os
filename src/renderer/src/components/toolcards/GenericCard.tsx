@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import { ArgList, RawDetails, ResultBlock } from './parts'
+import { useStore } from '../../store'
 import './toolcards.css'
 
 /**
@@ -32,6 +33,9 @@ export function GenericApproval({ event, decide, grant }: {
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const d = describeCall(event.name, event.arguments)
+  // A doc tool names its doc by id; show the title the user knows it by.
+  const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
+  const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return
     setBusy(true)
@@ -49,7 +53,7 @@ export function GenericApproval({ event, decide, grant }: {
           ? 'This reply read untrusted content, so it needs your OK each time.'
           : 'This acts outside the app.'}
       </div>
-      <ArgList rows={argRows(event.arguments)} />
+      <ArgList rows={argRows(args)} />
       <div className="approval-actions">
         <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
         <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>

@@ -91,7 +91,7 @@ from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
-from .working import Plans as WorkPlans, ToolResults
+from .working import FENCE_RULE, Plans as WorkPlans, ToolResults
 
 log = logging.getLogger("personal_os")
 
@@ -1285,7 +1285,8 @@ For anything larger or that the user will keep and revise (a calculator, a dashb
 Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
-TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
+TOOLS_HINT = ("You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. "
+              "After using tools, write the final answer for the user. " + FENCE_RULE)
 # Only added when todo_write is actually available in this chat (see _chat_stream).
 PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
              "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
@@ -1956,6 +1957,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
             return "\n\n" + text if text else ""
 
+        fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
         if mcp_defer:
             _counts: dict[str, int] = {}
@@ -2094,7 +2096,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for c, args in seg:
                 key = tools.call_key(c["name"], args)
                 if key not in warm:  # an identical call in the round runs once and shares the result
-                    warm_ctx[key] = dict(tool_ctx)  # taint set by a read must not reach calls gated before it
+                    # Taint set by a read must not reach calls gated before it; its sources merge back when it is consumed.
+                    warm_ctx[key] = {**tool_ctx, "taint_sources": []}
                     warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key], f"{am['id']}:{c['id']}"))
                     tasks.append(warm[key])
             return len(seg)
@@ -2859,6 +2862,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # sees the answer even when it was given somewhere else.
                         yield "plan_decision", {"message_id": am["id"], "call_id": uid, "plan": plan}
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
+                sources_before = len(tool_ctx["taint_sources"])  # grows only if this call brought untrusted text
                 ran = False  # only a call that really executed says anything about being stuck
                 mcp_ran = False  # the connector was actually contacted: whatever it said, error or not, is third-party text
                 if was_blocked:
@@ -2905,6 +2909,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         result = dict(result)
                     if warm_ctx[wkey].get("tainted"):
                         tool_ctx["tainted"] = True
+                    tool_ctx["taint_sources"].extend(warm_ctx[wkey]["taint_sources"])
                     ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
@@ -2993,7 +2998,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # Anything saved while this run is tainted can carry that text, including a script
                 # that prints it. Paging the handle later has to taint again, even after the banner is cleared.
                 brought_untrusted = bool(tool_ctx.get("tainted"))
-                content, rid = tool_results.render(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
+                # Fenced per call, not per run: a safe read after a web read is not wrapped, or the fence means nothing.
+                fence = fence_nonce if len(tool_ctx["taint_sources"]) > sources_before else None
+                content, rid = tool_results.render(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted, fence=fence)
                 if rid:
                     event["result_id"] = rid  # persisted with the tool event, so later turns can name the handle
                 if stuck and event["breaker"] == "stuck_nudge":

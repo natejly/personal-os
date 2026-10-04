@@ -1236,6 +1236,10 @@ export interface Settings {
   retainApprovalDays?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
+  /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */
+  snapshotsEnabled?: boolean
+  /** Reported by GET /settings, never stored: folder snapshots need a version-control binary on this Mac. */
+  snapshotsAvailable?: boolean
   /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
   workspaceRoots?: string[]
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */

@@ -70,7 +70,7 @@ from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
-from .snapshots import Snapshots, router as snapshots_router
+from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
@@ -78,6 +78,7 @@ from .retention import RetentionWorker
 from .presets import CanvasPresets
 from . import resume
 from . import permrules
+from . import egress
 from . import shell as shell_tool
 from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
@@ -711,6 +712,7 @@ def public_settings() -> dict[str, Any]:
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
     return out
 
 
@@ -790,6 +792,9 @@ def _check_permission_rules(v: Any) -> dict[str, list[str]]:
     return out
 
 
+HOST_LIST_SETTINGS = {"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"}
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
@@ -806,6 +811,17 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = _check_permission_rules(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k in HOST_LIST_SETTINGS:
+            # Bare hostnames only, the rule the egress proxy matches by: a URL, wildcard, IP or lone TLD stored
+            # here would be ignored at best and widen an allowlist at worst.
+            hosts: list[str] = []
+            for e in v:
+                h = egress.normalize_entry(e.strip().lstrip(".") if isinstance(e, str) else e)  # ".x.com" = "x.com"
+                if h is None:
+                    raise HTTPException(422, f"{k}: {e!r} is not a hostname (no scheme, path, wildcard or IP address)")
+                if h not in hosts:
+                    hosts.append(h)
+            clean[k] = hosts
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")

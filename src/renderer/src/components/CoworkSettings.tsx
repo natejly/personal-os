@@ -41,7 +41,7 @@ function NumField({ title, help, settingKey, value, fallback, step = 1, onCommit
 }
 
 /** A list of hostnames, following WorkspaceRoots: type, Enter or Add, remove with the x. An entry also allows its subdomains. */
-function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+export function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const add = (): void => {

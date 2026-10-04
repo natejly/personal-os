@@ -198,7 +198,7 @@ export const api = {
     list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
     accept: (id: string, args?: Record<string, unknown>) =>
-      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }),
+      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }, NO_TIMEOUT),
     reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
   },
   boards: {
@@ -288,10 +288,10 @@ export const api = {
     deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' }),
     providers: () => req<HealthProvider[]>('/health/providers'),
     sources: () => req<HealthSource[]>('/health/sources'),
-    connect: (provider: string, form: Record<string, string>) => req<HealthSource>('/health/sources', { method: 'POST', body: json({ provider, form }) }),
+    connect: (provider: string, form: Record<string, string>) => req<HealthSource>('/health/sources', { method: 'POST', body: json({ provider, form }) }, NO_TIMEOUT),
     plan: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/plan`),
     /** Approve the source's tools exactly as its server offers them now. */
-    approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }),
+    approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }, NO_TIMEOUT),
     sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }, NO_TIMEOUT),
     updateSource: (id: string, patch: { enabled?: boolean; days_back?: number }) => req<HealthSource>(`/health/sources/${id}`, { method: 'PUT', body: json(patch) }),
     disconnect: (id: string, keepData = true) => req(`/health/sources/${id}?keep_data=${keepData}&remove_server=true`, { method: 'DELETE' })
@@ -299,7 +299,7 @@ export const api = {
   planner: {
     suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }, NO_TIMEOUT),
     /** The one write: the user pressed "Add selected to calendar". */
-    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) })
+    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) }, NO_TIMEOUT)
   },
   mailWatch: {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
@@ -319,7 +319,7 @@ export const api = {
   },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),
-    create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
+    create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }, NO_TIMEOUT),
     /** A secret left as '' keeps the stored value; `clear_secrets` removes keys outright. */
     update: (id: string, patch: Partial<McpServerDraft> & { enabled?: boolean; clear_secrets?: string[] }) =>
       req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
@@ -456,8 +456,8 @@ export const api = {
     runs: (workflowId?: string) => req<WorkflowRun[]>(`/workflow-runs${workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : ''}`),
     run: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}`),
     approveRun: (runId: string, planDigest: string) =>
-      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }),
-    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }),
+      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }, NO_TIMEOUT),
+    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }, NO_TIMEOUT),
     cancelRun: (runId: string) => req<{ ok: boolean }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' })
   },
   /** Saved prompt templates ($ARGUMENTS, $1..$n). */

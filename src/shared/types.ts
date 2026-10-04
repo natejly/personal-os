@@ -1558,6 +1558,8 @@ export interface GrainApi {
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
+  /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
+  micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
   /** The agent's interactive browser (hidden windows owned by main). The renderer never gets the bridge secret. */
   agentBrowser: {
     list: () => Promise<AgentBrowserSession[]>

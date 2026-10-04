@@ -693,6 +693,9 @@ kbd {
 .send.stop { background: var(--text); color: var(--bg); }
 .send.stop:hover:not(:disabled) { background: var(--text-muted); }
 .send.stop:disabled { opacity: 0.7; }
+.mic-btn.recording { color: var(--danger); }
+.mic-pill { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); display: inline-flex; align-items: center; gap: 5px; }
+.mic-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: pulse-dot 1.2s ease-in-out infinite; }
 
 /* ---------- Buttons ---------- */
 .icon-btn {

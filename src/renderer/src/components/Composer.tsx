@@ -5,6 +5,8 @@ import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
 import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
+import MicButton from './MicButton'
+import { dictationText } from '../features/docrec/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
@@ -115,6 +117,17 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
   }
 
+  /** A dictated clip goes in at the caret, read from the box as it is now (the clip took a while). Never sent. */
+  const dictate = (raw: string): void => {
+    const ta = box.current?.querySelector('textarea')
+    const cur = ta?.value ?? text
+    const at = Math.min(ta?.selectionStart ?? cur.length, cur.length)
+    const ins = dictationText(raw, cur.slice(0, at))
+    if (!ins) return
+    setText(cur.slice(0, at) + ins + cur.slice(at))
+    requestAnimationFrame(() => { ta?.focus(); ta?.setSelectionRange(at + ins.length, at + ins.length) })
+  }
+
   /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
    * dropped: a draft written since goes after the returned one, under the key the composer resolves
@@ -171,6 +184,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           }}
         />
         <div className="composer-actions">
+          <MicButton scope={box} onText={dictate} />
           {streaming && (
             <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}

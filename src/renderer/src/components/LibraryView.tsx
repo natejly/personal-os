@@ -39,6 +39,7 @@ function ArtifactsPanel(): JSX.Element {
   const [kind, setKind] = useState<'all' | Made['kind']>('all')
   const [q, setQ] = useState('')
   const [viewing, setViewing] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   // Boards and dashboards live in their own views, so the Library fetches them rather than holding them.
   useEffect(() => {
@@ -53,7 +54,7 @@ function ArtifactsPanel(): JSX.Element {
         ])
       })
     return () => { live = false }
-  }, [])
+  }, [reload])
 
   const rows: Made[] = [
     ...docs.map((d) => ({ id: d.id, kind: 'doc' as const, name: d.title || 'Untitled', meta: d.folder || 'doc', at: d.updated_at ?? 0 })),
@@ -91,7 +92,7 @@ function ArtifactsPanel(): JSX.Element {
           ))}
         </div>
       )}
-      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} />}
+      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} onDeleted={() => { setViewing(null); setReload((n) => n + 1) }} />}
     </div>
   )
 }

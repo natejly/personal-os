@@ -322,17 +322,6 @@
 
 .plan-mode.auto, .plan-mode.always { color: var(--accent); }
 
-/* ---- Today card ---- */
-.home-desks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.home-desks li {
-  display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-radius: 7px;
-  cursor: pointer; font-size: 13px; color: var(--text-muted);
-}
-.home-desks li:hover { background: var(--hover); color: var(--text); }
-.home-desk-title { flex: none; font-weight: 600; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-desk-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-desk-when { flex: none; font-size: 10.5px; color: var(--text-faint); }
-
 /* ---- files tab: rich preview, delivered marks, changes ---- */
 .desk-preview-meta { white-space: nowrap; }
 .desk-preview-note { margin: 0 0 6px; }

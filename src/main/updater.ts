@@ -6,6 +6,8 @@
  */
 import { app, dialog } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { stopPageBridge } from './pagefetch'
+import { markQuitting } from './popouts'
 
 const RECHECK_MS = 6 * 60 * 60 * 1000
 
@@ -25,7 +27,12 @@ export function startUpdater(): void {
         cancelId: 1
       })
       .then((r) => {
-        if (r.response === 0) autoUpdater.quitAndInstall()
+        if (r.response !== 0) return
+        // quitAndInstall closes every window before before-quit fires: agent browser windows refuse a
+        // close until torn down (which would cancel the restart), and pop-outs would save themselves docked.
+        stopPageBridge()
+        markQuitting()
+        autoUpdater.quitAndInstall()
       })
   })
   const check = (): void => {

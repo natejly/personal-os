@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { chromeIpv4, hostBlocked, isLoopbackHost, isPrivateHost } from './pageGuard'
+import { chromeIpv4, hostBlocked, isLoopbackHost, isPrivateHost, sessionResolver } from './pageGuard'
 
 test('chrome spellings of loopback are private before any DNS lookup', () => {
   for (const host of ['127.0.0.1', '2130706433', '0x7f000001', '0x7f.0.0.1', '0177.0.0.1', '127.1', '127.0.1', '0']) {
@@ -53,4 +53,9 @@ test('a name that resolves privately is refused, and a lookup failure is refused
   assert.equal(await hostBlocked('rebind.test', async () => ['93.184.216.34']), false)
   assert.equal(await hostBlocked('rebind.test', async () => { throw new Error('nxdomain') }), true)
   assert.equal(await hostBlocked('0177.0.0.1', async () => ['177.0.0.1']), true)
+})
+
+test('a session resolver feeds the same private-address check', async () => {
+  const ses = { resolveHost: async () => ({ endpoints: [{ address: '93.184.216.34' }, { address: '192.168.1.1' }] }) }
+  assert.equal(await hostBlocked('rebind.test', sessionResolver(ses)), true)
 })

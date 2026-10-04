@@ -4,6 +4,8 @@ import { backendToken, backendUrl } from './backend'
 import { frameNavigationAllowed, shouldAttachWidgetToken, webviewNavigationBlocked, webviewRequestBlocked } from './navPolicy'
 import { pageBridgeUrl } from './pagefetch'
 
+const WEB_WIDGET_PARTITION = 'persist:web-widget'
+
 const openExternal = (url: string): void => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
 }
@@ -40,7 +42,7 @@ export function attachWidgetRenderAuth(): void {
 
 /** The web widget's session is not the app's. It still must not dial the sidecar or the page loader. */
 export function guardWebWidgetSession(): void {
-  const ses = session.fromPartition('persist:web-widget')
+  const ses = session.fromPartition(WEB_WIDGET_PARTITION)
   ses.webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: webviewRequestBlocked(details.url, localServices()) })
   })
@@ -87,6 +89,8 @@ export function guardNavigation(contents: Electron.WebContents): void {
 function guardWebviews(contents: Electron.WebContents): void {
   contents.on('will-attach-webview', (e, webPreferences, params) => {
     delete webPreferences.preload
+    // Pinned: a tag with no partition (or another one) would join a session without the guards below.
+    webPreferences.partition = WEB_WIDGET_PARTITION
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     const src = params.src ?? ''

@@ -87,6 +87,15 @@ TTL = {
 }
 
 
+def _id_token_email(id_token: Any) -> str | None:
+    """The email claim of an OpenID id_token, or None."""
+    try:
+        claims = str(id_token).split(".")[1]
+        return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4))).get("email") or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class GoogleNotConnected(Exception):
     pass
 
@@ -235,15 +244,18 @@ class Google:
             # Without a refresh token the connection dies in an hour. Google only withholds it
             # when consent is skipped, which prompt="consent" should prevent.
             log.warning("Google returned no refresh token")
-        email_addr = None
-        try:
-            import httpx
+        # The id_token came straight from Google's token endpoint, so its claims need no network call.
+        # The Tasks sync binds its links to this address; a missing one cannot tell an account switch apart.
+        email_addr = _id_token_email(getattr(creds, "id_token", None))
+        if not email_addr:
+            try:
+                import httpx
 
-            r = httpx.get("https://openidconnect.googleapis.com/v1/userinfo", headers={"Authorization": f"Bearer {creds.token}"}, timeout=10)
-            if r.status_code == 200:
-                email_addr = r.json().get("email")
-        except Exception:  # noqa: BLE001
-            pass
+                r = httpx.get("https://openidconnect.googleapis.com/v1/userinfo", headers={"Authorization": f"Bearer {creds.token}"}, timeout=10)
+                if r.status_code == 200:
+                    email_addr = r.json().get("email")
+            except Exception:  # noqa: BLE001
+                pass
         token = {
             "token": creds.token,
             "refresh_token": creds.refresh_token,
@@ -432,6 +444,8 @@ class Google:
         finally:
             self._reads.flush()
         out.sort(key=lambda e: e["start"] or "")
+        if max_results <= 0:  # the whole window: a grid cut at a count silently loses its last days
+            return out
         return out[: max_results if len(ids) == 1 else max_results * 2]
 
     @cached("calendar", TTL["calendar_events"])
@@ -722,8 +736,14 @@ class Google:
         metadata get runs only for ids we have never stored, or that history says changed.
         """
         svc = self._svc("gmail", "v1")
-        res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
+        want = max(1, min(int(max_results), 500))
+        res = svc.users().messages().list(userId="me", q=query, maxResults=want).execute()
         ids = [m["id"] for m in res.get("messages") or []]
+        more = res
+        while len(ids) < want and more.get("nextPageToken"):  # Gmail may return fewer than asked per page
+            more = svc.users().messages().list(userId="me", q=query, maxResults=want - len(ids),
+                                               pageToken=more["nextPageToken"]).execute()
+            ids += [m["id"] for m in more.get("messages") or []]
         if not ids:
             return []
         snap = self._reads.get("gmail", "meta") or {}
@@ -991,8 +1011,17 @@ class Google:
 
     @cached("tasks", TTL["tasks"])
     def tasks_list(self, tasklist: str = "@default", show_completed: bool = False, max_results: int = 50) -> list[dict[str, Any]]:
-        res = self._svc("tasks", "v1").tasks().list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed, maxResults=max_results).execute()
-        return [{"id": t["id"], "title": t.get("title"), "notes": t.get("notes"), "due": t.get("due"), "status": t.get("status")} for t in res.get("items", [])]
+        svc, want = self._svc("tasks", "v1").tasks(), max(1, int(max_results))
+        items: list[dict[str, Any]] = []
+        token = None
+        while True:  # a page holds at most 100
+            res = svc.list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed,
+                           maxResults=min(100, want - len(items)), pageToken=token).execute()
+            items += res.get("items", [])
+            token = res.get("nextPageToken")
+            if not token or len(items) >= want:
+                break
+        return [{"id": t["id"], "title": t.get("title"), "notes": t.get("notes"), "due": t.get("due"), "status": t.get("status")} for t in items]
 
     @invalidates("tasks")
     def tasks_add(self, title: str, notes: str = "", due: str | None = None, tasklist: str = "@default") -> dict[str, Any]:

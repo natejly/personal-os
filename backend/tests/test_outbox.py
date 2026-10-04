@@ -69,6 +69,14 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(row["seconds_left"], 30)
         self.assertEqual(self.server.messages, {})
 
+    def test_a_bad_recipient_is_refused_before_the_hold(self) -> None:
+        for to in ("bob", "a@b.co, nope", ""):
+            with self.assertRaises(ValueError):
+                self.box.queue(to, "Hi", "body")
+        with self.assertRaises(ValueError):
+            self.box.queue("mira@example.com", "Hi\nBcc: x@y.co", "body")
+        self.assertEqual(self.box.list(), [])
+
     def test_the_model_is_told_it_is_not_sent_yet(self) -> None:
         told = outbox_mod.queued_result(self._queue())
         self.assertEqual(told["sends_in_seconds"], 30)

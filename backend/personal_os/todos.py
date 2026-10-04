@@ -409,8 +409,10 @@ class Todos:
             c.execute("DELETE FROM todo_event_tombstones WHERE event_id=?", (event_id,))
 
     def stats(self) -> dict[str, int]:
+        # `due` is the user's local date; SQLite date('now') is UTC and is a day ahead every evening.
+        today_ = date.today().isoformat()
         with self.db.tx() as c:
             open_ = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL").fetchone()[0]
-            overdue = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due IS NOT NULL AND due < date('now')").fetchone()[0]
-            today = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due = date('now')").fetchone()[0]
+            overdue = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due IS NOT NULL AND due < ?", (today_,)).fetchone()[0]
+            today = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due = ?", (today_,)).fetchone()[0]
         return {"open": open_, "overdue": overdue, "today": today}

@@ -35,7 +35,7 @@ from .workspace import MAX_FILE_CHARS, WorkspaceError
 from . import plans
 from . import reach
 from . import mcp_search
-from .learn import skill_block
+from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block
 from . import redact
 from . import webread
 from . import websearch
@@ -948,16 +948,57 @@ class Toolbox:
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_memory, "memory",
             examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20}]))
 
-        async def save_memory(ctx: dict[str, Any], content: str, kind: str = "fact", personal: bool = False) -> Any:
-            m = self.memories.create(None if personal else ctx["project_id"], content, kind=kind, source="auto")
-            ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})["memories"].append(m)
+        async def save_memory(ctx: dict[str, Any], content: str = "", kind: str = "", personal: bool = False,
+                              replaces: str = "", forget: bool = False) -> Any:
+            learned = ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
+            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
+            old = None
+            if replaces or forget:
+                if not replaces:
+                    return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
+                                      alternative="search_memory to find the memory's id")
+                old = self.memories.get(replaces)
+                if not old or old["invalid_at"] is not None or old["project_id"] not in (None, ctx.get("project_id")):
+                    return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
+                                      alternative="search_memory for the memory's current id")
+                # Pinned rows are the user's own curation, as in auto-learn: the model never rewrites or drops them.
+                if old["pinned"]:
+                    return tool_error("That memory is pinned by the user. Do not retry; ask them to edit it in Memory.")
+                if forget:
+                    gone = self.memories.invalidate(replaces)
+                    if not gone:
+                        return tool_error(f"Could not forget {replaces}: it is no longer current.")
+                    learned.setdefault("removed", []).append(gone)
+                    return {"forgotten": replaces, "content": gone["content"]}
+            # The same normalisation auto-learn applies: never store a credential, or a relative date that will rot.
+            text = normalize_memory(content, datetime.now().date())
+            if text is None:
+                return tool_error("The memory has a relative date (next week, this month...) that cannot be stored as is. "
+                                  "Restate it with the actual date, or ask the user for it.", field="content")
+            if not text.strip():
+                return tool_error("content is empty.", field="content", example={"content": "User prefers dark mode"})
+            kind = kind if kind in MEMORY_KINDS else ""
+            if old:
+                m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov)
+                if not m:
+                    return tool_error(f"Could not update {replaces}: it is no longer current.")
+                learned.setdefault("updated", []).append(m)
+                return {"updated": replaces, "saved": m["id"], "content": m["content"]}
+            m = self.memories.create(None if personal else ctx["project_id"], text, kind=kind or "fact", source="auto", provenance=prov)
+            learned["memories"].append(m)
             return {"saved": m["id"], "content": m["content"]}
-        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference or goal) for future chats. Use when the user says 'remember that…' or shares something clearly worth keeping.",
-            _obj({"content": {"type": "string", "description": "Third person, e.g. 'User prefers dark mode'"}, "kind": {"type": "string", "enum": ["fact", "preference", "goal", "note"], "default": "fact"},
-                  "personal": {"type": "boolean", "description": "true = available in every chat, false = only this project", "default": False}}, ["content"]), save_memory, "memory", "writes",
+        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference or goal) for future chats. Use when the user says 'remember that…' or shares something clearly worth keeping. "
+                                  "To correct a memory, pass its id from search_memory as `replaces` with the corrected content; to forget one, pass `replaces` and `forget: true`.",
+            _obj({"content": {"type": "string", "description": "Third person, e.g. 'User prefers dark mode'. Write dates as absolute dates."},
+                  "kind": {"type": "string", "enum": ["fact", "preference", "goal", "note"], "description": "Defaults to fact (or the replaced memory's kind)"},
+                  "personal": {"type": "boolean", "description": "true = available in every chat, false = only this project. Ignored with replaces.", "default": False},
+                  "replaces": {"type": "string", "description": "id of an existing memory (from search_memory) that this one corrects; the old wording stays as history"},
+                  "forget": {"type": "boolean", "description": "true = forget the memory named by replaces instead of saving content", "default": False}}, []), save_memory, "memory", "writes",
             examples=[{"content": "User's daughter is called Mira", "kind": "fact", "personal": True},
                       {"content": "User prefers replies under 150 words", "kind": "preference", "personal": True},
-                      {"content": "User wants the migration done before March", "kind": "goal"}]))
+                      {"content": "User wants the migration done before March", "kind": "goal"},
+                      {"replaces": "mem_8c1d2e", "content": "User now lives in Lisbon"},
+                      {"replaces": "mem_8c1d2e", "forget": True}]))
 
         async def graph_search(ctx: dict[str, Any], query: str) -> Any:
             sub = self.graph.neighborhood(ctx["project_id"], query, max_nodes=40)

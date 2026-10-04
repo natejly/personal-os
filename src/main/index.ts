@@ -316,6 +316,10 @@ if (gotLock) app.whenReady().then(async () => {
     const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
     return r.canceled || !r.filePath ? null : r.filePath
   })
+  handle('data:choose-input-files', async () => {
+    const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })
+    return r.canceled ? [] : r.filePaths
+  })
   // Folders only: openPath on a file or .app would run it.
   handle('data:reveal', async (_e, path: string) => {
     const p = String(path)

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Archive, PanelLeftOpen, Plus, Users, X } from 'lucide-react'
-import type { DeskAutonomy } from '@shared/types'
+import type { DeskAutonomy, DeskInputRef } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import ScopeSelect from './ScopeSelect'
 import DeskRail, { AUTONOMY, railOrder } from './DeskRail'
@@ -21,6 +21,16 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
   const [maxCost, setMaxCost] = useState('')
   const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
   const maxCostDefault = useStore((s) => s.settings.deskMaxCost ?? 2)
+  const docs = useStore((s) => s.docs)
+  const documents = useStore((s) => s.documents)
+  const refreshDocuments = useStore((s) => s.refreshDocuments)
+  useEffect(() => { void refreshDocuments() }, [refreshDocuments])
+  const [inputs, setInputs] = useState<{ ref: DeskInputRef; label: string }[]>([])
+  const addInput = (ref: DeskInputRef, label: string): void =>
+    setInputs((xs) => (xs.some((x) => JSON.stringify(x.ref) === JSON.stringify(ref)) ? xs : [...xs, { ref, label }]))
+  const pickFiles = async (): Promise<void> => {
+    for (const path of await window.os.data.chooseInputFiles()) addInput({ kind: 'path', path }, path.split('/').pop() || path)
+  }
 
   const submit = async (): Promise<void> => {
     if (!brief.trim() || busy) return
@@ -34,7 +44,8 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
         ...(Number(maxTurns) > 0 ? { maxTurns: Number(maxTurns) } : {}),
         ...(Number(maxCost) > 0 ? { maxCost: Number(maxCost) } : {})
       },
-      start
+      start,
+      inputs: inputs.map((x) => x.ref)
     })
     // `createDesk` resolves null rather than rejecting, so a refused desk keeps the typed brief.
     if (desk) onDone()
@@ -63,6 +74,32 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
           <span>Title</span>
           <input placeholder="Taken from the brief if you leave this blank" value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
+        <div className="desk-field">
+          <span>Inputs</span>
+          <div className="desk-inputs">
+            {inputs.map((x, i) => (
+              <span key={i} className="desk-input-chip" title={x.ref.kind === 'path' ? x.ref.path : x.label}>
+                {x.label}
+                <button className="icon-btn ghost" aria-label={`Remove ${x.label}`} onClick={() => setInputs((xs) => xs.filter((_, j) => j !== i))}><X size={11} /></button>
+              </span>
+            ))}
+            <select
+              aria-label="Add a doc or uploaded document"
+              value=""
+              onChange={(e) => {
+                const [kind, id] = e.target.value.split(':')
+                if (kind === 'doc') addInput({ kind, id }, docs.find((d) => d.id === id)?.title || 'Doc')
+                if (kind === 'document') addInput({ kind, id }, documents.find((d) => d.id === id)?.name || 'Document')
+              }}
+            >
+              <option value="">Add a doc…</option>
+              {docs.length > 0 && <optgroup label="Docs">{docs.map((d) => <option key={d.id} value={`doc:${d.id}`}>{d.title || 'Untitled'}</option>)}</optgroup>}
+              {documents.length > 0 && <optgroup label="Uploads">{documents.map((d) => <option key={d.id} value={`document:${d.id}`}>{d.name}</option>)}</optgroup>}
+            </select>
+            <button className="ghost-btn" onClick={() => void pickFiles()}>Add files…</button>
+          </div>
+          <small className="muted">Copied into the desk's read-only inputs/ folder when it is created.</small>
+        </div>
         <div className="desk-field">
           <span>Autonomy</span>
           <div className="desk-autonomy">

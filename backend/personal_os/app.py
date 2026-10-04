@@ -28,6 +28,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
 from . import compaction, otel_export, titles
+from .fsx import sensitive_reason
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
@@ -1952,8 +1953,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
             net = ("open" if cfg.get("shellNetwork") else
                    "allowlist" if cfg.get("shellRegistryAccess", True) or cfg.get("shellAllowedDomains") else "off")
+            try:
+                inputs = workspace.inputs(desk_id) if desk_id else []
+            except WorkspaceError:
+                inputs = []
             text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True)), "inputs": inputs})
             return "\n\n" + text if text else ""
 
         tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
@@ -7647,6 +7652,12 @@ async def induce_conversation_skill(id: str, body: InduceIn | None = None) -> di
 
 
 # ---------------- cowork: desks, plans and workspaces ----------------
+class DeskInputRef(BaseModel):
+    kind: str                              # doc | document | path
+    id: str | None = None                  # doc or uploaded document id
+    path: str | None = None                # a local file under the home folder
+
+
 class DeskIn(BaseModel):
     brief: str
     title: str | None = None
@@ -7654,6 +7665,11 @@ class DeskIn(BaseModel):
     autonomy: str = "plan"
     budget: dict[str, Any] | None = None
     start: bool = True
+    inputs: list[DeskInputRef] = []
+
+
+class DeskInputsIn(BaseModel):
+    inputs: list[DeskInputRef]
 
 
 class DeskPatch(BaseModel):
@@ -7760,14 +7776,17 @@ async def create_desk(body: DeskIn) -> dict[str, Any]:
     return await _create_desk(body)
 
 
-async def _create_desk(body: DeskIn, *, origin: str | None = None, inputs: dict[str, str] | None = None) -> dict[str, Any]:
-    """`origin` is the chat that asked for the desk (it is told when the desk finishes); `inputs` maps a file name to
-    the text copied into the desk's inputs/ folder before its first turn, so the desk starts with the material."""
+async def _create_desk(body: DeskIn, *, origin: str | None = None,
+                       inputs: list[tuple[str, bytes, str]] | None = None) -> dict[str, Any]:
+    """`origin` is the chat that asked for the desk (it is told when the desk finishes); `inputs` are (name, bytes,
+    source) snapshots copied into the desk's inputs/ folder before its first turn, so the desk starts with the material.
+    `body.inputs` are resolved into more of them, and a bad one refuses the desk before anything is created."""
     brief = (body.brief or "").strip()
     if not brief:
         raise HTTPException(400, "A desk needs a brief")
     if body.autonomy not in AUTONOMY:
         raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
+    inputs = [*(inputs or []), *_load_desk_inputs(body.inputs)]
     pid = wsid(body.project_id)
     cfg = settings()
     live_cap = int(cfg.get("deskMaxLive") or 0)
@@ -7783,8 +7802,8 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None, inputs: dict[
         convos.delete(conv["id"])        # the conversation exists only to hold this desk's transcript
         raise HTTPException(400, str(e)) from e
     try:
-        for name, text in (inputs or {}).items():
-            workspace.write(desk["id"], f"inputs/{name}", text, mode="overwrite")
+        if inputs:
+            workspace.add_inputs(desk["id"], inputs)
     except WorkspaceError as e:          # a desk without the material it was promised would plan blind
         desks.delete(desk["id"])
         convos.delete(conv["id"])
@@ -7817,19 +7836,82 @@ def _input_name(title: str, taken: set[str]) -> str:
     return name
 
 
+DESK_INPUT_MAX = 20
+
+
+def _load_desk_inputs(refs: list[DeskInputRef]) -> list[tuple[str, bytes, str]]:
+    """What the user picked, read into (name, bytes, source). The route is a trust boundary even though the user picks:
+    a local path must resolve, symlinks followed, under the home folder and outside dot-folders, ~/Library, the app's
+    data and credential files, and is size-checked against the workspace quota before it is read."""
+    if len(refs) > DESK_INPUT_MAX:
+        raise HTTPException(400, f"At most {DESK_INPUT_MAX} inputs at a time")
+    out: list[tuple[str, bytes, str]] = []
+    for ref in refs:
+        if ref.kind == "doc":
+            d = docs.get(ref.id or "")
+            if not d:
+                raise HTTPException(404, f"No doc {ref.id!r}")
+            out.append((f"{d['title'] or 'Untitled'}.md", (d["content"] or "").encode("utf-8"), f"doc {d['title']!r} ({d['id']})"))
+        elif ref.kind == "document":
+            d = documents.get(ref.id or "")
+            if not d:
+                raise HTTPException(404, f"No document {ref.id!r}")
+            try:
+                data = Path(d["path"]).read_bytes()
+            except OSError:
+                data = (d["text"] or "").encode("utf-8")   # the stored bytes are gone; the extracted text is what is left
+            out.append((d["name"], data, f"uploaded document {d['name']!r} ({d['id']})"))
+        elif ref.kind == "path":
+            try:
+                p = mac.allowed_path(ref.path or "")
+            except mac.LocalPathError as e:
+                raise HTTPException(400, str(e)) from e
+            why = sensitive_reason(ref.path or "", p)
+            if why:
+                raise HTTPException(400, why)
+            if not p.is_file():
+                raise HTTPException(400, f"{p} is not a file")
+            size = p.stat().st_size
+            if size > workspace.max_total_bytes // 2:
+                raise HTTPException(400, f"{p.name} is {size} bytes; the workspace limit is {workspace.max_total_bytes} "
+                                         "and an input takes twice its size (a copy and a baseline)")
+            try:
+                out.append((p.name, p.read_bytes(), str(p)))
+            except OSError as e:
+                raise HTTPException(400, f"{p.name} could not be read ({e.__class__.__name__})") from e
+        else:
+            raise HTTPException(400, f"Unknown input kind {ref.kind!r}: doc, document or path")
+    return out
+
+
+@app.post("/cowork/desks/{id}/inputs")
+def add_desk_inputs(id: str, body: DeskInputsIn) -> dict[str, Any]:
+    """Hand a desk more material after it was created. Its next turn's system context lists them."""
+    _desk_or_404(id, False)
+    items = _load_desk_inputs(body.inputs)
+    if not items:
+        raise HTTPException(400, "No inputs given")
+    try:
+        added = workspace.add_inputs(id, items)
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+    desks.event(id, "note", "Inputs added: " + ", ".join(a["path"] for a in added))
+    return {"added": added, "inputs": workspace.inputs(id), "usage": workspace.usage(id)}
+
+
 async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: str,
                            doc_ids: list[str] | None = None) -> dict[str, Any]:
     """desk_start: the same creation the REST route does, started at once, in plan (or tighter) autonomy. The chat
     that called it is the desk's origin, and the docs it names are copied in as the desk's inputs."""
-    inputs: dict[str, str] = {}
+    inputs: list[tuple[str, bytes, str]] = []
     taken: set[str] = set()
     for ref in (doc_ids or [])[:DESK_INPUT_MAX_DOCS]:
         d = docs.find(str(ref))
         if not d:
             return tools.tool_error(f"No doc {ref!r}: pass an id or title from doc_list/doc_search.", field="doc_ids")
-        inputs[_input_name(d["title"], taken)] = d["content"]
+        inputs.append((_input_name(d["title"], taken), (d["content"] or "").encode("utf-8"), f"doc {d['title']!r} ({d['id']})"))
     if inputs:
-        brief = brief.rstrip() + "\n\nInputs, copied into inputs/ in your workspace: " + ", ".join(inputs) + "."
+        brief = brief.rstrip() + "\n\nInputs, copied into inputs/ in your workspace: " + ", ".join(n for n, _, _ in inputs) + "."
     try:
         out = await _create_desk(DeskIn(brief=brief, title=title or None, project_id=ctx.get("project_id"), autonomy=mode,
                                         start=True), origin=ctx.get("conversation_id"), inputs=inputs)
@@ -7837,7 +7919,7 @@ async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: st
         detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
         return tools.tool_error(f"The desk was not started: {detail}")
     return {"desk_id": out["desk"]["id"], "conversation_id": out["conversation_id"], "run_id": out.get("run_id"), "mode": mode,
-            "inputs": [f"inputs/{n}" for n in inputs],
+            "inputs": [f"inputs/{n}" for n, _, _ in inputs],
             "note": "The desk is planning. It will wait for the user to approve its plan before it does anything. When it "
                     "finishes, its report is posted back into this chat."}
 

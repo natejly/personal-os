@@ -1462,6 +1462,8 @@ export interface GrainApi {
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
   data: {
     chooseExportPath: () => Promise<string | null>
+    /** Native open dialog for files to hand a desk as inputs; [] when cancelled. */
+    chooseInputFiles: () => Promise<string[]>
     reveal: (path: string) => Promise<boolean>
     relaunch: () => Promise<void>
   }
@@ -1547,6 +1549,8 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; dr
 
 
 export interface DeskBudget { maxTurns?: number; maxCost?: number }
+/** Something the user hands a desk: a doc, an uploaded document, or a local file under the home folder. */
+export type DeskInputRef = { kind: 'doc'; id: string } | { kind: 'document'; id: string } | { kind: 'path'; path: string }
 
 export interface Desk {
   id: string

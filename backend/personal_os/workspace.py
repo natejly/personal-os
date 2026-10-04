@@ -42,6 +42,10 @@ TRASH_DIR = ".trash"
 SUBDIRS = ("outputs", "work", BASELINE_DIR, TRASH_DIR)
 # Bookkeeping, not content: a write into either would make diff() lie or lose a trashed version.
 RESERVED_DIRS = (BASELINE_DIR, TRASH_DIR)
+# What the user handed the desk: snapshot copies, read-only to every desk writer (write, trash, downloads, fs_*).
+# A shell or script can still change them, so each also gets a baseline copy and a change shows as `modified`.
+INPUTS_DIR = "inputs"
+INPUTS_MANIFEST = "MANIFEST.md"
 
 # Desk ids are new_id() hex, but the id is a path segment, so it is validated as one.
 DESK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -76,6 +80,14 @@ def _blocked(parts: tuple[str, ...]) -> str | None:
         suffix = PurePosixPath(part).suffix.lower()
         if suffix in BLOCKED_SUFFIXES:
             return suffix
+    return None
+
+
+def _read_only(rel: str) -> WorkspaceError | None:
+    head = PurePosixPath(rel).parts[0] if rel else ""
+    if head.casefold() == INPUTS_DIR:
+        return WorkspaceError(f"{INPUTS_DIR}/ holds the inputs the user handed this desk and is read-only; "
+                              "write your own copy under work/ instead")
     return None
 
 
@@ -348,6 +360,8 @@ class Workspace:
         parts = PurePosixPath(self._rel_of(desk_id, p)).parts
         if parts[0] in RESERVED_DIRS:
             raise WorkspaceError(f"{parts[0]}/ is reserved for the workspace itself and is not writable")
+        if err := _read_only(parts[0]):
+            raise err
         suffix = _blocked(parts)
         if suffix:
             raise WorkspaceError(f"{suffix} files cannot be written to a workspace", usage=self.usage(desk_id))
@@ -469,6 +483,8 @@ class Workspace:
         parts = PurePosixPath(rel).parts
         if parts[0].casefold() in RESERVED_DIRS:  # APFS is case-insensitive: .BASELINE is the same folder
             raise WorkspaceError(f"{parts[0]}/ is reserved for the workspace itself and is not writable")
+        if err := _read_only(rel):
+            raise err
         suffix = _blocked(parts)
         if suffix:
             raise WorkspaceError(f"{suffix} files cannot be written to a workspace", usage=self.usage(desk_id))
@@ -535,6 +551,8 @@ class Workspace:
             # write() refuses these for the same reason: moving .baseline/ away would destroy the
             # only before-copy the review diff is computed against.
             raise WorkspaceError(f"{head}/ is reserved for the workspace itself and cannot be trashed")
+        if err := _read_only(rel):
+            raise err
         if not p.exists():
             raise WorkspaceError(f"{rel} does not exist in this workspace")
         dest = _unique(root / TRASH_DIR / PurePosixPath(rel))
@@ -545,6 +563,54 @@ class Workspace:
             raise _oserror(rel, "trashed", e) from e
         return {"path": rel, "trashed_to": dest.relative_to(root).as_posix(),
                 "usage": self.usage(desk_id)}
+
+    # ---- inputs ----
+    def add_inputs(self, desk_id: str, items: list[tuple[str, bytes, str]]) -> list[dict[str, Any]]:
+        """Copy (name, bytes, source) snapshots into `inputs/`, each with a baseline copy and a MANIFEST.md line.
+
+        The only writer of `inputs/`. The quota is checked for the whole batch first, so a refused batch lands
+        nothing; an existing name gets Finder's `name 2.ext` rather than being replaced."""
+        root = self.ensure(desk_id).resolve()
+        need_files = 2 * len(items) + 1
+        need_bytes = 2 * sum(len(data) for _, data, _ in items) + 300 * len(items)
+        use = self.usage(desk_id)
+        if use["files"] + need_files > self.max_files:
+            raise WorkspaceError(f"this workspace already holds {use['files']} files and the limit is {self.max_files}", usage=use)
+        if use["bytes"] + need_bytes > self.max_total_bytes:
+            raise WorkspaceError(f"those inputs need {need_bytes} bytes (a copy and a baseline each); this workspace holds "
+                                 f"{use['bytes']} and the limit is {self.max_total_bytes}", usage=use)
+        out: list[dict[str, Any]] = []
+        manifest = root / INPUTS_DIR / INPUTS_MANIFEST
+        for name, data, source in items:
+            name = re.sub(r"[\\/\x00:]+", "-", str(name or "")).strip().lstrip(".~ ") or "input"
+            if name.casefold() == INPUTS_MANIFEST.casefold():
+                name = f"input-{name}"
+            suffix = _blocked((name,))
+            if suffix:
+                raise WorkspaceError(f"{suffix} files cannot be copied into a workspace")
+            dest = _unique(self.resolve_in(desk_id, f"{INPUTS_DIR}/{name}"))
+            rel = self._rel_of(desk_id, dest)
+            base = self._baseline_of(desk_id, rel)
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+                base.parent.mkdir(parents=True, exist_ok=True)
+                base.write_bytes(data)
+                new = not manifest.exists()
+                with manifest.open("a", encoding="utf-8") as fh:
+                    if new:
+                        fh.write("# Inputs\n\nSnapshot copies the user handed this desk. Read them; do not edit them.\n\n")
+                    fh.write(f"- `{rel}`: {' '.join(str(source).split())[:200]} ({len(data)} bytes, "
+                             f"sha256 {hashlib.sha256(data).hexdigest()[:12]})\n")
+            except OSError as e:
+                raise _oserror(rel, "copied in", e) from e
+            out.append({"path": rel, "bytes": len(data), "source": source})
+        return out
+
+    def inputs(self, desk_id: str) -> list[dict[str, Any]]:
+        """The inputs as the tree sees them, with `state`: `modified` means one changed after it was handed in."""
+        skip = f"{INPUTS_DIR}/{INPUTS_MANIFEST}"
+        return [e for e in self.tree(desk_id, INPUTS_DIR) if not e["is_dir"] and e["path"] != skip]
 
     def purge(self, desk_id: str) -> None:
         """Only ever called behind an explicit `?purge=true`: a desk's files are unregenerable."""

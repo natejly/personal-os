@@ -210,6 +210,13 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         return any(n in offered for n in names)
 
     out = ["## What you can do here"]
+    inputs = facts.get("inputs") or []
+    if inputs:
+        names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
+                          for e in inputs[:40])
+        more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
+        out.append(f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
+                   f"{names}{more}. Read them first; write your own copies under `work/`.")
     if has("desk_list_files", "desk_read_file", "desk_write_file"):
         out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
                    "`desk_write_file` handle whole text files.")

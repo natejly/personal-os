@@ -45,7 +45,7 @@ COPY_MAX_FILES = 2_000
 COPY_MAX_BYTES = 100_000_000
 DIFF_MAX_CHARS = 8_000
 BLOCK_SIMILARITY = 0.65
-RESERVED_DESK_DIRS = (".baseline", ".trash")  # workspace bookkeeping, never a write target
+RESERVED_DESK_DIRS = (".baseline", ".trash", "inputs")  # bookkeeping and the user's input snapshots, never a write target
 
 SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".azure", "gcloud", ".docker"})
 SENSITIVE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".ppk"})
@@ -150,8 +150,9 @@ def resolve_path(raw: Any, g: Grants, *, write: bool = False) -> Path:
         p = (g.desk or mac.home()) / p
     r = p.resolve()
     if g.in_desk(r):
-        if r != g.desk and write and r.relative_to(g.desk).parts[0] in RESERVED_DESK_DIRS:
-            raise FsError(f"{r.relative_to(g.desk).parts[0]} holds the workspace's own bookkeeping; write elsewhere in the workspace")
+        if r != g.desk and write and r.relative_to(g.desk).parts[0].casefold() in RESERVED_DESK_DIRS:
+            raise FsError(f"{r.relative_to(g.desk).parts[0]} holds the workspace's own bookkeeping or the user's inputs and is "
+                          "read-only; write elsewhere in the workspace")
     else:
         try:
             r = mac.allowed_path(str(r))

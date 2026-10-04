@@ -25,8 +25,11 @@ absolute path, so moving the data directory does not strand every desk.
 """
 from __future__ import annotations
 
+import email
+import email.policy
 import functools
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -94,7 +97,7 @@ CREATE TABLE IF NOT EXISTS desk_outputs (
   bytes         INTEGER NOT NULL DEFAULT 0,
   run_id        TEXT,
   status        TEXT NOT NULL DEFAULT 'proposed',  -- proposed|stale|accepted|promoted|promote_failed|rejected
-  promoted_kind TEXT,                              -- doc | doc_append | document | download
+  promoted_kind TEXT,                              -- one of OUTPUT_KINDS
   promoted_id   TEXT,
   verified      INTEGER NOT NULL DEFAULT 0,
   created_at    REAL NOT NULL,
@@ -113,7 +116,7 @@ LIVE = ("planning", "working", "needs_approval")
 # the desk in a state nothing can wake.
 RECOVER_FROM = (*LIVE, "awaiting_plan")
 AUTONOMY = ("plan", "ask", "propose")
-OUTPUT_KINDS = ("doc", "doc_append", "document", "download")
+OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "artifact", "mail_draft")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
 
 # The `kind` column's vocabulary. `status` is the fallback; the others let the timeline and the
@@ -764,6 +767,37 @@ class Desks:
                 return None
             r = c.execute("SELECT * FROM desk_outputs WHERE id=?", (output_id,)).fetchone()
         return self._output_view(r)
+
+
+
+MAX_TODO_ITEMS = 50
+_LIST_LINE = re.compile(r"^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)(.+?)\s*$")
+
+
+def checklist_items(text: str) -> list[str]:
+    """The todo titles in a delivered file: its checklist and list lines (`- [ ] x`, `- x`, `1. x`),
+    or every non-empty line when it has none. Capped, so one file cannot flood the list."""
+    lines = text.splitlines()
+    items = [m.group(1) for m in map(_LIST_LINE.match, lines) if m]
+    return (items or [ln.strip() for ln in lines if ln.strip()])[:MAX_TODO_ITEMS]
+
+
+def mail_parts(name: str, raw: bytes) -> tuple[str, str, str]:
+    """(to, subject, body) of a delivered mail file: an .eml, or text whose leading lines are `To:` and
+    `Subject:` headers, then a blank line, then the body. Raises ValueError naming what is missing."""
+    if name.lower().endswith(".eml"):
+        msg = email.message_from_bytes(raw, policy=email.policy.default)
+        part = msg.get_body(preferencelist=("plain",))
+        to, subject, body = str(msg["To"] or ""), str(msg["Subject"] or ""), part.get_content() if part else ""
+    else:
+        head, _, body = raw.decode("utf-8", "replace").lstrip("\ufeff").replace("\r\n", "\n").partition("\n\n")
+        h = {k.strip().lower(): v.strip() for k, _, v in (ln.partition(":") for ln in head.split("\n"))}
+        to, subject = h.get("to", ""), h.get("subject", "")
+    missing = [n for n, v in (("To:", to), ("Subject:", subject)) if not v.strip()]
+    if missing:
+        raise ValueError(f"missing the {' and '.join(missing)} header{'s' if len(missing) > 1 else ''}"
+                         " (start the file with To: and Subject: lines, then a blank line)")
+    return to.strip(), subject.strip(), body
 
 
 def origin_report(desk: dict[str, Any], outputs: list[dict[str, Any]]) -> str:

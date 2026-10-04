@@ -3,6 +3,7 @@ import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from 'lucide-react'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
 import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
+import ArtifactViewer from './ArtifactViewer'
 import InlineNote from './InlineNote'
 
 /**
@@ -12,16 +13,42 @@ import InlineNote from './InlineNote'
  * the third answer: review is a loop, not a binary.
  */
 
-const DESTINATIONS: { value: PromotionKind; label: string; hint: string }[] = [
-  { value: 'doc', label: 'Doc', hint: 'Creates a new doc, searchable immediately' },
-  { value: 'doc_append', label: 'Append to doc', hint: 'Proposes an edit to an existing doc; you accept it in Docs' },
-  { value: 'document', label: 'Document', hint: 'Ingests it as an uploaded document' },
+/** `only` limits a destination to the files it can take; the backend refuses the rest anyway. */
+const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: RegExp }[] = [
+  { value: 'doc', label: 'New note', hint: 'Creates a new note, searchable immediately' },
+  { value: 'doc_append', label: 'Append to note', hint: 'Proposes an edit to an existing note; you accept it in Files' },
+  { value: 'document', label: 'Upload', hint: 'Adds the file to Files → Uploads' },
+  { value: 'todo', label: 'Todos', hint: 'One todo per checklist or list line' },
+  { value: 'artifact', label: 'Page', hint: 'Opens as a page under Files → Pages', only: /\.(html?|svg)$/i },
+  { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a Gmail draft, never sends. The file starts with To: and Subject: lines, then a blank line' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
 
+/** Where a promoted copy lives, named and opened the way the rest of the app does. */
+function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; docId?: string }): JSX.Element | null {
+  const [page, setPage] = useState(false)
+  const s = useStore.getState
+  const go: Record<string, [string, () => void] | undefined> = {
+    doc: id ? ['open the note', () => void s().openDoc(id)] : undefined,
+    doc_append: docId ? ['open the note', () => void s().openDoc(docId)] : undefined,
+    document: ['open Files', () => s().setView('docs')],
+    todo: ['open Todos', () => s().setView('todos')],
+    mail_draft: ['open Mail', () => s().setView('mail')],
+    artifact: id ? ['open the page', () => setPage(true)] : undefined
+  }
+  const link = go[kind]
+  if (!link) return null
+  return (
+    <>
+      {' — '}<button className="link" onClick={link[1]}>{link[0]}</button>
+      {page && id && <ArtifactViewer id={id} onClose={() => setPage(false)} />}
+    </>
+  )
+}
+
 /** A retried row re-offers the destination that failed, so a retry means the same thing it did. */
 const defaultDest = (o: DeskOutput): PromotionKind =>
-  DESTINATIONS.some((d) => d.value === o.promoted_kind) ? (o.promoted_kind as PromotionKind) : 'doc'
+  DESTINATIONS.some((d) => d.value === o.promoted_kind && (!d.only || d.only.test(o.path))) ? (o.promoted_kind as PromotionKind) : 'doc'
 
 const fmtBytes = (n: number): string =>
   n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
@@ -94,7 +121,7 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
         {output.status === 'stale' && <span className="tag ask" title="The agent rewrote this file after nominating it">stale</span>}
         {output.status === 'promoted' && (
           output.verified
-            ? <span className="desk-verified"><Check size={12} /> verified</span>
+            ? <span className="desk-verified"><Check size={12} /> verified{!result && <PromotedLink kind={output.promoted_kind ?? ''} id={output.promoted_id} />}</span>
             : <span className="desk-unverified"><TriangleAlert size={12} /> unverified</span>
         )}
         {output.status === 'promote_failed' && <span className="desk-unverified"><TriangleAlert size={12} /> could not verify the write</span>}
@@ -112,14 +139,14 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
       {!decided && (
         <div className="desk-output-dest">
           <div className="seg">
-            {DESTINATIONS.map((d) => (
+            {DESTINATIONS.filter((d) => !d.only || d.only.test(output.path)).map((d) => (
               <button key={d.value} className={destination === d.value ? 'on' : ''} title={d.hint} onClick={() => onDestination(d.value)}>{d.label}</button>
             ))}
           </div>
           {destination === 'doc_append' && (
             <label className="model-picker">
               <select value={docId} onChange={(e) => onDocId(e.target.value)}>
-                <option value="">Pick a doc…</option>
+                <option value="">Pick a note…</option>
                 {docs.map((d) => <option key={d.id} value={d.id}>{d.title || 'Untitled'}</option>)}
               </select>
             </label>
@@ -129,10 +156,8 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
 
       {result && (
         result.ok && result.verified
-          ? <p className="desk-verified"><Check size={12} /> {result.kind === 'download' ? 'Downloaded' : 'Promoted and read back'}
-              {result.ref && (result.kind === 'doc' || result.kind === 'doc_append')
-                ? <> — <button className="link" onClick={() => void useStore.getState().openDoc(result.ref as string)}>open the doc</button></>
-                : result.ref ? ` — ${result.ref}` : ''}</p>
+          ? <p className="desk-verified"><Check size={12} /> {result.kind === 'download' ? `Downloaded ${result.ref ?? ''}` : 'Promoted and read back'}
+              <PromotedLink kind={result.kind} id={result.ref} docId={docId} /></p>
           : <p className="desk-unverified"><TriangleAlert size={12} /> could not verify the write{result.error ? ` — ${result.error}` : ''}</p>
       )}
     </article>
@@ -148,7 +173,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
   const [docIds, setDocIds] = useState<Record<string, string>>({})
   const [results, setResults] = useState<Record<string, PromotionResult>>({})
 
-  // The Append-to-doc picker needs the doc list, which is otherwise only loaded by the Docs view.
+  // The Append-to-note picker needs the doc list, which is otherwise only loaded by the Docs view.
   useEffect(() => { void refreshDocs() }, [refreshDocs])
 
   const undecided = desk.outputs.filter((o) => !DECIDED.includes(o.status))
@@ -234,7 +259,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
       )}
       <footer className="desk-review-foot">
-        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
+        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a note to append to' : undefined} onClick={() => void accept()}>
           <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
         </button>
         <button className="ghost-btn" aria-expanded={noting === 'back'} onClick={() => setNoting(noting === 'back' ? null : 'back')}>Send back</button>

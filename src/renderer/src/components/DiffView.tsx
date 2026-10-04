@@ -4,7 +4,7 @@ import type { DocRevision } from '@shared/types'
 import { diffLines, diffStat, hunks, toUnified, type DiffLine, type WordPart } from '../lib/diff'
 
 /** Word parts of a reworded line, so only the words that actually moved are marked. */
-function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text: string; op: DiffLine['op'] }): JSX.Element {
+export function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text: string; op: DiffLine['op'] }): JSX.Element {
   if (!parts) return <>{text}</>
   return (
     <>

@@ -41,10 +41,10 @@ if "pytest" in sys.modules:  # pragma: no cover - collection guard, not behaviou
 
 from personal_os import llm  # noqa: E402
 from personal_os.app import (AUTH_TOKEN, _desk_tasks, _missed_wake, _should_chain, app,  # noqa: E402
-                             bus, db, plans, desks, docs, run_store, toolbox, workspace)
+                             artifacts, bus, db, plans, desks, docs, google, run_store, todos, toolbox, workspace)
 from personal_os.app import events as topic  # noqa: E402
 from personal_os.plans import PLAN_SAFE_DANGER  # noqa: E402
-from personal_os.cowork import LIVE, NEEDS_YOU  # noqa: E402
+from personal_os.cowork import LIVE, NEEDS_YOU, checklist_items  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 
@@ -190,12 +190,14 @@ WRITE = call("desk_write_file", path="outputs/report.md", content=REPORT)
 DELIVER = call("desk_deliver", path="outputs/report.md", title="The report", summary="One finding.")
 
 
-def delivering_desk(brief: str) -> dict[str, Any]:
+def delivering_desk(brief: str, path: str = "", content: str = "") -> dict[str, Any]:
     """A desk that plans, writes one output, delivers it and finishes — the whole happy path."""
-    script({"calls": [propose("Write it up", step("desk_write_file", WRITE["arguments"]),
-                              step("desk_deliver", DELIVER["arguments"]))]},
-           {"calls": [WRITE]},
-           {"calls": [DELIVER]},
+    write = call("desk_write_file", path=path, content=content) if path else WRITE
+    deliver = call("desk_deliver", path=path, title="The report", summary="One finding.") if path else DELIVER
+    script({"calls": [propose("Write it up", step("desk_write_file", write["arguments"]),
+                              step("desk_deliver", deliver["arguments"]))]},
+           {"calls": [write]},
+           {"calls": [deliver]},
            {"calls": [call("desk_done", summary="Written and delivered.")]},
            {"text": "Finished."})
     made = make_desk(brief)
@@ -692,6 +694,58 @@ def test_doc_append_proposes_a_revision_and_leaves_the_doc_alone() -> None:
     check(REPORT.strip() in j("GET", f"/docs/revisions/{out['ref']}")["after"], "and it carries the file's text")
 
 
+def promote(state: dict[str, Any], destination: str) -> dict[str, Any]:
+    return j("POST", f"/cowork/desks/{state['id']}/accept",
+             {"outputs": [{"output_id": state["outputs"][0]["id"], "destination": destination}]})["results"][0]
+
+
+def test_a_checklist_becomes_one_todo_per_line() -> None:
+    state = delivering_desk("Plan it", "outputs/plan.md", "# Plan\n\n- [ ] Book the room\n- [ ] Send the agenda\n- [x] Pick a date\n")
+    out = promote(state, "todo")
+    check(out["ok"] is True and out["verified"] is True and out["kind"] == "todo", f"read back and matched, got {out}")
+    made = [todos.get(i) for i in out["ref"].split(",")]
+    check([t["title"] for t in made] == ["Book the room", "Send the agenda", "Pick a date"],
+          f"one todo per checklist line, headings skipped, got {[t['title'] for t in made]}")
+    check(all(t["source"] == "desk" for t in made), "marked as agent input, like mail and meetings")
+    check(checklist_items("first\n\n  second  \n") == ["first", "second"], "with no list lines, every non-empty line")
+    check(len(checklist_items("\n".join(f"{n}. step" for n in range(80)))) == 50, "and never more than 50")
+
+
+def test_an_html_file_becomes_a_page_and_markdown_does_not() -> None:
+    page = "<!doctype html><title>Chart</title><svg width='10' height='10'></svg>\n"
+    out = promote(delivering_desk("Chart it", "outputs/chart.html", page), "artifact")
+    check(out["ok"] is True and out["verified"] is True, f"the page was read back and matched, got {out}")
+    check(artifacts.get(out["ref"])["code"] == page.strip(), "and the page holds the file")
+
+    refused = promote(delivering_desk("Not a page"), "artifact")
+    check(refused["ok"] is False and refused["error"] == "not an html or svg file", f"a .md is refused, got {refused}")
+
+
+def test_a_mail_file_becomes_a_gmail_draft_never_a_send() -> None:
+    sent: list[Any] = []
+    drafted: list[tuple[str, str, str]] = []
+
+    def fake_draft(to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+        drafted.append((to, subject, body))
+        return {"draft_id": "d-1", "verified": True, "verification": {"status": "verified"}}
+
+    real = google.gmail_draft, google.gmail_send
+    google.gmail_draft = fake_draft  # type: ignore[method-assign]
+    google.gmail_send = lambda *a, **k: sent.append(a)  # type: ignore[method-assign]
+    try:
+        mail = "To: mira@example.com\nSubject: Invoice 42\n\nHi Mira,\n\nAttached.\n"
+        out = promote(delivering_desk("Draft it", "outputs/mail.md", mail), "mail_draft")
+        check(out["ok"] is True and out["verified"] is True and out["ref"] == "d-1", f"a verified draft, got {out}")
+        check(drafted == [("mira@example.com", "Invoice 42", "Hi Mira,\n\nAttached.\n")], f"headers split from the body, got {drafted}")
+
+        bare = promote(delivering_desk("No headers"), "mail_draft")
+        check(bare["ok"] is False and "To: and Subject:" in bare["error"], f"missing headers are refused, got {bare}")
+        check(len(drafted) == 1, "and nothing is drafted for it")
+    finally:
+        google.gmail_draft, google.gmail_send = real  # type: ignore[method-assign]
+    check(not sent, "gmail_send is never called")
+
+
 def test_delete_keeps_the_workspace_unless_purge() -> None:
     state = delivering_desk("Delete me")
     did, cid = state["id"], state["conversation_id"]
@@ -734,6 +788,9 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_failed_promotion_can_be_retried,
          test_download_hands_over_the_file_it_marks_promoted,
          test_doc_append_proposes_a_revision_and_leaves_the_doc_alone,
+         test_a_checklist_becomes_one_todo_per_line,
+         test_an_html_file_becomes_a_page_and_markdown_does_not,
+         test_a_mail_file_becomes_a_gmail_draft_never_a_send,
          test_delete_keeps_the_workspace_unless_purge]
 
 

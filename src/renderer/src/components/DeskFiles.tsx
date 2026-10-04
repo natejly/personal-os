@@ -7,6 +7,7 @@ import { deliveredPaths, deliveryLabel, fileKind, fmtAgo, fmtBytes } from '../li
 import { useStore } from '../store'
 import MarkdownPreview from './MarkdownPreview'
 import DeskChanges from './DeskChanges'
+import { Parts } from './DiffView'
 
 /**
  * The workspace, as the user sees it: `outputs/` first because that is what the review is about,
@@ -58,15 +59,6 @@ function parseUnified(diff: string): DiffRow[] {
     b.parts = w.after
   }
   return rows
-}
-
-function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text: string; op: Op }): JSX.Element {
-  if (!parts) return <>{text}</>
-  return (
-    <>
-      {parts.map((p, i) => (p.changed ? <mark key={i} className={op === 'add' ? 'w-add' : 'w-del'}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
-    </>
-  )
 }
 
 function DiffPane({ diff }: { diff: DeskDiff }): JSX.Element {
@@ -182,16 +174,15 @@ function PreviewBody({ path, data, onMore, error }: { path: string; data: Loaded
 
 export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
   const files = useStore((s) => s.deskFiles)
-  const preview = useStore((s) => s.deskPreview)
   const loadDeskFiles = useStore((s) => s.loadDeskFiles)
-  const previewDeskFile = useStore((s) => s.previewDeskFile)
+  const [path, setPath] = useState<string | null>(null)
   const toast = useStore((s) => s.toast)
   const [shut, setShut] = useState<Record<string, boolean>>({ work: true })
   const [showDiff, setShowDiff] = useState(false)
   const [diff, setDiff] = useState<DeskDiff | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => { void loadDeskFiles(desk.id) }, [desk.id, loadDeskFiles])
+  useEffect(() => { void loadDeskFiles(desk.id); setPath(null) }, [desk.id, loadDeskFiles])
 
   // Live: re-read the tree on every status change and every few seconds while the desk is working.
   // A desk at rest is never polled; `loadDeskFiles` replaces the list in place so the selection
@@ -217,7 +208,6 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
     return [...m.entries()].sort((a, b) => groupRank(a[0]) - groupRank(b[0]) || a[0].localeCompare(b[0]))
   }, [files])
 
-  const path = preview?.path ?? null
   const current = files.find((f) => f.path === path) ?? null
   const { data: rich, more: loadMore, error: richError } = useRichPreview(desk.id, path, current ? `${current.bytes}:${current.modified}` : '')
 
@@ -236,7 +226,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
     return () => { gone = true }
   }, [showDiff, path, diff, desk.id, toast])
 
-  const open = (p: string): void => { setShowDiff(false); void previewDeskFile(desk.id, p) }
+  const open = (p: string): void => { setShowDiff(false); setPath(p) }
 
   return (
     <div className="desk-files">

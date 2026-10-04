@@ -1590,7 +1590,7 @@ export interface FullDesk extends Desk {
 }
 
 export type DeskOutputStatus = 'proposed' | 'stale' | 'accepted' | 'promoted' | 'promote_failed' | 'rejected'
-export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download'
+export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download' | 'todo' | 'artifact' | 'mail_draft'
 
 export interface DeskOutput {
   id: string

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Copy, Mic } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -34,7 +35,8 @@ export default function MeetingConsentModal(): JSX.Element {
 
   const bad = (meetingPreflight?.capabilities ?? []).filter((c) => !c.ok)
 
-  return (
+  // Portaled: it opens from inside the Docs page, whose size container would otherwise box the backdrop in.
+  return createPortal(
     <div className="modal-backdrop" {...backdrop}>
       <div className="modal" {...modal}>
         <header>
@@ -105,6 +107,7 @@ export default function MeetingConsentModal(): JSX.Element {
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

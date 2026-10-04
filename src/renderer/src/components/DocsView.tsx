@@ -99,14 +99,15 @@ export default function DocsView(): JSX.Element {
   useEffect(() => { void refreshDocs() }, [refreshDocs])
   // The narrowed list lives here, not in the store: tabs, folders, links and templates read the full `docs`.
   const [matches, setMatches] = useState<Doc[] | null>(null)
+  // Re-asked when `docs` changes too, so a doc deleted or renamed mid-search leaves the list. The last
+  // answer stays up while the next loads, rather than flashing "No matches." on every keystroke.
   useEffect(() => {
-    setMatches(null)
     const q = query.trim()
-    if (!q) return
+    if (!q) return setMatches(null)
     let stale = false
     api.docs.list('all', q).then((d) => { if (!stale) setMatches(d) }).catch(() => { /* keep the last answer */ })
     return () => { stale = true }
-  }, [query])
+  }, [query, docs])
   // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
   const [hits, setHits] = useState<DocHit[] | null>(null)
   useEffect(() => {
@@ -317,7 +318,7 @@ export default function DocsView(): JSX.Element {
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree hits={hits} docs={query.trim() ? (matches ?? []) : docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>

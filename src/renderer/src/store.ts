@@ -1229,8 +1229,10 @@ export const useStore = create<State>((set, get) => {
     void get().refreshDocsPending()
     if (typeof id !== 'string' || get().activeDoc?.id !== id) return
     void api.docs.get(id).then((d) => {
-      // Only `pending` is taken: a proposal leaves the body alone, and the editor may hold unsaved typing.
-      set((st) => (st.activeDoc?.id === id ? { activeDoc: { ...st.activeDoc, pending: d.pending } } : {}))
+      // With unsaved typing only `pending` is taken; otherwise the whole doc, so an edit applied
+      // straight away (docEditMode "apply") shows and the next save does not write the old body back.
+      set((st) => (st.activeDoc?.id !== id ? {} : st.docDraft === null && st.docTitleDraft === null
+        ? { activeDoc: d } : { activeDoc: { ...st.activeDoc, pending: d.pending } }))
       void get().refreshDocRevisions(id)
     }).catch(() => { /* the banner appears on the next open */ })
   }

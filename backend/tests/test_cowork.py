@@ -712,6 +712,72 @@ def test_delete_keeps_the_workspace_unless_purge() -> None:
     check(not proot.exists(), "purge=true is the only thing that removes the directory")
 
 
+def _rewrite(did: str) -> None:
+    """The agent edits its delivered file after nominating it: the bytes on disk are no longer the
+    ones the user reviewed."""
+    (workspace.desk_root(did) / "outputs" / "report.md").write_text(REPORT + "\nA late edit.\n")
+
+
+def test_a_stale_output_is_not_promoted_without_saying_so() -> None:
+    """Review happens on the delivered bytes. Every destination checks them, not only download, and
+    shipping the current file instead takes an explicit accept_stale."""
+    for dest in ("doc", "download"):
+        state = delivering_desk(f"Stale {dest}")
+        did, oid = state["id"], state["outputs"][0]["id"]
+        _rewrite(did)
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "stale" and row["stale"] is True, f"the review shows it stale, got {row}")
+
+        body = {"outputs": [{"output_id": oid, "destination": dest}]}
+        refused = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
+        check(refused["ok"] is False and "changed" in (refused.get("error") or ""),
+              f"{dest}: the changed file is refused, got {refused}")
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "promote_failed" and row["stale"] is True,
+              f"{dest}: the row is retryable and still says why, got {row}")
+
+        body["outputs"][0]["accept_stale"] = True
+        took = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
+        check(took["ok"] is True and took["verified"] is True,
+              f"{dest}: with accept_stale the current file is promoted, not the cached refusal, got {took}")
+        if dest == "doc":
+            check("A late edit." in docs.get(took["ref"])["content"], "and it is the current bytes that shipped")
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "promoted" and row["sha256"] != state["outputs"][0]["sha256"],
+              f"{dest}: the row records the digest that actually shipped, got {row}")
+
+
+def _xlsx(text: str) -> bytes:
+    """The smallest workbook the stdlib extractor reads: one sheet, one inline string."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   '<sheets><sheet name="Model" sheetId="1"/></sheets></workbook>')
+        z.writestr("xl/worksheets/sheet1.xml", '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   f'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>')
+    return buf.getvalue()
+
+
+def test_a_text_file_and_a_workbook_promote_to_their_own_destinations() -> None:
+    """What the review pane's defaults send for a desk with a .md and a .xlsx: the text becomes a
+    doc and the workbook an uploaded document. A workbook sent to `doc` fails as not text."""
+    import hashlib
+    state = delivering_desk("Two kinds of output")
+    did = state["id"]
+    data = _xlsx("Widget")
+    (workspace.desk_root(did) / "outputs" / "model.xlsx").write_bytes(data)
+    sheet = desks.declare_output(did, "outputs/model.xlsx", "The model", "", hashlib.sha256(data).hexdigest(),
+                                 len(data), None)
+    md = state["outputs"][0]["id"]
+    got = j("POST", f"/cowork/desks/{did}/accept",
+            {"outputs": [{"output_id": md, "destination": "doc"},
+                         {"output_id": sheet["id"], "destination": "document"}]})["results"]
+    check(all(r["ok"] and r["verified"] for r in got), f"both are promoted and read back, got {got}")
+    check(desk(did)["status"] == "done", "and nothing is left to decide")
+
+
 TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first,
          test_three_desks_run_at_once,
@@ -734,7 +800,9 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_failed_promotion_can_be_retried,
          test_download_hands_over_the_file_it_marks_promoted,
          test_doc_append_proposes_a_revision_and_leaves_the_doc_alone,
-         test_delete_keeps_the_workspace_unless_purge]
+         test_delete_keeps_the_workspace_unless_purge,
+         test_a_stale_output_is_not_promoted_without_saying_so,
+         test_a_text_file_and_a_workbook_promote_to_their_own_destinations]
 
 
 def _system_text(round_messages: list[dict[str, Any]]) -> str:

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { RunChanges, RunInfo } from '@shared/types'
-import { defaultDeskTab, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, recentRunIds, splitUrl, undoNote } from './deskFiles'
+import { defaultDeskTab, defaultDest, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, recentRunIds, splitUrl, undoNote } from './deskFiles'
 
 const run = (id: string, at: number): RunInfo => ({ run_id: id, conversation_id: 'c', message_id: null, seq: 0, started_at: at, live: false, answering: false })
 const ch = (count: number): RunChanges => ({ available: true, count, state: 'applied', files: Array.from({ length: count }, (_, i) => ({ root: 'r', status: 'A' as const, path: `f${i}` })), skipped: [] })
@@ -51,4 +51,18 @@ test('deliveryLabel, undoNote, splitUrl', () => {
   assert.equal(undoNote(['a', 'b', 'c', 'd']), '4 left alone (edited since): a, b, c, …')
   assert.deepEqual(splitUrl('https://example.com/a/b?q=1'), { host: 'example.com', rest: '/a/b?q=1' })
   assert.deepEqual(splitUrl('nonsense'), { host: 'nonsense', rest: '' })
+})
+
+test('defaultDest: text to a doc, office files to documents, the rest handed over, a retry keeps its choice', () => {
+  const o = (path: string, promoted_kind: string | null = null) => ({ path, promoted_kind })
+  // Accepting everything on a desk with a .md and a .xlsx sends doc and document, never doc twice.
+  assert.deepEqual([o('outputs/report.md'), o('outputs/model.xlsx')].map(defaultDest), ['doc', 'document'])
+  assert.equal(defaultDest(o('outputs/notes.txt')), 'doc')
+  assert.equal(defaultDest(o('outputs/summary.PDF')), 'document')
+  assert.equal(defaultDest(o('outputs/deck.pptx')), 'document')
+  assert.equal(defaultDest(o('outputs/report.docx')), 'document')
+  assert.equal(defaultDest(o('outputs/chart.png')), 'download')
+  assert.equal(defaultDest(o('outputs/bundle.zip')), 'download')
+  assert.equal(defaultDest(o('outputs/model.xlsx', 'download')), 'download')
+  assert.equal(defaultDest(o('outputs/model.xlsx', 'bogus')), 'document')
 })

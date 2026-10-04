@@ -1,4 +1,4 @@
-import type { DeskStatus, RunChanges, RunInfo } from '@shared/types'
+import type { DeskStatus, PromotionKind, RunChanges, RunInfo } from '@shared/types'
 
 /**
  * Pure helpers behind the desk's Files / Changes / Browser tabs, kept out of the components so
@@ -22,6 +22,22 @@ export function fileKind(path: string, isText: boolean): FileKind {
   if (MARKDOWN.test(path)) return 'markdown'
   if (DOCUMENT.test(path)) return 'document'
   return isText ? 'text' : 'other'
+}
+
+const TEXT = /\.(md|markdown|txt|text|csv|tsv|json|ya?ml|html?|xml|rst|org|log)$/i
+const PROMOTIONS: PromotionKind[] = ['doc', 'doc_append', 'document', 'download']
+
+/**
+ * Where an output goes unless the user picks otherwise. A retried row re-offers the destination
+ * that failed, so a retry means the same thing it did; otherwise text becomes a doc, an office file
+ * or PDF an uploaded document, and anything else (an image, an archive) is handed over as a file —
+ * `doc` reads text only, so sending a workbook there could only fail.
+ */
+export function defaultDest(o: { path: string; promoted_kind: string | null }): PromotionKind {
+  if (PROMOTIONS.includes(o.promoted_kind as PromotionKind)) return o.promoted_kind as PromotionKind
+  if (TEXT.test(o.path)) return 'doc'
+  if (DOCUMENT.test(o.path)) return 'document'
+  return 'download'
 }
 
 export function fmtBytes(n: number): string {

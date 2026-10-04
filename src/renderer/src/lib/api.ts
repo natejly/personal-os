@@ -659,7 +659,7 @@ export const api = {
       /** Each sha re-checked against the disk, so a row the agent has since rewritten reads `stale`. */
       outputs: (id: string) => req<DeskOutput[]>(`/cowork/desks/${id}/outputs`),
       /** Exactly-once per output: a double-clicked Accept promotes once. `verified` is read, never assumed. */
-      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null }[]) =>
+      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null; accept_stale?: boolean }[]) =>
         req<{ results: PromotionResult[] }>(`/cowork/desks/${id}/accept`, { method: 'POST', body: json({ outputs }) }),
       /** No `output_ids` rejects every undecided output. */
       reject: (id: string, output_ids?: string[], note?: string) =>

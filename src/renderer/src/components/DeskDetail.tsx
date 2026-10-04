@@ -23,10 +23,8 @@ const TABS: { key: Tab; label: string }[] = [
 
 const defaultTab = defaultDeskTab
 
-/* Wider than DESK_LIVE: a desk parked on a plan, an approval or a question has no live run but is
-   still something the user can call off. `review` and the terminal states are not. */
-const STOPPABLE: DeskStatus[] = ['planning', 'awaiting_plan', 'working', 'needs_approval', 'blocked', 'paused']
-const PAUSABLE: DeskStatus[] = ['planning', 'working']
+/* Start, Pause, Resume, Stop and Delete are gated on `desk.actions`, which the backend reads off the
+   same transition tables its routes enforce, so a button is never offered for a route that 409s. */
 const ENDED: DeskStatus[] = ['done', 'failed', 'stopped']
 
 const clock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -212,13 +210,13 @@ export default function DeskDetail(): JSX.Element | null {
       const el = e.target as HTMLElement | null
       const typing = Boolean(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)))
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
-        if (!PAUSABLE.includes(desk.status)) return
+        if (!desk.actions.includes('pause')) return
         e.preventDefault()
         void pauseDesk(desk.id)
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key === '.') {
-        if (!STOPPABLE.includes(desk.status)) return
+        if (!desk.actions.includes('stop')) return
         e.preventDefault()
         void stopDesk(desk.id)
         return
@@ -267,11 +265,12 @@ export default function DeskDetail(): JSX.Element | null {
           <span className={`desk-pill desk-ring-${desk.status}`}>{STATUS_LABEL[desk.status]}</span>
           <span className="spacer" />
           <div className="desk-actions">
-            {desk.status === 'draft' && <button className="primary-btn" onClick={() => void startDesk(desk.id)}><Play size={13} /> Start</button>}
-            {PAUSABLE.includes(desk.status) && (
+            {desk.actions.includes('start') && <button className="primary-btn" onClick={() => void startDesk(desk.id)}><Play size={13} /> Start</button>}
+            {desk.actions.includes('pause') && (
               <button className="ghost-btn" title="Pause (⌘P)" onClick={() => void pauseDesk(desk.id)}><Pause size={13} /> Pause</button>
             )}
-            {(desk.status === 'blocked' || desk.status === 'paused' || desk.status === 'interrupted') && (
+            {/* Review and a waiting plan have their own answers (Accept / Send back, the Plan tab), so no bare Resume beside them. */}
+            {desk.actions.includes('resume') && desk.status !== 'review' && desk.status !== 'awaiting_plan' && (
               <button className="primary-btn" onClick={() => void resumeDesk(desk.id)}><Play size={13} /> Resume</button>
             )}
             {desk.status === 'review' && (
@@ -284,7 +283,7 @@ export default function DeskDetail(): JSX.Element | null {
                 <button className="ghost-btn" aria-expanded={sendingBack} onClick={() => setSendingBack((v) => !v)}>Send back</button>
               </>
             )}
-            {STOPPABLE.includes(desk.status) && <button className="ghost-btn danger" title="Stop (⌘.)" onClick={() => void stopDesk(desk.id)}><Square size={13} /> Stop</button>}
+            {desk.actions.includes('stop') && <button className="ghost-btn danger" title="Stop (⌘.)" onClick={() => void stopDesk(desk.id)}><Square size={13} /> Stop</button>}
             {/* Not while outputs wait: an archived desk leaves the badge and the inbox, so its pending work would vanish. */}
             {(desk.status === 'review' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && !desk.archived && undecided.length === 0 && (
               <button className="ghost-btn" onClick={() => void archive()}><Archive size={13} /> Archive</button>
@@ -297,7 +296,7 @@ export default function DeskDetail(): JSX.Element | null {
                 <Settings2 size={14} />
               </button>
             )}
-            {(desk.status === 'draft' || desk.status === 'interrupted' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && (
+            {desk.actions.includes('delete') && (
               <button className="icon-btn ghost danger" title="Delete this desk" onClick={remove}><Trash2 size={14} /></button>
             )}
           </div>

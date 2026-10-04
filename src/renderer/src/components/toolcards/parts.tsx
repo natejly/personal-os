@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertCircle, CheckCircle2, CircleDashed, Loader2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, CircleDashed, FileDown, FolderOpen, Loader2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
 import type { ToolEvent } from '@shared/types'
 import { api } from '../../lib/api'
+import { outputFiles } from '../../lib/toolResult'
 import { appendPage, argRows, cardStatus, displayFullOutput, EMPTY_OUTPUT, preview, resultView, type ArgRow, type CardStatus, type FullOutput } from '../../lib/toolDisplay'
 import './toolcards.css'
 
@@ -153,6 +154,41 @@ export function StatusChip({ event }: { event: ToolEvent }): JSX.Element {
   const s = cardStatus(event)
   const label = s === 'running' && event.approval && event.approval !== 'deny' ? 'Approved · running' : STATUS[s].label
   return <span className={`tc-status ${s}`} role="status">{STATUS[s].icon}{label}</span>
+}
+
+const fmtSize = (n: number): string =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/**
+ * Files a plain chat's tool saved for the user (sandbox export, run_python outputs/, a browser download), each with
+ * Download and Show in Finder. Renders nothing for a result without `outputs`, so it can sit under every tool row.
+ */
+export function OutputFiles({ event, conversationId }: { event: ToolEvent; conversationId: string }): JSX.Element | null {
+  const files = useMemo(() => (event.pending || event.error ? [] : outputFiles(event.result_preview)), [event.pending, event.error, event.result_preview])
+  const [problem, setProblem] = useState<string | null>(null)
+  if (!files.length) return null
+  const run = (fn: () => Promise<unknown>) => (): void => {
+    setProblem(null)
+    fn().catch((e: Error) => setProblem(e.message))
+  }
+  const reveal = async (): Promise<void> => {
+    const { folder } = await api.conversations.outputs(conversationId)
+    if (!(await window.os.data.reveal(folder))) throw new Error('That folder is no longer there.')
+  }
+  return (
+    <div className="tc-outputs" aria-label="Files saved for you">
+      {files.map((f) => (
+        <div key={f.path} className="tc-output">
+          <FileDown size={13} />
+          <span className="tc-output-name" title={f.path}>{f.name}</span>
+          <span className="tc-muted">{fmtSize(f.size)}</span>
+          <button type="button" className="ghost-btn" onClick={run(() => api.conversations.downloadOutput(conversationId, f.path))}>Download</button>
+        </div>
+      ))}
+      <button type="button" className="ghost-btn" onClick={run(reveal)}><FolderOpen size={13} /> Show in Finder</button>
+      {problem && <span className="tc-muted" role="alert">{problem}</span>}
+    </div>
+  )
 }
 
 export function Section({ children }: { children: ReactNode }): JSX.Element {

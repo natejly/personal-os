@@ -167,3 +167,37 @@ export function gateProblems(error: string | null | undefined): { lead: string; 
   const items = rest.map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean)
   return { lead: lead.replace(/^desk_done refused:?\s*/i, '').replace(/[:.]\s*$/, ''), problems: items }
 }
+
+/** One file a plain chat's tool saved for the user (backend `Workspace.output_entry`); path is relative to the chat's files. */
+export interface OutputFile { name: string; size: number; path: string }
+
+const OUTPUT_ENTRY = /\{\s*"name":\s*"((?:[^"\\]|\\.)*)",\s*"size":\s*(\d+),\s*"path":\s*"((?:[^"\\]|\\.)*)"\s*\}/g
+
+const isOutput = (f: unknown): f is OutputFile => !!f && typeof f === 'object' && typeof (f as Fields).name === 'string' &&
+  typeof (f as Fields).size === 'number' && typeof (f as Fields).path === 'string'
+
+/**
+ * The `outputs` a result lists (sandbox_export_file, run_python, a browser download in a chat). The backend puts the key
+ * first, so when the preview was cut the complete entries at its start are still read.
+ */
+export function outputFiles(preview: string | null | undefined): OutputFile[] {
+  let text = (preview ?? '').trim()
+  try {
+    const o = JSON.parse(text) as Fields
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return []
+    if (Array.isArray(o.outputs)) return o.outputs.filter(isOutput)
+    if (o.truncated !== true || typeof o.preview !== 'string') return []
+    text = o.preview
+  } catch { /* cut JSON: read it loosely below */ }
+  const head = /^\{\s*"outputs":\s*\[/.exec(text)
+  if (!head) return []
+  const body = text.slice(head[0].length)
+  const out: OutputFile[] = []
+  let at = 0
+  for (const m of body.matchAll(OUTPUT_ENTRY)) {
+    if (body.slice(at, m.index).replace(/[\s,]/g, '')) break // past the array: something else sits between entries
+    out.push({ name: decodeLoose(m[1]), size: Number(m[2]), path: decodeLoose(m[3]) })
+    at = (m.index ?? 0) + m[0].length
+  }
+  return out
+}

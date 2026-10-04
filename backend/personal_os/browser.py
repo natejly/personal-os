@@ -21,6 +21,7 @@ from typing import Any
 
 from . import fsx, mac, redact, tools
 from .tools import ToolSpec, UrlBlocked, _obj, tool_error
+from .workspace import WorkspaceError
 
 SNAPSHOT_CAP = 12_000  # what the model may be handed, whatever main sent
 # Credential shapes only; the entropy/card rules would eat ids and prices, which are most of what a page shows.
@@ -85,7 +86,17 @@ def register(tb: Any) -> None:
         except Exception:  # noqa: BLE001 - no workspace means "no desk files", not a crash
             return None
 
-    def shaped(root: Path | None, res: dict[str, Any]) -> dict[str, Any]:
+    def chat_root(ctx: dict[str, Any]) -> Path | None:
+        """A plain chat's files (tools.Toolbox.files_for): browser downloads land under its outputs/downloads/."""
+        box = tb.files_for(ctx) if not ctx.get("desk_id") else None
+        if box is None:
+            return None
+        try:
+            return box[0].ensure(box[1])
+        except Exception:  # noqa: BLE001 - no outbox means downloads stay refused, not a crash
+            return None
+
+    def shaped(root: Path | None, res: dict[str, Any], chat: Any = None) -> dict[str, Any]:
         """What the model sees: the page state, the snapshot verbatim (it carries its own delimiters), notes."""
         snap, cut = _clip(str(res.get("snapshot") or ""))
         notes = [str(n) for n in (res.get("notes") or [])][:20]
@@ -96,18 +107,29 @@ def register(tb: Any) -> None:
         if res.get("tabList") is not None:
             out["tab_list"] = res["tabList"]
         # The desktop app reports a finished download as a note, "downloaded: <absolute path>". The model gets the path
-        # relative to the desk workspace, which is what the desk file tools take.
-        files = []
+        # relative to the desk workspace, which is what the desk file tools take. In a plain chat (`chat` is the
+        # outbox's (workspace, conversation id)) it is relative to the chat's files, and listed as an output for the card.
+        base = root if root is not None else chat[0].desk_root(chat[1]) if chat else None
+        files, outputs = [], []
         for i, n in enumerate(notes):
             if not n.startswith(DOWNLOADED):
                 continue
             raw = n[len(DOWNLOADED):].strip()
             try:
-                rel = os.path.relpath(raw, root) if root and os.path.isabs(raw) else raw
+                rel = os.path.relpath(raw, base) if base and os.path.isabs(raw) else raw
             except ValueError:
                 rel = raw
             files.append(rel)
             notes[i] = DOWNLOADED + " " + rel
+            if chat:
+                try:
+                    p = chat[0].resolve_in(chat[1], rel)
+                    if p.is_file():
+                        outputs.append(chat[0].output_entry(chat[1], p))
+                except (WorkspaceError, OSError):
+                    pass
+        if outputs:
+            out = {"outputs": outputs, **out}
         if files:
             out["downloaded"] = files
         return out
@@ -116,7 +138,7 @@ def register(tb: Any) -> None:
         res = await mac.page_bridge.browser(route, {"session": session_of(ctx), **payload}, timeout)
         if not res.get("ok"):
             return _fail(name, res)
-        return shaped(desk_root(ctx), res)
+        return shaped(desk_root(ctx), res, None if ctx.get("desk_id") else tb.files_for(ctx))
 
     async def ask(ctx: dict[str, Any], args: dict[str, Any]) -> bool:
         approve = ctx.get("approve")
@@ -153,8 +175,9 @@ def register(tb: Any) -> None:
         root = desk_root(ctx)
         payload: dict[str, Any] = {"url": cur, "newTab": bool(new_tab), "timeoutMs": 30000,
                                    "maxTabs": int(cfg.get("browserMaxTabs") or 4), "idleSeconds": int(cfg.get("browserIdleSeconds") or 300)}
-        if root is not None:
-            dl = root / "work" / "downloads"
+        chat = chat_root(ctx) if root is None else None
+        dl = root / "work" / "downloads" if root is not None else chat / "outputs" / "downloads" if chat is not None else None
+        if dl is not None:  # a download still needs the user's yes on its card (guarded); this is only where it lands
             dl.mkdir(parents=True, exist_ok=True)
             payload["downloadDir"] = str(dl)
         return await call("browser_open", "open", payload, ctx, 50)

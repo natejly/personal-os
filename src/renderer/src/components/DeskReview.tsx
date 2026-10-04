@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from 'lucide-react'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
-import { api, getBase, getToken } from '../lib/api'
+import { api, saveDownload } from '../lib/api'
 import { defaultDest } from '../lib/deskFiles'
 import { useStore } from '../store'
 import InlineNote from './InlineNote'
@@ -31,24 +31,9 @@ const fmtBytes = (n: number): string =>
  */
 const DECIDED: DeskOutput['status'][] = ['accepted', 'promoted', 'rejected']
 
-/**
- * The `download` destination promises the file itself, and the backend now serves it from GET
- * /cowork/desks/{id}/download. A bare <a href> 401s — the auth middleware reads the token header
- * only, there is no query-param token — so the bytes are fetched with the header and handed over
- * through an object URL.
- */
-async function saveDownload(deskId: string, ref: string): Promise<void> {
-  const r = await fetch(`${getBase()}/cowork/desks/${deskId}/download?path=${encodeURIComponent(ref)}`, {
-    headers: getToken() ? { 'X-Personal-OS-Token': getToken() } : {}
-  })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-  const url = URL.createObjectURL(await r.blob())
-  const a = document.createElement('a')
-  a.href = url
-  a.download = ref.split('/').pop() || 'download'
-  a.click()
-  URL.revokeObjectURL(url)
-}
+/** The `download` destination promises the file itself, served from GET /cowork/desks/{id}/download. */
+const saveDeskDownload = (deskId: string, ref: string): Promise<void> =>
+  saveDownload(`/cowork/desks/${deskId}/download?path=${encodeURIComponent(ref)}`, ref)
 
 /** The first few hundred characters of the nominated file, fetched only when the row is opened. */
 function Excerpt({ deskId, path }: { deskId: string; path: string }): JSX.Element {
@@ -183,7 +168,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
     for (const x of out) {
       if (x.kind !== 'download' || !x.ok || !x.ref) continue
       try {
-        await saveDownload(desk.id, x.ref)
+        await saveDeskDownload(desk.id, x.ref)
       } catch (e) {
         toast(`Could not download ${x.ref}: ${(e as Error).message}`, 'error')
       }

@@ -416,12 +416,13 @@ def _limits_for(cpu_seconds: int):  # type: ignore[no-untyped-def]
 
 
 def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: Any = None,
-               workspace: str | None = None) -> dict[str, Any]:
+               workspace: str | None = None, keep: Any = None) -> dict[str, Any]:
     """Run `code` in the sandbox. With `workspace` (a cowork desk's folder) the script runs *in* that folder, may read
     and write it, and the result lists what it created or changed there (`workspace_files`); the script itself and the
     scratch HOME/TMPDIR stay in the per-run temp dir, which is still deleted afterwards. `bridge` (toolbridge.Bridge) lets the script call app tools over its Unix socket:
     its client module is dropped next to the script, the socket is the one network path the profile allows, and the
-    wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`)."""
+    wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`). `keep` (outside a desk) is
+    called with the temp dir's `outputs/` before the temp dir is deleted, and what it returns is the result's `outputs`."""
     work = tempfile.mkdtemp(prefix="pos-sandbox-")
     script = os.path.join(work, "main.py")
     with open(script, "w", encoding="utf-8") as f:
@@ -477,7 +478,10 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         wfiles = _workspace_changes(cwd, started_ns) if workspace else []
         if wfiles:
             images += _collect_images(cwd, wfiles)[: max(0, MAX_IMAGES - len(images))]
+        kept = keep(os.path.join(work, "outputs")) if keep is not None and not workspace else None
         shutil.rmtree(work, ignore_errors=True)
+    if kept:
+        out = {"outputs": kept, **out}  # first, so a card still finds it when a long stdout cuts the stored preview
     out["files_created"] = files[:50]
     if workspace:
         out["workspace_files"] = wfiles

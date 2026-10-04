@@ -8496,6 +8496,37 @@ def desk_file_download(id: str, path: str) -> FileResponse:
     return FileResponse(p, filename=Path(path).name, media_type="application/octet-stream")
 
 
+def _chat_files_or_404(id: str) -> Workspace:
+    if not convos.get(id, with_messages=False) or toolbox.chat_outputs is None:
+        raise HTTPException(404, "No such conversation")
+    return toolbox.chat_outputs
+
+
+@app.get("/conversations/{id}/outputs")
+def chat_outputs_list(id: str) -> dict[str, Any]:
+    """What a plain chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/).
+    `folder` is for Show in Finder, which the desktop app opens itself (folders only)."""
+    ws = _chat_files_or_404(id)
+    try:
+        files = [f for f in ws.tree(id) if not f["is_dir"]]
+        return {"folder": str(ws.desk_root(id) / "outputs"), "files": files, "usage": ws.usage(id)}
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/conversations/{id}/outputs/download")
+def chat_outputs_download(id: str, path: str) -> FileResponse:
+    ws = _chat_files_or_404(id)
+    try:
+        p = ws.resolve_in(id, path)
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    # octet-stream for the same reason as a desk: these files are agent-written and never rendered as a page.
+    return FileResponse(p, filename=p.name, media_type="application/octet-stream")
+
+
 @app.get("/cowork/desks/{id}/diff")
 def desk_file_diff(id: str, path: str) -> dict[str, Any]:
     _desk_or_404(id, False)

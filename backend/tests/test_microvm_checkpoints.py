@@ -253,7 +253,16 @@ def test_export_file_binary_round_trip_and_limits(tmp_path: Any) -> None:
     r = asyncio.run(tb.specs["sandbox_export_file"].fn(ctx, path="out/a.bin"))
     assert r["saved"] == "outputs/a.bin" and ws.read_bytes("d1", "outputs/a.bin") == blob
     assert asyncio.run(tb.specs["sandbox_export_file"].fn(ctx, path="out/a.bin"))["saved"] != "outputs/a.bin"  # never overwrites
-    assert "error" in asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin"))
+    # A plain chat has no desk: the file lands in the chat's outbox, listed for the card, and still never overwrites.
+    chat = asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin"))
+    assert chat["saved"] == "outputs/a.bin" and chat["outputs"] == [{"name": "a.bin", "size": len(blob), "path": "outputs/a.bin"}]
+    assert (tmp_path / "chats" / "c1" / "outputs" / "a.bin").read_bytes() == blob
+    again = asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin"))
+    assert again["saved"] == "outputs/a 2.bin" and (tmp_path / "chats" / "c1" / "outputs" / "a.bin").read_bytes() == blob
+    assert "error" in asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin", dest="../escape.bin"))
+    assert not (tmp_path / "chats" / "escape.bin").exists()
+    # The no-desk export does not reach a desk's files.
+    assert not (tmp_path / "cowork" / "c1").exists()
 
 
 def test_export_file_read_passes_the_export_cap_to_the_real_runner(monkeypatch: Any) -> None:

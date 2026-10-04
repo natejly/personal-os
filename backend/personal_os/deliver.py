@@ -49,7 +49,7 @@ PANDOC_READ = {**PANDOC_FORMATS, "txt": "markdown"}
 EXT_ALIASES = {"markdown": "md", "htm": "html", "text": "txt"}
 INSTALL = {"pandoc": "brew install pandoc", "soffice": "brew install --cask libreoffice", "pdftotext": "brew install poppler",
            "pdftoppm": "brew install poppler"}
-FILE_HOME = ("Files live in the desk workspace (paths relative to it, e.g. outputs/report.docx) or, outside a desk, "
+FILE_HOME = ("Files live in the desk workspace or this chat's files (paths relative to it, e.g. outputs/report.docx) or "
              "under a workspace root the user granted in Settings.")
 
 
@@ -109,18 +109,23 @@ def _desk_id(ctx: dict[str, Any], tb: Any) -> str | None:
     return str(did) if did and getattr(tb, "workspace", None) is not None else None
 
 
+def _box(ctx: dict[str, Any], tb: Any) -> tuple[Any, str] | None:
+    """What relative paths resolve against: the desk workspace, else the chat's files (Toolbox.files_for)."""
+    return tb.files_for(ctx) if hasattr(tb, "files_for") else None
+
+
 def _resolve(tb: Any, ctx: dict[str, Any], raw: Any) -> tuple[Path | None, dict[str, Any] | None]:
     """A real, contained path (resolved through symlinks), or an error envelope. Sources and outputs go through here."""
     from .tools import tool_error
     s = str(raw or "").strip()
     if not s:
         return None, tool_error("A path is required.", field="path", example={"path": "outputs/report.docx"})
-    did = _desk_id(ctx, tb)
-    if did and not os.path.isabs(os.path.expanduser(s)):
+    box = _box(ctx, tb)
+    if box and not os.path.isabs(os.path.expanduser(s)):
         try:
-            return tb.workspace.resolve_in(did, s), None
+            return box[0].resolve_in(box[1], s), None
         except WorkspaceError as e:
-            return None, tool_error(str(e), field="path", expected="a path inside the desk workspace such as outputs/report.docx")
+            return None, tool_error(str(e), field="path", expected="a path inside the desk workspace or the chat's files such as outputs/report.docx")
     g = fsx.grants_for(tb, ctx)
     p = Path(os.path.realpath(os.path.expanduser(s)))
     if not os.path.isabs(os.path.expanduser(s)):
@@ -132,10 +137,10 @@ def _resolve(tb: Any, ctx: dict[str, Any], raw: Any) -> tuple[Path | None, dict[
 
 def _shown(tb: Any, ctx: dict[str, Any], p: Path) -> str:
     """Relative to the desk workspace in a desk, absolute otherwise: what the model passes back to other tools."""
-    did = _desk_id(ctx, tb)
-    if did:
+    box = _box(ctx, tb)
+    if box:
         try:
-            return p.relative_to(tb.workspace.desk_root(did).resolve()).as_posix()
+            return p.relative_to(box[0].desk_root(box[1]).resolve()).as_posix()
         except (ValueError, WorkspaceError):
             pass
     return str(p)
@@ -405,7 +410,7 @@ def register(tb: Any) -> None:
             return err
         assert src is not None
         if not src.is_file():
-            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files)")
+            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, sandbox_list_files or the earlier tool results in a chat)")
         why = fsx.sensitive_reason(path, src)
         if why:
             return tool_error(f"{path} cannot be read: {why}.", field="path")
@@ -445,7 +450,7 @@ def register(tb: Any) -> None:
             return err
         assert src is not None
         if not src.is_file():
-            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files)")
+            return tool_error(f"{path} is not a file here.", field="path", alternative="list the folder first (desk_list_files in a desk, sandbox_list_files or the earlier tool results in a chat)")
         why = fsx.sensitive_reason(path, src)
         if why:
             return tool_error(f"{path} cannot be read: {why}.", field="path")

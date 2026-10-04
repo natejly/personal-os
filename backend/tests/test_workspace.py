@@ -313,7 +313,43 @@ def test_sha_and_purge() -> None:
     check(ws.tree("d-purge") == [], "tree of an absent workspace is empty")
 
 
-TESTS = [test_layout, test_resolve_in_refuses_traversal, test_resolve_in_refuses_absolute,
+def test_chat_outbox_containment_quota_and_keep() -> None:
+    """A plain chat's files (<data>/chats/<id>) share the desk's containment, quota and never-overwrite rules."""
+    chats = Workspace(DATA_DIR, sub="chats", max_total_bytes=1000)
+    shutil.rmtree(chats.desk_root("c-out"), ignore_errors=True)
+    root = chats.ensure("c-out")
+    check(root == DATA_DIR / "chats" / "c-out", "chat outbox is <data_dir>/chats/<conversation_id>")
+    refuses(lambda: chats.save_bytes("c-out", "../c-other/x.bin", b"x"), "chat outbox refuses ..", contains="'..'")
+    (root / "outputs" / "escape").symlink_to(OUTSIDE, target_is_directory=True)
+    refuses(lambda: chats.save_bytes("c-out", "outputs/escape/x.bin", b"x"), "chat outbox refuses a symlink escape",
+            contains="outside")
+    check(not (OUTSIDE / "x.bin").exists(), "nothing was written through the symlink")
+    (root / "outputs" / "escape").unlink()
+
+    first = chats.save_bytes("c-out", "outputs/a.bin", b"\x00" * 10)
+    second = chats.save_bytes("c-out", "outputs/a.bin", b"\x01" * 10)
+    check(first == {"name": "a.bin", "size": 10, "path": "outputs/a.bin"}, f"entry names the file, got {first}")
+    check(second["path"] == "outputs/a 2.bin" and (root / "outputs" / "a.bin").read_bytes() == b"\x00" * 10,
+          "a second save never overwrites")
+    refuses(lambda: chats.save_bytes("c-out", "outputs/big.bin", b"x" * 2000), "chat quota refuses past the byte limit",
+            contains="no room")
+
+    src = Path(tempfile.mkdtemp(prefix="keep-"))
+    (src / "sub").mkdir()
+    (src / "r.csv").write_text("a,b\n")
+    (src / "sub" / "p.txt").write_text("hi")
+    (src / "link.txt").symlink_to(OUTSIDE / "nope.txt")
+    (src / "run.command").write_text("echo")
+    kept = chats.keep_files("c-out", src)
+    check(sorted(k["path"] for k in kept) == ["outputs/r.csv", "outputs/sub/p.txt"],
+          f"keep_files copies regular files, skips symlinks and blocked suffixes, got {kept}")
+    shutil.rmtree(src)
+    check((root / "outputs" / "r.csv").read_text() == "a,b\n", "kept files outlive their source dir")
+    check(chats.keep_files("c-out", src) == [], "a missing source dir keeps nothing")
+    check(not (DATA_DIR / "cowork" / "c-out").exists(), "a chat outbox never touches desk workspaces")
+
+
+TESTS = [test_layout, test_chat_outbox_containment_quota_and_keep, test_resolve_in_refuses_traversal, test_resolve_in_refuses_absolute,
          test_resolve_in_refuses_symlink_escape, test_resolve_in_refuses_cross_desk,
          test_write_modes, test_write_refuses_blocked_suffixes, test_quotas_report_usage,
          test_trash_never_unlinks, test_trash_refuses_reserved_dirs,

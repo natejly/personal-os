@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, parseResult, shellState, snapshotLine, tailLines } from './toolResult'
+import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, outputFiles, parseResult, shellState, snapshotLine, tailLines } from './toolResult'
 
 test('a whole preview parses; a cut one is read loosely and flagged', () => {
   const ok = parseResult('{"exit_code":0,"output":"hi\\n","cwd":"/w"}')
@@ -73,4 +73,17 @@ test('the completion gate refusal becomes a list of problems', () => {
   assert.deepEqual(g?.problems, ['Your plan has 2 open steps.', 'outputs/ is empty.'])
   assert.equal(gateProblems('something else'), null)
   assert.equal(gateProblems(null), null)
+})
+
+test('outputs a chat tool saved are read whole, and from the start of a cut preview', () => {
+  const a = { name: 'a "q".csv', size: 4, path: 'outputs/a "q".csv' }
+  const b = { name: 'b.png', size: 9, path: 'outputs/b.png' }
+  assert.deepEqual(outputFiles(JSON.stringify({ outputs: [a, b, { name: 'x' }], stdout: 'hi' })), [a, b])
+  const full = JSON.stringify({ outputs: [a, b], stdout: 'x'.repeat(5000) }).replace(/,"/g, ', "').replace(/":/g, '": ')
+  const wrapped = JSON.stringify({ truncated: true, total_chars: full.length, shown: 1300, preview: full.slice(0, 1300) })
+  assert.deepEqual(outputFiles(wrapped), [a, b])
+  assert.deepEqual(outputFiles(full.slice(0, 50)), []) // the first entry is not complete yet
+  assert.deepEqual(outputFiles('{"stdout": "{\\"outputs\\": []}"}'), [])
+  assert.deepEqual(outputFiles('not json'), [])
+  assert.deepEqual(outputFiles(null), [])
 })

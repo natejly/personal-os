@@ -21,6 +21,7 @@ import socket
 import time
 import urllib.parse
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -31,7 +32,7 @@ from . import fsx
 from . import skillbuild
 from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
-from .workspace import MAX_FILE_CHARS, WorkspaceError
+from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
 from . import plans
 from . import reach
 from . import mcp_search
@@ -627,6 +628,10 @@ class Toolbox:
         # autonomy is exactly the boundary of the workspace directory, and the root is derived from
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
+        # A plain chat's outbox (<data>/chats/<conversation_id>/): where sandbox exports, browser downloads and
+        # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
+        root = getattr(workspace, "root", None)
+        self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
@@ -685,6 +690,16 @@ class Toolbox:
         vision.register(self)   # view_image
         deliver.register(self)  # convert_document / render_preview / doc_guide
         envs.register(self)     # python_install: the shared work environment
+
+    def files_for(self, ctx: dict[str, Any]) -> tuple[Workspace, str] | None:
+        """Where a file made for the user lands: the desk's workspace, else this chat's outbox, else nowhere
+        (a subagent or test with no conversation)."""
+        if ctx.get("desk_id") and self.workspace is not None:
+            return self.workspace, str(ctx["desk_id"])
+        cid = str(ctx.get("conversation_id") or "")
+        if cid and self.chat_outputs is not None:
+            return self.chat_outputs, cid
+        return None
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -1148,6 +1163,9 @@ class Toolbox:
             env = getattr(self, "work_env", None)
             py = env.python_path() if env is not None else None
             secs = max(1, min(int(timeout), 120))
+            # Outside a desk, what the script saves under ./outputs/ is copied into this chat's files before the temp dir goes.
+            box = None if wroot else self.files_for(ctx)
+            keep = (lambda src: box[0].keep_files(box[1], src)) if box is not None else None
             async def _carry(result: Any) -> None:
                 if not wroot or not isinstance(result, dict):
                     return
@@ -1162,11 +1180,11 @@ class Toolbox:
 
             if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
                 from . import toolbridge
-                runner = (lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot)) if (wroot or py) else run_python
+                runner = lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot, keep=keep)  # noqa: E731
                 bridged = await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
                 await _carry(bridged)
                 return bridged
-            out = await asyncio.to_thread(run_python, code, secs, py, None, wroot)
+            out = await asyncio.to_thread(run_python, code, secs, py, None, wroot, keep)
             await _carry(out)
             if wroot:
                 use = self.workspace.usage(desk_id)
@@ -1175,7 +1193,7 @@ class Toolbox:
                                       f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
                                       "but further writes will be refused until you desk_trash_file what you no longer need.")
             return out
-        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
+        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
                   "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 50 calls and 300s; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
@@ -1333,7 +1351,9 @@ def summarize_result(result: Any, limit: int = 1500) -> str:
     if len(s) <= limit:
         return s
     if isinstance(result, dict):
-        key = max((k for k, v in result.items() if isinstance(v, list)), key=lambda k: len(result[k]), default=None)
+        # Never `outputs`: the card reads its Download list from this preview, and files_created often ties with it.
+        key = max((k for k, v in result.items() if isinstance(v, list) and k != "outputs"),
+                  key=lambda k: len(result[k]), default=None)
         if key is not None:
             items = result[key]
             lo, hi, best = 0, len(items), None
@@ -2047,27 +2067,27 @@ def _register_sandbox(self: Toolbox) -> None:
         examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
 
     async def sandbox_export_file(ctx: dict[str, Any], path: str, dest: str | None = None) -> Any:
-        desk_id = str(ctx.get("desk_id") or "")
-        ws = self.workspace
-        if not desk_id or ws is None:
-            return tool_error("sandbox_export_file saves into a cowork desk's workspace, and this chat has no desk.",
+        box = self.files_for(ctx)
+        if box is None:
+            return tool_error("sandbox_export_file has nowhere to save: this run belongs to no chat or desk.",
                               alternative=ALTERNATIVE["sandbox_export_file"])
+        ws, owner = box
         try:
             gp, data = await run(sb.export_file, ctx["conversation_id"], path)
             rel = (dest or "").strip() or "outputs/" + posixpath.basename(gp)
-            target, room = ws.reserve_file(desk_id, rel)
-            if len(data) > room:
-                return tool_error("This workspace has no room for the file.", alternative=ALTERNATIVE["sandbox_export_file"])
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+            entry = ws.save_bytes(owner, rel, data)
         except (SandboxError, WorkspaceError) as e:
             return tool_error(str(e), field="path", alternative=ALTERNATIVE["sandbox_export_file"])
-        out: dict[str, Any] = {"saved": ws._rel_of(desk_id, target), "bytes": len(data), "from_sandbox": gp}
+        out: dict[str, Any] = {"saved": entry["path"], "bytes": len(data), "from_sandbox": gp}
+        if not ctx.get("desk_id"):
+            out = {"outputs": [entry], **out,
+                   "note": "Saved in this chat's files; the user can download it from the card. write_local_file puts text "
+                           "files elsewhere in their home folder."}
         if sb.networked(ctx["conversation_id"]):
             out["network"] = True
         return _mark(ctx, out, "sandbox_export_file")
-    R("sandbox_export_file", ToolSpec("sandbox_export_file", "Copy any file (binary included, up to 10 MB) from the sandbox's /workspace into this desk's workspace (default outputs/<name>) so the user can open it. Never overwrites an existing file.",
-        _obj({"path": {"type": "string", "description": "file under /workspace"}, "dest": {"type": "string", "description": "destination in the desk workspace; default outputs/<file name>"}}, ["path"]),
+    R("sandbox_export_file", ToolSpec("sandbox_export_file", "Copy any file (binary included, up to 10 MB) from the sandbox's /workspace to the user so they can open it: into this desk's workspace, or in a plain chat into the chat's files, which the user can download from the card (default outputs/<name>). Never overwrites an existing file.",
+        _obj({"path": {"type": "string", "description": "file under /workspace"}, "dest": {"type": "string", "description": "destination relative to the desk workspace or chat files; default outputs/<file name>"}}, ["path"]),
         sandbox_export_file, "sandbox", "writes",
         examples=[{"path": "report.pdf"}, {"path": "build/chart.xlsx", "dest": "outputs/chart.xlsx"}]))
 

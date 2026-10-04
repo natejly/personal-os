@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException
 from .db import Database, now
 from .docs import Docs
 from .todos import Todos
+from .workspace import Workspace, WorkspaceError
 
 log = logging.getLogger("personal_os")
 
@@ -132,7 +133,15 @@ class Trash:
         else:
             with self.db.tx() as c:
                 c.execute("DELETE FROM conversations WHERE id=?", (id,))
+            self._purge_chat_files([id])
         return True
+
+    def _purge_chat_files(self, ids: list[str]) -> None:
+        """A chat's saved outputs (<data>/chats/<id>/) go when the chat itself is erased, never at trash time."""
+        chats = Workspace(self.db.data_dir, sub="chats")
+        for cid in ids:
+            with contextlib.suppress(WorkspaceError):
+                chats.purge(cid)
 
     def _purge_documents(self, ids: list[str]) -> None:
         paths: list[str] = []
@@ -157,7 +166,9 @@ class Trash:
         with self.db.tx() as c:
             for ct in CHILD_TABLES:  # trashed on their own earlier: they keep their own 30 days, so step out of the FK cascade
                 c.execute(f"UPDATE {ct} SET project_id=NULL WHERE project_id=? AND deleted_with IS NULL AND deleted_at IS NOT NULL", (id,))
+            chat_ids = [r["id"] for r in c.execute("SELECT id FROM conversations WHERE project_id=?", (id,)).fetchall()]
             c.execute("DELETE FROM projects WHERE id=?", (id,))
+        self._purge_chat_files(chat_ids)
 
     # ---- reading the trash ----
     def list(self) -> dict[str, Any]:

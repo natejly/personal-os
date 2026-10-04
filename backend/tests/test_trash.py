@@ -244,6 +244,17 @@ class GoogleTasksTests(_Base):
         self.assertEqual([t["title"] for t in self.g.tasks.values()], ["Back again"])
         self.assertEqual(len(self.todos.list()), 1)
 
+    def test_purging_a_project_erases_its_chats_files(self) -> None:
+        from personal_os.workspace import Workspace
+        chats = Workspace(self.db.data_dir, sub="chats")
+        p = self.projects.create("P")
+        c = self.convos.create(p["id"], "Inside", "m")
+        chats.save_bytes(c["id"], "outputs/a.txt", b"a")
+        self.trash.trash("project", p["id"])
+        self.assertTrue(chats.desk_root(c["id"]).exists())
+        self.trash.purge("project", p["id"])
+        self.assertFalse(chats.desk_root(c["id"]).exists())
+
     def test_purge_does_not_double_tombstone(self) -> None:
         td = self.todos.create("Once")
         self.sync.sync_once()
@@ -300,6 +311,26 @@ class RouteTests(unittest.TestCase):
         j("DELETE", f"/trash/memory/{mem['id']}")
         j("DELETE", f"/trash/memory/{mem['id']}", expect=404)
         j("POST", f"/trash/bogus/{mem['id']}/restore", expect=404)
+
+    def test_chat_outputs_routes_and_purge(self) -> None:
+        from personal_os.app import toolbox
+        conv = self.j("POST", "/conversations", {"title": "Outputs chat"})
+        cid = conv["id"]
+        self.assertEqual(self.j("GET", f"/conversations/{cid}/outputs")["files"], [])
+        toolbox.chat_outputs.save_bytes(cid, "outputs/report.html", b"<script>x</script>")
+        listing = self.j("GET", f"/conversations/{cid}/outputs")
+        self.assertEqual([f["path"] for f in listing["files"]], ["outputs/report.html"])
+        self.assertTrue(listing["folder"].endswith(f"chats/{cid}/outputs"))
+        r = self.client.get(f"/conversations/{cid}/outputs/download", params={"path": "outputs/report.html"})
+        self.assertEqual((r.status_code, r.headers["content-type"], r.content), (200, "application/octet-stream", b"<script>x</script>"))
+        self.assertEqual(self.client.get(f"/conversations/{cid}/outputs/download", params={"path": "../../personal-os.db"}).status_code, 400)
+        self.assertEqual(self.client.get(f"/conversations/{cid}/outputs/download", params={"path": "outputs/nope.bin"}).status_code, 404)
+        self.assertEqual(self.client.get("/conversations/nosuchchat/outputs").status_code, 404)
+        root = toolbox.chat_outputs.desk_root(cid)
+        self.j("DELETE", f"/conversations/{cid}")
+        self.assertTrue(root.exists())  # trashed, not erased: restoring the chat brings its files back
+        self.j("DELETE", f"/trash/conversation/{cid}")
+        self.assertFalse(root.exists())
 
     def test_trash_routes_require_the_token(self) -> None:
         from personal_os.app import app

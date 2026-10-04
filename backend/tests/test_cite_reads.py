@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import tools  # noqa: E402
+from personal_os.context import context_taints  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, docs, documents, meeting_store, toolbox  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
@@ -35,6 +36,15 @@ def test_pinned_doc_is_numbered_before_the_excerpts() -> None:
     assert "### [1] rules.txt" in used["system_prompt"]
     assert rest and rest[0]["n"] == 2 and rest[0]["name"] == "lease.txt"
     assert "### [2] lease.txt" in used["system_prompt"]
+
+
+def test_pinned_only_context_does_not_taint_the_turn() -> None:
+    # Pinned files never tainted a turn; their range citations must not count as uploaded-file excerpts.
+    used = client.post("/context/preview", json={"query": "xylophone quasar"}).json()
+    assert used["chunks"] and all(c["kind"] == "range" for c in used["chunks"])
+    assert context_taints(used) == []
+    used = client.post("/context/preview", json={"query": "notice period"}).json()
+    assert context_taints(used) == ["chunks"]
 
 
 def test_read_document_cites_its_slice_once() -> None:

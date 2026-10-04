@@ -100,6 +100,15 @@ def range_ref(source: str, name: str, text: str, start: int, end: int, **ids: An
             "text": text[start:end][:400], "heading": "", "page": None, **ids}
 
 
+def context_taints(used: dict[str, Any]) -> list[str]:
+    """Prompt sections that put text the user did not write as an instruction into the turn. A pinned file is the
+    user's own choice and never tainted a turn, so its range citation does not count as a 'chunks' excerpt."""
+    keys = [k for k in ("meetings", "activity") if used.get(k)]
+    if any(c.get("kind") != "range" for c in used.get("chunks") or []):
+        keys.append("chunks")
+    return keys
+
+
 def _excerpt_header(h: dict[str, Any]) -> str:
     """'name — section (p.N)', or 'name (chunk N)' for a chunk with neither."""
     heading, page = h.get("heading") or "", h.get("page")

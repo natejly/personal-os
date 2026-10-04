@@ -28,7 +28,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
 from . import compaction, otel_export, titles
-from .context import build_context, estimate_tokens, layout_messages
+from .context import build_context, context_taints, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
@@ -1780,7 +1780,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Meeting titles, activity window titles, and uploaded-file excerpts are text the user did not
         # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
         # grant would send mail with no card.
-        ctx_taints = [k for k in ("meetings", "activity", "chunks") if used.get(k)]
+        ctx_taints = context_taints(used)
         page = used.get("page") or {}
         if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
             ctx_taints.append("page")

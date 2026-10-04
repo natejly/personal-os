@@ -251,6 +251,27 @@ test('a doc whose save failed is not navigated away from, so the draft survives'
   }
 })
 
+test('opening a doc at a cited line leaves the jump for the editor', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.get = async () => docFull({ id: 'd2' })
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: null, docTabs: [], docDraft: null, docTitleDraft: null, docJump: null })
+    await useStore.getState().openDoc('d2', { line: 7 })
+    const st = useStore.getState()
+    assert.equal(st.activeDoc?.id, 'd2')
+    assert.equal(st.view, 'docs')
+    assert.deepEqual(st.docJump, { docId: 'd2', line: 7 })
+    useStore.setState({ docJump: null })
+    await useStore.getState().openDoc('d2')
+    assert.equal(useStore.getState().docJump, null, 'a plain open asks for no jump')
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
 test('a meeting whose notes failed to save is not navigated away from', async () => {
   const { api } = await import('./lib/api')
   const meetings = api.meetings as unknown as Stubs

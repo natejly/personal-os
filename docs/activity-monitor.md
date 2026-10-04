@@ -5,7 +5,7 @@ and writes the result to a markdown file that gets fed back into your chats — 
 the assistant knows what you were actually working on without being told.
 
 It is off until you turn it on, and every signal is a separate switch - or one switch, if you want
-it recording everything: see [Palantir mode](#palantir-mode).
+it recording everything: see [Record-everything mode](#record-everything-mode).
 
 ---
 
@@ -64,7 +64,7 @@ transcribes it, and unlinks the wav.
   `redactAllow` / `redactDeny` take strings or `/regex/`. Page URLs go through
   `sanitize_url`: no userinfo or fragment, sensitive query values become `~`.
   Per-entity counts show in `/activity/status` (`redactions`, never the text) and
-  `POST /activity/redact/test` previews a string without storing it. Palantir mode
+  `POST /activity/redact/test` previews a string without storing it. Record-everything mode
   turns all of this off with `redact`.
 - **Redaction (v1 rules)** — emails, phone numbers, card numbers, SSNs, API keys, AWS keys,
   JWTs, private key blocks and long high-entropy strings become placeholders. On
@@ -272,7 +272,7 @@ brew install ffmpeg                             # truncated-wav repair and the f
 brew install --cask blackhole-2ch               # system audio on macOS older than 14.2
 ```
 
-## Palantir mode
+## Record-everything mode
 
 One switch, on the Overview tab, for *record everything*:
 
@@ -282,7 +282,7 @@ One switch, on the Overview tab, for *record everything*:
   other window
 
 It is the only control in the app that turns protections off rather than on, so it sits behind a
-confirmation that says exactly that, the panel wears a **Palantir mode** pill while it is on, and
+confirmation that says exactly that, the panel wears a **Recording everything** pill while it is on, and
 the Signals and Privacy tabs say which of their switches the mode is currently sitting on.
 
 **What it cannot turn off:** secure input. While macOS reports a focused password field it withholds
@@ -290,7 +290,7 @@ keystrokes from every tap in the system, so those keys were never ours to record
 dropped keys is still reported rather than hidden.
 
 **Turning it off restores what you had.** The signals, the redaction flag and both exclusion lists
-are snapshotted on the way in (`palantirRestore`) and put back on the way out, so a carefully built
+are snapshotted on the way in and put back on the way out, so a carefully built
 exclusion list survives a stint in the mode - and a second enable does not overwrite that snapshot
 with the mode's own flattened values.
 
@@ -368,7 +368,7 @@ The assistant gets two tools when the monitor exists:
 `backend/tests/test_activity.py` covers the gate, config merging, retention and
 purge, the digest, rollup (including a dead LLM), the context block, the
 lifecycle, the markdown writer, the permission probes (which must never raise and never prompt)
-and Palantir mode's snapshot-and-restore. The collectors themselves need a real session
+and record-everything mode's snapshot-and-restore. The collectors themselves need a real session
 with granted permissions, so they are exercised by hand rather than in tests.
 
 ```bash

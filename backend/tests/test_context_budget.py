@@ -103,4 +103,9 @@ documents.set_pinned(glob["id"], False)
 sys_, used = build(project_id=proj["id"])
 check("Pinned documents" not in sys_ and used["pinned"] == [], "unpin removes it")
 
+# ---- hidden views are named, so the model does not send the user to a page they cannot see
+sys_, _ = build(settings={"hiddenViews": ["library", "activity"]})
+check("Library, Activity" in sys_ and "Settings → Modules" in sys_, "hidden views named with where to turn them on")
+check("Hidden in this app" not in build()[0], "nothing hidden, no line")
+
 print(f"{passed} checks passed")

@@ -1,6 +1,6 @@
 # Feature modules — pilot contract (todos)
 
-Status: **FROZEN 2026-10-01** for the pilot. Branch `worktree-module-manifest`.
+Status: **FROZEN 2026-10-01** for the pilot, since merged to `main` (todos is the ported module).
 
 Goal: one unit per feature that owns its routes, tools, background loops, Today payload, view, nav entry,
 canvas widget and Today card, so the shell iterates a list instead of naming each feature. Todos is the

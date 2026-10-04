@@ -11,7 +11,7 @@ import type {
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
-  ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
+  ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
@@ -270,7 +270,6 @@ export const api = {
       req<HealthSummary[]>(`/health/summary?days=${days}&today=${today}&include_hidden=${includeHidden}`),
     entries: (metric?: string, limit = 50) => req<HealthEntry[]>(`/health/entries?limit=${limit}${metric ? `&metric=${encodeURIComponent(metric)}` : ''}`),
     log: (e: { metric: string; value: number; day?: string; note?: string }) => req<HealthEntry>('/health/entries', { method: 'POST', body: json(e) }),
-    updateEntry: (id: string, patch: { value?: number; day?: string; note?: string }) => req<HealthEntry>(`/health/entries/${id}`, { method: 'PUT', body: json(patch) }),
     deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' }),
     providers: () => req<HealthProvider[]>('/health/providers'),
     sources: () => req<HealthSource[]>('/health/sources'),
@@ -324,9 +323,7 @@ export const api = {
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
-    acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
-    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global') =>
-      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}`, { method: 'DELETE' })
+    acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' })
   },
   google: {
     status: () => req<GoogleStatus>('/integrations/google/status'),
@@ -374,9 +371,7 @@ export const api = {
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
     gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
-    clearCache: (namespace?: string) =>
-      req<{ dropped: number }>(`/integrations/google/cache/clear${namespace ? `?namespace=${namespace}` : ''}`, { method: 'POST' })
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
   },
   /** Backups, restore and export (backend backups.py). */
   data: {
@@ -491,13 +486,6 @@ export const api = {
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
   agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
-  /** The newest interrupted run of a conversation, with whether it can still be resumed. */
-  interruptedRun: async (convId: string): Promise<{ run_id: string; resumable: boolean } | null> => {
-    const rows = await req<RunInfo[]>(`/runs?conversation_id=${encodeURIComponent(convId)}&status=interrupted&limit=1`)
-    if (!rows[0]) return null
-    const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
-    return { run_id: d.run_id, resumable: d.resumable }
-  },
   /** Whether the conversation's newest run can be resumed, and which message it would continue. */
   resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
@@ -595,7 +583,6 @@ export const api = {
     refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
     context: () => req<ActivityContextFile>('/activity/context'),
     devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
-    permissions: () => req<ActivityCapability[]>('/activity/permissions'),
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
     categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
@@ -612,7 +599,6 @@ export const api = {
     setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
       req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
     applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
-    deleteInsight: (id: string) => req<{ ok: boolean }>(`/activity/insights/${id}`, { method: 'DELETE' }),
     forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
   },
   cowork: {

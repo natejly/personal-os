@@ -55,6 +55,14 @@ class ReadPathTests(_Base):
         back = self.convos.get(c["id"])
         self.assertEqual((back["title"], back["messages"][0]["content"]), ("Plan the launch", "hello"))
 
+    def test_project_stats_count_written_docs_apart_from_uploads(self) -> None:
+        p = self.projects.create("P")
+        d = self.docs.create("Notes", project_id=p["id"])
+        self.docs.create("Other", project_id=p["id"])
+        self.assertEqual((self.projects.stats(p["id"])["docs"], self.projects.stats(p["id"])["documents"]), (2, 0))
+        self.trash.trash("doc", d["id"])
+        self.assertEqual(self.projects.stats(p["id"])["docs"], 1)
+
     def test_memory_context_search_and_dedup(self) -> None:
         m = self.memories.create(None, "Prefers oat milk in coffee")
         self.trash.trash("memory", m["id"])

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
+import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2, NotebookPen } from 'lucide-react'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
 import ChatPulse from './ChatPulse'
@@ -9,20 +9,25 @@ import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import { api } from '../lib/api'
+import type { Doc } from '@shared/types'
 
-type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
+type Tab = 'chats' | 'docs' | 'instructions' | 'knowledge' | 'memory'
 
 export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope } = useStore()
+  const { toggleSidebar, newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, openDoc } = useStore()
+  const [docs, setDocs] = useState<Doc[]>([])
   const [tab, setTab] = useState<Tab>('chats')
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
+  // The sidebar group lists these docs beside the chats, so 'View all' must show them too.
+  useEffect(() => { void api.docs.list(id).then((ds) => setDocs(ds.filter((d) => d.project_id === id))).catch(() => setDocs([])) }, [id])
 
   usePageContext(() => (project
     ? {
@@ -44,6 +49,7 @@ export default function ProjectView(): JSX.Element {
 
   const TABS: { key: Tab; label: string; icon: JSX.Element; n?: number }[] = [
     { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: chats.length },
+    { key: 'docs', label: 'Docs', icon: <NotebookPen size={14} />, n: docs.length },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
     { key: 'knowledge', label: 'Knowledge', icon: <FileText size={14} />, n: st?.documents },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
@@ -89,6 +95,20 @@ export default function ProjectView(): JSX.Element {
                 <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                 <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
                 <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {tab === 'docs' && (
+        <div className="page-body">
+          {docs.length === 0 && <div className="empty-hint big"><p>No docs in this project yet. Docs you write in Files and file under this project show up here.</p></div>}
+          <div className="chat-rows">
+            {docs.map((d) => (
+              <div key={d.id} className="chat-row" onClick={() => void openDoc(d.id)} role="button" tabIndex={0}>
+                <NotebookPen size={14} />
+                <span className="chat-row-title">{d.title || 'Untitled'}</span>
+                <span className="muted small">{new Date(d.updated_at * 1000).toLocaleDateString()}</span>
               </div>
             ))}
           </div>

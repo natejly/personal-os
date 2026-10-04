@@ -5,17 +5,17 @@
 Grain is a personal AI operating system for your desktop. Chat with any model through
 [LiteLLM](https://docs.litellm.ai/) (Fireworks AI out of the box), give the
 assistant tools, and let it build memory and a knowledge graph about you as you
-go. Organise work into **projects** the way Claude does: groups of chats with
+go. Organise work into **projects**: groups of chats with
 their own instructions, knowledge files, memories and graph.
 
 ```
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Todos      3 │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Memory    19 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
-│ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ PROJECTS   + │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ Boards       │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
+│ Files        │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ PROJECTS   + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
 │ ■ Grain      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
 │ RECENTS      │  └───────────────┘ └───────────────┘ │   run python │
 │ · …          │                                      │   gmail send │
@@ -60,7 +60,7 @@ their own instructions, knowledge files, memories and graph.
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
 - **Documents.** Upload any file up to 20 MB. Text, PDF, and Word are read; other files are kept by name. Chunked,
   full-text indexed, best excerpts pulled into replies.
-- **Docs.** Writing of your own, in an editor rather than an upload box:
+- **Files.** Docs of your own (the sidebar's **Files** view), in an editor rather than an upload box:
   markdown and LaTeX, a line-numbered editor beside a live preview, and full
   revision history. The assistant can read and revise a doc — but its edits are
   *proposed*, never written straight in. Each one arrives as a diff you accept
@@ -69,6 +69,11 @@ their own instructions, knowledge files, memories and graph.
   note. On macOS any doc can be recorded or dictated into, with the transcript
   kept apart from the text and a summary proposed for you to accept. See
   [docs/docs-editor.md](docs/docs-editor.md).
+- **Ask about this page** (⌘I). A side panel that sees the view you are on (a
+  chat, a doc, a project, a Space) and answers or acts on it.
+- **Health.** A page in the title-bar app strip that tracks a few daily metrics,
+  with a Today card and `health_*` tools; it can sync from a connected fitness
+  account. See [docs/health.md](docs/health.md).
 - **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text
   you type, microphone and system audio — summarizes it every few minutes, and
@@ -188,7 +193,7 @@ their own instructions, knowledge files, memories and graph.
   LiteLLM's `ollama/` route): activity summaries, meeting enhance, auto-learn
   over mail and keystrokes, voice extraction from your docs. If that model is
   down, those jobs skip or fail closed instead of forwarding the payload to
-  Fireworks. That is the air-gap switch a Palantir-style deploy would use:
+  Fireworks. That is the switch an air-gapped deployment would use:
   private data stays on the box; only ordinary chat hits a remote API.
   `extractionModel` today is just a cheaper LiteLLM name, not an on-device
   guarantee. Audio already has a local path (whisper.cpp); this is the same
@@ -203,8 +208,8 @@ their own instructions, knowledge files, memories and graph.
   and raw keystrokes and call audio are never uploaded. A task has one home,
   local or cloud, so a late catch-up and a cloud run cannot both fire. The
   worker keeps its own database for the stores those jobs read, synced per
-  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md) already
-  describes, rather than a network copy of the desktop SQLite file. Signing the
+  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md)
+  proposes, rather than a network copy of the desktop SQLite file. Signing the
   desktop into the worker replaces the loopback sidecar token, and Google
   sign-in on the worker is a web OAuth client with a fixed redirect, not the
   Desktop client the app ships now. Its tool box is the scheduled-run box, drawn
@@ -239,11 +244,23 @@ Electron (TypeScript)               Python (FastAPI)                      LiteLL
 ```
 
 Electron spawns the backend on a free port with a data directory under the
-app's user-data folder. All state is one SQLite file plus an `uploads/` folder.
+app's user-data folder. State is one SQLite file plus folders beside it:
+`uploads/` and `doc_assets/` (your files and pasted images), `recordings/` (meeting
+audio you keep), `cowork/` (desk workspaces), `context/` (`activity.md`),
+`backups/` and `logs/`. API keys and Google tokens are kept in the macOS
+Keychain, or a 0600 file in the data folder when the Keychain is unavailable.
 In development, `scripts/dev.sh` runs LiteLLM, the backend (autoreload) and
 Electron (HMR) together.
 
-## Setup
+## Install
+
+The packaged app (`npm run package`, see [docs/releasing.md](docs/releasing.md))
+is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
+wizard asks a few things about you and has you pick a model provider (Fireworks
+AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
+OpenAI-compatible endpoint). Google is connected from Settings → Integrations.
+
+## Development
 
 Requirements: Node 20+, Python 3.10+, [uv](https://docs.astral.sh/uv/), and a
 Fireworks AI key (or any provider LiteLLM supports).
@@ -271,7 +288,8 @@ opens in the browser and returns to the app on a loopback URL. The OAuth client
 the app signs in with is set up once per install:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-   create a project and enable the **Calendar**, **Gmail** and **Tasks** APIs.
+   create a project and enable the **Calendar**, **Gmail**, **Tasks**,
+   **Drive**, **Docs** and **Sheets** APIs (the Integrations panel links each one).
 2. Configure the OAuth consent screen (External; add yourself as a test user).
    Publishing it, or making it Internal on a Workspace account, avoids the
    7-day refresh-token expiry that "Testing" apps have.
@@ -287,8 +305,10 @@ Restart the app after editing `.env` — the client is read when the backend sta
 If `.env` has no client, the Settings panel falls back to asking for one, and a
 client pasted there always overrides the one from `.env`.
 
-Scopes: `calendar`, `gmail.modify`, `tasks`, `email`. Tokens live in the local
-database. `gmail_send` is a separate tool you can keep off; `gmail_draft` never
+Scopes: `openid`, `email`, `calendar`, `gmail.modify`, `tasks`,
+`drive.readonly`, `drive.file`, `documents`, `spreadsheets`. Tokens and the
+client secret are kept in the macOS Keychain (a 0600 file in the data folder if
+the Keychain is unavailable). `gmail_send` is a separate tool you can keep off; `gmail_draft` never
 sends.
 
 When a token is revoked, expires (a "Testing" consent screen kills refresh
@@ -339,8 +359,9 @@ Anything but `verified` is surfaced as a failure, not a success:
 
 ### Undo on outgoing mail
 
-Agency people will actually use is reversible, so nothing sends mail
-immediately. A send — from the compose window or from the assistant — is written
+Agency people will actually use is reversible, so by default nothing sends
+mail immediately (Settings → Integrations can turn the hold off, which makes
+every send immediate and final). A send — from the compose window or from the assistant — is written
 to `pending_sends` and held for 90 s (configurable, 60–120, Settings →
 Integrations) while a countdown with an **Undo** button sits above the toasts.
 "Send now" is in that card and deliberately not a tool: the assistant can cancel
@@ -368,8 +389,14 @@ and its verdict is kept on the row.
 | ⌘7 | Memory, opened on the knowledge graph |
 | ⌘9 | Activity |
 | ⌘⇧M | Meetings |
+| ⌘⇧K | Cowork |
+| ⌘⇧N / ⌘⇧D | New note / Today's note |
+| ⌘⇧F | Search chats |
+| ⌘⇧[ / ⌘⇧] | Previous / next chat |
+| ⌘⇧C | Toggle Spaces |
 | ⌘B | Toggle sidebar |
-| ⌘I | Toggle context panel |
+| ⌘I | Ask about this page |
+| ⌃⌘I | Toggle context panel |
 | ⌘U | Upload document |
 | ⌘, | Settings |
 | Enter / Shift+Enter | Send / newline |
@@ -521,7 +548,7 @@ Each assistant message carries a `trace`: spans of kind `context`, `llm`, `tool`
 and `learn`, each with start and end times and metadata such as token usage,
 time to first token, finish reason, tool arguments and result sizes. Spans are
 streamed as `span` SSE events while the reply is generated, so the Trace tab in
-the Context panel (⌘I) fills in live. The chip under a finished reply
+the Context panel (⌃⌘I) fills in live. The chip under a finished reply
 (`4 steps · 6.1 s · 3.7k tok`) opens that reply's trace.
 
 ## Usage and cost
@@ -536,8 +563,8 @@ from character counts and the row is flagged `estimated`.
 ## Activity monitor
 
 Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
-separate switch with a plain description of what it records — or flip **Palantir
-mode** for one switch that records everything, with the redaction and
+separate switch with a plain description of what it records — or flip **Record
+everything** for one switch that records everything, with the redaction and
 “never record” filters down. Turning that mode off restores the settings it
 replaced rather than resetting to defaults.
 
@@ -605,7 +632,7 @@ backend/personal_os app.py routes · repos.py storage · context.py · learn.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
-docs/research.md    Feature research and roadmap
+docs/research/roadmap.md    Feature research and roadmap
 docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
@@ -613,18 +640,14 @@ docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
 
 ## Roadmap
 
-See [docs/research.md](docs/research.md) for the researched roadmap across
+See [docs/research/roadmap.md](docs/research/roadmap.md) for the researched roadmap across
 memory, retrieval, app features, life-OS features and agentic capabilities,
 with the per-track source reports under [docs/research/](docs/research/).
 
-**Read Track 5 first.** It documents four live security defects in the current
-tool defaults — the stock permission modes let an injected web page or email
-read the Fireworks key and the whole database and exfiltrate them without ever
-showing an approval card — and it establishes that durable runs (an agent run
-that survives its HTTP connection) are the shared prerequisite for the
-approval queue, the scheduled brief, scheduled tasks and the session tape.
-
-Near-term after those: budgets replacing the fixed tool-round cap, taint
-tracking and an undo journal, tool-use examples and result pagination, and
-skills. Later: MCP client, code mode and file/browser reach — after an eval
-harness exists.
+Track 5's four security defects (G1–G4: sandbox profile, SSRF guard, sidecar
+auth, CSP images) were fixed on 2026-09-29. Much of what the roadmap then listed
+as later work has shipped since: durable runs, budgets, taint tracking and the
+undo journal, skills, MCP connectors, scripts that call tools, local file tools
+and the agent browser (see [CHANGELOG.md](CHANGELOG.md)). What is still open is
+the **Planned** items under Features, plus whatever in the roadmap is not in
+the changelog yet.

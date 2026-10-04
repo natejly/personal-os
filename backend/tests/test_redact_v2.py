@@ -92,7 +92,7 @@ def test_sanitize_url() -> None:
         assert redact.sanitize_url(bad) == ""  # type: ignore[arg-type]
 
 
-def test_gate_palantir_passthrough_and_counts() -> None:
+def test_gate_record_everything_passthrough_and_counts() -> None:
     cfg = {"redact": True, "redactAllow": [], "redactDeny": ["falcon"], "redactThreshold": 0.4}
     g = activity.Gate(lambda: cfg)
     assert g.scrub("call 415-555-0134 about falcon") == "call [phone] about [redacted]"

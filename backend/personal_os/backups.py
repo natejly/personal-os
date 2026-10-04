@@ -216,6 +216,8 @@ grain.db            A complete SQLite snapshot (open with any SQLite tool, or re
                     It includes your settings, which can hold API keys: keep this file private.
 uploads/            Files you added to the knowledge base, as stored.
 doc_assets/         Images pasted into your documents, one folder per document.
+recordings/         Meeting audio you chose to keep, one folder per meeting.
+cowork/             Each desk's outputs/ folder: the deliverables it handed in.
 export/             The same content as plain text:
   conversations.md / conversations.json
   memories.md / memories.json
@@ -293,11 +295,14 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-        for sub in ("uploads", "doc_assets"):
+        for sub in ("uploads", "doc_assets", "recordings", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:
+                rel = f.relative_to(up).as_posix()
+                if sub == "cowork" and rel.split("/")[1:2] != ["outputs"]:
+                    continue  # a desk's work/ is scratch; only its outputs/ are deliverables
                 if f.is_file() and not f.is_symlink():
-                    z.write(f, f"{sub}/{f.relative_to(up).as_posix()}")
+                    z.write(f, f"{sub}/{rel}")
 
 
 # ---- scheduler + routes ----

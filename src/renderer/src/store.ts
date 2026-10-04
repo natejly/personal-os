@@ -382,6 +382,7 @@ export interface State {
   /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
   editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
   activateVariant: (conversationId: string, messageId: string) => Promise<void>
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -470,8 +471,8 @@ export interface State {
   /** Ask macOS for one permission. Returns the note to show; '' when it went through silently. */
   grantActivityPermission: (id: string, browser?: string) => Promise<void>
   openActivitySettings: (id: string) => Promise<void>
-  /** Record everything, or put back the settings palantir mode replaced. */
-  setPalantirMode: (on: boolean) => Promise<void>
+  /** Record everything, or put back the settings record-everything mode replaced. */
+  setRecordEverything: (on: boolean) => Promise<void>
   /** Habits noticed and automations on offer. */
   loadActivityInsights: () => Promise<void>
   /** `deep` runs the model pass; without it the patterns are just re-mined locally, for free. */
@@ -1409,8 +1410,8 @@ export const useStore = create<State>((set, get) => {
         if (!live || !bubble || !visible) {
           // After `done` the reply is whole, so there is nothing to continue: only the auto-learn tail was lost.
           const text = !stalled ? (e as Error).message
-            : live ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.'
-              : 'The backend stopped responding. Restart it from Settings > Support.'
+            : live ? 'The backend stopped responding. Restart it from Settings > Behavior > Support, then continue the reply.'
+              : 'The backend stopped responding. Restart it from Settings > Behavior > Support.'
           get().toast(text, 'error')
         }
         if (live) announce(convId, run.run_id, 'failed', visible, notified)
@@ -2305,6 +2306,16 @@ export const useStore = create<State>((set, get) => {
       try {
         const c = await api.activateMessage(conversationId, messageId)
         // Replace the list wholesale: merging would keep the swapped-out row alive.
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteMessage: async (conversationId, messageId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      try {
+        await api.conversations.deleteMessage(conversationId, messageId)
+        const c = await api.conversations.get(conversationId)
         patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -3421,10 +3432,10 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    setPalantirMode: async (on) => {
+    setRecordEverything: async (on) => {
       try {
         set({ activity: await api.activity.palantir(on) })
-        get().toast(on ? 'Palantir mode on — recording everything' : 'Palantir mode off — previous settings restored')
+        get().toast(on ? 'Recording everything' : 'Stopped recording everything — previous settings restored')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

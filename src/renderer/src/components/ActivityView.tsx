@@ -155,20 +155,20 @@ function Capabilities({ caps, onGrant, onOpen }: {
   )
 }
 
-/** Palantir mode: one switch for "record everything", and an honest account of what that costs.
+/** Record-everything mode: one switch, and an honest account of what that costs.
  *
  *  It is gated behind a typed confirmation because it is the one control in the app that turns
  *  protections off rather than on - and it says out loud which protection it cannot touch. */
-function PalantirCard({ on, missing, onSet }: { on: boolean; missing: string[]; onSet: (on: boolean) => void }): JSX.Element {
+function RecordAllCard({ on, missing, onSet }: { on: boolean; missing: string[]; onSet: (on: boolean) => void }): JSX.Element {
   const [confirming, setConfirming] = useState(false)
   return (
-    <section className={`act-card palantir ${on ? 'armed' : ''}`}>
+    <section className={`act-card record-all ${on ? 'armed' : ''}`}>
       <div className="act-card-head static">
         <Eye size={14} />
-        <b>Palantir mode</b>
+        <b>Record everything</b>
         {on && <span className="act-pill warn">recording everything</span>}
       </div>
-      <div className="act-palantir-body">
+      <div className="act-record-all-body">
         <p className="muted small">
           One switch for everything: all six signals on — including the keylogger, the microphone and system audio —
           redaction off, and both “never record” lists emptied, so password managers and sign-in pages get recorded
@@ -188,10 +188,10 @@ function PalantirCard({ on, missing, onSet }: { on: boolean; missing: string[]; 
             withholding: {missing.join(', ')}. Grant those above, then restart the app.</p>
         )}
         {on
-          ? <button className="ghost-btn danger" onClick={() => onSet(false)}><EyeOff size={14} /> Turn Palantir mode off</button>
+          ? <button className="ghost-btn danger" onClick={() => onSet(false)}><EyeOff size={14} /> Turn record-everything mode off</button>
           : confirming
             ? (
-              <div className="act-palantir-confirm">
+              <div className="act-record-all-confirm">
                 <p><b>Record everything, with the filters down?</b></p>
                 <div className="act-danger">
                   <button className="ghost-btn danger" onClick={() => { setConfirming(false); onSet(true) }}>
@@ -201,7 +201,7 @@ function PalantirCard({ on, missing, onSet }: { on: boolean; missing: string[]; 
                 </div>
               </div>
             )
-            : <button className="ghost-btn danger" onClick={() => setConfirming(true)}><Eye size={14} /> Turn Palantir mode on</button>}
+            : <button className="ghost-btn danger" onClick={() => setConfirming(true)}><Eye size={14} /> Turn record-everything mode on</button>}
       </div>
     </section>
   )
@@ -660,7 +660,7 @@ export default function ActivityView(): JSX.Element {
     toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
     refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
-    grantActivityPermission, openActivitySettings, setPalantirMode,
+    grantActivityPermission, openActivitySettings, setRecordEverything,
     loadActivityInsights, refreshActivityInsights, setInsightStatus, applyInsight, forgetActivityHabit
   } = useStore()
   const [tab, setTab] = useState<Tab>('overview')
@@ -742,7 +742,7 @@ export default function ActivityView(): JSX.Element {
           <span>{st.counts.summaries} summaries</span>
           <span>last rollup {ago(st.last_rollup)}</span>
           {st.secure_input && <span className="act-pill ok"><Shield size={11} /> password field focused — keystrokes dropped</span>}
-          {st.palantir && <span className="act-pill warn"><Eye size={11} /> Palantir mode</span>}
+          {st.palantir && <span className="act-pill warn"><Eye size={11} /> Recording everything</span>}
         </div>
         {!st.platform_supported && <p className="act-warn"><AlertTriangle size={13} /> The collectors are macOS-only. Everything else in the app works normally.</p>}
         {st.last_error && <p className="act-warn"><AlertTriangle size={13} /> {st.last_error}</p>}
@@ -775,10 +775,10 @@ export default function ActivityView(): JSX.Element {
             onOpen={(id) => void openActivitySettings(id)}
           />
 
-          <PalantirCard
+          <RecordAllCard
             on={st.palantir}
             missing={st.capabilities.filter((c) => c.state && c.state !== 'granted' && c.state !== 'n/a').map((c) => c.label)}
-            onSet={(on) => void setPalantirMode(on)}
+            onSet={(on) => void setRecordEverything(on)}
           />
 
           <section className="act-card">
@@ -964,7 +964,7 @@ export default function ActivityView(): JSX.Element {
           </p>
           {st.palantir && (
             <p className="act-warn">
-              <AlertTriangle size={13} /> Palantir mode has every signal on. Turning one off here leaves the mode on;
+              <AlertTriangle size={13} /> Record-everything mode has every signal on. Turning one off here leaves the mode on;
               turn the mode off on the Overview tab to restore the signals you had before.
             </p>
           )}
@@ -1025,7 +1025,7 @@ export default function ActivityView(): JSX.Element {
         <div className="page-body">
           {st.palantir && (
             <p className="act-warn">
-              <AlertTriangle size={13} /> Palantir mode is on: redaction is off and both “never record” lists are
+              <AlertTriangle size={13} /> Record-everything mode is on: redaction is off and both “never record” lists are
               empty. Editing them here leaves the mode on — turn it off on the Overview tab to get your previous
               settings back.
             </p>

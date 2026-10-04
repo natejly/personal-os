@@ -37,13 +37,13 @@ def test_regex_in_lists() -> None:
     assert g.excluded("A", "Q3 Budget") and g.excluded("A", "Payroll run")
 
 
-def test_palantir_round_trip() -> None:
+def test_record_everything_round_trip() -> None:
     rules = [{"app": "Safari", "title": "bank"}]
     m = ta._monitor(Path(tempfile.mkdtemp()))
     m.set_config({"excludeRules": rules})
-    m.set_palantir(True)
+    m.set_record_everything(True)
     assert m.config()["excludeRules"] == []
-    m.set_palantir(False)
+    m.set_record_everything(False)
     assert m.config()["excludeRules"] == rules
 
 

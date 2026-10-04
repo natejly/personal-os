@@ -44,7 +44,7 @@ model_list:
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/kimi-k2p7-code
       api_key: os.environ/FIREWORKS_API_KEY
-  # Embeddings + reranking (for hybrid retrieval; see docs/research.md)
+  # Embeddings + reranking (for hybrid retrieval; see docs/research/roadmap.md)
   - model_name: qwen3-embedding-8b
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/qwen3-embedding-8b
@@ -55,7 +55,7 @@ model_list:
   # Nothing above answers /v1/audio/transcriptions, so the meetings feature and the activity
   # monitor's audio signals have no transcription route on a default config: every clip fails,
   # keeps its wav, and waits for a retry. Fireworks deprecated audio transcription
-  # (docs/research.md:101), which is why there is no Fireworks entry to uncomment here.
+  # (docs/research/roadmap.md:101), which is why there is no Fireworks entry to uncomment here.
   #
   # Pick ONE of the two blocks below, uncomment it, and press Test in Settings -> Meetings.
   # The model_name must stay `whisper-1`: that is meetings' `sttModel` default and

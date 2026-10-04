@@ -1477,7 +1477,16 @@ export interface GrainApi {
     hide: (session: string) => Promise<void>
     /** Live JPEG frames after each action and at most every ~1.5 s while subscribed; returns the unsubscribe. */
     subscribe: (session: string, cb: (frame: AgentBrowserFrame) => void) => () => void
+    /** Sites with cookies saved in the agent browser (sign-ins from handoffs; page fetches share the same store). */
+    signIns: () => Promise<AgentBrowserSignIn[]>
+    /** Forgets one site's cookies and storage, or with no domain everything, closing open agent browsers first. */
+    clearSignIns: (domain?: string) => Promise<void>
   }
+}
+
+export interface AgentBrowserSignIn {
+  domain: string
+  count: number
 }
 
 export interface AgentBrowserSession {

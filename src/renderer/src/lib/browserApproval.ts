@@ -88,3 +88,12 @@ export function hostPath(url: string): string {
     return url.length > 80 ? url.slice(0, 79) + '…' : url
   }
 }
+
+/** The agent browser session a plain chat drives (browser.py `session_of`; a desk's is `desk:<id>`). */
+export const chatBrowserSession = (conversationId: string): string => `conv:${conversationId}`
+
+/** The last browser_* call in a reply: only that card offers to watch the browser, so a long run shows one viewer. */
+export function latestBrowserCall(events: ReadonlyArray<{ id: string; name: string }>): string | null {
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].name.startsWith('browser_')) return events[i].id
+  return null
+}

@@ -13,6 +13,7 @@ import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents } from '.
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
+import { latestBrowserCall } from '../lib/browserApproval'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -321,6 +322,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  const lastBrowser = latestBrowserCall(events)
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
 
@@ -388,7 +390,8 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
       <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
         {Card ? (
           <>
-            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)}
+              conversationId={conversationId} streaming={streaming} latestBrowser={t.id === lastBrowser} />
             {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
             {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>

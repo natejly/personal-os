@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { browserAllowLabel, browserApprovalSentence, browserSentence, hostPath } from './browserApproval'
+import { browserAllowLabel, browserApprovalSentence, browserSentence, chatBrowserSession, hostPath, latestBrowserCall } from './browserApproval'
+
+test('a plain chat watches its own conv: session', () => {
+  assert.equal(chatBrowserSession('c1'), 'conv:c1')
+})
+
+test('only the last browser call in a reply gets the viewer', () => {
+  assert.equal(latestBrowserCall([{ id: 'a', name: 'browser_open' }, { id: 'b', name: 'browser_click' }, { id: 'c', name: 'web_search' }]), 'b')
+  assert.equal(latestBrowserCall([{ id: 'a', name: 'web_search' }]), null)
+})
 
 const text = (a: Record<string, unknown>): string => { const s = browserSentence(a); return s.before + s.host + s.after }
 

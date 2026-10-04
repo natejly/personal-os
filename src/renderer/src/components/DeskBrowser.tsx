@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Globe, MonitorUp, EyeOff } from 'lucide-react'
-import { DESK_LIVE, type AgentBrowserFrame, type AgentBrowserSession, type FullDesk } from '@shared/types'
+import type { AgentBrowserFrame, AgentBrowserSession } from '@shared/types'
 import { splitUrl } from '../lib/deskFiles'
 
 /** While the desk works, look again for its browser session this often. A desk at rest is only re-checked on a status change. */
 const RECHECK_MS = 5000
 
 /**
- * The desk's own browser, as the agent sees it. Frames are only captured while someone is
- * subscribed, so this subscribes while it is mounted AND a session exists, and lets go on unmount
- * or tab change. "Take over" opens that same browser as a window of its own, separate from the
- * user's browser, so they can sign in or get past a challenge the agent cannot.
+ * One agent browser session (`desk:<id>` for a desk, `conv:<id>` for a plain chat), as the agent sees it. Frames
+ * are only captured while someone is subscribed, so this subscribes while it is mounted AND a session exists, and
+ * lets go on unmount. "Take over" opens that same browser as a window of its own, separate from the user's
+ * browser, so they can sign in or get past a challenge the agent cannot. `live`: the owner is working, so look
+ * for the session again every few seconds; at rest it is re-checked only when `live` changes.
  */
-export default function DeskBrowser({ desk }: { desk: FullDesk }): JSX.Element {
+export default function DeskBrowser({ session, live, emptyText = "This desk hasn't opened its browser." }: {
+  session: string; live: boolean; emptyText?: string
+}): JSX.Element {
   const api = window.os?.agentBrowser
-  const session = `desk:${desk.id}`
   const [info, setInfo] = useState<AgentBrowserSession | null>(null)
   const [frame, setFrame] = useState<AgentBrowserFrame | null>(null)
   const [error, setError] = useState('')
-  const live = DESK_LIVE.includes(desk.status)
 
   const check = useCallback(async (): Promise<void> => {
     if (!api) return
@@ -30,7 +31,7 @@ export default function DeskBrowser({ desk }: { desk: FullDesk }): JSX.Element {
     }
   }, [api, session])
 
-  useEffect(() => { void check() }, [check, desk.status])
+  useEffect(() => { void check() }, [check, live])
   useEffect(() => {
     if (!live) return
     const t = setInterval(() => { void check() }, RECHECK_MS)
@@ -54,7 +55,7 @@ export default function DeskBrowser({ desk }: { desk: FullDesk }): JSX.Element {
       <div className="desk-pane">
         <div className="empty-state">
           <Globe size={20} />
-          <p>This desk hasn't opened its browser.</p>
+          <p>{emptyText}</p>
           {!api && <p className="muted small">The browser view needs the desktop app.</p>}
         </div>
       </div>
@@ -81,7 +82,7 @@ export default function DeskBrowser({ desk }: { desk: FullDesk }): JSX.Element {
       </p>
       {error && <p className="small desk-browser-error">{error}</p>}
       <div className="desk-browser-frame">
-        {frame ? <img src={frame.dataUrl} alt={`The desk's browser showing ${title || host}`} /> : <p className="muted small">Waiting for the first frame…</p>}
+        {frame ? <img src={frame.dataUrl} alt={`The agent's browser showing ${title || host}`} /> : <p className="muted small">Waiting for the first frame…</p>}
       </div>
     </div>
   )

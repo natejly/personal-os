@@ -54,6 +54,8 @@ const api: GrainApi = {
     list: () => ipcRenderer.invoke('agentBrowser:list'),
     show: (session: string) => ipcRenderer.invoke('agentBrowser:show', session),
     hide: (session: string) => ipcRenderer.invoke('agentBrowser:hide', session),
+    signIns: () => ipcRenderer.invoke('agentBrowser:signIns'),
+    clearSignIns: (domain?: string) => ipcRenderer.invoke('agentBrowser:clearSignIns', domain),
     subscribe: (session: string, cb) => {
       const off = listen<AgentBrowserFrame & { session: string }>('agentBrowser:frame', (f) => {
         if (f.session === session) cb({ dataUrl: f.dataUrl, url: f.url, title: f.title, at: f.at })

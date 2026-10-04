@@ -16,6 +16,12 @@ export interface ToolCardProps {
    * exactly those arguments; a Deny never carries an edit.
    */
   decide: (approve: boolean, editedArgs?: Record<string, unknown>) => Promise<void>
+  /** The chat this call ran in. Absent where a card renders outside a conversation's message list. */
+  conversationId?: string
+  /** The reply is still streaming, so the run is in progress. */
+  streaming?: boolean
+  /** The last browser_* call in its reply: the one card that offers to watch the agent's browser. */
+  latestBrowser?: boolean
 }
 
 /** Tool name -> card. A registered card replaces the generic row and ask card for that tool, pending and finished. */

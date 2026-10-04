@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
-import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, ToolEvent } from '@shared/types'
+import { DESK_LIVE, type DeskAutonomy, type DeskStatus, type FullDesk, type PendingApproval, type ToolEvent } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
@@ -390,7 +390,7 @@ export default function DeskDetail(): JSX.Element | null {
       )}
       {tab === 'plan' && <div className="desk-pane scroll"><DeskPlan desk={desk} /></div>}
       {tab === 'files' && <DeskFiles desk={desk} />}
-      {tab === 'browser' && <DeskBrowser desk={desk} />}
+      {tab === 'browser' && <DeskBrowser session={`desk:${desk.id}`} live={DESK_LIVE.includes(desk.status)} />}
       {tab === 'output' && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </section>
   )

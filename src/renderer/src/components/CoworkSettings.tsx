@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import type { Settings } from '@shared/types'
+import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, type NetworkMode } from '../lib/coworkSettings'
@@ -18,6 +18,43 @@ const Toggle = ({ title, help, checked, onChange }: { title: string; help: strin
     <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
   </label>
 )
+
+/**
+ * What the agent's browser remembers: sites with saved cookies, mostly sign-ins made while the user took over.
+ * An action on the machine like the environment build, so it applies at once rather than on Save.
+ */
+function SignIns(): JSX.Element | null {
+  const ab = window.os?.agentBrowser
+  const [rows, setRows] = useState<AgentBrowserSignIn[] | null>(null)
+  const [error, setError] = useState('')
+  const load = (): void => { ab?.signIns().then(setRows, (e: Error) => setError(e.message)) }
+  useEffect(load, [ab])
+  if (!ab) return null
+  const clear = (domain?: string): void => {
+    if (!domain && !confirm('Sign the agent browser out of every site? Open agent browsers close.')) return
+    setError('')
+    ab.clearSignIns(domain).then(load, (e: Error) => setError(e.message))
+  }
+  return (
+    <div className="workspace-roots">
+      <span><b>Browser sign-ins</b></span>
+      <p className="muted small">Sites the agent's browser keeps cookies for, mostly from when you took over to sign in. Page reads use the same store, so removing a site signs both out.</p>
+      {rows && rows.length === 0 && <p className="muted small">Nothing saved.</p>}
+      {rows && rows.length > 0 && (
+        <ul className="plain-list">
+          {rows.map((r) => (
+            <li key={r.domain} className="chip-check-row">
+              <code>{r.domain}</code> <span className="muted small">{r.count} cookie{r.count === 1 ? '' : 's'}</span>
+              <button type="button" aria-label={`Remove ${r.domain}`} title="Remove" onClick={() => clear(r.domain)}><X size={12} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {rows && rows.length > 0 && <div className="workspace-roots-add"><button type="button" onClick={() => clear()}>Clear all</button></div>}
+      {error && <p className="cowork-error" role="alert">{error}</p>}
+    </div>
+  )
+}
 
 /** A number the user can clear while typing; it is clamped into the backend's range once they leave the field. */
 function NumField({ title, help, settingKey, value, fallback, step = 1, onCommit }: {
@@ -212,6 +249,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
       <HostList title="Allowed sites" help="Sites a desk may open even when a link came from something it read, instead of being asked. A name also allows its subdomains."
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
+      <SignIns />
 
       <h4>Vision</h4>
       <label>

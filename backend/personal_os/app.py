@@ -4308,6 +4308,10 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
     if job.get("budget"):
         conv_settings["job_budget"] = job["budget"]  # read by the runner, which clamps it again (_job_caps)
+    if fire.get("mail"):
+        # The prompt carries senders and subjects the user did not write: taint the transcript from its first turn, so
+        # a later turn continued from the Inbox still forces a card over a standing grant.
+        conv_settings.update(tainted=True, taint_sources=["mail_trigger"])
     # Narrowing only: tools outside the job's allowlist (and, for a preview, everything that is not read-only) are
     # switched off for this conversation. Tools left out of the map keep the user's own modes.
     if fire.get("dry_run"):

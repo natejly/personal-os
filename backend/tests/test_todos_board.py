@@ -35,6 +35,7 @@ def test_boards_migrate_into_todos_without_loss() -> None:
         assert (tile["list_name"], tile["status"], tile["notes"], tile["due"], tile["priority"], tile["position"], tile["tags"], tile["done"]) == \
             ("Home", "Doing", "grout", "2026-11-01", 1, 3.5, ["kitchen"], 0)
         assert paint["done"] == 1 and paint["status"] == "Done" and paint["completed_at"] == 30
+        assert tile["source"] == paint["source"] == "board"  # Tasks sync never pushes these
         with db.connect() as c:
             names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             assert "legacy_cards" in names and "cards" not in names

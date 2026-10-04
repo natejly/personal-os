@@ -98,6 +98,14 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(rt["due"], "2026-10-02T00:00:00.000Z")
         self.assertEqual(rt["notes"], "2%")
 
+    def test_cards_moved_in_from_boards_are_not_pushed_but_done_todos_are(self) -> None:
+        self.todos.create("Old card", source="board")
+        done = self.todos.create("Finished later")
+        self.todos.update(done["id"], {"done": True}, notify=False)
+        counts = self.sync.sync_once()
+        self.assertEqual(counts["created_remote"], 1)
+        self.assertEqual([t["title"] for t in self.g.tasks.values()], ["Finished later"])
+
     def test_remote_task_is_pulled(self) -> None:
         self.g.seed("Call landlord", due="2026-10-05T00:00:00.000Z", status="completed")
         counts = self.sync.sync_once()

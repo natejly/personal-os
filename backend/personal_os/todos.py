@@ -136,7 +136,7 @@ def import_boards(c: Any) -> int:
             labels = []
         c.execute(
             "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,created_at,updated_at,completed_at,tags,list_name,status,position)"
-            " VALUES(?,?,?,?,?,?,?,'local',?,?,?,?,?,?,?)",
+            " VALUES(?,?,?,?,?,?,?,'board',?,?,?,?,?,?,?)",
             (new_id(), r["board_project"], r["title"], r["description"] or "", r["due"] or None, r["priority"], int(done),
              r["created_at"], r["updated_at"], r["updated_at"] if done else None,
              json.dumps(Todos.clean_tags(labels)), r["board_name"], r["col_name"], r["position"]))

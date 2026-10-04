@@ -6,8 +6,8 @@ Full-state merge rather than incremental: every pass fetches the whole remote li
 - remotely edited since last sync -> pull;
 - both                            -> last write wins by timestamp.
 Unlinked local todos become remote tasks, unmatched remote tasks become local todos,
-tombstones (todos.py) carry local deletes out, and a task missing remotely deletes its
-local mirror. Priority and project stay local-only — Google Tasks has no equivalent.
+tombstones (todos.py) carry local deletes out, and a task missing remotely moves its
+local mirror to the trash. Priority and project stay local-only — Google Tasks has no equivalent.
 
 The loop (started at app startup) syncs every `intervalMinutes`, or ~2 s after a todo
 changes (todos.on_change -> poke), so edits land in Google almost immediately.
@@ -215,8 +215,10 @@ class TasksSync:
             linked.add(eid)
             rt = remote.get(eid)
             if rt is None or rt.get("deleted"):
-                # Its Google Task is gone; no tombstone, or we would delete it remotely again.
-                self.todos.delete(td["id"], notify=False, tombstone=False)
+                # Its Google Task is gone: trash (restorable), and drop the task tombstone trash
+                # leaves, or we would delete it remotely again.
+                self.todos.trash(td["id"], deleted_with="google", notify=False)
+                self.todos.clear_tombstone(eid)
                 counts["deleted_local"] += 1
                 continue
             local_changed = float(td["updated_at"]) > float(td.get("synced_at") or 0)
@@ -225,7 +227,7 @@ class TasksSync:
                 counts["pulled"] += self._pull(td, rt)
             elif local_changed:
                 try:
-                    self._push(td, eid, tasklist)
+                    self._push(td, rt, tasklist)
                 except GoogleNotConnected:
                     raise
                 except Exception as e:  # noqa: BLE001 - one refused todo must not block the rest
@@ -235,9 +237,17 @@ class TasksSync:
 
         # Remote tasks nothing points at yet -> new local todos. Untitled ones are usually
         # rows someone is still typing into; skip them until they have a name.
+        unlinked = [td for td in self.todos.all_for_sync() if not td.get("external_id")]
         for eid, rt in remote.items():
             title = _line(rt.get("title") or "", 500)
             if eid in linked or rt.get("deleted") or not title:
+                continue
+            # An insert that reached Google but whose link was never recorded (crash, refused
+            # write-back) comes back as an unmatched task: adopt the todo it came from.
+            twin = next((td for td in unlinked if td["title"] == title and td["due"] == _date_only(rt.get("due"))), None)
+            if twin:
+                unlinked.remove(twin)
+                self.todos.set_sync_state(twin["id"], eid, rt.get("updated"), twin["updated_at"])
                 continue
             td = self.todos.create(title, notes=_line(rt.get("notes") or ""), due=_date_only(rt.get("due")),
                                    source="google", external_id=eid, notify=False)
@@ -312,6 +322,11 @@ class TasksSync:
         self.todos.set_sync_state(td["id"], td["external_id"], rt.get("updated"), cur["updated_at"])
         return 1 if patch else 0
 
-    def _push(self, td: dict[str, Any], task_id: str, tasklist: str) -> None:
-        rt = self.google.tasks_update(task_id, _remote_body(td), tasklist)
-        self.todos.set_sync_state(td["id"], task_id, rt.get("updated"), td["updated_at"])
+    def _push(self, td: dict[str, Any], remote: dict[str, Any], tasklist: str) -> None:
+        body = _remote_body(td)
+        if (td.get("notes") or "") == _line(remote.get("notes") or ""):
+            # Unchanged here: the local copy is the flattened pull, so sending it would rewrite
+            # Google's multi-line (or longer) notes.
+            body.pop("notes")
+        rt = self.google.tasks_update(remote["id"], body, tasklist)
+        self.todos.set_sync_state(td["id"], remote["id"], rt.get("updated"), td["updated_at"])

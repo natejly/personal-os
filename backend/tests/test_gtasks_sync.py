@@ -178,10 +178,48 @@ class SyncTests(unittest.TestCase):
         eid = self.g.seed("Ephemeral")
         self.sync.sync_once()
         self.g.remote_delete(eid)
+        tid = self.todos.list(include_done=True)[0]["id"]
         counts = self.sync.sync_once()
         self.assertEqual(counts["deleted_local"], 1)
         self.assertEqual(self.todos.list(include_done=True), [])
         self.assertIsNotNone(self.g.calls[-1])  # found through the incremental pull
+        # Trashed, not erased: the user can still get it back, and no tombstone re-deletes remotely.
+        with self.todos.db.tx() as c:
+            row = c.execute("SELECT deleted_with FROM todos WHERE id=?", (tid,)).fetchone()
+        self.assertEqual(row["deleted_with"], "google")
+        self.assertEqual(self.todos.tombstones(), [])
+        self.assertTrue(self.todos.restore(tid))
+        self.assertEqual(self.sync.sync_once()["created_remote"], 1)
+
+    def test_unchanged_multiline_notes_are_not_pushed_back_flattened(self) -> None:
+        eid = self.g.seed("Pack", notes="passport\ncharger\n" + "x" * 3000)
+        self.sync.sync_once()
+        td = self.todos.list(include_done=True)[0]
+        self.todos.update(td["id"], {"done": True})
+        sent: list[dict[str, Any]] = []
+        real = self.g.tasks_update
+        self.g.tasks_update = lambda tid, patch, tl="@default": (sent.append(patch), real(tid, patch, tl))[1]  # type: ignore[method-assign]
+        self.assertEqual(self.sync.sync_once()["pushed"], 1)
+        self.assertNotIn("notes", sent[0])
+        self.assertEqual(self.g.tasks[eid]["notes"], "passport\ncharger\n" + "x" * 3000)
+        self.assertEqual(self.g.tasks[eid]["status"], "completed")
+        # A note edited here still goes out.
+        self.todos.update(td["id"], {"notes": "passport only"})
+        self.sync.sync_once()
+        self.assertEqual(self.g.tasks[eid]["notes"], "passport only")
+
+    def test_an_insert_whose_link_was_lost_is_adopted_not_duplicated(self) -> None:
+        td = self.todos.create("Renew visa", due="2026-11-01")
+        real = self.todos.set_sync_state
+        self.todos.set_sync_state = lambda *a, **k: True  # type: ignore[method-assign]  # the write-back is lost
+        self.sync.sync_once()
+        self.todos.set_sync_state = real  # type: ignore[method-assign]
+        self.assertEqual(len(self.g.tasks), 1)
+        counts = self.sync.sync_once()
+        self.assertEqual((counts["created_local"], counts["created_remote"]), (0, 0))
+        self.assertEqual(len(self.todos.list(include_done=True)), 1)
+        self.assertEqual(len(self.g.tasks), 1)
+        self.assertEqual((self.todos.get(td["id"]) or {})["external_id"], next(iter(self.g.tasks)))
 
     def test_second_pass_is_incremental_and_full_pass_recurs(self) -> None:
         from personal_os import gtasks

@@ -578,7 +578,9 @@ class Database:
                      "model": "TEXT", "budget": "TEXT",
                      # When a run of this job is worth an OS notification: 'problems' | 'always' | 'never'.
                      "notify": "TEXT NOT NULL DEFAULT 'problems'",
-                     "mail_query": "TEXT", "mail_seen": "TEXT"},
+                     "mail_query": "TEXT", "mail_seen": "TEXT",
+                     # target='desk': a fire starts a desk (desk_autonomy plan|propose, desk_budget JSON) instead of a run.
+                     "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

@@ -205,10 +205,10 @@ export const api = {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
      *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
-     *  a mail job passes kind:'mail' and `mail_query`. */
-    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget'] }) =>
+     *  a mail job passes kind:'mail' and `mail_query`. target:'desk' makes each fire open a desk instead of a run. */
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
@@ -226,7 +226,8 @@ export const api = {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
       return r.text()
     },
-    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
+    /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
+    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

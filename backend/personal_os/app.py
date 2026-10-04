@@ -50,8 +50,8 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, MAIL_MAX_THREADS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name,
-                   next_fire, spent, valid_cron, valid_tz)
+from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
+                   Scheduler, local_tz_name, next_fire, spent, valid_cron, valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
@@ -60,7 +60,7 @@ from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOP
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTO_RESUME_FROM, AUTONOMY, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
-                     STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
+                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
@@ -4296,6 +4296,8 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     Fresh each time on purpose. A morning brief that replayed its own back catalogue every day would get slower,
     dearer and worse at the actual job; one fire, one transcript, one tight budget.
     """
+    if job.get("target") == "desk":
+        return await _launch_desk_job(job, fire)
     # The previous fire still running (a card nobody can answer, a long job) must not stack another run behind it.
     prev = job.get("last_run_id")
     if prev and prev in bus.live_ids() and not fire.get("manual"):
@@ -4328,6 +4330,57 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     if run.task is not None:
         run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: events.publish("job_finished", {"run_id": rid, "job_id": jid}))
     return run.run_id
+
+
+def _job_desk(job_id: str, due_at: float) -> dict[str, Any] | None:
+    """The desk a desk job already opened for this slot, if any: one slot is at most one desk."""
+    with db.tx() as c:
+        r = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
+                      "WHERE json_extract(c.settings,'$.jobId')=? AND json_extract(c.settings,'$.jobDueAt')=?",
+                      (job_id, due_at)).fetchone()
+    return desks.get(r["id"], False) if r else None
+
+
+def _job_open_desk(job_id: str) -> dict[str, Any] | None:
+    """The job's newest desk that has not finished, if any: like a run job, a desk job has at most one instance.
+    An archived desk does not count: it is gone from the inbox and the desk list, so it must not hold the job back."""
+    with db.tx() as c:
+        r = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
+                      f"WHERE json_extract(c.settings,'$.jobId')=? AND d.archived=0 AND d.status NOT IN ({','.join('?' * len(DESK_TERMINAL))}) "
+                      "ORDER BY d.created_at DESC LIMIT 1", (job_id, *DESK_TERMINAL)).fetchone()
+    return desks.get(r["id"], False) if r else None
+
+
+async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
+    """A desk job's fire: the same creation desk_start and the REST route use, with the job's prompt as the brief, in
+    plan or propose autonomy. Writes stay behind the plan or the approval cards and outputs still need Accept.
+    At the live-desk cap the desk is created but not started, and the inbox says so; the slot is not dropped.
+    Returns the desk's first run id, or None when it was not started."""
+    due = float(fire["due_at"])
+    if (prev := _job_desk(job["id"], due)) is not None:
+        return prev.get("run_id")
+    if (open_desk := _job_open_desk(job["id"])) is not None:
+        why = f"previous desk still open ({open_desk['status']})"
+        if fire.get("manual"):  # as in JobPolicy.admit: a manual run has no slot to record, the user is told why
+            raise HTTPException(409, f"Not started: {why}")
+        jobs.record_skip(job["id"], why)
+        return None
+    capped = _over_live_cap()
+    out = await _create_desk(DeskIn(brief=_job_prompt(job, fire), title=f"{job['name']} · {_stamp(due)}",
+                                    project_id=job["project_id"], autonomy=job.get("desk_autonomy") or "plan",
+                                    budget=job.get("desk_budget"), start=not capped))
+    desk_id = out["desk"]["id"]
+    convos.update(out["conversation_id"], {"settings": {"jobId": job["id"], "jobDueAt": due}})
+    run_id = out.get("run_id")
+    if run_id:
+        desks.event(desk_id, "note", f"Started on schedule by “{job['name']}”.", needs_you=True, job_id=job["id"])
+    else:
+        why = ("too many desks running" if capped else "the desk could not be started") + ": it was created but not started"
+        jobs.record_skip(job["id"], why)
+        desks.event(desk_id, "note", f"Scheduled by “{job['name']}”, but {why}. Start it when another desk finishes.",
+                    needs_you=True, job_id=job["id"], queued=True)
+    log.info("job %s opened desk %s for %s%s", job["name"], desk_id, _stamp(due), "" if run_id else " (not started, at the cap)")
+    return run_id
 
 
 job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
@@ -4363,6 +4416,10 @@ class JobIn(BaseModel):
     budget: dict[str, Any] | None = None
     # kind='mail': a Gmail search; a matching thread that is new or has a new message fires one run.
     mail_query: str | None = Field(default=None, max_length=500)
+    # target='desk': each fire starts a desk with the prompt as its brief, in desk_autonomy (plan | propose).
+    target: str = "run"
+    desk_autonomy: str | None = None
+    desk_budget: dict[str, Any] | None = None
 
 
 class JobPatch(BaseModel):
@@ -4381,6 +4438,20 @@ class JobPatch(BaseModel):
     model: str | None = Field(default=None, max_length=200)  # an explicit null resets to the default model
     budget: dict[str, Any] | None = None  # an explicit null resets to JOB_BUDGET
     mail_query: str | None = Field(default=None, max_length=500)
+    target: str | None = None
+    desk_autonomy: str | None = None
+    desk_budget: dict[str, Any] | None = None
+
+
+def _check_target(target: str | None, autonomy: str | None, allowed_tools: list[str] | None = None) -> None:
+    if target not in TARGETS:
+        raise HTTPException(400, f"'{target}' is not a job target ('run' or 'desk')")
+    # A desk needs its own desk_* and planning tools, so an allowlist cannot narrow it; refuse rather than drop it.
+    if target == "desk" and allowed_tools is not None:
+        raise HTTPException(400, "A desk job cannot narrow its tools: clear allowed_tools or keep it a run job")
+    if target == "desk" and (autonomy or "plan") not in DESK_JOB_AUTONOMY:
+        raise HTTPException(400, "A scheduled desk plans first or proposes at the end ('plan' or 'propose'), "
+                                 f"not {autonomy!r}: nobody is there to answer its cards as it goes")
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -4494,17 +4565,21 @@ async def create_job(body: JobIn) -> dict[str, Any]:
     _check_allowed_tools(body.allowed_tools)
     _check_job_budget(body.budget)
     await _check_job_model(body.model)
+    _check_target(body.target, body.desk_autonomy, body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
                        model=body.model or None, budget=body.budget or None,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None,
-                       mail_query=body.mail_query.strip() if body.kind == "mail" and body.mail_query else None)
+                       mail_query=body.mail_query.strip() if body.kind == "mail" and body.mail_query else None,
+                       target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget)
 
 
 @app.patch("/jobs/{id}")
 async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
+    if patch.get("target", "") is None:
+        patch.pop("target")
     if "project_id" in patch:
         patch["project_id"] = wsid(patch["project_id"])
     if "notify" in patch and patch["notify"] is None:
@@ -4512,10 +4587,17 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     cur = jobs.get(id)
     if not cur:
         raise HTTPException(404, "No such job")
+    # Turning a narrowed run job into a desk job drops its allowlist (a desk cannot honour one); sending a list
+    # with the switch, or onto a desk job, is still refused below.
+    if patch.get("target") == "desk" and "allowed_tools" not in patch:
+        patch["allowed_tools"] = None
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
     _check_job_budget(patch.get("budget"))
     await _check_job_model(patch.get("model"))
+    _check_target(merged.get("target") or "run", merged.get("desk_autonomy"), merged.get("allowed_tools"))
+    if merged.get("target") == "desk" and not merged.get("desk_autonomy"):
+        patch["desk_autonomy"] = "plan"
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                     fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"), mail_query=merged.get("mail_query"))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
@@ -4555,7 +4637,9 @@ async def run_job_now(id: str) -> dict[str, Any]:
     run_id = await _launch_job(job, fire)
     jobs.mark_launched(job["id"], run_id)
     row = run_store.get(run_id) if run_id else None
-    return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+    desk = _job_desk(job["id"], t) if job.get("target") == "desk" else None
+    return {"ok": bool(run_id or desk), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id"),
+            "desk_id": (desk or {}).get("id")}
 
 
 def _job_run_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4605,6 +4689,8 @@ async def dry_run_job(id: str) -> dict[str, Any]:
     line telling the model to describe rather than do. Still a job run, so proposal-only; with nothing outward
     available it makes no proposals. Hidden from the inbox's "while you were away" and never counted as a failure."""
     job = _known_job(id)
+    if job.get("target") == "desk":
+        raise HTTPException(400, "A desk job has no preview: its desk shows you a plan before it does anything")
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True, "dry_run": True}

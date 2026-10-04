@@ -3811,8 +3811,9 @@ export const useStore = create<State>((set, get) => {
     },
     runJobNow: async (id) => {
       try {
-        const { run_id } = await api.jobs.runNow(id)
-        get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
+        const { run_id, desk_id } = await api.jobs.runNow(id)
+        if (desk_id) get().toast(run_id ? 'Desk started. Open it under Desks.' : 'Desk created, not started: too many desks are running.', 'info')
+        else get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
         void get().refreshJobs()
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')

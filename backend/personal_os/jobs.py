@@ -12,6 +12,8 @@ Three pieces, all of them rows:
                  · `watch` — a folder; new or touched files in it fire a run.
                  · `mail` — a Gmail search; a matching thread that is new or has a new message fires a run.
                    Its `next_due_at` is the next poll (every MAIL_POLL_S), not a slot, and never books an OS wake.
+               Separately, `target` says what a fire starts: 'run' (a proposal-only chat run) or 'desk' (a desk with
+               the prompt as its brief, in plan or propose autonomy; see app._launch_desk_job).
 - `Proposals` — the `proposals` table: an outward-facing tool call a background run was not allowed to
                make. Accepting one is a user action, and is what actually executes it, once.
 - `Scheduler` — a clock, not a heartbeat. It wakes on the earliest `next_due_at` (capped, so a config
@@ -66,6 +68,10 @@ KINDS = ("cron", "once", "watch", "mail")
 # A mail job asks Gmail at most this often, and reads at most this many matching threads per look.
 MAIL_POLL_S = 300.0
 MAIL_MAX_THREADS = 20
+# What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
+# target. A scheduled desk may plan first or propose at the end, never 'ask' (cards each change while nobody watches).
+TARGETS = ("run", "desk")
+DESK_JOB_AUTONOMY = ("plan", "propose")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
 WATCH_MAX_ENTRIES = 2000
 WATCH_CHANGED_NAMES = 50  # names a directory fire hands the run; past this, only the count
@@ -308,7 +314,8 @@ class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
-              "allowed_tools", "watch_dir", "notify", "model", "budget", "mail_query")
+              "allowed_tools", "watch_dir", "notify", "model", "budget", "mail_query", "target", "desk_autonomy",
+              "desk_budget")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled", "mail_query"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
@@ -337,6 +344,10 @@ class Jobs:
                 d["budget"] = json.loads(d["budget"]) if d.get("budget") else None
             except ValueError:
                 d["budget"] = None
+            try:
+                d["desk_budget"] = json.loads(d["desk_budget"]) if d.get("desk_budget") else None
+            except ValueError:
+                d["desk_budget"] = None
         return d
 
     def list(self) -> list[dict[str, Any]]:
@@ -352,22 +363,26 @@ class Jobs:
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
                watch_dir: str | None = None, notify: str = "problems", model: str | None = None,
-               budget: dict[str, Any] | None = None, mail_query: str | None = None) -> dict[str, Any]:
+               budget: dict[str, Any] | None = None, mail_query: str | None = None, target: str = "run",
+               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
         kind = kind if kind in KINDS else "cron"
+        target = target if target in TARGETS else "run"
         cron = "" if kind in ("once", "mail") else cron
         fresh = {"kind": kind, "cron": cron, "run_at": run_at, "timezone": tz, "last_due_at": None}
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
                       "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget, "
-                      "mail_query) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "mail_query, target, desk_autonomy, desk_budget) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
                        json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
-                       json.dumps(budget) if budget else None, mail_query))
+                       json.dumps(budget) if budget else None, mail_query, target,
+                       (desk_autonomy or "plan") if target == "desk" else desk_autonomy,
+                       json.dumps(desk_budget) if desk_budget else None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -386,6 +401,8 @@ class Jobs:
             cols["budget"] = json.dumps(cols["budget"]) if cols["budget"] else None
         if "model" in cols:
             cols["model"] = cols["model"] or None
+        if "desk_budget" in cols:
+            cols["desk_budget"] = json.dumps(cols["desk_budget"]) if cols["desk_budget"] else None
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None

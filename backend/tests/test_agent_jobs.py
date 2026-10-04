@@ -916,3 +916,142 @@ def test_accepting_a_send_says_it_is_queued_not_sent() -> None:
     q = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
     res = j("POST", f"/proposals/{q['id']}/accept")
     assert res["ok"] is True and res["queued"] is False and res["sends_in_seconds"] is None
+
+
+# ---------------- desk jobs: a fire that opens a desk ----------------
+def make_desk_job(name: str, prompt: str = "Write the weekly report folder", **kw: Any) -> dict[str, Any]:
+    return jobs.create(f"{name} {time.time()}", "0 * * * *", prompt, timezone="UTC", enabled=True, at=T0,
+                       target="desk", **kw)
+
+
+def job_desks(job_id: str) -> list[dict[str, Any]]:
+    with appmod.db.tx() as c:
+        rows = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
+                         "WHERE json_extract(c.settings,'$.jobId')=?", (job_id,)).fetchall()
+    return [appmod.desks.get(r["id"], False) for r in rows]
+
+
+@contextlib.contextmanager
+def desk_cap(n: int):  # type: ignore[no-untyped-def]
+    before = appmod.settings().get("deskMaxLive")
+    client.put("/settings", json={"deskMaxLive": n})
+    try:
+        yield
+    finally:
+        client.put("/settings", json={"deskMaxLive": before})
+
+
+def test_a_desk_job_fire_opens_one_desk_with_the_brief_in_plan_mode() -> None:
+    job = make_desk_job("desk job")
+    assert job["target"] == "desk" and job["desk_autonomy"] == "plan", "a desk job plans first unless told otherwise"
+    with desk_cap(0):
+        fired = tick(T0 + HOUR + 10)
+    assert len(fired) == 1 and fired[0]["run_id"]
+    made = job_desks(job["id"])
+    assert len(made) == 1, "one slot, one desk"
+    desk = made[0]
+    assert desk["brief"] == "Write the weekly report folder" and desk["autonomy"] == "plan"
+    assert desk["status"] != "draft", "it was started, not left for the user to start"
+    assert job_runs(job["id"]) == [], "a desk job does not also fire a chat run"
+    conv = appmod.convos.get(desk["conversation_id"], with_messages=False)
+    assert conv["settings"]["deskId"] == desk["id"] and conv["settings"]["jobDueAt"] == T0 + HOUR
+    assert any(e["desk_id"] == desk["id"] for e in j("GET", "/inbox")["needs_you"]["desks"]), "the inbox links the desk"
+
+
+def test_a_desk_job_refuses_ask_autonomy_and_unknown_targets() -> None:
+    base = {"name": "desk api", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC", "target": "desk"}
+    j("POST", "/jobs", {**base, "desk_autonomy": "ask"}, expect=400)
+    j("POST", "/jobs", {**base, "target": "rocket"}, expect=400)
+    made = j("POST", "/jobs", {**base, "desk_autonomy": "propose", "desk_budget": {"maxTurns": 3}})
+    assert made["target"] == "desk" and made["desk_autonomy"] == "propose" and made["desk_budget"] == {"maxTurns": 3}
+    j("PATCH", f"/jobs/{made['id']}", {"desk_autonomy": "ask"}, expect=400)
+    plain = j("POST", "/jobs", {**base, "target": "run"})
+    assert plain["target"] == "run"
+    j("PATCH", f"/jobs/{plain['id']}", {"target": "desk", "desk_autonomy": "ask"}, expect=400)
+    assert j("PATCH", f"/jobs/{plain['id']}", {"target": "desk"})["desk_autonomy"] == "plan"
+    j("POST", f"/jobs/{plain['id']}/dry_run", expect=400)
+    for x in (made, plain):
+        j("DELETE", f"/jobs/{x['id']}")
+
+
+def test_a_desk_job_at_the_live_cap_creates_its_desk_unstarted_and_says_so() -> None:
+    job = make_desk_job("capped desk job")
+    conv = appmod.convos.create(None, "busy", "test-model")
+    busy = appmod.desks.create(conversation_id=conv["id"], brief="already working")
+    with appmod.db.tx() as c:
+        c.execute("UPDATE desks SET status='working' WHERE id=?", (busy["id"],))
+    try:
+        with desk_cap(1):
+            fired = tick(T0 + HOUR + 10)
+    finally:
+        with appmod.db.tx() as c:
+            c.execute("UPDATE desks SET status='stopped' WHERE id=?", (busy["id"],))
+    assert len(fired) == 1 and fired[0]["run_id"] is None
+    made = job_desks(job["id"])
+    assert len(made) == 1 and made[0]["status"] == "draft", "the slot is not dropped: the desk waits to be started"
+    assert "not started" in (jobs.get(job["id"])["last_skip_reason"] or "")
+    notes = [e for e in appmod.desks.events(made[0]["id"]) if e["kind"] == "note"]
+    assert notes and notes[-1]["needs_you"] and notes[-1]["data"].get("queued") is True
+
+
+def test_a_desk_job_catch_up_opens_exactly_one_desk() -> None:
+    job = make_desk_job("late desk job", "Tidy the inbox folder")
+    with desk_cap(0):
+        fired = tick(T0 + 5 * HOUR + 600)  # four missed slots and the current one
+        assert len(fired) == 1 and fired[0]["missed_slots"] == 4
+        assert tick(T0 + 5 * HOUR + 700) == [], "the gap is closed, not replayed"
+        # The same slot launched again (a retry, a second pass) finds the desk it already opened.
+        again = asyncio.run(appmod._launch_desk_job(jobs.get(job["id"]), fired[0]))  # noqa: SLF001
+    made = job_desks(job["id"])
+    assert len(made) == 1, "one gap, one desk"
+    assert made[0]["brief"].startswith("[This run was scheduled for") and made[0]["brief"].endswith("Tidy the inbox folder")
+    assert again == made[0]["run_id"]
+
+
+def test_a_desk_job_has_at_most_one_open_desk() -> None:
+    job = make_desk_job("hourly desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        tick(T0 + 2 * HOUR + 10)
+        assert len(job_desks(job["id"])) == 1, "an open desk (even one waiting on its plan) blocks the next slot"
+        assert "previous desk still open" in (jobs.get(job["id"])["last_skip_reason"] or "")
+        with appmod.db.tx() as c:
+            c.execute("UPDATE desks SET status='done' WHERE id=?", (first[0]["id"],))
+        tick(T0 + 3 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "once the previous desk finished, the next slot opens a new one"
+
+
+def test_an_archived_desk_does_not_block_its_job() -> None:
+    job = make_desk_job("archived desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        j("PATCH", f"/cowork/desks/{first[0]['id']}", {"archived": True})
+        tick(T0 + 2 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "an archived desk is out of sight, so it does not block the next slot"
+
+
+def test_run_now_with_a_desk_still_open_is_a_409_and_records_no_skip() -> None:
+    job = make_desk_job("manual desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        before = jobs.get(job["id"])["last_skip_reason"]
+        r = j("POST", f"/jobs/{job['id']}/run", expect=409)
+    assert "previous desk still open" in r["detail"]
+    assert jobs.get(job["id"])["last_skip_reason"] == before, "a manual run has no slot to record a skip on"
+    assert len(job_desks(job["id"])) == 1
+
+
+def test_a_desk_job_cannot_carry_a_tool_allowlist() -> None:
+    base = {"name": "narrow", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    narrowed = j("POST", "/jobs", {**base, "allowed_tools": ["current_time"]})
+    j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    switched = j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk"})
+    assert switched["target"] == "desk" and switched["allowed_tools"] is None, "the allowlist is cleared, not kept unenforced"
+    j("PATCH", f"/jobs/{narrowed['id']}", {"allowed_tools": ["current_time"]}, expect=400)
+    j("DELETE", f"/jobs/{narrowed['id']}")
+

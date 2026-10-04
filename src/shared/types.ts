@@ -2081,6 +2081,11 @@ export interface Job {
   model: string | null
   /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
   budget: JobBudget | null
+  /** 'desk': each fire opens a desk with `prompt` as its brief, instead of a proposal-only chat run. */
+  target: 'run' | 'desk'
+  /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
+  desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
+  desk_budget: Record<string, number> | null
 }
 
 export interface JobBudget {

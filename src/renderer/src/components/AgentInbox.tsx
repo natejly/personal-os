@@ -17,6 +17,7 @@ import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { SAFE_MD } from './Message'
+import { AUTONOMY } from './DeskRail'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -306,14 +307,18 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         <option value="always">Notify every run</option>
         <option value="never">Never notify</option>
       </select>
-      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
-        aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
-        <Wrench size={12} />
-      </button>
-      <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
-        onClick={() => void preview()}>
-        <Eye size={12} />
-      </button>
+      {job.target !== 'desk' && (
+        <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
+          aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
+          <Wrench size={12} />
+        </button>
+      )}
+      {job.target === 'desk'
+        ? <span className="muted small" title="Each fire opens a desk with this prompt as its brief">desk · {AUTONOMY.find((a) => a.value === (job.desk_autonomy ?? 'plan'))?.label}</span>
+        : <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+            onClick={() => void preview()}>
+            <Eye size={12} />
+          </button>}
       <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
         onClick={() => setHistory((v) => !v)}>
         <History size={12} />
@@ -398,7 +403,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail', onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail', onlyTools: false, desk: false, autonomy: 'plan' as 'plan' | 'propose' }
 
 /** `/Users/me/Downloads` -> `~/Downloads`, for display. */
 function tildePath(p: string): string {
@@ -489,7 +494,8 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       setErr(refused)
       ok = refused === null
     } else {
-      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools ? picked : null })
+      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
+        ...(f.desk ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}) })
     }
     setBusy(false)
     if (ok) {
@@ -531,11 +537,23 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       {err && <p className="msg-error">{err}</p>}
       {!job && (
         <label className="chip-check-row small">
+          <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
+          <span>Start a desk</span>
+        </label>
+      )}
+      {!job && f.desk && (
+        <select value={f.autonomy} aria-label="How the desk works"
+          onChange={(e) => setF({ ...f, autonomy: e.target.value as 'plan' | 'propose' })}>
+          {AUTONOMY.filter((a) => a.value !== 'ask').map((a) => <option key={a.value} value={a.value} title={a.hint}>{a.label}</option>)}
+        </select>
+      )}
+      {!job && !f.desk && (
+        <label className="chip-check-row small">
           <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
           <span>Only allow some tools</span>
         </label>
       )}
-      {!job && f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
+      {!job && f.onlyTools && !f.desk && <ToolPicker value={picked} onChange={setPicked} />}
     </form>
   )
 }

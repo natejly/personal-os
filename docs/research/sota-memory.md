@@ -12,7 +12,7 @@
 
 **Style.** style.py is strong: verbatim evidence samples (prose filter, dedup by ref, 80/scope), one profile per scope (summary, guidelines, traits, phrases, avoid), lazy relearn every 3 samples, `edited` freezes auto-relearn, injected only for drafting. Weak spots: profile is one global voice per scope, not per register (email vs chat vs doc); no few-shot exemplar injection; no measured stylometrics computed locally (traits are LLM impressions); no evaluation of whether a draft matches.
 
-**Adjacent, already shipped (do not respec).** Skills induction with approve-only gating (learn.Skills, skillbuild.py), activity-habit memories with confidence (insights.py), async LearnWorker, working-memory plan/handles, taint tracking for tool results, pinned memories (user-curated, extractor cannot drop). docs/research.md items M2 (ADD/UPDATE/DELETE reconciliation) is partly shipped as updates/forget; M1 provenance, M3 temporal, M4 sleep-time rewriter, M5 hybrid retrieval, M8 linking are NOT shipped.
+**Adjacent, already shipped (do not respec).** Skills induction with approve-only gating (learn.Skills, skillbuild.py), activity-habit memories with confidence (insights.py), async LearnWorker, working-memory plan/handles, taint tracking for tool results, pinned memories (user-curated, extractor cannot drop). docs/research/roadmap.md items M2 (ADD/UPDATE/DELETE reconciliation) is partly shipped as updates/forget; M1 provenance, M3 temporal, M4 sleep-time rewriter, M5 hybrid retrieval, M8 linking are NOT shipped.
 
 **Weak spots, ranked by user-visible damage:** stale/contradicted facts live forever or are destroyed without trace; candidate set for dedup is just recency; retrieval is lexical only so "my boss" never finds "manager Priya"; duplicate entities fragment the graph; nothing consolidates over time so the list grows into noise; no way to ask "why do you believe this".
 
@@ -30,9 +30,9 @@
 
 **A-MEM** ([paper](https://arxiv.org/html/2502.12110v2)). Each memory is a Zettelkasten note: content, timestamp, LLM keywords, tags, contextual description, embedding of all of them, links. On insert: cosine top-k neighbors, LLM decides links, and neighbors' context/keywords/tags may be rewritten ("memory evolution").
 
-**Hindsight** ([paper](https://arxiv.org/pdf/2512.12818)). Separates world facts, experiences, observations and opinions-with-confidence; retain/recall/reflect operations; recall runs semantic, BM25, graph and temporal strategies and fuses them. Reported to beat Zep and Mem0 on LongMemEval (numbers from the paper as cited in docs/research.md).
+**Hindsight** ([paper](https://arxiv.org/pdf/2512.12818)). Separates world facts, experiences, observations and opinions-with-confidence; retain/recall/reflect operations; recall runs semantic, BM25, graph and temporal strategies and fuses them. Reported to beat Zep and Mem0 on LongMemEval (numbers from the paper as cited in docs/research/roadmap.md).
 
-**ChatGPT / Claude consumer memory** (as documented in docs/research.md): background "dreaming" that rewrites time-sensitive memories, editable per-topic summaries.
+**ChatGPT / Claude consumer memory** (as documented in docs/research/roadmap.md): background "dreaming" that rewrites time-sensitive memories, editable per-topic summaries.
 
 **Style learning.** No open-source memory system has serious style learning; the closest practice is few-shot exemplar retrieval of the user's own text plus measured stylometrics. style.py already leads the memory systems here; the remaining gap is exemplars and per-register profiles.
 

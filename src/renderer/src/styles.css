@@ -1542,9 +1542,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
 /* ---------- Sidebar project groups ---------- */
-/* A group reads as a header and its recent lines, the way Claude's own sidebar does: the folder
-   carries the project colour, so no dot or count competes with the name, and the rows under it are
-   indented to the header's text, not to its icon. */
+/* A group reads as a header and its recent lines: the folder carries the project colour, so no dot
+   or count competes with the name, and the rows under it are indented to the header's text, not to
+   its icon. */
 .icon-btn.xs { width: 16px; height: 16px; margin-left: -4px; }
 .project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }

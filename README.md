@@ -5,23 +5,30 @@
 Grain is a personal AI operating system for your desktop. Chat with any model through
 [LiteLLM](https://docs.litellm.ai/) (Fireworks AI out of the box), give the
 assistant tools, and let it build memory and a knowledge graph about you as you
-go. Organise work into **projects** the way Claude does: groups of chats with
-their own instructions, knowledge files, memories and graph.
+go. Organise work into **projects**: groups of chats with their own
+instructions, files, memories and graph.
 
 ```
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
-│ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Todos      3 │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Memory    19 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
-│ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ PROJECTS   + │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ ■ Grain      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ RECENTS      │  └───────────────┘ └───────────────┘ │   run python │
-│ · …          │                                      │   gmail send │
-│ · …          │  [Brief me]                          │  Last reply… │
+│ Today      2 │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
+│ Boards       │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
+│ Files        │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ Cowork       │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ Library      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
+│ SPACES     + │  └───────────────┘ └───────────────┘ │   run python │
+│ ▦ Space 1    │                                      │   gmail send │
+│ PROJECTS   + │  [Brief me]                          │  Last reply… │
+│ ■ Grain      │                                      │              │
+│ RECENTS      │                                      │              │
+│ · …          │                                      │              │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
+
+Todos, Calendar, Mail and Health are apps in the title bar, at the top right of
+every view. Meetings and Activity join the sidebar once turned on in
+Settings → Modules.
 
 ## Features
 
@@ -41,7 +48,7 @@ their own instructions, knowledge files, memories and graph.
   timing, and every reply carries an execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
-- **Memory.** One panel holding what the app remembers about you, over a shared
+- **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
   scope filter and search box — the first two halves side by side, either alone,
   or the voice profile on its own:
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
@@ -58,17 +65,37 @@ their own instructions, knowledge files, memories and graph.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Documents.** Upload any file up to 20 MB. Text, PDF, and Word are read; other files are kept by name. Chunked,
-  full-text indexed, best excerpts pulled into replies.
-- **Docs.** Writing of your own, in an editor rather than an upload box:
-  markdown and LaTeX, a line-numbered editor beside a live preview, and full
-  revision history. The assistant can read and revise a doc — but its edits are
-  *proposed*, never written straight in. Each one arrives as a diff you accept
-  or reject, so you can point a model at prose you care about. Notes features:
-  a `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a daily
-  note. On macOS any doc can be recorded or dictated into, with the transcript
-  kept apart from the text and a summary proposed for you to accept. See
-  [docs/docs-editor.md](docs/docs-editor.md).
+- **Files.** One view with three sections:
+  - *Notes* — writing of your own, in an editor rather than an upload box:
+    markdown and LaTeX, a line-numbered editor beside a live preview, folders
+    per project, and full revision history. The assistant can read and revise
+    a note. By default its edits are *proposed*: each one arrives as a diff you
+    accept or reject, so you can point a model at prose you care about.
+    Settings → Tools → **Document edits** → *Accept all* writes them straight
+    in instead, still showing the diff and still undoable from the history.
+    A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
+    daily note. On macOS any note can be recorded or dictated into, with the
+    transcript kept apart from the text and a summary proposed for you to
+    accept. See [docs/docs-editor.md](docs/docs-editor.md).
+  - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other
+    files are kept by name. Chunked, indexed, and the best excerpts pulled
+    into replies.
+  - *Pages* — interactive HTML pages (artifacts) the assistant builds and
+    revises with the `artifact_*` tools. A page renders sandboxed with no
+    network access, every version is kept and restorable, and a page can sit
+    on a space as a window.
+- **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
+  space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes, boards,
+  todos, calendar, memory, pages, dashboard widgets and a web browser sit side
+  by side; drag anything from the sidebar or right-click to add. A window can
+  pop out into its own OS window, pinned on top and see-through, and one
+  global shortcut gathers them all. Save a space as a preset, lock it so
+  neither you nor the assistant can rearrange it, and let the assistant add
+  windows with the `space_*` and `widget_*` tools. See
+  [docs/spaces.md](docs/spaces.md).
+- **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
+  with goals, a Today card, and `health_*` tools for the assistant. COROS and
+  Garmin sync through MCP. See [docs/health.md](docs/health.md).
 - **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text
   you type, microphone and system audio — summarizes it every few minutes, and
@@ -112,7 +139,10 @@ their own instructions, knowledge files, memories and graph.
   ask as it goes (one card per change), and propose only (it may plan an external
   action and never perform one). Nothing it writes reaches the app until you accept
   it: it works in `cowork/<desk>/` and nominates files for review, and every
-  promotion is read back before it counts. A card nobody is watching parks after a
+  promotion is read back before it counts. An accepted output goes where you
+  send it: a new note or an append to one, an upload, a download, todos (one per
+  checklist line), a page (an HTML or SVG file), or a Gmail draft (a file with
+  To and Subject headers; drafted, never sent). A card nobody is watching parks after a
   few minutes — the run lets go, the card stays pending and decidable, and answering
   it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
   A chat can hand work to a desk (`desk_start`) along with the docs it needs, which
@@ -126,8 +156,9 @@ their own instructions, knowledge files, memories and graph.
   to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
   opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
-  the procedures it can be asked to repeat; **Connectors**, the MCP servers whose
-  tools join the toolbox; and **Made**, every doc, dashboard and board built here.
+  the procedures it can be asked to repeat; **Workflows**, multi-step jobs you
+  approve once; **Agents** and **Commands**, the roles and prompt templates you
+  write; and **Connectors**, the MCP servers whose tools join the toolbox.
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -179,8 +210,10 @@ their own instructions, knowledge files, memories and graph.
   sandboxed iframe and fetches data through the backend (keys never reach the
   widget). "AI summary" widgets turn any source into a short briefing. Revise a
   widget by telling it what to change.
-- **Google Workspace.** Sign in once with your own OAuth client; calendar,
-  Gmail and Tasks become dashboard widgets and assistant tools.
+- **Google Workspace.** Sign in once with your own OAuth client; Calendar,
+  Gmail, Tasks, Drive, Docs and Sheets become dashboard widgets and assistant
+  tools. Connecting turns on two-way Tasks sync with your todos and creates a
+  "Grain Todos" calendar that mirrors todos with a due date.
 - **Sign in with ChatGPT.** *(Planned — not shipped yet.)* Connect an OpenAI
   account the way Google connects today: an OAuth flow that opens in the browser
   and returns to the app on a loopback URL, the token stored in the local
@@ -198,7 +231,7 @@ their own instructions, knowledge files, memories and graph.
   LiteLLM's `ollama/` route): activity summaries, meeting enhance, auto-learn
   over mail and keystrokes, voice extraction from your docs. If that model is
   down, those jobs skip or fail closed instead of forwarding the payload to
-  Fireworks. That is the air-gap switch a Palantir-style deploy would use:
+  Fireworks. That is the air-gap switch an on-premises deploy would use:
   private data stays on the box; only ordinary chat hits a remote API.
   `extractionModel` today is just a cheaper LiteLLM name, not an on-device
   guarantee. Audio already has a local path (whisper.cpp); this is the same
@@ -281,7 +314,8 @@ opens in the browser and returns to the app on a loopback URL. The OAuth client
 the app signs in with is set up once per install:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-   create a project and enable the **Calendar**, **Gmail** and **Tasks** APIs.
+   create a project and enable the **Calendar**, **Gmail**, **Tasks**,
+   **Drive**, **Docs** and **Sheets** APIs.
 2. Configure the OAuth consent screen (External; add yourself as a test user).
    Publishing it, or making it Internal on a Workspace account, avoids the
    7-day refresh-token expiry that "Testing" apps have.
@@ -297,9 +331,14 @@ Restart the app after editing `.env` — the client is read when the backend sta
 If `.env` has no client, the Settings panel falls back to asking for one, and a
 client pasted there always overrides the one from `.env`.
 
-Scopes: `calendar`, `gmail.modify`, `tasks`, `email`. Tokens live in the local
-database. `gmail_send` is a separate tool you can keep off; `gmail_draft` never
-sends.
+Scopes: `calendar`, `gmail.modify`, `tasks`, `drive.readonly`, `drive.file`,
+`documents` and `spreadsheets`, plus `openid` and `email` to know which account
+signed in. Tokens live in the local database. `gmail_send` is a separate tool
+you can keep off; `gmail_draft` never sends.
+
+Connecting turns on two-way sync between your todos and Google Tasks, and
+creates a calendar named "Grain Todos" that mirrors every todo with a due date.
+Both can be switched off under Integrations.
 
 When a token is revoked, expires (a "Testing" consent screen kills refresh
 tokens after 7 days) or is missing a permission that was unticked on the consent
@@ -373,10 +412,13 @@ and its verdict is kept on the row.
 
 | Shortcut | Action |
 |---|---|
+| ⌘K | Command palette (link while typing in a doc) |
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
-| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Knowledge base |
-| ⌘7 | Memory, opened on the knowledge graph |
+| ⌘U | Upload file (Files → Uploads) |
+| ⌘0 … ⌘5 | Today / Chats / Todos / Calendar / Boards / Dashboards |
+| ⌘6 / ⌘7 | Settings → Memory / its knowledge graph |
+| ⌘8 | Files → Uploads |
 | ⌘9 | Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
 | ⌘⇧K | Cowork |
@@ -386,10 +428,13 @@ and its verdict is kept on the row.
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
 | ⌘I | Ask about this page |
 | ⌃⌘I | Toggle context panel |
-| ⌘⇧C | Toggle Spaces |
-| ⌘U | Upload document |
-| ⌘, | Settings |
+| ⌘⇧C | Toggle Spaces (Spaces menu) |
+| ⌃1 … ⌃9 | Go to space 1–9 |
+| ⌘, | Settings: Provider & cost, Memory, Integrations, Meetings, Tools, Modules, Behavior, Data |
 | Enter / Shift+Enter | Send / newline |
+
+A view turned off in Settings → Modules keeps its shortcut, which then offers
+to turn the view back on instead of opening it.
 
 ## How a reply is built
 
@@ -622,15 +667,17 @@ backend/personal_os app.py routes · repos.py storage · context.py · learn.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
-docs/research.md    Feature research and roadmap
+docs/research/      Feature research, the roadmap, per-track source reports
 docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
+docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
+docs/health.md      Health: metrics and connected services
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
 ```
 
 ## Roadmap
 
-See [docs/research.md](docs/research.md) for the researched roadmap across
+See [docs/research/roadmap.md](docs/research/roadmap.md) for the researched roadmap across
 memory, retrieval, app features, life-OS features and agentic capabilities,
 with the per-track source reports under [docs/research/](docs/research/).
 

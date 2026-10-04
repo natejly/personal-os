@@ -877,7 +877,7 @@ planning   = plan is None and (bool(desk) or mode_pref != "off")
 ```
 
 A desk always plans its first run: `POST /cowork/desks` writes `planMode: "always"` into the new conversation's
-settings. `'auto'` is the Claude Code feel — see §4.7.
+settings. `'auto'` lets a reply act until its first mutating call, then switches it to planning — see §4.7.
 
 ### 4.2 Guard 1 — the model is never offered the tool
 
@@ -1060,8 +1060,8 @@ Identical code path with `desk_id=None`. The composer gets a toggle (⌘⇧P) wr
   reads `conv` once at `app.py:485` and keeps using the in-memory `conv["settings"]` for the whole reply; the
   flip mutates that in-memory copy only. This is the same documented in-memory mutation the approval path
   already performs at `app.py:722`, and it must carry the same kind of comment.
-* The card renders inline in the assistant bubble, from the `plan` SSE event, exactly where Claude Code's plan
-  appears.
+* The card renders inline in the assistant bubble, from the `plan` SSE event, in the reply's own flow where
+  the plan was proposed.
 
 ### 4.8 Editing a plan
 

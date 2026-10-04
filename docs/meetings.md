@@ -170,7 +170,7 @@ auto-start writes the reason onto the row instead of failing silently.
 
 **Meetings never reach auto-learn.** Nothing feeds a meeting into
 `learn_from_exchange`, which writes durable memories re-injected into unrelated
-chats. docs/research.md:216 already flags auto-learn as an injection-persistence
+chats. docs/research/roadmap.md:216 already flags auto-learn as an injection-persistence
 channel, and anything said on a call becoming a permanent memory is worse.
 
 **Transcripts are untrusted third-party content.** `meeting_search` and
@@ -379,8 +379,8 @@ Logic lives in `meeting_import.py`; progress is the existing segments poll.
 In the UI: the **Meetings** view (⌘⇧M, or the sidebar row), an **Upcoming
 meetings** card on Today, and a live-recording indicator in the sidebar visible
 from every view. The sidebar badge is the number of enhance proposals awaiting
-review, not a meeting count. The sidebar row and the Today card are both on by
-default and hideable in Settings → Modules; *recording* is a separate switch
+review, not a meeting count. The sidebar row and the Today card both ship off
+and are turned on in Settings → Modules; *recording* is a separate switch
 (`meetings.enabled` plus the consent acknowledgement) and is off.
 
 ## Limits

@@ -39,7 +39,7 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 ### frontend-module — the todos `ModuleDef`
 | Path | Note |
 |---|---|
-| `src/renderer/src/features/todos/module.tsx` | new. `export const todosModule: ModuleDef`: `view: { id: 'todos', Component: TodosView, optional: true }`, `nav: { section: 'main', order: 15, badge: s => s.dashboard?.todo_stats.open ?? null }`, `widget` = the existing `def` from `canvas/widgets/todos`, `home: { key: 'todos', label: 'Todos', Card: TodosCard }`. |
+| `src/renderer/src/features/todos/module.tsx` | new. `export const todosModule: ModuleDef`: `view: { id: 'todos', Component: TodosView, optional: true }`, `nav: { section: 'apps', order: 0, badge: s => s.dashboard?.todo_stats?.open ?? null }` (an `apps` entry sits in the title-bar app strip, not the sidebar), `widget` = the existing `def` from `canvas/widgets/todos`, `home: { key: 'todos', label: 'Todos', Card: TodosCard }`. |
 | `src/renderer/src/features/todos/TodosCard.tsx` | new. The Today card, moved verbatim out of `HomeView.tsx` (the `<section className="widget">` at ~line 147). |
 
 `TodosView.tsx`, `TodoItem.tsx` and `canvas/widgets/todos.tsx` do **not** move in the pilot.

@@ -31,7 +31,7 @@
 4. Stdio only, with no remote servers or OAuth, no registry or bundle install, and no secrets-in-keychain story beyond the `secrets` column.
 5. Skills are not portable.
 
-`docs/research.md` G43 (skills manifest, `view_skill`, `$name`) and G52-54 are partly shipped: the MCP client, grants and hash pinning exist, but the manifest/`view_skill` half of G43 is not.
+`docs/research/roadmap.md` G43 (skills manifest, `view_skill`, `$name`) and G52-54 are partly shipped: the MCP client, grants and hash pinning exist, but the manifest/`view_skill` half of G43 is not.
 
 ### What the best open-source systems do
 

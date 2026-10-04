@@ -21,7 +21,7 @@
 
 **UI.** `CalendarView/CalendarWeek/EventEditor.tsx` do the week grid and full editor. `MailView.tsx` has folder/label/date filters, debounced Gmail `q` search, star/archive, compose and reply. `TodosView.tsx` is a 116-line list. `BoardsView.tsx` is a plain kanban.
 
-**docs/research.md status.** Its L7 (email triage, awaiting-reply detection), L9 (people memory), the `syncToken`/`history.list` recommendation, and G73 (arrival trigger) remain unbuilt here. G17 (outbox) and G38 (`todo_write`) have shipped.
+**docs/research/roadmap.md status.** Its L7 (email triage, awaiting-reply detection), L9 (people memory), the `syncToken`/`history.list` recommendation, and G73 (arrival trigger) remain unbuilt here. G17 (outbox) and G38 (`todo_write`) have shipped.
 
 ### What the best open-source systems do
 
@@ -129,7 +129,7 @@ UI: TodosView gets an estimate input (minutes) on each item and a 'Plan my day' 
 
 #### mail-1: Reply tracker: needs-reply / awaiting-reply thread status with follow-up proposals (M)
 
-**Why.** There is no thread model: google.py has no threads.get, MailView only lists messages, and nothing tells the user which sent emails are unanswered or which received ones need a reply (docs/research.md L7 is still open). Inbox Zero's Reply Zero keeps four statuses (TO_REPLY, AWAITING_REPLY, FYI, ACTIONED) per thread, scans all messages for questions/requests and who promised what, and skips FYI when the user sent last (PR #3787). A header-heuristic classifier with an optional stubbed LLM refinement delivers most of the value offline and stays read-only and proposal-only.
+**Why.** There is no thread model: google.py has no threads.get, MailView only lists messages, and nothing tells the user which sent emails are unanswered or which received ones need a reply (docs/research/roadmap.md L7 is still open). Inbox Zero's Reply Zero keeps four statuses (TO_REPLY, AWAITING_REPLY, FYI, ACTIONED) per thread, scans all messages for questions/requests and who promised what, and skips FYI when the user sent last (PR #3787). A header-heuristic classifier with an optional stubbed LLM refinement delivers most of the value offline and stays read-only and proposal-only.
 
 **Files.** `backend/personal_os/mailwatch.py (new: classifier + store)`, `backend/personal_os/modules/mailwatch.py (new Module: routes, tool, today())`, `backend/personal_os/modules/__init__.py (append MailWatchModule to build_modules)`, `backend/personal_os/google.py (add gmail_threads_recent + _gmail_thread_meta, nothing else)`, `backend/personal_os/llm.py (DEFAULT_SETTINGS['mailWatch'])`, `backend/tests/test_mailwatch.py (new)`, `src/renderer/src/components/MailView.tsx (status filter chips: Needs reply / Awaiting reply)`, `src/renderer/src/components/TodosView.tsx or Today card (optional: show suggested follow-ups; keep UI small)`
 

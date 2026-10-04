@@ -8,6 +8,7 @@ import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
+import { compactCommand, compactNow } from '../lib/compact'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
 
 interface ComposerProps {
@@ -125,6 +126,20 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!text.trim()) return
     const k0 = key
     const t = text
+    // "/compact [focus]" summarizes this chat's history instead of sending a message.
+    const focus = onSend ? null : compactCommand(t)
+    if (focus !== null) {
+      const { toast } = useStore.getState()
+      if (!activeId) return toast('Nothing to compact yet: this chat has no history.', 'info')
+      try {
+        const res = await compactNow(activeId, focus)
+        dropDraft(k0)
+        toast(res.compacted ? 'Earlier messages were summarized.' : 'Nothing old enough to compact yet.', 'info')
+      } catch (e) {
+        toast(`Could not compact: ${(e as Error).message}`, 'error')
+      }
+      return
+    }
     const entry = getDraft(k0)
     // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
     // relaunch only the draft remembers it, so it is re-armed here before the send reads it.

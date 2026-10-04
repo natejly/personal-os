@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
 import { fmtCost, usageLine } from '../lib/chatMeta'
+import { compactNow } from '../lib/compact'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
   return (
@@ -25,6 +26,8 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
   const [spent, setSpent] = useState<ConversationUsage | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Null while closed; otherwise the optional "Keep focus on…" text for the next compaction. */
+  const [focus, setFocus] = useState<string | null>(null)
   const load = (): void => {
     void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null))
     // Its own catch: a failed usage read must leave the meter standing.
@@ -53,8 +56,20 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
       </div>
       <div className="ctx-meta">
         <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
-        <button className="link" disabled={busy} onClick={() => void act(() => api.compactConversation(conversationId))}>{busy ? 'compacting…' : 'Compact now'}</button>
+        {focus === null && <button className="link" disabled={busy} onClick={() => setFocus('')}>{busy ? 'compacting…' : 'Compact now'}</button>}
       </div>
+      {focus !== null && (
+        <form className="ctx-compact-focus" onSubmit={(e) => { e.preventDefault(); const f = focus; void act(async () => {
+          const res = await compactNow(conversationId, f)
+          setFocus(null) // closed only on success: a failure keeps the typed focus for a retry
+          if (!res.compacted) setError('Nothing old enough to compact yet.')
+        }) }}>
+          <input autoFocus aria-label="Keep focus on" placeholder="Keep focus on… (optional)" value={focus} disabled={busy}
+            onChange={(e) => setFocus(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setFocus(null) } }} />
+          <button type="submit" className="link" disabled={busy}>{busy ? 'compacting…' : 'Compact'}</button>
+          <button type="button" className="link" disabled={busy} onClick={() => setFocus(null)}>Cancel</button>
+        </form>
+      )}
       {spentLine && <div className="ctx-usage" title={spentTitle}>{spentLine}</div>}
       {error && <p className="muted small">{error}</p>}
       {meter.summary && (

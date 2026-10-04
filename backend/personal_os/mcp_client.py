@@ -39,7 +39,7 @@ from anyio.abc import TaskGroup
 from mcp import ClientSession, Implementation, StdioServerParameters, stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-from . import mcp_drift
+from . import mcp_drift, redact
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
 
@@ -225,6 +225,18 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
+def _public_value(value: Any) -> Any:
+    """Credentials out of a tool result. The server's own payload is not stored here."""
+    if isinstance(value, str):
+        return redact.scrub_command_output(value)
+    if isinstance(value, list):
+        return [_public_value(item) for item in value]
+    if isinstance(value, dict):
+        return {(redact.scrub_command_output(key) if isinstance(key, str) else key): _public_value(item)
+                for key, item in value.items()}
+    return value
+
+
 def _result_dict(result: Any) -> dict[str, Any]:
     """A CallToolResult as plain JSON for the chat loop. Text blocks win; others are named."""
     parts: list[str] = []
@@ -234,13 +246,13 @@ def _result_dict(result: Any) -> dict[str, Any]:
             parts.append(str(text))
         else:
             parts.append(f"[{getattr(block, 'type', type(block).__name__)} content]")
-    content = "\n".join(parts)
+    content = _public_value("\n".join(parts))
     if len(content) > MAX_RESULT_CHARS:
         content = content[:MAX_RESULT_CHARS] + f"\n[truncated at {MAX_RESULT_CHARS} chars]"
     out: dict[str, Any] = {"content": content, "is_error": bool(getattr(result, "is_error", False))}
     structured = getattr(result, "structured_content", None)
     if structured is not None:
-        out["structured"] = structured
+        out["structured"] = _public_value(structured)
     if out["is_error"]:
         out["error"] = content or "the tool reported an error"
     return out

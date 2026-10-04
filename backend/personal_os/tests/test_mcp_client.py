@@ -33,6 +33,30 @@ def tool(name: str, description: str = "Does a thing.", parameters: dict[str, An
             if parameters is None else parameters, **extra}
 
 
+class _Block:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _CallResult:
+    def __init__(self, content: list[Any], structured: Any = None, is_error: bool = False) -> None:
+        self.content = content
+        self.structured_content = structured
+        self.is_error = is_error
+
+
+class TestResultText(unittest.TestCase):
+    def test_a_token_in_a_tool_result_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        out = mcp_client._result_dict(_CallResult(
+            [_Block(f"key {pat}")], {"note": pat, "ok": True},
+        ))
+        self.assertNotIn(pat, out["content"])
+        self.assertIn("[github-pat]", out["content"])
+        self.assertEqual(out["structured"], {"note": "[github-pat]", "ok": True})
+        self.assertFalse(out["is_error"])
+
+
 class TestStaticEval(unittest.TestCase):
     def codes(self, report: dict[str, Any]) -> set[str]:
         return {f["code"] for f in report["findings"]}

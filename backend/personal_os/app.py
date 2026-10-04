@@ -58,7 +58,7 @@ from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthSto
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTO_RESUME_FROM, AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, AUTONOMY, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -3344,20 +3344,6 @@ async def _desk_supervisor(desk_id: str, run: Run) -> None:
             _drain_queue()  # this chain's slot is free now
         except Exception:  # noqa: BLE001 - a queued desk failing to launch must not mask how this one ended
             log.exception("desk queue drain after %s failed", desk_id)
-
-
-# Which statuses each entry point may claim a desk out of. `claim_run`'s rowcount is the lock, so a
-# double-clicked Start makes one run, not two.
-START_FROM = ("draft",)
-# `awaiting_plan` is resumable too: a restart strands a desk on a plan card nobody is waiting on,
-# and Desks.recover() sweeps that status, so Resume has to be able to claim out of it.
-RESUME_FROM = ("awaiting_plan", "blocked", "paused", "interrupted", "review")
-# A typed message may also wake a desk the user had let finish — the same box, awake or not.
-MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped")
-# Pause holds a desk that is doing something; pausing one in review or done would make it resumable
-# work it is not. Stop ends anything not already over.
-PAUSE_FROM = (*DESK_LIVE, "awaiting_plan")
-STOP_FROM = ("draft", *DESK_LIVE, "awaiting_plan", "blocked", "paused", "interrupted", "queued")
 
 
 def _over_live_cap() -> bool:
@@ -7721,6 +7707,8 @@ class AcceptItem(BaseModel):
     title: str | None = None
     doc_id: str | None = None
     project_id: str | None = None
+    # The user saw the file had moved on since delivery and wants the bytes that are there now.
+    accept_stale: bool = False
 
 
 class AcceptIn(BaseModel):
@@ -7769,11 +7757,15 @@ def _outputs_view(desk_id: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for o in desks.outputs(desk_id):
         row = dict(o)
-        if o["status"] in ("proposed", "stale"):
+        if o["status"] in UNDECIDED:
+            # `stale` rides on a failed row too: a promotion refused for changed bytes is
+            # promote_failed, and its retry still has to offer "Accept current file".
             try:
-                row["status"] = "proposed" if workspace.sha(desk_id, o["path"]) == o["sha256"] else "stale"
+                row["stale"] = workspace.sha(desk_id, o["path"]) != o["sha256"]
             except WorkspaceError as e:
-                row["status"], row["error"] = "stale", str(e)
+                row["stale"], row["error"] = True, str(e)
+            if o["status"] != "promote_failed":
+                row["status"] = "stale" if row["stale"] else "proposed"
         rows.append(row)
     return rows
 
@@ -8228,21 +8220,31 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
     if dest not in ("doc", "doc_append", "document", "download"):
         return {"ref": None, "verified": False, "error": f"unknown destination {dest!r}"}
     title = (item.title or out["title"] or Path(rel).name).strip()
+    # Review happened on the bytes that were delivered, so those are the only bytes that ship unless
+    # the user saw the change and asked for the current file. Every destination, not just download.
+    try:
+        sha = workspace.sha(desk_id, rel)
+    except WorkspaceError as e:
+        return {"ref": None, "verified": False, "error": str(e)}
+    fresh_sha = None
+    if sha != out["sha256"]:
+        if not item.accept_stale:
+            return {"ref": None, "verified": False, "error": "the file has changed since it was delivered"}
+        fresh_sha = sha
+    # A stale accept records the digest it shipped, so the row says which bytes were promoted.
+    return {**await _promote_to(desk_id, rel, title, item), "sha256": fresh_sha}
+
+
+async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> dict[str, Any]:
+    """The destination half of _promote, on bytes it has already checked against the delivery."""
+    dest = item.destination
     if dest == "download":
         # Nothing enters the app, so the hand-off IS the file: `ref` is the path GET
-        # /cowork/desks/{id}/download serves, and the read-back is that file still being there and
-        # still being the bytes this output was declared with. Without both, the row would read
-        # promoted and verified having given the user nothing at all.
-        try:
-            p = workspace.resolve_in(desk_id, rel)
-        except WorkspaceError as e:
-            return {"ref": None, "verified": False, "error": str(e)}
-        if not p.is_file():
-            return {"ref": None, "verified": False, "error": "the file is no longer in the workspace"}
-        ok = hashlib.sha256(p.read_bytes()).hexdigest() == out["sha256"]
-        return {"ref": rel, "verified": ok,
-                "error": None if ok else "the file has changed since it was delivered"}
-    content = _read_whole(desk_id, rel)
+        # /cowork/desks/{id}/download serves, and the read-back is _promote's hash, which only a
+        # file still in the workspace could have answered.
+        return {"ref": rel, "verified": True, "error": None}
+    # Only the text destinations read text: a workbook or a PDF goes to `document` as bytes, below.
+    content = _read_whole(desk_id, rel) if dest in ("doc", "doc_append") else ""
     if dest == "doc":
         doc = docs.create(title, content, wsid(item.project_id) if item.project_id else None)
         fresh = docs.get(doc["id"])
@@ -8320,6 +8322,9 @@ async def accept_outputs(id: str, body: AcceptIn) -> dict[str, Any]:
         args = {"output_id": item.output_id, "destination": item.destination, "doc_id": item.doc_id,
                 "claimed_at": claimed.get("decided_at")}
 
+        if item.accept_stale:
+            args["accept_stale"] = True
+
         async def _fn(o: dict[str, Any] = out, it: AcceptItem = item) -> Any:
             return await _promote(id, o, it)
 
@@ -8333,7 +8338,8 @@ async def accept_outputs(id: str, body: AcceptIn) -> dict[str, Any]:
         ref, ok = booked.get("ref"), bool(booked.get("verified"))
         err = booked.get("error")
         try:
-            desks.finish_output(item.output_id, kind=item.destination, ref=ref, verified=ok)
+            desks.finish_output(item.output_id, kind=item.destination, ref=ref, verified=ok,
+                                sha256=booked.get("sha256") if ok else None)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         results.append({"output_id": item.output_id, "ok": ok, "verified": ok,

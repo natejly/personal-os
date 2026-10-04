@@ -1550,6 +1550,8 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; dr
 
 export interface DeskBudget { maxTurns?: number; maxCost?: number }
 
+export type DeskAction = 'start' | 'pause' | 'resume' | 'stop' | 'message' | 'delete'
+
 export interface Desk {
   id: string
   conversation_id: string
@@ -1576,6 +1578,8 @@ export interface Desk {
   live: boolean
   /** Derived: unseen `needs_you` events on this desk. */
   unseen: number
+  /** Derived from the backend's transition tables: what may be done to the desk in this status. */
+  actions: DeskAction[]
   created_at: number
   updated_at: number
   ended_at: number | null
@@ -1621,6 +1625,8 @@ export interface DeskOutput {
   decided_at: number | null
   /** Set by GET .../outputs when the file could not be re-hashed at all. */
   error?: string
+  /** Undecided rows only: the file on disk no longer matches `sha256`. Survives a refused promotion. */
+  stale?: boolean
 }
 
 export type DeskFileState = 'new' | 'modified' | 'unchanged'

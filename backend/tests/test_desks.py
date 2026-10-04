@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.cowork import (  # noqa: E402
     AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, HEADLINE_FLUSH_S, LIVE, NEEDS_YOU,
-    OUTPUT_KINDS, RECOVER_FROM, STATUSES, DeskRuntime, Desks,
+    DELETE_FROM, MESSAGE_FROM, OUTPUT_KINDS, PAUSE_FROM, RECOVER_FROM, RESUME_FROM, START_FROM, STATUSES,
+    STOP_FROM, DeskRuntime, Desks, desk_actions,
 )
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Conversations  # noqa: E402
@@ -68,6 +69,24 @@ def test_constants() -> None:
         check(frag and frag == frag.strip(), "the prompt fragments are non-empty and unpadded")
     check("desk_deliver" in DESK_HINT and "desk_ask" in DESK_HINT and "desk_done" in DESK_HINT,
           "DESK_HINT names the three tools that end a turn honestly")
+
+
+def test_actions_are_read_off_the_transition_tables() -> None:
+    tables = {"start": START_FROM, "pause": PAUSE_FROM, "resume": RESUME_FROM, "stop": STOP_FROM,
+              "message": MESSAGE_FROM, "delete": DELETE_FROM}
+    for status in STATUSES:
+        want = {name for name, allowed in tables.items() if status in allowed}
+        check(set(desk_actions(status)) == want, f"{status}: {desk_actions(status)} != {sorted(want)}")
+    # The cases the pane's own status lists used to get wrong.
+    check("resume" in desk_actions("review") and "resume" in desk_actions("awaiting_plan"), "review/awaiting_plan resume")
+    check("pause" in desk_actions("needs_approval") and "pause" in desk_actions("awaiting_plan"), "needs_approval pauses")
+    check("stop" in desk_actions("interrupted") and "stop" in desk_actions("draft"), "interrupted and draft stop")
+    check(desk_actions("done") == ["message", "delete"], "a finished desk can only be woken or deleted")
+    d = fresh()
+    check(d["actions"] == desk_actions("draft") and desks.get(d["id"])["actions"] == d["actions"],
+          "every desk row carries its actions")
+    desks.set_status(d["id"], "review")
+    check(desks.get(d["id"])["actions"] == desk_actions("review"), "and they follow the status")
 
 
 def test_create() -> None:
@@ -445,7 +464,7 @@ def test_runtime_debounce() -> None:
     check(HEADLINE_FLUSH_S == 1.0, "the window is the documented one")
 
 
-TESTS = [test_constants, test_create, test_update_and_list, test_set_status_writes_column_and_event,
+TESTS = [test_constants, test_actions_are_read_off_the_transition_tables, test_create, test_update_and_list, test_set_status_writes_column_and_event,
          test_set_status_is_one_transaction, test_claim_run_is_a_lock,
          test_claim_run_targets_working_once_a_plan_exists, test_claim_output_is_a_lock,
          test_outputs_lifecycle, test_settle, test_live_count_and_charge, test_recover, test_queue,

@@ -115,6 +115,30 @@ RECOVER_FROM = (*LIVE, "awaiting_plan")
 # What auto-resume (deskAutoResume) may relaunch after a restart. `awaiting_plan` is swept by recover()
 # but never auto-resumed: its next step is the user's plan decision, not another turn.
 AUTO_RESUME_FROM = LIVE
+# Which statuses each entry point may claim a desk out of. `claim_run`'s rowcount is the lock, so a
+# double-clicked Start makes one run, not two.
+START_FROM = ("draft",)
+# `awaiting_plan` is resumable too: a restart strands a desk on a plan card nobody is waiting on,
+# and Desks.recover() sweeps that status, so Resume has to be able to claim out of it.
+RESUME_FROM = ("awaiting_plan", "blocked", "paused", "interrupted", "review")
+# A typed message may also wake a desk the user had let finish — the same box, awake or not.
+MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped")
+# Pause holds a desk that is doing something; pausing one in review or done would make it resumable
+# work it is not. Stop ends anything not already over.
+PAUSE_FROM = (*LIVE, "awaiting_plan")
+STOP_FROM = ("draft", *LIVE, "awaiting_plan", "blocked", "paused", "interrupted", "queued")
+# A desk can be deleted once nothing is mid-flight: never while a run or a card holds it.
+DELETE_FROM = ("draft", "interrupted", "done", "failed", "stopped")
+_ACTIONS = (("start", START_FROM), ("pause", PAUSE_FROM), ("resume", RESUME_FROM), ("stop", STOP_FROM),
+            ("message", MESSAGE_FROM), ("delete", DELETE_FROM))
+
+
+def desk_actions(status: str) -> list[str]:
+    """What the desk pane may offer for this status, read off the same tables the routes enforce,
+    so a button and its route can never disagree."""
+    return [name for name, allowed in _ACTIONS if status in allowed]
+
+
 AUTONOMY = ("plan", "ask", "propose")
 OUTPUT_KINDS = ("doc", "doc_append", "document", "download")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
@@ -389,6 +413,7 @@ class Desks:
         d["archived"] = bool(d["archived"])
         d["live"] = d["status"] in LIVE
         d["unseen"] = unseen
+        d["actions"] = desk_actions(d["status"])
         return d
 
     @staticmethod
@@ -785,8 +810,9 @@ class Desks:
         return self._output_view(r)
 
     def finish_output(self, output_id: str, *, kind: str, ref: str | None,
-                      verified: bool) -> dict[str, Any] | None:
-        """An unverified promotion is `promote_failed`, never a tick: the read-back is the evidence."""
+                      verified: bool, sha256: str | None = None) -> dict[str, Any] | None:
+        """An unverified promotion is `promote_failed`, never a tick: the read-back is the evidence.
+        `sha256` replaces the delivered digest when the user accepted a file changed since delivery."""
         if kind not in OUTPUT_KINDS:
             raise ValueError(f"Unknown output destination: {kind}")
         t = now()
@@ -794,8 +820,8 @@ class Desks:
         with self.db.tx() as c:
             cur = c.execute(
                 "UPDATE desk_outputs SET status=?, promoted_kind=?, promoted_id=?, verified=?, updated_at=?,"
-                " decided_at=COALESCE(decided_at, ?) WHERE id=?",
-                (status, kind, ref, int(bool(verified)), t, t, output_id),
+                " decided_at=COALESCE(decided_at, ?), sha256=COALESCE(?, sha256) WHERE id=?",
+                (status, kind, ref, int(bool(verified)), t, t, sha256, output_id),
             )
             if not cur.rowcount:
                 return None

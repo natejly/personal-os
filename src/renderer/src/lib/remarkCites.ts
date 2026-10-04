@@ -57,3 +57,20 @@ export function openCite(c: Citation, view: (c: Citation) => void): void {
 export default function remarkCites(opts: { known: ReadonlySet<number> }): (tree: MdNode) => void {
   return (tree) => walk(tree, opts.known)
 }
+
+/** What a chip knows about excerpt n: its source label and, once the reply is saved, the quote it was checked against. */
+export interface CiteInfo { label: string; quote?: string; weak?: boolean }
+
+export const citeInfo = (c: Citation): CiteInfo => ({ label: citeLabel(c), quote: c.quote || undefined, weak: c.support === 'weak' })
+
+/** A chip's hover: the supporting quote then its source, or a warning when the excerpt barely matches the sentence. */
+export const citeTitle = (c?: CiteInfo): string =>
+  !c ? '' : c.weak ? `Source may not support this\n${c.label}` : c.quote ? `“${c.quote}”\n— ${c.label}` : c.label
+
+/** The numbered excerpts a reply cites (first-use order) and the ones it consulted without citing. Code is not prose. */
+export function splitSources<T extends { n?: number }>(content: string, chunks: readonly T[]): { cited: T[]; consulted: T[] } {
+  const byN = new Map(chunks.filter((c) => c.n).map((c) => [c.n!, c]))
+  const prose = content.replace(/```[\s\S]*?(?:```|$)|`[^`\n]*`/g, ' ')
+  const cited = [...new Set([...prose.matchAll(CITE)].map((m) => Number(m[1])))].flatMap((n) => byN.get(n) ?? [])
+  return { cited, consulted: [...byN.values()].filter((c) => !cited.includes(c)) }
+}

@@ -977,6 +977,15 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* An inline [n] citation in a reply: opens the passage it came from. */
 .cite-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px; vertical-align: 2px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border: none; border-radius: 8px; cursor: pointer; }
 .cite-chip:hover, .cite-chip:focus-visible { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.cite-chip.weak { text-decoration: underline dotted; text-underline-offset: 2px; }
+.sources { margin-top: 8px; font-size: 12px; }
+.sources summary { cursor: pointer; color: var(--text-muted); width: fit-content; }
+.sources ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.sources li button { background: none; border: none; padding: 2px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sources li button:hover { text-decoration: underline; }
+.sources li.cited { font-weight: 600; }
+.sources li.consulted { color: var(--text-faint); }
+.sources-n { color: var(--accent); }
 .muted.small, .small { font-size: 12px; }
 
 /* ---------- Generic pages ---------- */

@@ -22,7 +22,7 @@ import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
 import RecordingChip from '../features/docrec/RecordingChip'
 import { recordingIdFromHref } from '../features/docrec/recordingBlock'
 import { taskLineMap } from '../features/notes/tasks'
-import remarkCites, { citeNumber } from '../lib/remarkCites'
+import remarkCites, { citeNumber, citeTitle, type CiteInfo } from '../lib/remarkCites'
 import '../styles/notes.css'
 import 'katex/dist/katex.min.css'
 
@@ -168,7 +168,7 @@ export interface MarkdownPreviewProps {
   /** Opt in to recording blocks (`grain-recording:ID` links) as live chips; called with the recording id. */
   onRecording?: (id: string) => void
   /** Excerpt numbers this reply may cite: `[n]` for one of them becomes a chip that calls onCite. */
-  cites?: ReadonlyMap<number, string>
+  cites?: ReadonlyMap<number, CiteInfo>
   onCite?: (n: number) => void
 }
 
@@ -223,7 +223,7 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
         const n = cite ? citeNumber(p.href) : null
         if (n !== null) {
           return (
-            <button type="button" className="cite-chip" title={cites?.get(n)} aria-label={`Source ${n}: ${cites?.get(n) ?? ''}`}
+            <button type="button" className={`cite-chip${cites?.get(n)?.weak ? ' weak' : ''}`} title={citeTitle(cites?.get(n))} aria-label={`Source ${n}: ${citeTitle(cites?.get(n))}`}
               onClick={() => citeRef.current?.(n)}>{n}</button>
           )
         }

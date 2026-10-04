@@ -34,6 +34,9 @@ export interface Citation {
   url?: string
   title?: string
   domain?: string
+  /** Set once the reply is saved: the excerpt sentence that best matches the citing sentence, and how well. */
+  quote?: string
+  support?: 'ok' | 'weak' | 'invalid'
 }
 
 export interface ContextUsed {

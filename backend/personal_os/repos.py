@@ -365,6 +365,13 @@ class Conversations:
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
                        trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
                        outcome: str | None = None, error_kind: str | None = None) -> None:
+        if context_used and context_used.get("chunks"):
+            # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
+            # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
+            # text, so a second finish on the same ledger (a parked card, a steer's next segment) checks the same.
+            from .context import cite_check, cite_slim
+            cite_check(content, context_used["chunks"])
+            context_used = cite_slim(context_used)
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "

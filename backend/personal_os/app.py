@@ -29,7 +29,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, stt, tools
 from . import compaction, otel_export, titles
 from .fsx import sensitive_reason
-from .context import build_context, context_taints, estimate_tokens, layout_messages
+from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
@@ -1851,7 +1851,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if compaction.needs_compaction(compactor, convos, cfg, conv_id, used["tokens_estimate"], window=win):
         pre_am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
         _bind_stop(pre_am["id"], stop, run)
-        yield "assistant_message", {**pre_am, "context_used": used}
+        yield "assistant_message", {**pre_am, "context_used": cite_slim(used)}
         yield "status", {"id": pre_am["id"], "kind": "compacting"}
     try:
         history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
@@ -2128,7 +2128,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return head + [dict(n) for n in run_notes]
         messages = _assemble(history)
         base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
-        yield "assistant_message", {**am, "context_used": used}
+        yield "assistant_message", {**am, "context_used": cite_slim(used)}
         yield "span", {"message_id": am["id"], "span": cspan}
         if compact_span:
             yield "span", {"message_id": am["id"], "span": compact_span}
@@ -2348,7 +2348,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             _active.pop(am["id"], None)
             convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))
             convos.touch(conv_id)
-        yield "done", {"id": am.get("id"), "error": str(e), "context_used": used, "tool_events": [], "trace": tracer.spans,
+        yield "done", {"id": am.get("id"), "error": str(e), "context_used": cite_slim(used), "tool_events": [], "trace": tracer.spans,
                        "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
                        "reasoning": None, "outcome": None, "error_kind": getattr(e, "kind", None)}
         return
@@ -2372,7 +2372,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A steer closes the current segment and the reply carries on in a fresh assistant
                     # message, so this `done` ends a segment, not the run. Anything supervising the run
                     # (a desk turn) must not read it as the end of the turn and charge for it.
-                    yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
+                    yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                                    "reasoning": reasoning, "outcome": partial}
@@ -2383,7 +2383,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     rbuf = []
                     tool_events = []
                     tracer = Tracer()
-                    yield "assistant_message", {**am, "context_used": used}
+                    yield "assistant_message", {**am, "context_used": cite_slim(used)}
                 elif any(um["created_at"] >= am["created_at"] for um in steered):
                     # Nothing was written, and the steer landed after this row: swap it for a fresh one so the
                     # transcript reads user message, then answer. No segment closed, so no `done` and the
@@ -2397,7 +2397,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     am = convos.add_message(conv_id, "assistant", "", model=model, variant_of=am.get("variant_of"))
                     _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
-                    yield "assistant_message", {**am, "context_used": used, "trace": tracer.spans}
+                    yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
                         messages.append({"role": "user", "content": expand_command(um["content"], command_store)})
@@ -2921,7 +2921,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         convos.touch(conv_id)
                         if run is not None:
                             run.partial, run.cost, run.rounds = None, budget.cost, budget.rounds
-                        yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
+                        yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                                        "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid}
@@ -3215,7 +3215,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.
         run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
-    yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
+    yield "done", {"id": am["id"], "error": error, "context_used": cite_slim(used), "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}

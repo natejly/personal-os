@@ -1,6 +1,7 @@
 import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
-import { citeLabel, openCite } from '../lib/remarkCites'
+import SourcesList from './SourcesList'
+import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil, GitBranch } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
@@ -190,7 +191,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
-  const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeLabel(c)])), [chunks])
+  const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeInfo(c)])), [chunks])
   const [citing, setCiting] = useState<ChunkRef | null>(null)
   const onCite = useCallback((n: number) => { const c = chunks?.find((x) => x.n === n); if (c) openCite(c, setCiting) }, [chunks])
   // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
@@ -219,6 +220,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <span className="thinking"><span /><span /><span /></span>
               ) : null}
             </BodyBoundary>
+            {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
             {streaming && message.content && <span className="cursor" />}
             {streaming && message.status && <StatusLine status={message.status} />}

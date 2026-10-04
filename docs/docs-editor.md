@@ -10,7 +10,7 @@ live preview, a revision history, and an assistant that may revise a doc only by
 | --- | --- | --- |
 | **Documents** | files you upload, chunked and indexed so replies can quote them | `repos.Documents`, `/documents` |
 | **Docs** | prose you write and keep editing | `docs.Docs`, `/docs` |
-| **Notes** | canvas mode's sticky notes: a body and a colour, no history | `notes.Notes`, `/notes` |
+| **Notes** | canvas mode's sticky notes: a body and a colour, no history | `notes.Notes`, `/notes`; "Save to Files" on the widget copies one into Files |
 
 Docs took the `/docs` prefix, so FastAPI's own Swagger UI moved to `/api-docs`
 (`docs_url` in `app.py`). Its OAuth redirect, which also defaults to a path

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Notebook } from 'lucide-react'
 import type { Note } from '@shared/types'
 import { api } from '../../lib/api'
+import { useStore } from '../../store'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { SAFE_MD } from '../../components/Message'
 import SmartTextarea from '../../components/SmartTextarea'
@@ -96,6 +97,14 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   // Closing the window mid-edit still writes: the effect above only ever cleared its timer.
   useEffect(() => () => { if (pending.current !== null) save(pending.current) }, [save])
 
+  /** Copies the note into Files; the note widget itself stays as it is. */
+  const saveToFiles = (): void => {
+    const st = useStore.getState()
+    void api.docs.create({ title: firstLine(body) || 'Note', content: body })
+      .then((d) => st.toast('Saved to Files', 'info', { label: 'Open', run: () => { st.setView('docs'); void useStore.getState().openDoc(d.id) } }))
+      .catch((e) => st.toast(`Could not save to Files: ${(e as Error).message}`, 'error'))
+  }
+
   const skin = COLORS[note?.color ?? 'yellow'] ?? COLORS.yellow
 
   if (!id) return <div className="widget-empty">A note window needs a note.</div>
@@ -128,6 +137,8 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
             onClick={() => void api.notes.update(id, { color: k }).then(setNote).catch(() => setSaveError('Could not recolour this note'))} />
         ))}
         <span className="spacer" />
+        <button style={{ font: 'inherit', fontSize: 10, textDecoration: 'underline', color: 'inherit' }}
+          disabled={!body.trim()} onClick={saveToFiles}>Save to Files</button>
         {saveError ? (
           <span style={{ fontSize: 10 }} title={saveError}>
             Not saved{' '}

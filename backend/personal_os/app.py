@@ -557,6 +557,11 @@ def mcp_is(name: str) -> bool:
     return name.startswith(MCP_PREFIX)
 
 
+def _mutates(name: str) -> bool:
+    """Does this tool change something? Connector tools are not in toolbox.specs but are external by construction."""
+    return (toolbox.specs[name].danger if name in toolbox.specs else (MCP_DANGER if mcp_is(name) else "safe")) in MUTATING
+
+
 def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Modes + tool schemas for MCP tools whose server is connected right now.
 
@@ -1620,6 +1625,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
+    regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
     placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
     carried_root: str | None = None
 
@@ -1656,8 +1662,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     run_store.decide(a["call_id"], "deny", by="superseded", note="The message this call belonged to was edited.")
             # Connector tools are not in toolbox.specs but are external by construction (as the tool loop treats them).
             ran = [str(te.get("name") or "") for r in cut for te in r["tool_events"] if not te.get("pending")]
-            had_writes = any((toolbox.specs[n].danger if n in toolbox.specs else (MCP_DANGER if mcp_is(n) else "safe")) in MUTATING
-                             for n in ran)
+            had_writes = any(_mutates(n) for n in ran)
             first_user = next((m for m in conv["messages"] if m["role"] == "user"), None)
             conv = {**conv, "messages": [m for m in conv["messages"] if m["id"] not in hidden]}
             # Cutting the first message re-titles the chat below, unless the user renamed it (an auto title is derived).
@@ -1689,6 +1694,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             last = msgs[-1]
             if last.get("content") or last.get("tool_events"):
                 regen_am = convos.begin_variant(last["id"], model)
+                # The superseded answer leaves history, so without a note the model would make its doc or todo again.
+                regen_done = [te for te in last.get("tool_events") or []
+                              if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             else:
                 # An empty row is a failed earlier attempt: drop just that row and keep its group for the new one.
                 with db.tx() as c:
@@ -1975,6 +1983,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
             run_notes.append({"role": "system", "content": parked_note})
+        if regen_done:
+            run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
@@ -3450,6 +3460,9 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     run = bus.answering(id)
     if not run:
         raise HTTPException(409, {"message": "No running reply to steer"})
+    # A stopping run breaks out of its loop before it reads steers: one taken here would never be answered.
+    if run.stop.is_set():
+        raise HTTPException(409, {"message": "That reply is stopping", "stopping": True})
     um = convos.add_message(id, "user", text)
     run.publish("user_message", um)
     run.steers.append(um)
@@ -7855,7 +7868,8 @@ async def message_desk(id: str, body: DeskMessageIn) -> dict[str, Any]:
         desks.set_status(id, desk["status"], reason=desk["status_reason"], question="", event=False)
     conv_id = desk["conversation_id"]
     run = bus.answering(conv_id)
-    if run is not None:
+    # A stopping run never reads its steers; wait it out below and start a turn with the message instead.
+    if run is not None and not run.stop.is_set():
         um = convos.add_message(conv_id, "user", text)
         run.publish("user_message", um)
         run.steers.append(um)

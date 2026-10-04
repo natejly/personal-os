@@ -6,6 +6,7 @@ Built on the test_runs harness (TestClient + a scripted llm.stream_chat).
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import sys
 import tempfile
@@ -151,6 +152,27 @@ def test_success_makes_variants_and_activate_swaps() -> None:
     drain(cid)
     use(OK_STREAM)
     check(any(m.get("content") == "one" for m in seen[0]) and not any(m.get("content") == "two" for m in seen[0]), "the next send replays the activated text")
+
+
+def test_regenerate_tells_the_model_what_the_old_answer_changed() -> None:
+    cid = answered("made it")
+    old = msgs(cid)[-1]
+    made = [{"id": "c1", "name": "doc_create", "arguments": {"title": "Weekly Meal Plan"}, "result_preview": "created doc d1"},
+            {"id": "c2", "name": "doc_create", "arguments": {"title": "Failed"}, "error": "boom"}]
+    with app_mod.db.tx() as c:
+        c.execute("UPDATE messages SET tool_events=? WHERE id=?", (json.dumps(made), old["id"]))
+    seen: list[list[dict[str, Any]]] = []
+
+    async def spy(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], *a: Any, **k: Any) -> Any:
+        seen.append(messages)
+        yield {"type": "delta", "text": "again"}
+        yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
+
+    use(spy)
+    regen(cid)
+    use(OK_STREAM)
+    notes = [m["content"] for m in seen[0] if m["role"] == "system" and "Regenerating a reply" in str(m.get("content"))]
+    check(len(notes) == 1 and "Weekly Meal Plan" in notes[0] and "Failed" not in notes[0], f"one note naming the finished write, got {notes}")
 
 
 def test_activate_guards() -> None:

@@ -13,6 +13,7 @@ import './BrowserApprovalCard'
 import './ViewImageCard'
 import './DocumentCard'
 import './DeskCards'
+import './SandboxCard'
 
 export { TOOL_CARDS, registerToolCard } from './registry'
 export type { ToolCardProps } from './registry'

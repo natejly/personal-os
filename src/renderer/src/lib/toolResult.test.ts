@@ -1,6 +1,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, parseResult, shellState, snapshotLine, tailLines } from './toolResult'
+import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, parseResult, sandboxEntries, sandboxLine, shellState, snapshotLine, tailLines } from './toolResult'
+
+test('sandbox run outcome reads like a shell run', () => {
+  assert.deepEqual(shellState('sandbox_exec', { stdout: '', stderr: 'boom', exit_code: 1, timed_out: false }, false), { label: 'exit 1', tone: 'bad' })
+  assert.equal(shellState('sandbox_exec', { stdout: '', stderr: 'Timed out after 5s', exit_code: -1, timed_out: true }, false).label, 'timed out and stopped')
+})
+
+test('sandbox file and checkpoint calls get one status line', () => {
+  assert.equal(sandboxLine('sandbox_write_file', { written: '/workspace/a.py', bytes: 1200, appended: false }), 'wrote 1,200 bytes to /workspace/a.py')
+  assert.equal(sandboxLine('sandbox_write_file', { written: '/workspace/n.md', bytes: 3, appended: true }), 'appended 3 bytes to /workspace/n.md')
+  assert.equal(sandboxLine('sandbox_export_file', { saved: 'outputs/r.pdf', bytes: 10, from_sandbox: '/workspace/r.pdf' }), 'saved 10 bytes to outputs/r.pdf')
+  assert.equal(sandboxLine('sandbox_checkpoint', { checkpoint: 'clean', kept: ['clean', 'deps'] }), 'saved checkpoint “clean” (keeping clean, deps)')
+  assert.equal(sandboxLine('sandbox_restore', { restored: 'clean' }), 'restored checkpoint “clean”')
+  assert.match(sandboxLine('sandbox_reset', { reset: true }), /^reset/)
+  assert.equal(sandboxLine('sandbox_exec', { exit_code: 0 }), '')
+  assert.equal(sandboxLine('sandbox_restore', null), '')
+})
+
+test('sandbox listing keeps the rows a list-cut preview still carries', () => {
+  const p = parseResult(JSON.stringify({ entries: [{ type: 'dir', bytes: 4096, path: '/workspace/out' }, { type: 'file', bytes: 12, path: '/workspace/a.py' }, { junk: 1 }],
+    total: 9, truncated: { field: 'entries', kept: 3, of: 9 }, path: '/workspace' }))
+  assert.deepEqual(sandboxEntries(p.data), [{ type: 'dir', bytes: 4096, path: '/workspace/out' }, { type: 'file', bytes: 12, path: '/workspace/a.py' }])
+  assert.deepEqual(sandboxEntries(null), [])
+})
 
 test('a whole preview parses; a cut one is read loosely and flagged', () => {
   const ok = parseResult('{"exit_code":0,"output":"hi\\n","cwd":"/w"}')

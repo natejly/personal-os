@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
+from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, stt, tools
 from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -5265,6 +5265,47 @@ async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
     if not meeting_svc.config().get("dictationCleanup"):
         return {"text": body.text}
     return {"text": await assist.clean_dictation(settings(), body.text)}
+
+
+# A dictated chat clip: 2 minutes of 16 kHz mono 16-bit PCM plus the WAV header.
+STT_CLIP_MAX_BYTES = 2 * 60 * 16000 * 2 + 1024
+
+
+@app.post("/stt/transcribe")
+async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) -> dict[str, Any]:
+    """One short WAV from the composer's mic, transcribed by the configured meetings backend.
+
+    Nothing is kept: the clip goes to a temp file that is removed whatever happens, and the text is
+    returned for the composer to insert, never sent. 409 with the fix when no backend can run.
+    """
+    cfg = meeting_svc.config()
+    backend = stt.resolve_backend(cfg, db.data_dir)
+    if backend == "off":
+        raise HTTPException(409, f"Transcription is off. {stt.OFF_FIX}")
+    if backend == "speech" and not (activity.IS_MAC and stt.speech_ready()):
+        row = next((r for r in stt.capabilities(cfg, db.data_dir) if r["id"] == "stt"), {})
+        raise HTTPException(409, row.get("fix") or "On-device Speech Recognition is not available.")
+    data = bytearray()
+    while chunk := await audio.read(1 << 20):
+        data.extend(chunk)
+        if len(data) > STT_CLIP_MAX_BYTES:
+            raise HTTPException(413, "Dictation clips are limited to 2 minutes.")
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise HTTPException(400, "audio must be a WAV file")
+    tmp = db.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    path = tmp / f"dictate-{new_id()}.wav"
+    try:
+        path.write_bytes(data)
+        res = await asyncio.to_thread(stt.transcribe, path, settings=settings(), cfg=cfg,
+                                      data_dir=db.data_dir, prompt=prompt[:stt.MAX_PROMPT_CHARS])
+    finally:
+        path.unlink(missing_ok=True)
+    text = str(res.get("text") or "").strip()
+    if text and not res.get("error") and cfg.get("hallucinationFilter", True):
+        text = stt.filter_hallucinations(text, res.get("detail"), None, cfg)[0].strip()
+    return {"text": text, "backend": res.get("backend") or backend, "error": res.get("error") or "",
+            "ms": res.get("ms", 0)}
 
 
 @app.get("/integrations/google/tasks")

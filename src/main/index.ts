@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, shell, systemPreferences } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
@@ -324,6 +324,13 @@ if (gotLock) app.whenReady().then(async () => {
   })
   // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
   handle('data:relaunch', () => { app.relaunch(); app.quit() })
+  // The composer's mic: macOS shows its prompt once, from here; after a denial only System Settings can change it.
+  handle('media:mic-access', async () => {
+    if (!isMac) return 'granted'
+    const st = systemPreferences.getMediaAccessStatus('microphone')
+    if (st !== 'not-determined') return st
+    return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : 'denied'
+  })
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

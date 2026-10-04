@@ -411,6 +411,13 @@ export const api = {
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
     cleanDictation: (text: string) =>
       req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
+    /** One mic clip (WAV, at most 2 minutes) through the meetings transcription backend. A backend failure is `error`, not a throw. */
+    transcribe: (audio: Blob, prompt = '') => {
+      const fd = new FormData()
+      fd.append('audio', audio, 'clip.wav')
+      fd.append('prompt', prompt)
+      return req<{ text: string; backend: string; error: string; ms: number }>('/stt/transcribe', { method: 'POST', body: fd }, NO_TIMEOUT)
+    },
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
       req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) }, NO_TIMEOUT)
   },

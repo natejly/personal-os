@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns, maxCost} overriding the global caps
+  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -462,7 +462,7 @@ class Desks:
             if not row:
                 return None
             if isinstance(patch.get("budget"), dict):
-                # Merge, so sending {maxCost} does not silently drop maxTurns.
+                # Merge, so sending one key does not silently drop maxTurns.
                 fields["budget"] = json.dumps({**json.loads(row["budget"] or "{}"), **patch["budget"]})
             if fields:
                 fields["updated_at"] = now()
@@ -582,7 +582,7 @@ class Desks:
         elif partial == "blocked":
             target, reason = "blocked", "approval"
         elif partial:
-            # rounds | tokens | time | cost from Budget.exceeded(), or "loop" from the repeat breaker.
+            # rounds | tokens | time from Budget.exceeded(), or "loop" from the repeat breaker.
             target, reason = "review", "budget" if partial != "loop" else "loop"
         else:
             # The reply ended without `desk_done`. A terminal state is a decision, not an inference,

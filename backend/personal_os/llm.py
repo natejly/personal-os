@@ -151,7 +151,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
-    "maxRunCost": 0.50,
     # Provider resilience (retry/backoff section below). Retries only happen before a reply's first token;
     # llmIdleSeconds is how long a stream may go without a byte before it is abandoned with a clear error.
     "llmRetries": 3,
@@ -164,28 +163,24 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retainToolResultDays": 30,
     "retainApprovalDays": 90,
     # Cowork desks. A desk runs bounded turns unattended, so both axes are caps on the whole
-    # desk rather than on one reply; 0 on either means unlimited. deskMaxLive bounds how many
+    # desk rather than on one reply; 0 means unlimited. deskMaxLive bounds how many
     # desks may be running at once, which is the cap the user actually feels.
     # How long a desk waits on a card nobody is watching before letting the run go. The card stays
     # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
     "parkAfterSeconds": 180,
     "deskMaxTurns": 12,
-    "deskMaxCost": 2.0,
     "deskMaxLive": 4,
     # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
-    # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
+    # each one's own round cap (its cost is also charged to the reply that spawned it). A child with no
     # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
     # is stopped and returns what it had.
     "subagentMaxConcurrent": 4,
     "subagentMaxDepth": 2,
     "subagentMaxRounds": 12,
-    "subagentMaxCost": 0.25,
     "subagentStaleSeconds": 450,
     "subagentToolSeconds": 1200,
-    # Workflows (workflows.py): the most items one fan-out step may map over, and a cost cap per run
-    # (0 = none) over every subagent the run starts.
+    # Workflows (workflows.py): the most items one fan-out step may map over.
     "workflowMaxFanOut": 50,
-    "workflowMaxCost": 1.0,
     # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,

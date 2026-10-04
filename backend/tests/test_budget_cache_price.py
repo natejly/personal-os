@@ -26,7 +26,7 @@ def check(cond: Any, label: str) -> None:
 
 
 PRICES = {"modelPrices": {"m": {"input": 10.0, "output": 0.0, "cache_read": 1.0}}}
-appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "maxRunCost": 0.5, **PRICES})
+appmod.db.set_settings({"autoLearn": False, "baseUrl": "", **PRICES})
 cfg = appmod.settings()
 
 # 1. discounted cost, and Budget.add equals it
@@ -66,7 +66,7 @@ def drive() -> list[tuple[str, Any]]:
 
 
 ev1 = drive()
-check(not any(isinstance(d, dict) and d.get("partial") == "cost" for _, d in ev1), "discounted run does not trip the cost cap")
+check(not any(isinstance(d, dict) and d.get("partial") == "cost" for _, d in ev1), "a run never stops on cost")
 drive()
 for msgs in SEEN:
     check(msgs[0]["role"] == "system" and "Today is" not in msgs[0]["content"], "stable prefix omits the date line")

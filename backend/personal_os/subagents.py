@@ -643,7 +643,7 @@ class Subagents:
             ratios = b._ratios()
         except Exception:  # noqa: BLE001 - a budget without ratios only has the hard cap
             return False
-        return any(ratios.get(k, 0.0) >= PARENT_RESERVE for k in ("cost", "tokens", "time"))
+        return any(ratios.get(k, 0.0) >= PARENT_RESERVE for k in ("tokens", "time"))
 
     def _check(self, ch: Child) -> None:
         if ch.halt_reason:
@@ -652,11 +652,8 @@ class Subagents:
         run = ch.ctx.get("run")
         if (stop is not None and stop.is_set()) or (run is not None and not run.live):
             raise _Halt("interrupted")
-        cap = self._float("subagentMaxCost")
-        if cap > 0 and ch.meter.cost >= cap:
-            raise _Halt("cost_cap")
         b = ch.ctx.get("budget_parent")
-        if b is not None and (b.exceeded() in ("cost", "tokens", "time") or self._parent_spent(b)):
+        if b is not None and (b.exceeded() in ("tokens", "time") or self._parent_spent(b)):
             raise _Halt("cost_cap")
 
     async def _model_round(self, ch: Child, schemas: list[dict[str, Any]], final: bool = False) -> tuple[str, dict[str, Any]]:
@@ -717,9 +714,8 @@ class Subagents:
 
     async def _summarize(self, ch: Child, schemas: list[dict[str, Any]]) -> None:
         ch.state, ch.exit_reason = "partial", "max_steps"
-        cap = self._float("subagentMaxCost")
-        if (cap > 0 and ch.meter.cost >= cap) or ch.halt_reason:
-            raise _Halt("cost_cap" if not ch.halt_reason else ch.halt_reason)
+        if ch.halt_reason:
+            raise _Halt(ch.halt_reason)
         ch.messages.append({"role": "system", "content": "You are out of tool rounds. Do not call tools. In one message, summarize what "
                                                          "you have done and found so far, and what remains unfinished."})
         try:

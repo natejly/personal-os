@@ -2,7 +2,7 @@
 
 ### Where we are
 
-Verified in code (docs/meetings.md is accurate; docs/research.md L16 "meeting recap" has shipped; `native_audio.py` does not exist, capture is ffmpeg/avfoundation only via `audiocap.py`).
+Verified in code (docs/meetings.md is accurate; docs/research/roadmap.md L16 "meeting recap" has shipped; `native_audio.py` does not exist, capture is ffmpeg/avfoundation only via `audiocap.py`).
 
 - **Capture** (`meeting_recorder.py`): `ChannelCapture` = one long-lived ffmpeg per channel (`mic`, `output`) using the segment muxer, closes a 16 kHz mono wav every `segmentSeconds` (20). `RecordingSession._segment` stamps `t_start = seq*segment_seconds` (recording clock) and queues it; `TranscribeWorker._transcribe_one` validates (`audiocap.validate_wav`, ffprobe + remux), calls `stt.transcribe`, retries with backoff, deletes the wav unless `keepAudio` or error. Fixed-length cuts: segments are sliced at arbitrary 20 s boundaries with no VAD, so words are cut mid-utterance (mitigated only by a 180-char `TAIL_CHARS` whisper `prompt`).
 - **STT** (`stt.py`): `proxy` (POST `/v1/audio/transcriptions`, `verbose_json`, prompt tail) or `local` (`whisper-cli -otxt -nt -l auto`, **returns empty `detail`: no timestamps, no segments, no VAD flags**). Every non-paused segment is sent, including pure silence. There is no silence gate, no `no_speech_prob`/`avg_logprob`/`compression_ratio` filtering, no hallucination-phrase filter (grep for silence/vad/hallucin in these modules finds only the selftest's `silence_wav`). Whisper on silent or noisy-room mic segments is known to emit "Thank you." / "Thanks for watching" / repeated loops, which then get rolled into `transcript`, FTS and the enhance prompt, and each one costs a billed call.

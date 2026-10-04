@@ -1,6 +1,6 @@
 # State of the art, feature by feature
 
-Researched 2026-10-01. For each feature area of Grain, one write-up compares what the code does today with what the strongest open-source systems do, ranks the gaps, and specifies the two or three highest-leverage builds as offline-testable specs. These supersede the older [research.md](../research.md) roadmap where they overlap; that file's tables predate a dozen merged branches.
+Researched 2026-10-01. For each feature area of Grain, one write-up compares what the code does today with what the strongest open-source systems do, ranks the gaps, and specifies the two or three highest-leverage builds as offline-testable specs. These supersede the older [research.md](roadmap.md) roadmap where they overlap; that file's tables predate a dozen merged branches.
 
 Every spec obeys the standing rules: offline tests with stubbed models, no heavy required dependencies, nothing outside the app acts without asking, no higher `maxToolRounds`, no auto-enabled skills, no heartbeat, no pixel clicking.
 

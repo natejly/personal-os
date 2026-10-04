@@ -1114,7 +1114,7 @@ button.tag:disabled { cursor: default; }
 .add-edge { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--text-faint); }
 .add-edge input { flex: 1; min-width: 0; padding: 5px 8px; font-size: 12px; }
 
-/* ---------- Projects (Claude-style groups of chats) ---------- */
+/* ---------- Projects (groups of chats) ---------- */
 .project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; background: var(--text-faint); }
 .project-dot.sm { width: 8px; height: 8px; border-radius: 2px; }
 .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px 14px; }
@@ -1564,9 +1564,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
 /* ---------- Sidebar project groups ---------- */
-/* A group reads as a header and its recent lines, the way Claude's own sidebar does: the folder
-   carries the project colour, so no dot or count competes with the name, and the rows under it are
-   indented to the header's text, not to its icon. */
+/* A group reads as a header and its recent lines: the folder carries the project colour, so no dot
+   or count competes with the name, and the rows under it are indented to the header's text, not to
+   its icon. */
 .icon-btn.xs { width: 16px; height: 16px; margin-left: -4px; }
 .project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }

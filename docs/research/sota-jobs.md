@@ -19,7 +19,7 @@
 6. There is no per-job tool allowlist; every job gets the global tool set (minus outward calls). AnythingLLM scopes tools per job.
 7. There are no event triggers (webhook or file or calendar change); cron and once only.
 8. Jobs have no manual dry run that shows what would happen without creating proposals, and no deterministic jitter or expiry for forgotten recurring jobs.
-9. `docs/research.md` A8 ("tasks with inbox, run history, OS notifications") is only partly shipped: the inbox exists; history and notifications do not.
+9. `docs/research/roadmap.md` A8 ("tasks with inbox, run history, OS notifications") is only partly shipped: the inbox exists; history and notifications do not.
 
 ### What the best open-source systems do
 
@@ -74,7 +74,7 @@ Specs below carry the file lists and tests. I did not spec event triggers (gap 8
 
 #### jobs-2: Per-job run history API/UI and OS notifications for job events (M)
 
-**Why.** AnythingLLM and OpenHands both centre the feature on a per-job run history (status incl. timed out, duration, error, last 50 runs, export); ours has only a 72 h cross-job feed with no durations, cost or per-job view, so the user cannot tell whether a job is healthy. docs/research.md A8 listed 'run history and OS notifications' and only the inbox shipped. Desks already raise a Notification (App.tsx:72); jobs never do, so unattended failures and new proposals are invisible while the app is in the background.
+**Why.** AnythingLLM and OpenHands both centre the feature on a per-job run history (status incl. timed out, duration, error, last 50 runs, export); ours has only a 72 h cross-job feed with no durations, cost or per-job view, so the user cannot tell whether a job is healthy. docs/research/roadmap.md A8 listed 'run history and OS notifications' and only the inbox shipped. Desks already raise a Notification (App.tsx:72); jobs never do, so unattended failures and new proposals are invisible while the app is in the background.
 
 **Files.** `backend/personal_os/job_history.py (new: pure functions over run_store/proposals rows)`, `backend/personal_os/app.py (small: GET /jobs/{id}/runs, GET /jobs/{id}/stats, GET /jobs/{id}/runs.csv; add `since_id`-style cursor to /inbox)`, `backend/personal_os/runs.py (add RunStore.of_job(job_id, limit) using json_extract on agent_runs.input, and an index-free scan fallback)`, `src/renderer/src/lib/api.ts, types.ts`, `src/renderer/src/components/AgentInbox.tsx (History drawer per job)`, `src/renderer/src/App.tsx (extend the existing Notification effect to job events)`, `backend/tests/test_job_history.py (new)`
 

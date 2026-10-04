@@ -170,9 +170,11 @@ def test_regenerate_tells_the_model_what_the_old_answer_changed() -> None:
 
     use(spy)
     regen(cid)
+    regen(cid)  # the first regenerate, told so, made nothing: the second must still know about the doc
     use(OK_STREAM)
-    notes = [m["content"] for m in seen[0] if m["role"] == "system" and "Regenerating a reply" in str(m.get("content"))]
-    check(len(notes) == 1 and "Weekly Meal Plan" in notes[0] and "Failed" not in notes[0], f"one note naming the finished write, got {notes}")
+    for i, run_msgs in enumerate(seen):
+        notes = [m["content"] for m in run_msgs if m["role"] == "system" and "Regenerating a reply" in str(m.get("content"))]
+        check(len(notes) == 1 and "Weekly Meal Plan" in notes[0] and "Failed" not in notes[0], f"regenerate {i + 1}: one note naming the finished write, got {notes}")
 
 
 def test_activate_guards() -> None:

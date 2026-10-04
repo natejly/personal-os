@@ -1694,14 +1694,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             last = msgs[-1]
             if last.get("content") or last.get("tool_events"):
                 regen_am = convos.begin_variant(last["id"], model)
-                # The superseded answer leaves history, so without a note the model would make its doc or todo again.
-                regen_done = [te for te in last.get("tool_events") or []
-                              if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             else:
                 # An empty row is a failed earlier attempt: drop just that row and keep its group for the new one.
                 with db.tx() as c:
                     c.execute("DELETE FROM messages WHERE id=?", (last["id"],))
                 carried_root = last.get("variant_of")
+            # Every superseded answer in the group leaves history, so without a note the model would make
+            # its doc or todo again. All of them, not only the last: a second regenerate follows one that
+            # (told so) did not repeat the write.
+            group = (regen_am or {}).get("variant_of") or carried_root
+            if group:
+                with db.tx() as c:
+                    rows = c.execute("SELECT tool_events FROM messages WHERE (id=? OR variant_of=?) AND tool_events IS NOT NULL "
+                                     "ORDER BY created_at, rowid", (group, group)).fetchall()
+                regen_done = [te for r in rows for te in json.loads(r["tool_events"]) or []
+                              if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
 

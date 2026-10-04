@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -97,7 +97,6 @@ export default function Sidebar(): JSX.Element {
   // useStore() here is what made App's whole subtree commit once per streamed token.
   const newChat = useStore((s) => s.newChat)
   const selectChat = useStore((s) => s.selectChat)
-  const deleteChat = useStore((s) => s.deleteChat)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)

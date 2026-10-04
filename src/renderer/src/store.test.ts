@@ -316,9 +316,7 @@ test('send on a chat whose session cannot load resolves false with a toast', asy
 test('deleting a chat whose reply was running says so in the Undo toast, and closes its session', async () => {
   const realDelete = api.conversations.delete
   const realList = api.projects.list
-  const realStats = api.projects.globalStats
   api.projects.list = (async () => []) as never // the delete refreshes the sidebar in the background
-  api.projects.globalStats = (async () => ({})) as never
   const abort = new AbortController()
   useStore.setState({ toasts: [], sessions: { c9: session({ conversation: { ...session().conversation, id: 'c9' }, streaming: { messageId: 'm1', runId: 'r', abort, answering: true } as never }) } })
   try {
@@ -335,7 +333,6 @@ test('deleting a chat whose reply was running says so in the Undo toast, and clo
   } finally {
     api.conversations.delete = realDelete
     api.projects.list = realList
-    api.projects.globalStats = realStats
   }
 })
 

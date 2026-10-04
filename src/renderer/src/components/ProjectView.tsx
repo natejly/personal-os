@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { Doc } from '@shared/types'
 import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
@@ -7,6 +8,8 @@ import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
+import { api } from '../lib/api'
+import { projectRows } from '../lib/chatRows'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
@@ -17,12 +20,17 @@ export default function ProjectView(): JSX.Element {
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope } = useStore()
+  const { toggleSidebar, newChat, selectChat, deleteChat, openDoc, setProjectModal, updateProject, loadScope } = useStore()
   const [tab, setTab] = useState<Tab>('chats')
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
+  // Fetched per project rather than read from `docs`, which a search in the Files view narrows.
+  const [notes, setNotes] = useState<Doc[]>([])
+  const storeDocs = useStore((s) => s.docs)
+  const rows = useMemo(() => projectRows(conversations, notes)[id] ?? [], [conversations, notes, id])
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
+  useEffect(() => { void api.docs.list(id).then(setNotes).catch(() => undefined) }, [id, storeDocs])
 
   usePageContext(() => (project
     ? {
@@ -39,13 +47,13 @@ export default function ProjectView(): JSX.Element {
     : null), [project, conversations])
 
   if (!project) return <main className="page"><div className="page-body"><p className="muted">Project not found.</p></div></main>
-  const chats = conversations.filter((c) => c.project_id === id)
+  const convById = Object.fromEntries(conversations.map((c) => [c.id, c]))
   const st = project.stats
 
   const TABS: { key: Tab; label: string; icon: JSX.Element; n?: number }[] = [
-    { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: chats.length },
+    { key: 'chats', label: 'Chats & notes', icon: <MessageSquare size={14} />, n: rows.length },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
-    { key: 'knowledge', label: 'Knowledge', icon: <FileText size={14} />, n: st?.documents },
+    { key: 'knowledge', label: 'Uploads', icon: <FileText size={14} />, n: st?.documents },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
   ]
 
@@ -75,20 +83,26 @@ export default function ProjectView(): JSX.Element {
 
       {tab === 'chats' && (
         <div className="page-body">
-          {chats.length === 0 && (
+          {rows.length === 0 && (
             <div className="empty-hint big">
-              <p>No chats yet.</p>
+              <p>No chats or notes yet.</p>
               <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> Start one</button>
             </div>
           )}
           <div className="chat-rows">
-            {chats.map((c) => (
-              <div key={c.id} className="chat-row" onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
-                {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
+            {rows.map((r) => r.kind === 'doc' ? (
+              <div key={`d${r.id}`} className="chat-row" onClick={() => void openDoc(r.id)} role="button" tabIndex={0}>
+                <FileText size={14} />
+                <span className="chat-row-title">{r.title}</span>
+                <span className="muted small">Note · {new Date(r.at * 1000).toLocaleDateString()}</span>
+              </div>
+            ) : (
+              <div key={`c${r.id}`} className="chat-row" onClick={() => void selectChat(r.id)} role="button" tabIndex={0}
+                {...dragProps({ kind: 'conversation', id: r.id, label: r.title, projectId: id })}>
                 <MessageSquare size={14} />
-                <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
-                <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
-                <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
+                <span className="chat-row-title"><ChatPulse conversationId={r.id} />{r.title}</span>
+                <span className="muted small">{convById[r.id]?.model} · {new Date(r.at * 1000).toLocaleDateString()}</span>
+                <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteChat(r.id) }}><Trash2 size={13} /></button>
               </div>
             ))}
           </div>

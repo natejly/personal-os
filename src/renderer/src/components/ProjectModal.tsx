@@ -14,7 +14,6 @@ export default function ProjectModal(): JSX.Element {
   const existing = modal.mode === 'edit' ? modal.project : null
   const [name, setName] = useState(existing?.name ?? '')
   const [description, setDescription] = useState(existing?.description ?? '')
-  const [prompt, setPrompt] = useState(existing?.system_prompt ?? '')
   const [color, setColor] = useState(existing?.color ?? COLORS[0])
   const [tools, setTools] = useState<Record<string, ToolOverride>>(existing?.tools ?? {})
   const globalToolsRaw = useStore((s) => s.settings.tools)
@@ -25,9 +24,9 @@ export default function ProjectModal(): JSX.Element {
 
   const save = async (): Promise<void> => {
     if (!name.trim()) return
-    if (existing) await updateProject(existing.id, { name: name.trim(), description, system_prompt: prompt, color, tools })
+    if (existing) await updateProject(existing.id, { name: name.trim(), description, color, tools })
     else {
-      await createProject({ name: name.trim(), description, system_prompt: prompt, color })
+      await createProject({ name: name.trim(), description, system_prompt: '', color })
       const created = useStore.getState().projects.find((p) => p.name === name.trim())
       if (created && Object.keys(tools).length) await updateProject(created.id, { tools })
     }
@@ -41,7 +40,6 @@ export default function ProjectModal(): JSX.Element {
         <section>
           <label><span>Name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} /></label>
           <label><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown to the model" /></label>
-          <label><span>Instructions</span><textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Extra system prompt for chats in this project…" /></label>
           <label><span>Color</span>
             <div className="color-row">{COLORS.map((c, i) => <button key={c} type="button" className={`swatch ${c === color ? 'on' : ''}`} style={{ background: c }} aria-label={COLOR_NAMES[i]} aria-pressed={c === color} title={COLOR_NAMES[i]} onClick={() => setColor(c)} />)}</div>
           </label>

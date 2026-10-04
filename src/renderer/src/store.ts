@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
+  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { installRejectionToasts } from './lib/rejections'
@@ -158,7 +158,6 @@ export interface State {
   jobs: Job[]
 
   projects: Project[]
-  personalStats: Project['stats']
 
   view: View
   /** The classic view the canvas was entered from; `leaveCanvas` (⌘⇧C) returns to it. */
@@ -1006,6 +1005,16 @@ export const useStore = create<State>((set, get) => {
     void get().refreshDocuments()
     void get().refreshProjects()
   }
+  const reviewMemories = { label: 'Review', run: () => get().openMemory('list') }
+  // Both paths a learn pass reports on (the `remember` tool's stream, auto-learn's `/events`) say it the same way.
+  const announceLearned = ({ memories, nodes, edges, updated = [], removed = [] }: Learned): void => {
+    const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
+    if (updated.length) parts.push(`updated ${updated.length}`)
+    if (removed.length) parts.push(`forgot ${removed.length}`)
+    parts.push(`${nodes.length} entities, ${edges.length} relations`)
+    get().toast(parts.join(', '), 'learned', reviewMemories)
+    refreshAll()
+  }
 
   /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
   let loadedOnce = false
@@ -1100,9 +1109,11 @@ export const useStore = create<State>((set, get) => {
           if (ev.seq !== null) eventsSince = ev.seq
           backoff = 1000
           if (ev.event === 'learned') {
-            const { memories, nodes, edges } = ev.data
-            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
-            if (memories.length + nodes.length + edges.length) refreshAll()
+            announceLearned(ev.data)
+          } else if (ev.event === 'proposals') {
+            const n = ev.data.count
+            get().toast(`${n} memory tidy-up suggestion${n === 1 ? '' : 's'}`, 'learned', reviewMemories)
+            void get().refreshAgentInbox()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
           } else if (ev.event === 'job_finished') {
@@ -1347,19 +1358,12 @@ export const useStore = create<State>((set, get) => {
             if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
-          case 'learned': {
-            const { memories, nodes, edges, updated = [], removed = [] } = ev.data
-            const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
-            if (updated.length) parts.push(`updated ${updated.length}`)
-            if (removed.length) parts.push(`forgot ${removed.length}`)
-            parts.push(`${nodes.length} entities, ${edges.length} relations`)
-            get().toast(parts.join(', '), 'learned')
-            if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
+          case 'learned':
+            announceLearned(ev.data)
             break
-          }
           case 'style_learned':
             // A banked sample is quiet; a refreshed voice profile is worth saying once.
-            if (ev.data.profile) get().toast('Updated how you write', 'learned')
+            if (ev.data.profile) get().toast('Updated how you write', 'learned', { label: 'Review', run: () => get().openMemory('style') })
             void get().refreshStyle()
             break
           case 'learn_error':
@@ -1557,7 +1561,6 @@ export const useStore = create<State>((set, get) => {
     agentInbox: null,
     jobs: [],
     projects: [],
-    personalStats: undefined,
     view: 'home',
     lastClassicView: 'home',
     memoryMode: 'split',
@@ -1660,10 +1663,10 @@ export const useStore = create<State>((set, get) => {
         inited = false
         return set({ ready: true, backendError: status.error ?? (e as Error).message })
       }
-      let settings: Settings, projects: Project[], personalStats: Project['stats'], conversations: Conversation[]
+      let settings: Settings, projects: Project[], conversations: Conversation[]
       try {
-        ;[settings, projects, personalStats, conversations] = await Promise.all([
-          api.settings.get(), api.projects.list(), api.projects.globalStats().catch(() => undefined), api.conversations.list('all')
+        ;[settings, projects, conversations] = await Promise.all([
+          api.settings.get(), api.projects.list(), api.conversations.list('all')
         ])
       } catch (e) {
         // Release the guard so a retry can run, and surface the failure instead of an empty window.
@@ -1677,7 +1680,7 @@ export const useStore = create<State>((set, get) => {
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, conversations, ready: true })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')
@@ -1829,8 +1832,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshProjects: async () => {
-      const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats().catch(() => undefined)])
-      set({ projects, personalStats })
+      set({ projects: await api.projects.list() })
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.

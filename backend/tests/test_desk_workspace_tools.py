@@ -165,6 +165,25 @@ def test_run_python_outside_a_desk_keeps_outputs_in_the_chat_files(box: Box) -> 
     assert "outputs" not in box.run("run_python", code="print(1)")
 
 
+def test_a_long_run_python_preview_keeps_every_output_for_the_card(box: Box) -> None:
+    """files_created lists the same files as outputs; when stdout pushes the preview past its limit, the
+    trimmed list must be files_created, never the outputs the card offers for download."""
+    import json
+    del box.ctx["desk_id"]
+    for n in (450, 1000):  # 450: a list is trimmed; 1000: no trim fits, the string cut keeps outputs first
+        r = box.run("run_python", code="import os\nos.makedirs('outputs', exist_ok=True)\n"
+                                       f"for i in range(5):\n    open(f'outputs/chart{{i}}.png','w').write(str(i))\nprint('x' * {n})")
+        assert r["exit_code"] == 0, r
+        assert len(r["outputs"]) == 5 and len(r["files_created"]) == 5
+        assert len(json.dumps(r)) > 1500
+        shown = json.loads(tools_mod.summarize_result(r))
+        if n == 450:
+            assert shown["truncated"]["field"] != "outputs" and shown["outputs"] == r["outputs"]
+        else:  # the card reads the cut preview loosely from its head
+            assert shown["truncated"] is True
+            assert shown["preview"].startswith(json.dumps({"outputs": r["outputs"]})[:-1])
+
+
 def test_run_python_warns_when_the_workspace_is_over_quota(tmp_path: Path) -> None:
     b = Box(tmp_path, max_total_bytes=50)
     (b.root / "work" / "big.bin").write_bytes(b"x" * 200)

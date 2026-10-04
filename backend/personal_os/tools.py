@@ -1331,7 +1331,9 @@ def summarize_result(result: Any, limit: int = 1500) -> str:
     if len(s) <= limit:
         return s
     if isinstance(result, dict):
-        key = max((k for k, v in result.items() if isinstance(v, list)), key=lambda k: len(result[k]), default=None)
+        # Never `outputs`: the card reads its Download list from this preview, and files_created often ties with it.
+        key = max((k for k, v in result.items() if isinstance(v, list) and k != "outputs"),
+                  key=lambda k: len(result[k]), default=None)
         if key is not None:
             items = result[key]
             lo, hi, best = 0, len(items), None

@@ -82,11 +82,13 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
 
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const [open, setOpen] = useState(r.late || r.status === 'error' || r.pending_proposals > 0)
+  const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
+  useEffect(() => { if (r.seen) setOpen(false) }, [r.seen])  // read collapses it, Mark all read included
 
   return (
-    <li className="inbox-item">
+    <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-item-head">
         <button className="icon-btn sm" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -104,6 +106,11 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         <span style={{ flex: 1 }} />
         <span className="muted small">{fmtWhen(r.fired_at)}</span>
         {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        {!r.seen && (
+          <button className="icon-btn sm" title="Mark read" aria-label={`Mark ${r.job} read`} onClick={() => void markInboxRunSeen(r.run_id)}>
+            <Check size={13} />
+          </button>
+        )}
       </div>
       {open && (
         <>
@@ -463,7 +470,7 @@ const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
@@ -598,7 +605,10 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-group">
           <h5>While you were away <span className="muted small">
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}
-            {away.length} run{away.length === 1 ? '' : 's'}</span></h5>
+            {away.length} run{away.length === 1 ? '' : 's'}</span>
+            {(box.counts.unseen_runs ?? 0) > 0 && (
+              <button className="link small" style={{ marginLeft: 'auto' }} onClick={() => void markInboxRunSeen(null)}>Mark all read</button>
+            )}</h5>
           <ul className="inbox-list">{away.map((r) => <RunCard key={r.run_id} r={r} />)}</ul>
         </div>
       )}

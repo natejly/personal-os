@@ -17,6 +17,7 @@ import { partitionChats } from '../lib/chatRows'
 import ChatRow from './ChatRow'
 import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
+import { inboxBadge } from '../lib/inboxBadge'
 
 /** The first matching excerpt under a search result, with the matched words marked. */
 function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
@@ -90,8 +91,8 @@ export default function Sidebar(): JSX.Element {
   /** Desks with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const meetingsPending = useStore((s) => s.meetingsPending)
-  /** Everything agents left for the user (approvals, proposals, desks, review queues): the Agent inbox on Today. */
-  const inboxCount = useStore((s) => s.agentInbox?.counts.needs_you ?? 0)
+  /** Everything agents left for the user (approvals, proposals, desks, review queues) plus unread job runs: the Agent inbox on Today. */
+  const inboxCount = useStore((s) => inboxBadge(s.agentInbox))
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -214,7 +215,7 @@ export default function Sidebar(): JSX.Element {
         <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
       )}
       {n.view === 'home' && inboxCount > 0 && (
-        <span className="count pending" title={`${inboxCount} waiting on you in the Agent inbox`}>{inboxCount}</span>
+        <span className="count pending" title={`${inboxCount} new in the Agent inbox`}>{inboxCount}</span>
       )}
       {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>

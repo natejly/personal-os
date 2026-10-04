@@ -4417,6 +4417,14 @@ def _review_queues() -> list[dict[str, Any]]:
     return out
 
 
+def _inbox_runs(hours: float, limit: int, include_dry: int) -> list[dict[str, Any]]:
+    """The job runs "While you were away" lists: one window, shared by the read and by Mark all read."""
+    runs = run_store.of_kind("job", since=time.time() - max(0.0, float(hours)) * 3600, limit=_clamp(limit))
+    if not include_dry:  # a preview is not something that happened while the user was away
+        runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
+    return runs
+
+
 @app.get("/inbox")
 def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
@@ -4425,7 +4433,6 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     whose late-fire notice, failure and counts all come from the journal — the reply text is shown as the body, but
     nothing about the entry is parsed out of it.
     """
-    cutoff = time.time() - max(0.0, float(hours)) * 3600
     pending_approvals = []
     for a in _untrashed(run_store.approvals("pending", limit=100)):
         row = run_store.get(a["run_id"]) if a["run_id"] else None
@@ -4433,10 +4440,9 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
                                   "job": ((row or {}).get("input") or {}).get("job")})
     pending_proposals = proposals.list("pending", limit=100)
 
-    runs = run_store.of_kind("job", since=cutoff, limit=_clamp(limit))
-    if not include_dry:  # a preview is not something that happened while the user was away
-        runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
+    runs = _inbox_runs(hours, limit, include_dry)
     counts = proposals.counts([r["run_id"] for r in runs])
+    seen = run_store.seen(r["run_id"] for r in runs)
     away = []
     for r in runs:
         fire = r["input"] if isinstance(r.get("input"), dict) else {}
@@ -4452,7 +4458,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "attempt": int(fire.get("attempt") or 1), "retry_of": fire.get("retry_of"),
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
-            "pending_proposals": mine.get("pending", 0),
+            "pending_proposals": mine.get("pending", 0), "seen": r["run_id"] in seen,
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
@@ -4472,11 +4478,28 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
                        + sum(q["count"] for q in elsewhere),
                        "paused_jobs": len(paused_jobs),
                        "approvals": len(pending_approvals), "proposals": len(pending_proposals),
-                       "runs": len(away), "late": sum(1 for a in away if a["late"]),
+                       "runs": len(away), "unseen_runs": sum(1 for a in away if not a["seen"]), "late": sum(1 for a in away if a["late"]),
                        "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
             "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
                           "next_due_at": jobs.earliest_due(), "timezone": local_tz_name(),
                           "wake_unavailable": scheduler.wake_unavailable}}
+
+
+@app.post("/inbox/runs/{run_id}/seen")
+def inbox_run_seen(run_id: str) -> dict[str, bool]:
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    run_store.mark_seen([run_id])
+    return {"ok": True}
+
+
+@app.post("/inbox/seen_all")
+def inbox_seen_all(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
+    """Mark read exactly the runs GET /inbox would list with the same window, nothing older."""
+    ids = [r["run_id"] for r in _inbox_runs(hours, limit, include_dry)]
+    run_store.mark_seen(ids)
+    return {"ok": True, "marked": len(ids)}
 
 
 @app.get("/inbox/notify")

@@ -511,6 +511,35 @@ def test_the_inbox_is_built_from_journal_rows() -> None:
     assert j("GET", "/inbox?hours=0")["while_you_were_away"] == [], "the window is a WHERE on started_at"
 
 
+def test_inbox_runs_carry_a_read_state_the_user_can_clear() -> None:
+    j("POST", "/inbox/seen_all")  # earlier tests' runs are in the same window
+    job = make_job("readstate", "0 * * * *", at=T0)
+    tick(T0 + HOUR)
+    rid = job_runs(job["id"])[0]["run_id"]
+
+    box = j("GET", "/inbox")
+    entry = next(e for e in box["while_you_were_away"] if e["run_id"] == rid)
+    assert entry["seen"] is False and box["counts"]["unseen_runs"] == 1
+
+    assert j("POST", f"/inbox/runs/{rid}/seen")["ok"] is True
+    box = j("GET", "/inbox")
+    assert next(e for e in box["while_you_were_away"] if e["run_id"] == rid)["seen"] is True
+    assert box["counts"]["unseen_runs"] == 0
+    j("POST", f"/inbox/runs/{rid}/seen")  # twice is fine
+
+    j("POST", "/inbox/runs/no-such-run/seen", expect=404)
+    chat = next((r for r in store.list(None, limit=500) if r["kind"] != "job"), None)
+    if chat:
+        j("POST", f"/inbox/runs/{chat['run_id']}/seen", expect=404)
+
+    tick(T0 + 2 * HOUR)
+    tick(T0 + 3 * HOUR)
+    assert j("GET", "/inbox")["counts"]["unseen_runs"] == 2
+    assert j("POST", "/inbox/seen_all")["marked"] >= 3
+    box = j("GET", "/inbox")
+    assert box["counts"]["unseen_runs"] == 0 and all(e["seen"] for e in box["while_you_were_away"])
+
+
 def test_a_failed_job_shows_up_as_a_failure_and_a_pending_approval_needs_you() -> None:
     async def boom(*a: Any, **k: Any) -> Any:
         raise RuntimeError("the model is down")

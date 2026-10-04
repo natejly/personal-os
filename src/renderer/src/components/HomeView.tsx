@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
+import { inboxBadge } from '../lib/inboxBadge'
 import HomeCowork from './HomeCowork'
 import type { Meeting, MeetingCandidate } from '@shared/types'
 import { moduleHome } from '../shell/registry'
@@ -218,6 +219,7 @@ export default function HomeView(): JSX.Element {
   const [customizing, setCustomizing] = useState(false)
 
   const on = (key: string): boolean => homeModuleOn(settings, key)
+  const inboxNew = useStore((s) => inboxBadge(s.agentInbox))
   const toggleModule = (key: string): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
   }
@@ -307,7 +309,8 @@ export default function HomeView(): JSX.Element {
           </div>
         </div>
 
-        {on('agent') && <AgentInbox />}
+        {/* The sidebar badge points here, so a hidden inbox still shows while it has something to show. */}
+        {(on('agent') || inboxNew > 0) && <AgentInbox />}
         {on('cowork') && <HomeCowork />}
 
         {on('recap') && (recap?.content || recapLoading) && recapOpen && (

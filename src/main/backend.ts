@@ -258,18 +258,28 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
 }
 
 /** `sync` is for process exit, where no timer will ever fire: kill outright instead of a grace period. */
-function killChild(sync = false): void {
+/** Resolves once the child has exited, or a second after the SIGKILL if even that did not take. */
+function killChild(sync = false): Promise<void> {
   const c = child
   child = null
-  if (!c || c.exitCode !== null) return
-  if (sync) c.kill('SIGKILL')
-  else {
-    c.kill()
-    // A backend stuck in shutdown would keep its port and the database; escalate after a grace period.
-    const t = setTimeout(() => { if (c.exitCode === null) c.kill('SIGKILL') }, 3000)
-    t.unref?.()
-    c.once('exit', () => clearTimeout(t))
+  if (!c || c.exitCode !== null || c.signalCode !== null) return Promise.resolve()
+  if (sync) {
+    c.kill('SIGKILL')
+    return Promise.resolve()
   }
+  c.kill()
+  return new Promise((resolve) => {
+    // A backend stuck in shutdown would keep its port and the database; escalate after a grace period.
+    const t = setTimeout(() => {
+      if (c.exitCode === null) c.kill('SIGKILL')
+      setTimeout(resolve, 1000)
+    }, 3000)
+    t.unref?.()
+    c.once('exit', () => {
+      clearTimeout(t)
+      resolve()
+    })
+  })
 }
 
 /** The backend died on its own: restart it with backoff, or give up after too many exits in a short time. */
@@ -314,10 +324,12 @@ export async function restartBackend(): Promise<BackendInfo> {
   supervising = false
   policy.reset()
   record('restart requested', 'manual')
-  killChild()
   lastError = null
   setState('restarting')
   const mine = epoch
+  // The old process must be gone before `launch(true)` checks its port, or the restart moves to a new one.
+  await killChild()
+  if (mine !== epoch || stopping) return backendInfo()
   try {
     await launch(true)
     if (mine === epoch && !stopping) setState('ready')

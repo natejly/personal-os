@@ -8,7 +8,7 @@ import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
@@ -1123,9 +1123,9 @@ export const useStore = create<State>((set, get) => {
     await seedLiveRuns()
     for (;;) {
       try {
-        for await (const ev of backgroundStream(eventsSince)) {
+        // Reset on open, not on an event: a quiet stream that drops after an hour is not a failing backend.
+        for await (const ev of backgroundStream(eventsSince, undefined, () => { backoff = 1000 })) {
           if (ev.seq !== null) eventsSince = ev.seq
-          backoff = 1000
           if (ev.event === 'learned') {
             const { memories, nodes, edges } = ev.data
             get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
@@ -1146,11 +1146,10 @@ export const useStore = create<State>((set, get) => {
             const info = ev.data
             set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
             const sess = get().sessions[info.conversation_id]
-            // A reply this window did not start: follow it, or, once it ends, read what it persisted.
-            if (sess && sess.streaming?.runId !== info.run_id) {
-              if (info.answering) void get().attachSession(info.conversation_id).catch(() => undefined)
-              else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
-            }
+            // A reply this window did not start: follow it if it is on screen, or, once it ends, read what it persisted.
+            const next = sess && followRun(sess.streaming, info, onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained }))
+            if (next === 'attach') void get().attachSession(info.conversation_id).catch(() => undefined)
+            else if (next === 'open') void get().openSession(info.conversation_id).catch(() => undefined)
           } else if (ev.event === 'conversation_changed') {
             applyTitle(ev.data.id, ev.data.title)
           } else if (ev.event === 'recording') {
@@ -2645,7 +2644,15 @@ export const useStore = create<State>((set, get) => {
     openDesk: async (id) => {
       // The files and the preview belong to the desk that was open, so they go now rather than
       // after the fetch: the Files tab must never paint another desk's workspace for a frame.
-      if (get().activeDeskId !== id) set({ activeDeskId: id, activeDesk: null, deskFiles: [], deskPreview: null })
+      if (get().activeDeskId !== id) {
+        // The desk being left stops streaming: each one held a connection, and clicking through a
+        // few live desks queued every other request behind them. Its run's end refetches it.
+        const left = get().activeDesk?.conversation_id
+        if (left && (retained.get(left) ?? 0) <= 1 && !onScreen(left, { view: get().view, focusedId: get().focusedConversationId, retained: new Set() })) {
+          get().sessions[left]?.streaming?.abort.abort()
+        }
+        set({ activeDeskId: id, activeDesk: null, deskFiles: [], deskPreview: null })
+      }
       try {
         const desk = await api.cowork.desks.get(id)
         // A slower fetch must not clobber a desk the user has since switched away from.

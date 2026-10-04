@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CONTROL_TIMEOUT_MS, STOP_TIMEOUT_MS, req } from './api'
+import { CONTROL_TIMEOUT_MS, NO_TIMEOUT, REQUEST_TIMEOUT_MS, STOP_TIMEOUT_MS, req } from './api'
 import { ApiError } from './apiError'
 
 const withFetch = async (impl: typeof fetch, run: () => Promise<void>): Promise<void> => {
@@ -50,12 +50,15 @@ test('a caller abort stays an abort even with a deadline set', async () => {
   })
 })
 
-test('a request with no deadline sends no signal of its own', async () => {
+test('a request opted out of the deadline sends no signal of its own; any other gets one', async () => {
   let seen: RequestInit | undefined
   await withFetch((async (_i: RequestInfo | URL, init?: RequestInit) => { seen = init; return new Response('{"ok":true}', { status: 200 }) }) as typeof fetch, async () => {
-    assert.deepEqual(await req('/x'), { ok: true })
+    assert.deepEqual(await req('/x', undefined, NO_TIMEOUT), { ok: true })
     assert.equal(seen?.signal, undefined)
+    await req('/x')
+    assert.ok(seen?.signal, 'a plain request carries the default deadline')
   })
+  assert.equal(REQUEST_TIMEOUT_MS, 60_000)
 })
 
 test('control timeouts: Stop gives up sooner than the rest', () => {

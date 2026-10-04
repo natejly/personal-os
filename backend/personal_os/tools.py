@@ -119,7 +119,7 @@ class ToolSpec:
         self.name, self.description, self.parameters, self.fn, self.group, self.danger = name, description, parameters, fn, group, danger
         self.examples, self.taints = examples or [], taints
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
-        # args -> True when this particular call must ask whatever the mode says (shell_run's escape from the sandbox)
+        # (args, ctx) -> True when this particular call must ask whatever the mode says (shell_run unsandboxed, or networked in a tainted run)
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None

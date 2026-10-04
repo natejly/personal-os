@@ -2512,7 +2512,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if fs_ask and mode == "on":
                     mode = "ask"
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
-                # (shell_run outside its sandbox), which no standing grant can then buy off
+                # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
                 forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args, tool_ctx))
                 # A sandboxed shell_run inside this desk's own workspace needs no card when the tool is still on its default
                 # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.

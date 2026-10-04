@@ -369,6 +369,7 @@ class _Supervisor:
                     self._register(listing.tools)
                     self._set_status("ready")
                     self._ready.set()
+                    self.attempts = 0  # counts consecutive failed connects, not drops over the app's lifetime
                     async with anyio.create_task_group() as tg:
                         tg.start_soon(self._heartbeat, session, err)
                         tg.start_soon(self._relister, session)
@@ -497,7 +498,7 @@ class _Supervisor:
     def _register(self, tools: list[Any]) -> None:
         exported = [tool_export(t) for t in tools]
         synced = self.store.sync_tools(self.config.id, exported)
-        for slug in synced["changed"]:  # re-scan what changed; a new fail-level finding withholds the tool
+        for slug in synced["added"] + synced["changed"]:  # scan what is new or changed; a new fail-level finding withholds the tool
             try:
                 mcp_drift.apply_review(self.store, slug)
             except Exception:  # noqa: BLE001 - a review failure must not stop the server from connecting
@@ -642,6 +643,8 @@ class McpClient:
             raise McpUnavailable(f"Unknown MCP tool {tool_slug}")
         if tool["missing_since"]:
             raise McpUnavailable(f"{tool_slug} is no longer offered by its server")
+        if tool.get("quarantined_at"):
+            raise McpUnavailable(f"{tool_slug} is withheld until you accept it in Settings")
         sup = self._supervisors.get(tool["server_id"])
         if sup is None:
             raise McpUnavailable(f"The server for {tool_slug} is not running")

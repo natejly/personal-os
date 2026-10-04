@@ -495,7 +495,8 @@ class McpServers:
         if scope not in SCOPES:
             raise ValueError(f"scope must be one of {SCOPES}")
         tool = self.tool(tool_slug)
-        h = schema_hash if schema_hash is not None else (tool["schema_hash"] if tool else "")
+        # Unpinned: bind to the shape the user last reviewed, so a grant given while a drift is unread stays stale.
+        h = schema_hash if schema_hash is not None else ((tool["reviewed_hash"] or tool["schema_hash"]) if tool else "")
         slug = tool["slug"] if tool else tool_slug
         t = now()
         with self.db.tx() as c:

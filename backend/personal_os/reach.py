@@ -1,8 +1,7 @@
-"""Agent Reach: per-platform read and search paths, after Panniantong/Agent-Reach.
+"""Platform readers: per-platform read and search paths.
 
-Agent-Reach is an installer and router for a shell-running agent: it picks the most reliable upstream path per
-platform (Jina Reader for any page, Exa for search, yt-dlp for YouTube, the GitHub API, feedparser for RSS) and
-leaves the agent to call those tools itself. Our agent has no shell, so the same routing lives here as plain
+Each platform gets the most reliable upstream path (Jina Reader for any page, Exa for search, yt-dlp for
+YouTube, the GitHub API, feedparser for RSS). The agent has no shell, so the routing lives here as plain
 functions that tools.py exposes as tools.
 
 Everything in this module talks to a fixed, first-party host (r.jina.ai, mcp.exa.ai / api.exa.ai, api.github.com,

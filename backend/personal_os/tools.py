@@ -1078,7 +1078,7 @@ class Toolbox:
                 return tool_error(f"fetch_url: {final_url} is {ctype or 'of unknown type'}: {e}", field="url", alternative=ALTERNATIVE["fetch_url"])
             text = rendered.text
             via = None
-            # Agent Reach's web path: when our plain client is turned away, or the page is a JavaScript shell, read it
+            # Reader-service fallback: when our plain client is turned away, or the page is a JavaScript shell, read it
             # through Jina Reader, which renders it on Jina's side. Only ever a URL that already passed _check_url.
             if kind == "html" and cfg.get("readerFallback", True) and (status in (401, 403, 429, 503) or len(text) < 300):
                 try:
@@ -3233,7 +3233,7 @@ Toolbox._register_cowork = _register_cowork  # type: ignore[attr-defined]
 Toolbox._register_meetings = _register_meetings  # type: ignore[attr-defined]
 
 
-# ---- Agent Reach: platform readers (reach.py) ----
+# ---- Platform readers (reach.py) ----
 # The same taint stance as web_search: a query sent to a fixed first-party search API (GitHub, YouTube) is accepted,
 # since nobody downstream of that API can read it back. A URL the model chose goes through _check_url like fetch_url.
 REACH_TOOLS = ("youtube_video", "youtube_search", "github_search", "github_read", "read_feed")
@@ -3286,7 +3286,7 @@ def _register_reach(self: Toolbox) -> None:
 
     async def github_search(ctx: dict[str, Any], query: str, kind: str = "repos", max_results: int = 10) -> Any:
         try:
-            rows = await reach.github_search(kind, query, max_results, token=reach.gh_token(self.settings()))
+            rows = await reach.github_search(kind, query, max_results, token=await asyncio.to_thread(reach.gh_token, self.settings()))
         except (reach.ReachError, httpx.HTTPError, ValueError) as e:
             return failed("github_search", e)
         for row in rows:
@@ -3304,7 +3304,7 @@ def _register_reach(self: Toolbox) -> None:
                           max_chars: int = 20000) -> Any:
         try:
             return _scrub_public_text(await reach.github_read(
-                repo, path=path, number=number, ref=ref, token=reach.gh_token(self.settings()),
+                repo, path=path, number=number, ref=ref, token=await asyncio.to_thread(reach.gh_token, self.settings()),
                 max_chars=max(2000, min(int(max_chars), 60000))))
         except (reach.ReachError, httpx.HTTPError, ValueError, KeyError) as e:
             return failed("github_read", e)

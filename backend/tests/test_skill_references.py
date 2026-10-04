@@ -63,6 +63,10 @@ class RefsTest(unittest.TestCase):
         with self.assertRaises(skillmd.ImportError_):
             skillmd.import_text(self.skills, self.lint, "---\nname: big\ndescription: d\n---\n" + "x" * 4001, references=REFS)
 
+    def test_scalar_metadata_with_a_child_is_a_parse_error(self) -> None:
+        out = skillmd.parse("---\nname: a\ndescription: b\nmetadata: x\n  source: y\n---\nbody")
+        self.assertIn("metadata must be a map of strings", out["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()

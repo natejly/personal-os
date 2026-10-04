@@ -1,4 +1,4 @@
-"""Agent Reach tools (reach.py + their Toolbox wiring). No network: every platform client is monkeypatched."""
+"""Platform reader tools (reach.py + their Toolbox wiring). No network: every platform client is monkeypatched."""
 from __future__ import annotations
 
 import asyncio

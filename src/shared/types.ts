@@ -1956,6 +1956,16 @@ export interface Job {
   last_skip_reason: string | null
   /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
   allowed_tools: string[] | null
+  /** The model this job's runs use. null = the default model. */
+  model: string | null
+  /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
+  budget: JobBudget | null
+}
+
+export interface JobBudget {
+  maxRunTokens?: number
+  maxRunSeconds?: number
+  maxRunCost?: number
 }
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */

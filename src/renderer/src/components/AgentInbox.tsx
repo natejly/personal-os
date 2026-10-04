@@ -14,6 +14,7 @@ import remarkGfm from 'remark-gfm'
 import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { SAFE_MD } from './Message'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -222,9 +223,10 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       toast(`Jobs: ${(e as Error).message}`, 'error')
     }
   }
-  const saveTools = async (allowed: string[] | null): Promise<void> => {
+  const saveTools = (allowed: string[] | null): Promise<void> => save({ allowed_tools: allowed })
+  const save = async (patch: Parameters<typeof api.jobs.update>[1]): Promise<void> => {
     try {
-      await api.jobs.update(job.id, { allowed_tools: allowed })
+      await api.jobs.update(job.id, patch)
       await refreshJobs()
     } catch (e) {
       toast(`Jobs: ${(e as Error).message}`, 'error')
@@ -257,7 +259,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
       )}
-      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
+      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
         aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
         <Wrench size={12} />
       </button>
@@ -289,10 +291,62 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         {job.allowed_tools !== null && <ToolPicker value={job.allowed_tools} onChange={(n) => void saveTools(n)} />}
         <p className="muted small">A run can only use tools it is given here, on top of your own tool settings. Anything
           that leaves the app is still a proposal.</p>
+        <JobRunSettings job={job} save={save} />
       </li>
     )}
     {history && <JobHistory job={job} />}
     </>
+  )
+}
+
+/** The fixed caps of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
+const JOB_MAX_COST = 0.2
+const JOB_MAX_MINUTES = 4
+
+/** Which model a job's runs use, and the tighter caps it may set for itself. */
+function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<typeof api.jobs.update>[1]) => Promise<void> }): JSX.Element {
+  const models = useStore((s) => s.models)
+  const ids = chatModelIds(models)
+  if (job.model && !ids.includes(job.model)) ids.unshift(job.model)
+  const budget = job.budget ?? {}
+  // A cleared or out-of-range field drops that cap, so the job falls back to the fixed one.
+  const setCap = (key: 'maxRunCost' | 'maxRunSeconds', raw: string, scale: number, max: number): void => {
+    const n = Number(raw) * scale
+    const next = { ...budget }
+    if (raw.trim() && n > 0 && n <= max * scale) next[key] = n
+    else delete next[key]
+    if (next[key] === budget[key]) return
+    void save({ budget: Object.keys(next).length ? next : null })
+  }
+  return (
+    <div className="job-run-settings">
+      <label className="small">
+        <span className="muted">Model</span>{' '}
+        <select value={job.model ?? ''} aria-label={`Model for ${job.name}`}
+          onChange={(e) => void save({ model: e.target.value || null })}>
+          <option value="">Default model</option>
+          {ids.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
+        </select>
+      </label>
+      <details>
+        <summary className="muted small">Advanced: a tighter budget per run</summary>
+        <label className="small">
+          <span className="muted">Max cost ($)</span>{' '}
+          <input key={`c${budget.maxRunCost ?? ''}`} type="number" min={0.01} max={JOB_MAX_COST} step={0.01}
+            placeholder={String(JOB_MAX_COST)} defaultValue={budget.maxRunCost ?? ''} aria-label={`Max cost per run of ${job.name}`}
+            onBlur={(e) => setCap('maxRunCost', e.target.value, 1, JOB_MAX_COST)} />
+        </label>{' '}
+        <label className="small">
+          <span className="muted">Max minutes</span>{' '}
+          <input key={`s${budget.maxRunSeconds ?? ''}`} type="number" min={0.5} max={JOB_MAX_MINUTES} step={0.5}
+            placeholder={String(JOB_MAX_MINUTES)} defaultValue={budget.maxRunSeconds ? budget.maxRunSeconds / 60 : ''}
+            aria-label={`Max minutes per run of ${job.name}`}
+            onBlur={(e) => setCap('maxRunSeconds', e.target.value, 60, JOB_MAX_MINUTES)} />
+        </label>
+        <p className="muted small">Every scheduled run already stops at ${JOB_MAX_COST.toFixed(2)} or {JOB_MAX_MINUTES} minutes; these can
+          only lower that, and your own settings still win when they are stricter.</p>
+      </details>
+    </div>
   )
 }
 

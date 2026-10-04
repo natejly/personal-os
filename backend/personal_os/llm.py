@@ -492,6 +492,8 @@ _OVERFLOW_MSG = re.compile(r"context (length|window)|maximum context|prompt is t
 _QUOTA_MSG = re.compile(r"exceeded your current quota|insufficient (quota|credits?|balance)|credit balance|billing|payment required")
 _PARAM_MSG = re.compile(r"unsupported (parameter|value)|unknown parameter|unrecognized request argument|does not support")
 _OVERLOAD_MSG = re.compile(r"overloaded|at capacity")
+# A LiteLLM proxy answers 400 "No connected db." when the key is not its master key.
+_AUTH_MSG = re.compile(r"no connected db|invalid api key|authentication")
 
 
 def classify_error(status: int | None, body: str) -> str:
@@ -504,7 +506,7 @@ def classify_error(status: int | None, body: str) -> str:
         return "overflow"
     if status == 402 or code == "insufficient_quota" or typ == "insufficient_quota" or code.startswith("billing") or typ.startswith("billing") or _QUOTA_MSG.search(msg):
         return "quota"
-    if status in (401, 403):
+    if status in (401, 403) or typ == "no_db_connection" or _AUTH_MSG.search(msg):
         return "auth"
     if status == 404:
         return "not_found"
@@ -557,7 +559,7 @@ def describe_http_error(status: int, reason: str, body: str, retried: int = 0, r
         wait = f" The provider asked to wait {int(retry_after)}s." if retry_after else ""
         more = f" {detail}" if detail and kind == "rate_limit" else ""
         return f"The provider is rate-limiting you (429).{tail}{wait} Wait a moment and try again, or pick another model.{more}"
-    if status in (401, 403):
+    if kind == "auth" or status in (401, 403):
         return f"The provider rejected your API key or access ({status}). Check the API key in Settings. {detail}".strip()
     if status == 404:
         return f"The provider does not know that model or route (404). Check the model name in Settings. {detail}".strip()

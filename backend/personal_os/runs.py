@@ -340,7 +340,7 @@ class RunStore:
 
         done    -> the recorded result, fn not called.
         started -> the process died mid-call last time; the outcome is unknown, so fn is NOT called again.
-        error   -> the last attempt failed cleanly; fn is called again.
+        error   -> the last attempt failed cleanly; fn is called again. An unverified write is not clean: it is done.
         """
         digest = args_digest(args)
         key = idempotency_key(run_id or "", step, tool, digest)
@@ -371,7 +371,8 @@ class RunStore:
             self._exec("UPDATE executed_calls SET status='error', result=?, finished_at=? WHERE key=?",
                        (_dumps({"error": f"{type(e).__name__}: {e}"}), time.time(), key))
             raise
-        failed = isinstance(result, dict) and bool(result.get("error"))
+        # An UNVERIFIED write may have landed: record it as done so a resume replays it instead of writing twice.
+        failed = isinstance(result, dict) and bool(result.get("error")) and "verification" not in result
         self._exec("UPDATE executed_calls SET status=?, result=?, finished_at=? WHERE key=?",
                    ("error" if failed else "done", _dumps(result), time.time(), key))
         return result, False
@@ -411,7 +412,7 @@ class RunStore:
     def recover(self, live: Iterable[str] = ()) -> list[dict[str, Any]]:
         """At startup: every run still marked active, but not running in this process, died with the last one.
         Mark it interrupted and append an `error` event saying so (naming any approval it was blocked on).
-        Pending approvals stay pending: the UI can still show the card and record the decision.
+        Pending approvals stay pending: the UI can still show the card and record the decision. A desk's are parked.
         Also drops the event tape of runs that ended more than EVENTS_RETAIN_S ago."""
         keep = set(live)
         out = []
@@ -419,6 +420,9 @@ class RunStore:
             if r["run_id"] in keep:
                 continue
             pending = self.approvals("pending", run_id=r["run_id"])
+            for a in pending:
+                if a.get("desk_id"):
+                    self.park(a["call_id"])  # the desk's next turn picks the answer up, with no second card
             msg = "Interrupted: the backend stopped while this reply was running."
             if pending:
                 msg += " It was waiting on your approval of " + ", ".join(f"{a['tool']} ({a['call_id']})" for a in pending) + "."

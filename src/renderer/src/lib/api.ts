@@ -179,6 +179,10 @@ export const api = {
     update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
+    /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
+    preview: (cron: string, timezone?: string, n = 5) =>
+      req<{ ok: boolean; error?: string; timezone?: string; next: number[] }>(
+        `/jobs/preview?${new URLSearchParams({ cron, n: String(n), ...(timezone ? { timezone } : {}) })}`),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
     /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
     dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),

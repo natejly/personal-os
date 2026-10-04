@@ -12,7 +12,6 @@ import { isDeclarative } from '../../lib/boundWidget'
 const time = (t: number): string => new Date(t * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
 export default function DashboardWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
-  const dashboardId = typeof win.config.dashboard_id === 'string' ? win.config.dashboard_id : ''
   const refId = win.ref_id
   const [widget, setWidget] = useState<Widget | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -23,7 +22,7 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
   // Only while the window is live, so an off-screen window issues no request at all. A declarative widget
   // then asks for its data, which is the cache inside its refresh_minutes and a re-bind (never the model) after.
   useEffect(() => {
-    if (!live || !dashboardId || !refId) return
+    if (!live || !refId) return
     let ok = true
     void api.widgets
       .get(refId)
@@ -31,7 +30,7 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
       .then((w) => { if (ok) { setWidget(w); setError(null) } })
       .catch((e: Error) => { if (ok) setError(/404|Not Found/i.test(e.message) ? 'That widget was deleted from its dashboard.' : e.message) })
     return () => { ok = false }
-  }, [live, dashboardId, refId, attempt])
+  }, [live, refId, attempt])
 
   useEffect(() => {
     if (widget && !win.title) onTitle(widget.title)
@@ -50,7 +49,7 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
     }
   }
 
-  if (!dashboardId || !refId) return <div className="widget"><div className="widget-error">No dashboard widget bound to this window.</div></div>
+  if (!refId) return <div className="widget"><div className="widget-error">No dashboard widget bound to this window.</div></div>
   // The iframe is the single most expensive thing on the plane; `live` is what unmounts it.
   if (!live) return <div className="widget"><div className="widget-empty">{widget?.title || 'Widget'} · paused</div></div>
   if (!widget && error) {

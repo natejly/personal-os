@@ -1,6 +1,6 @@
 """Reply tracker: which threads need the user's reply, and which sent mail is still unanswered.
 
-Four statuses per thread, as a reply-zero tracker: to_reply (they wrote last and want something),
+Four statuses per thread: to_reply (they wrote last and want something),
 awaiting_reply (I wrote last and asked something), fyi (nothing needed) and actioned. The classifier
 works from headers and snippets only; an LLM refinement is opt-in, injected, and sees only subject,
 sender domain and snippet. Nothing here labels, archives, drafts or sends: it reads thread metadata

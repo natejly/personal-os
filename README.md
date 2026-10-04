@@ -115,6 +115,16 @@ their own instructions, knowledge files, memories and graph.
   promotion is read back before it counts. A card nobody is watching parks after a
   few minutes — the run lets go, the card stays pending and decidable, and answering
   it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
+  A chat can hand work to a desk (`desk_start`) along with the docs it needs, which
+  are copied into the desk's `inputs/` folder. When the desk finishes, fails or
+  waits for review, its report is posted back into that chat, so the chat's
+  assistant picks the result up on its next reply.
+- **Agent inbox.** Everything agents left for you, in one list on Today, with the
+  total on the sidebar's Today row: approval cards from any chat, desks waiting on
+  you, scheduled-job proposals and paused jobs, and a count with a link for every
+  other review queue (proposed doc edits, meeting notes, skills and workflow runs
+  to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
+  opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
   the procedures it can be asked to repeat; **Connectors**, the MCP servers whose
   tools join the toolbox; and **Made**, every doc, dashboard and board built here.
@@ -364,12 +374,19 @@ and its verdict is kept on the row.
 | Shortcut | Action |
 |---|---|
 | ⌘N | New chat |
-| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
+| ⌘⇧N / ⌘⇧D | New note / today's note |
+| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Knowledge base |
 | ⌘7 | Memory, opened on the knowledge graph |
 | ⌘9 | Activity |
-| ⌘⇧M | Meetings |
-| ⌘B | Toggle sidebar |
-| ⌘I | Toggle context panel |
+| ⌘⇧M | Meetings (maths while typing in a doc) |
+| ⌘⇧K | Cowork |
+| ⌘⇧F | Search chats |
+| ⌘F | Find in this chat |
+| ⌘⇧P | Cycle plan mode in the composer |
+| ⌘B | Toggle sidebar (bold while typing in a doc) |
+| ⌘I | Ask about this page |
+| ⌃⌘I | Toggle context panel |
+| ⌘⇧C | Toggle Spaces |
 | ⌘U | Upload document |
 | ⌘, | Settings |
 | Enter / Shift+Enter | Send / newline |
@@ -521,7 +538,7 @@ Each assistant message carries a `trace`: spans of kind `context`, `llm`, `tool`
 and `learn`, each with start and end times and metadata such as token usage,
 time to first token, finish reason, tool arguments and result sizes. Spans are
 streamed as `span` SSE events while the reply is generated, so the Trace tab in
-the Context panel (⌘I) fills in live. The chip under a finished reply
+the Context panel (⌃⌘I) fills in live. The chip under a finished reply
 (`4 steps · 6.1 s · 3.7k tok`) opens that reply's trace.
 
 ## Usage and cost

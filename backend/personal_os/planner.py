@@ -1,7 +1,7 @@
 """Deterministic time-block planner: todos with estimates onto free work-hour calendar time.
 
-After FluidCalendar's open scheduler: busy intervals out of work-hour windows, candidate slots of task
-duration, a fixed-weight score per slot, greedy best pick. No Google, no db, no clock reads: `now` and
+Busy intervals out of work-hour windows, candidate slots of task duration, a fixed-weight score per slot,
+greedy best pick. No Google, no db, no clock reads: `now` and
 tz-naive local datetimes are injected, so the same input always gives the same plan. The output is a
 proposal; nothing is written anywhere until the user applies it (modules/planner.py).
 """

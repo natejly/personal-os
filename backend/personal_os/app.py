@@ -8332,13 +8332,6 @@ def get_action_plan(plan_id: str) -> dict[str, Any]:
     return plan
 
 
-@app.get("/conversations/{id}/plan")
-def conversation_plan(id: str) -> dict[str, Any] | None:
-    """The newest plan of this conversation, so a reloaded chat still shows its card."""
-    rows = plans.for_conversation(id, limit=1)
-    return rows[0] if rows else None
-
-
 # A plan is decided through POST /approvals/{call_id} like every other card, not through a route of
 # its own. The branch this came from had a second decision path keyed by plan_id; keeping one means
 # a plan cannot be approved by a route that skips the approval row, the edited-digest re-derivation

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
-import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, PromotionKind, ToolEvent } from '@shared/types'
+import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, ToolEvent } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
@@ -159,7 +159,7 @@ export default function DeskDetail(): JSX.Element | null {
   const desk = useStore((s) => s.activeDesk)
   const maxTurns = useStore((s) => s.settings.deskMaxTurns ?? 12)
   const {
-    startDesk, resumeDesk, pauseDesk, stopDesk, patchDesk, deleteDesk, acceptOutputs, rejectOutputs, messageDesk,
+    startDesk, resumeDesk, pauseDesk, stopDesk, patchDesk, deleteDesk, messageDesk,
     markDeskSeen
   } = useStore()
   const [tab, setTab] = useState<Tab>('activity')
@@ -251,9 +251,6 @@ export default function DeskDetail(): JSX.Element | null {
     const purge = confirm(`Also delete the workspace files at ${desk.workspace}? Cancel keeps them on disk — they are the one thing you cannot regenerate.`)
     void deleteDesk(desk.id, purge)
   }
-  const acceptAll = (): void => {
-    void acceptOutputs(desk.id, undecided.map((o) => ({ output_id: o.id, destination: 'doc' as PromotionKind, title: o.title || o.path })))
-  }
 
   return (
     <section className="cowork-main">
@@ -279,13 +276,17 @@ export default function DeskDetail(): JSX.Element | null {
             )}
             {desk.status === 'review' && (
               <>
-                <button className="primary-btn" disabled={undecided.length === 0} onClick={acceptAll}>Accept all</button>
+                {/* Accepting happens on the Output tab, where each output's destination and project are chosen: a
+                    header "Accept all" sent everything to a new personal doc whatever was picked there. */}
+                {undecided.length > 0 && tab !== 'output' && (
+                  <button className="primary-btn" onClick={() => setTab('output')}>Review {undecided.length} output{undecided.length === 1 ? '' : 's'}</button>
+                )}
                 <button className="ghost-btn" aria-expanded={sendingBack} onClick={() => setSendingBack((v) => !v)}>Send back</button>
-                <button className="ghost-btn danger" disabled={undecided.length === 0} onClick={() => void rejectOutputs(desk.id)}>Reject all</button>
               </>
             )}
             {STOPPABLE.includes(desk.status) && <button className="ghost-btn danger" title="Stop (⌘.)" onClick={() => void stopDesk(desk.id)}><Square size={13} /> Stop</button>}
-            {(desk.status === 'review' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && !desk.archived && (
+            {/* Not while outputs wait: an archived desk leaves the badge and the inbox, so its pending work would vanish. */}
+            {(desk.status === 'review' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && !desk.archived && undecided.length === 0 && (
               <button className="ghost-btn" onClick={() => void archive()}><Archive size={13} /> Archive</button>
             )}
             {desk.archived && (

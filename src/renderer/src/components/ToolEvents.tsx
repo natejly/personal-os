@@ -354,6 +354,12 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
         )}
         {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
         {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
+        {t.name === 'desk_start' && !t.pending && !t.error && /"desk_id":\s*"([^"]+)"/.test(t.result_preview ?? '') && (
+          <button className="link small" onClick={() => {
+            const id = /"desk_id":\s*"([^"]+)"/.exec(t.result_preview ?? '')?.[1]
+            if (id) { useStore.getState().setView('cowork'); void useStore.getState().openDesk(id) }
+          }}>Open the desk</button>
+        )}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
         {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
         {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}

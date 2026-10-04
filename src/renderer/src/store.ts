@@ -940,8 +940,19 @@ export const useStore = create<State>((set, get) => {
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
+    // ⌘B (Toggle Sidebar) and ⇧⌘M (Meetings) are menu accelerators, and a menu accelerator never reaches the page:
+    // inside the Markdown editor they would hide the sidebar or leave the doc instead of bold / maths. While the
+    // editor has focus, hand the chord back to it as the keystroke it was.
+    const toEditor = (key: string, shift: boolean): boolean => {
+      const el = typeof document === 'undefined' ? null : document.activeElement
+      if (!el || el.tagName !== 'TEXTAREA' || !el.classList.contains('md-input')) return false
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, metaKey: true, ctrlKey: false, shiftKey: shift, bubbles: true, cancelable: true }))
+      return true
+    }
     window.os.onMenu((action) => {
       const s = get()
+      if (action === 'toggle-sidebar' && toEditor('b', false)) return
+      if (action === 'view:meetings' && toEditor('M', true)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
         // Always personal: a new chat belongs to a project only when the user asked for one by
@@ -1233,6 +1244,12 @@ export const useStore = create<State>((set, get) => {
     if (next === s) return s
     if (ev.event === 'tool_result' && (ev.data as { name?: string }).name === 'gmail_send') {
       setTimeout(() => window.dispatchEvent(new Event('grain-outbox-changed')), 0)  // the undo countdown, now
+    }
+    // A space the agent just changed: re-read the canvas so the windows it placed appear without leaving and coming
+    // back. Lazy import, since the canvas store imports this one.
+    const tool = ev.event === 'tool_result' ? (ev.data as { name?: string; error?: unknown }) : null
+    if (tool && !tool.error && /^(space_|widget_)/.test(tool.name ?? '') && get().view === 'canvas') {
+      setTimeout(() => void import('./canvas/store').then((m) => m.useCanvas.getState().load()), 0)
     }
     // Only the events that open or settle a gate can move the count, and delta must stay free
     // of any recount: it is the one event that arrives per token.

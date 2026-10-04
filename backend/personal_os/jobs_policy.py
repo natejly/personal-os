@@ -2,8 +2,8 @@
 
 `Scheduler` fires a slot and forgets it; this is the part that looks at how the run ended.
 
-- Overlap. A slot that comes due while the job's previous run is still live is skipped (APScheduler's
-  `max_instances=1`). The skip is recorded on the job (`last_skip_*`), and the slot is still consumed, so a
+- Overlap. A slot that comes due while the job's previous run is still live is skipped (at most one
+  instance per job). The skip is recorded on the job (`last_skip_*`), and the slot is still consumed, so a
   long run does not buy a catch-up the moment it finishes.
 - Retry. A run that ENDS in `error` or `interrupted` is launched again for the same slot, up to the job's
   `max_retries`, after an exponential backoff. The attempt number travels in the run's own input

@@ -33,14 +33,15 @@ _ANAPHOR = re.compile(r"\b(it|its|that|this|those|these|them|they|he|she|him|her
 def retrieval_query(prior: list[dict[str, Any]], text: str) -> str:
     """The text retrieval searches with. A follow-up ("what about the second one?") names nothing on its own, so a
     short or anaphoric message is searched together with the previous user message and the head of the last reply.
-    `prior` is the history before `text` (without it). The model still sees `text` unchanged."""
+    `prior` is the history before `text` (without it). The model still sees `text` unchanged. `text` goes first and
+    the history is clipped, so its own terms survive fts_query's term cap and the embedder's character cut."""
     if len(text.split()) >= 12 and not _ANAPHOR.search(text):
         return text
     prev_user = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "user"), "")
     if not prev_user.strip():
         return text
     reply = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "assistant"), "")
-    return "\n".join(p for p in (prev_user.strip(), reply.strip()[:300], text) if p)
+    return "\n".join(p for p in (text, prev_user.strip()[:300], reply.strip()[:300]) if p)
 
 
 PINNED_LIMIT = 4000  # characters per pinned document

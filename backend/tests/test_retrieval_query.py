@@ -14,7 +14,7 @@ from personal_os import app as app_mod  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os.context import build_context, retrieval_query  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.repos import Documents, Graph, Memories  # noqa: E402
+from personal_os.repos import Documents, Graph, Memories, fts_query  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -31,13 +31,25 @@ def test_standalone_question_is_unchanged() -> None:
 
 def test_follow_up_carries_the_previous_turn() -> None:
     rq = retrieval_query(HISTORY, "what about the second one?")
-    assert "budget memo" in rq and rq.endswith("what about the second one?")
+    assert "budget memo" in rq and rq.startswith("what about the second one?")
     assert "vendor renewal" in rq  # head of the last reply
 
 
 def test_long_reply_is_clipped() -> None:
     rq = retrieval_query([HISTORY[0], {"role": "assistant", "content": "x" * 1000}], "and then?")
     assert rq.count("x") == 300
+
+
+def test_long_previous_message_is_clipped() -> None:
+    rq = retrieval_query([{"role": "user", "content": "y" * 5000}], "and then?")
+    assert rq.startswith("and then?") and rq.count("y") == 300
+
+
+def test_new_topic_keeps_its_own_terms() -> None:
+    q = fts_query(retrieval_query(HISTORY, "what does the Kubernetes migration plan say?"))
+    assert '"kubernetes"' in q and '"migration"' in q
+    q = fts_query(retrieval_query(HISTORY, "what about the travel cap?"))
+    assert '"travel"' in q and '"cap"' in q
 
 
 def test_first_message_has_no_history() -> None:
@@ -55,6 +67,10 @@ def test_bm25_fallback_finds_the_memo_for_a_follow_up() -> None:
                               global_system_prompt="")
     _, used = build_context(**kw, retrieval_text=retrieval_query(HISTORY, follow))
     assert memo["id"] in [c["document_id"] for c in used["chunks"]]
+    k8s = documents.create(None, "k8s.txt", "text/plain", 10, "", "Kubernetes migration plan: move workers to the new cluster.")
+    new_topic = "what does the Kubernetes migration plan say?"
+    _, used = build_context(**{**kw, "query": new_topic}, retrieval_text=retrieval_query(HISTORY, new_topic))
+    assert k8s["id"] in [c["document_id"] for c in used["chunks"]]
     _, raw = build_context(**kw)  # without it, "second" finds the garden note, not the memo
     assert memo["id"] not in [c["document_id"] for c in raw["chunks"]]
 
@@ -85,8 +101,7 @@ def test_stream_retrieves_with_history_and_regenerate_counts_once(monkeypatch: p
     assert seen[-1] == "Summarise the Q3 budget memo"  # first message: nothing to add
     T.j("POST", f"/conversations/{cid}/chat", {"content": "what about the second one?"})
     T.drain(cid)
-    assert seen[-1].startswith("Summarise the Q3 budget memo\nThe Q3 budget memo raises")
-    assert seen[-1].endswith("what about the second one?")
+    assert seen[-1].startswith("what about the second one?\nSummarise the Q3 budget memo\nThe Q3 budget memo raises")
     first = seen[-1]
     T.j("POST", f"/conversations/{cid}/chat", {})  # regenerate: the trailing user message is not history
     T.drain(cid)

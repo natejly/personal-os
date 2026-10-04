@@ -3,7 +3,7 @@ import {
   FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
-import { useStore } from '../store'
+import { useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
@@ -28,6 +28,11 @@ import type { SlashCommand } from '../features/notes/slash'
 import { toggleTaskAt } from '../features/notes/tasks'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
+import DocumentsView from './DocumentsView'
+import ScopeSelect from './ScopeSelect'
+
+// ponytail: Pages joins when the files-view package lands.
+const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads']]
 
 const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
@@ -56,6 +61,9 @@ export default function DocsView(): JSX.Element {
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const section = useStore((s) => s.filesSection)
+  const libraryScope = useStore((s) => s.libraryScope)
+  const { openFiles, setLibraryScope } = useStore()
   const {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
     setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, openDailyNote
@@ -283,18 +291,25 @@ export default function DocsView(): JSX.Element {
     <main className="page docs-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <button
+        {section === 'notes' && <button
           className={`icon-btn no-drag ${treeOpen ? 'on' : ''}`} title={treeOpen ? 'Hide file tree' : 'Show file tree'}
           aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}
-        ><FolderTree size={16} /></button>
+        ><FolderTree size={16} /></button>}
         <h2><Files size={16} /> Files</h2>
+        <div className="seg no-drag" role="tablist" aria-label="Files section">
+          {SECTIONS.map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={section === k} className={section === k ? 'on' : ''} onClick={() => openFiles(k)}>{label}</button>
+          ))}
+        </div>
         <div className="no-drag header-right">
-          <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} />
+          {section === 'notes' && <NewDocMenu onCreate={(t) => void createDoc(t)} onDaily={() => void openDailyNote()} />}
+          {section === 'uploads' && <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />}
         </div>
         <AppSwitcher />
       </header>
 
-      <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
+      {section === 'uploads' && <DocumentsView embedded />}
+      {section === 'notes' && <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
         {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
         {treeOpen && (
           <>
@@ -515,7 +530,7 @@ export default function DocsView(): JSX.Element {
             )}
           </aside>
         )}
-      </div>
+      </div>}
     </main>
   )
 }

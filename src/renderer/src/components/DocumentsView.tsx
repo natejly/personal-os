@@ -16,7 +16,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { uploadDocuments, deleteDocument, pinDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
-  // Embedded without a project (Settings → Knowledge base) it follows the library scope, like the page did.
+  // Embedded without a project (Files → Uploads) it follows the library scope, like the page did.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)

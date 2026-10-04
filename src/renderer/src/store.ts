@@ -961,7 +961,7 @@ export const useStore = create<State>((set, get) => {
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'new-note') void s.createDoc({})
-      else if (action === 'daily-note') { s.setView('docs'); void s.openDailyNote() }
+      else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'chat:next') s.stepChat(1)
       else if (action === 'chat:prev') s.stepChat(-1)
@@ -2389,7 +2389,7 @@ export const useStore = create<State>((set, get) => {
     },
     openDoc: async (id) => {
       if (get().activeDoc?.id !== id) await get().flushDoc()
-      set((st) => ({ view: 'docs', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
+      set((st) => ({ view: 'docs', filesSection: 'notes', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
@@ -2418,6 +2418,7 @@ export const useStore = create<State>((set, get) => {
         get().expandTo(doc.project_id ?? '', doc.folder)
         set((st) => ({
           view: 'docs',
+          filesSection: 'notes',
           docTabs: st.docTabs.includes(doc.id) ? st.docTabs : [...st.docTabs, doc.id],
           activeDoc: doc,
           docDraft: null

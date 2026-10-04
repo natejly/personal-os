@@ -92,3 +92,24 @@ def test_evaluate_route_and_always_rule():
 def test_card_offers_recipient_rule():
     r = pr.resolve("gmail_send", mail("a@x.com"), "ask", False, rules=None)
     assert r.card()["subject"] == "gmail_send(a@x.com)" and r.card()["suggestions"] == ["gmail_send(a@x.com)"]
+
+
+def test_rule_naming_an_unknown_tool_is_rejected_on_save():
+    assert "gmail_reply" not in pr.MAIL_TOOLS and "gmail_forward" not in pr.MAIL_TOOLS
+    assert client.put("/settings", json={"permissionRules": rs(deny=["gmail_reply(a@b.com)"])}).status_code == 422
+    v = client.post("/permissions/evaluate", json={"rule": "gmail_reply(a@b.com)"}).json()
+    assert v["ok"] is False and "gmail_reply" in v["error"]
+    for ok in ("Bash(git *)", "Read(~/x/**)", "Edit", "Agent(worker)", "external_directory(/tmp/**)", "mcp__srv__tool", "gmail_send"):
+        assert client.post("/permissions/evaluate", json={"rule": ok}).json()["ok"] is True, ok
+    # a rule saved before its tool went away still loads
+    assert pr.load_rules(rs(deny=["gmail_reply(a@b.com)"])).deny[0].tool == "gmail_reply"
+
+
+def test_evaluate_route_per_tool_subjects():
+    client.put("/settings", json={"permissionRules": rs(deny=["gmail_send(a@b.com)"])})
+    v = client.post("/permissions/evaluate", json={"tool": "gmail_send", "args": {"to": "a@b.com"}}).json()
+    assert v["action"] == "deny" and v["rule"] == "gmail_send(a@b.com)"
+    home = os.path.expanduser("~")
+    client.put("/settings", json={"permissionRules": rs(allow=["Edit(~/x/**)"])})
+    v = client.post("/permissions/evaluate", json={"tool": "write_local_file", "args": {"path": f"{home}/x/y"}}).json()
+    assert v["action"] == "allow" and v["rule"] == "Edit(~/x/**)"

@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from email.utils import getaddresses
 from typing import Any, Iterable
 
+# Rule names that are not tool names: the subject kinds `subject_for` emits.
+PSEUDO_TOOLS = frozenset({"Bash", "Read", "Edit", "Agent", "external_directory"})
 # Verdicts: 'deny' | 'ask' | 'allow' | None (no opinion: the tool's own mode stands).
 MAX_SUGGESTIONS = 5
 # Matches a call that has just been refused this many times in a row (permission refusals and user denials).
@@ -33,7 +35,7 @@ HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of t
 
 READ_TOOLS = {"read_local_file", "fs_glob", "fs_grep"}
 EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_file", "trash_local_file"}
-MAIL_TOOLS = {"gmail_send", "gmail_draft", "gmail_reply", "gmail_forward"}
+MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
 SRC_KEYS = ("src", "source", "from")

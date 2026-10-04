@@ -759,6 +759,13 @@ def _check_numeric_setting(key: str, value: Any) -> int | float:
     return int(value) if isinstance(default, int) else float(value)
 
 
+def _rule_tool_known(r: permrules.Rule) -> None:
+    """A rule must name something a call can match, or it silently never applies. Checked on save, not on load, so a
+    saved rule for a tool that later goes away keeps loading."""
+    if r.tool not in permrules.PSEUDO_TOOLS and r.tool not in toolbox.specs and not mcp_is(r.tool):
+        raise ValueError(f"unknown tool {r.tool!r} in {r.text!r}")
+
+
 def _check_permission_rules(v: Any) -> dict[str, list[str]]:
     """The permissionRules setting: three lists of well-formed rule strings, nothing else."""
     if not isinstance(v, dict):
@@ -769,7 +776,10 @@ def _check_permission_rules(v: Any) -> dict[str, list[str]]:
         if not isinstance(items, list):
             raise HTTPException(422, f"permissionRules.{key} must be a list")
         try:
-            out[key] = list(dict.fromkeys(permrules.parse_rule(str(t)).text for t in items))
+            parsed = [permrules.parse_rule(str(t)) for t in items]
+            for r in parsed:
+                _rule_tool_known(r)
+            out[key] = list(dict.fromkeys(r.text for r in parsed))
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
     return out
@@ -3939,6 +3949,7 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
     if body.rule is not None:
         try:
             r = permrules.parse_rule(body.rule)
+            _rule_tool_known(r)
             return {"ok": True, "rule": r.text, "tool": r.tool, "pattern": r.pattern}
         except ValueError as e:
             return {"ok": False, "error": str(e)}

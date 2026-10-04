@@ -66,21 +66,6 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     ]
   }
 
-  const board = async (): Promise<MenuEntry[]> => {
-    const boards = await api.boards.list()
-    if (!boards.length) {
-      return [{
-        label: 'New board',
-        icon: <Plus size={14} />,
-        run: act(async () => {
-          const b = await api.boards.create({ name: 'Board', project_id: projectOf() })
-          await open('board', b.id)
-        })
-      }]
-    }
-    return boards.map((b): MenuEntry => ({ label: b.name, run: act(() => open('board', b.id)) }))
-  }
-
   const note = async (): Promise<MenuEntry[]> => {
     const notes = (await api.notes.list('all')).sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT_NOTES)
     const fresh: MenuEntry = {
@@ -143,7 +128,6 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 
   const pickers: Partial<Record<WidgetKind, () => MenuEntry[] | Promise<MenuEntry[]>>> = {
     chat,
-    board,
     note,
     'dashboard-widget': widget,
     project,

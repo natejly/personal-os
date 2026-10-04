@@ -30,8 +30,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_presets_created ON canvas_presets(created_
 """
 PRESET_JSON = ("windows",)
 # needsRef kinds -> the table their ref_id must still exist in. Mirrors `needsRef` in
-# src/renderer/src/canvas/registry.ts (chat, board, note, dashboard-widget, project, artifact).
-REF_TABLES = {"chat": "conversations", "board": "boards", "note": "notes", "dashboard-widget": "widgets", "project": "projects", "artifact": "artifacts"}
+# src/renderer/src/canvas/registry.ts (chat, note, dashboard-widget, project, artifact).
+REF_TABLES = {"chat": "conversations", "note": "notes", "dashboard-widget": "widgets", "project": "projects", "artifact": "artifacts"}
 
 
 def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
@@ -108,7 +108,7 @@ class CanvasPresets:
 
     # ---------- portable files ----------
     # Notes and dashboard widgets travel with their content; every other referent stays a ref (a chat
-    # must never leave the machine, and boards/projects/artifacts have no body that fits a window).
+    # must never leave the machine, and projects/artifacts have no body that fits a window).
     def export(self, id: str) -> dict[str, Any] | None:
         p = self.get(id)
         if not p or not self.notes or not self.dashboards:

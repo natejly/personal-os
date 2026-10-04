@@ -48,7 +48,6 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   viewRow('health'),
   { view: 'calendar', label: 'Calendar' },
   { view: 'mail', label: 'Mail' },
-  { view: 'boards', label: 'Boards' },
   { view: 'dashboards', label: 'Dashboards' },
   { view: 'library', label: 'Library' },
   { view: 'cowork', label: 'Cowork' },

@@ -10,7 +10,7 @@ import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
 import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
-const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'board-card', 'project', 'widget', 'note', 'file', 'nav']
+const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'widget', 'note', 'file', 'nav']
 
 /** Keep a fixed popover this far inside the viewport. */
 const MENU_GAP = 8

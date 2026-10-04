@@ -224,7 +224,7 @@ j("GET", f"/docs/{did}", expect=404)
 check(True, "a deleted doc is gone")
 
 # ---- the neighbouring surfaces still answer ----
-for path in ("/health", "/notes", "/todos", "/boards"):
+for path in ("/health", "/notes", "/todos"):
     j("GET", path)
 check(True, "the routes that were already there still work")
 

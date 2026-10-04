@@ -10,7 +10,7 @@ removed: canvases are Spaces in the sidebar, and ⌘⇧C toggles Spaces. Written
 
 A second way to use Personal OS. Today the app is a single-pane router: the sidebar picks one
 `view` and that view fills the window (`App.tsx:60-68`). Canvas Mode keeps the same sidebar but
-turns the right-hand area into a **desktop**: clicking a chat, todo list, board, calendar or
+turns the right-hand area into a **desktop**: clicking a chat, todo list or board, calendar or
 dashboard widget opens it as a **floating window on a canvas** instead of replacing what's there.
 Windows move, resize, snap, stack, minimize to a dock, and — for the ones you want on your real
 desktop — **pop out into genuine macOS windows** that a global shortcut can summon back to the
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS notes (
 ```
 
 `notes` is the only genuinely new content type — everything else on the canvas is a view onto data
-that already exists (conversations, todos, boards, documents, memories, widgets).
+that already exists (conversations, todos, documents, memories, widgets).
 
 ### 6.2 REST
 
@@ -353,9 +353,8 @@ interface WidgetProps {
 | Kind | Default size | Backed by | Notes |
 |---|---|---|---|
 | `chat` | 520×640 | `conversations/{id}` | Full `ChatView` minus its header; status ring; ⌘↵ sends |
-| `todos` | 380×520 | `/todos` | `config`: `{ scope, includeDone, q }`; rows are drag sources |
+| `todos` | 380×520 | `/todos` | `config`: `{ scope, includeDone, q, view: 'list'\|'board', list, groupBy: 'status'\|'list' }`; rows and board cards are drag sources |
 | `calendar` | 640×520 | `/integrations/google/calendar` | `config`: `{ mode: 'day' \| 'week', days }` |
-| `board` | 760×560 | `/boards/{id}` | Whole board, or `config.column_id` for a single column |
 | `note` | 300×300 | `notes` | Sticky note, markdown, 6 Apple-ish colours, no chrome beyond a close button |
 | `dashboard-widget` | 420×340 | `/widgets/{id}/render` | Reuses the existing sandboxed iframe (`DashboardsView.tsx:127`) |
 | `memory` | 400×520 | `/memories` | List, scope filter, drag a memory into a chat to pin it as context |
@@ -393,7 +392,7 @@ One payload type carried on a custom MIME (`application/x-personal-os`) so the b
 drag types never collide:
 
 ```ts
-type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file'
+type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file'
 interface DragPayload { kind: DragKind; id: string; label: string; projectId?: string | null }
 ```
 
@@ -404,10 +403,9 @@ widgets. Drop targets declare `accepts` in the registry.
 |---|---|---|
 | sidebar chat | opens a `chat` window | — |
 | sidebar nav item (Todos, Calendar…) | opens that widget | — |
-| todo | opens a focused `todos` window | onto `board` → becomes a card; onto `chat` → quoted into the composer |
+| todo | opens a focused `todos` window | onto a `todos` board column → moves it there; onto `chat` → quoted into the composer |
 | document | opens a `documents` window | onto `chat` → attached to context |
 | memory | opens a `memory` window | onto `chat` → pinned into context |
-| board card | opens a `note` with its text | onto `todos` → becomes a todo |
 | project | opens a `project` window | onto a space → binds the space to that project |
 | OS files | uploads + opens `documents` | onto `chat` → uploads and attaches |
 
@@ -635,7 +633,7 @@ green for six seconds after, and the dock tile agrees.
 
 **Phase 4 — drag and drop**
 The payload type, sources, targets, drop feedback (§9).
-*Done when:* a todo dragged onto a board becomes a card and survives a reload.
+*Done when:* a todo dragged to another board column changes status and survives a reload.
 
 **Phase 5 — spaces**
 Multiple canvases, switcher, transitions, overview, project binding.

@@ -40,7 +40,6 @@ from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
 from .artifacts import Artifacts
-from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
@@ -334,7 +333,6 @@ def settings() -> dict[str, Any]:
 
 jobs = Jobs(db)
 proposals = Proposals(db)
-boards = Boards(db)
 dashboards = Dashboards(db)
 artifacts = Artifacts(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
@@ -505,7 +503,7 @@ docs.on_delete = meeting_store.purge_doc
 docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
 # A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
 docs.on_move = meeting_store.move_doc
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
                   conversations=convos)
@@ -5351,187 +5349,6 @@ async def dashboard() -> dict[str, Any]:
     return out
 
 
-# ---------------- boards (kanban) ----------------
-class BoardIn(BaseModel):
-    name: str
-    project_id: str | None = None
-    columns: list[str] | None = None
-
-
-class BoardPatch(BaseModel):
-    name: str | None = None
-    project_id: str | None = None
-
-
-class ColumnIn(BaseModel):
-    name: str
-
-
-class ColumnPatch(BaseModel):
-    name: str | None = None
-    position: int | None = None
-    wip_limit: int | None = None
-
-
-class CardIn(BaseModel):
-    title: str
-    column_id: str | None = None
-    description: str = ""
-    due: str | None = None
-    priority: int = 2
-    labels: list[str] = []
-
-
-class CardPatch(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    due: str | None = None
-    priority: int | None = None
-    labels: list[str] | None = None
-    clear_due: bool = False
-
-
-class MoveIn(BaseModel):
-    column_id: str
-    before_card_id: str | None = None
-
-
-@app.get("/boards")
-def list_boards() -> list[dict[str, Any]]:
-    return boards.list()
-
-
-@app.post("/boards")
-def create_board(body: BoardIn) -> dict[str, Any]:
-    return boards.create(body.name, wsid(body.project_id), body.columns)
-
-
-@app.get("/boards/{id}")
-def get_board(id: str) -> dict[str, Any]:
-    b = boards.get(id)
-    if not b:
-        raise HTTPException(404)
-    return b
-
-
-@app.put("/boards/{id}")
-def update_board(id: str, body: BoardPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_unset=True)  # an explicit null project_id moves the board back to No project
-    if "project_id" in patch:
-        patch["project_id"] = wsid(patch["project_id"])
-    b = boards.update(id, patch)
-    if not b:
-        raise HTTPException(404)
-    return b
-
-
-def _board_op(fn: Any, *a: Any) -> Any:
-    """A board write with a bad id or an empty board is the caller's mistake (400/404), never a 500."""
-    try:
-        return fn(*a)
-    except KeyError as e:
-        raise HTTPException(404, str(e.args[0]) if e.args else "Not found") from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    except sqlite3.IntegrityError as e:  # an id that matches no row, caught by the foreign key
-        raise HTTPException(404, "No such board, column or card") from e
-
-
-@app.delete("/boards/{id}")
-def delete_board(id: str) -> dict[str, bool]:
-    boards.delete(id)
-    canvases.delete_windows_for("board", id)
-    return {"ok": True}
-
-
-@app.post("/boards/{id}/columns")
-def add_column(id: str, body: ColumnIn) -> dict[str, Any]:
-    return _board_op(boards.add_column, id, body.name)
-
-
-@app.put("/boards/columns/{cid}")
-def update_column(cid: str, body: ColumnPatch) -> dict[str, bool]:
-    _board_op(boards.update_column, cid, body.model_dump(exclude_none=True))
-    return {"ok": True}
-
-
-@app.delete("/boards/columns/{cid}")
-def delete_column(cid: str) -> dict[str, bool]:
-    boards.delete_column(cid)
-    return {"ok": True}
-
-
-@app.post("/boards/{id}/cards")
-def add_card(id: str, body: CardIn) -> dict[str, Any]:
-    if not body.title.strip():
-        raise HTTPException(400, "Empty title")
-    return _board_op(boards.add_card, id, body.column_id, body.title, body.description, body.due, body.priority, body.labels)
-
-
-@app.put("/boards/cards/{cid}")
-def update_card(cid: str, body: CardPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_due"})
-    if body.clear_due:
-        patch["due"] = None
-    c = _board_op(boards.update_card, cid, patch)
-    if not c:
-        raise HTTPException(404)
-    return c
-
-
-@app.post("/boards/cards/{cid}/move")
-def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
-    c = _board_op(boards.move_card, cid, body.column_id, body.before_card_id)
-    if not c:
-        raise HTTPException(404)
-    return c
-
-
-class ClaimIn(BaseModel):
-    holder: str
-    ttl_s: float = 600
-
-
-class ReleaseIn(BaseModel):
-    token: str
-    reason: str = "finished"
-
-
-@app.get("/boards/{id}/cards/{card}/events")
-def card_events(id: str, card: str) -> list[dict[str, Any]]:
-    return boards.events(card)
-
-
-@app.post("/boards/cards/{cid}/claim")
-def claim_card(cid: str, body: ClaimIn) -> dict[str, Any]:
-    token = boards.claim(cid, body.holder, body.ttl_s)
-    if token is None:
-        raise HTTPException(409, "That card is already claimed")
-    return {"token": token}
-
-
-@app.post("/boards/cards/{cid}/release")
-def release_card(cid: str, body: ReleaseIn) -> dict[str, bool]:
-    try:
-        return {"ok": boards.release(cid, body.token, body.reason)}
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-@app.post("/boards/cards/{cid}/complete")
-def complete_card(cid: str) -> dict[str, bool]:
-    """The user accepting a card as done: the one check the HTTP surface may write."""
-    if not boards.complete(cid, "user_accepted", "user", by="user"):
-        raise HTTPException(404)
-    return {"ok": True}
-
-
-@app.delete("/boards/cards/{cid}")
-def delete_card(cid: str) -> dict[str, bool]:
-    boards.delete_card(cid)
-    return {"ok": True}
-
-
 # ---------------- dashboards, data sources, widgets, recap ----------------
 class SourceIn(BaseModel):
     name: str
@@ -5588,7 +5405,6 @@ async def _internal_data() -> dict[str, Any]:
         "todos": todos.list("__all__", include_done=False),
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
-        "boards": [{**b, **{"cards": (boards.get(b["id"]) or {}).get("cards", [])}} for b in boards.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
         "google_connected": bool(st["connected"]),
     }
@@ -5615,7 +5431,7 @@ async def _internal_data() -> dict[str, Any]:
 
 @app.get("/sources")
 def list_sources() -> dict[str, Any]:
-    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects", "boards"]}
+    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects"]}
 
 
 @app.post("/sources")

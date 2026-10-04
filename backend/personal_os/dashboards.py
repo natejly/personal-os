@@ -62,7 +62,7 @@ _WIDGET_COLUMNS = {
 }
 _WIDGET_JSON = ("source_ids", "spec", "data")
 
-INTERNAL_SOURCES = ["todos", "calendar", "gmail", "memories", "projects", "boards"]
+INTERNAL_SOURCES = ["todos", "calendar", "gmail", "memories", "projects"]
 _STORED = "[secret store]"  # data_sources.secret marker: the key is in db.secrets under source:<id>
 
 

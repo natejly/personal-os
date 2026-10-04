@@ -21,7 +21,7 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
   `/integrations/google/todo-calendar*`. `/integrations/google/tasklists` stays in app.py (Google listing).
 - `GET /dashboard` still returns `todos` (open, first 12) and `todo_stats`.
 - Tool names, schemas, descriptions, examples, groups, danger levels, **and their position in
-  `toolbox.specs`** (todo tools register at the same point, between `todo_write`'s working group and boards).
+  `toolbox.specs`** (todo tools register at the same point, between `todo_write`'s working group and the modules after it).
 - `todos.on_change` still pokes both Google loops; both loops start on startup and are cancelled on shutdown.
 - The sidebar order, the Today card order, the Settings → Modules toggles and their settings keys
   (`homeWidgets.todos`, `hiddenViews: ['todos']`), the badge count, the canvas widget and its drag kind.
@@ -66,4 +66,4 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 
 ## Later (not this pilot)
 Open the `View`/`WidgetKind` unions; move store slices into modules; a settings-panel slot (GoogleSettings'
-sync UI); per-module SCHEMA registration; port calendar, boards, docs, mail; then think about third-party.
+sync UI); per-module SCHEMA registration; port calendar, docs, mail; then think about third-party.

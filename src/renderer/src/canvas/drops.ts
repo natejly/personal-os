@@ -40,11 +40,6 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
     case 'project': return open('project', p.id)
     case 'note': return open('note', p.id)
     case 'widget': return open('dashboard-widget', p.id, { dashboard_id: p.dashboardId })
-    case 'board-card': {
-      // A card becomes a note in the target space's project, not the active one's.
-      const note = await api.notes.create({ body: p.label, project_id: projectId }).catch(() => null)
-      return note ? open('note', note.id) : null
-    }
     case 'file': return upload()
   }
   return null

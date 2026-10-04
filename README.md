@@ -12,7 +12,7 @@ their own instructions, knowledge files, memories and graph.
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Boards       │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Calendar     │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
 │ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
 │ Files        │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
 │ PROJECTS   + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
@@ -31,7 +31,7 @@ their own instructions, knowledge files, memories and graph.
   revise your docs, search
   and save memory, traverse and extend the knowledge graph, read your writing
   style before drafting as you, search the web and
-  read pages, run Python in a sandbox, manage todos and kanban boards, and (once
+  read pages, run Python in a sandbox, manage todos (list or board view), and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
   manage Google Tasks. Each tool has a mode: **on** (runs automatically),
   **ask** (pauses the reply with an inline approve/deny card) or **off**.
@@ -153,10 +153,12 @@ their own instructions, knowledge files, memories and graph.
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, todos, calendar, boards.** A Today screen with a generated daily
+- **Today, todos, calendar.** A Today screen with a generated daily
   recap, calendar, unread inbox, todos, projects and recently learned memories,
   plus a one-click brief. A native todo list, a week calendar (Google events
-  plus due todos, double-click to add), and kanban boards with drag and drop.
+  plus due todos, double-click to add), and a board view of the same todos (columns by status or by list, drag and
+  drop to move). Boards from older versions were migrated into todos: each board
+  is now a list, each card a todo with the column as its status.
   The assistant can drive all of them through tools.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
@@ -627,7 +629,7 @@ src/preload/        contextBridge (backend URL, menu events)
 src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client)
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
-                    tools.py · sandbox.py · google.py · todos.py · boards.py
+                    tools.py · sandbox.py · google.py · todos.py
                     docs.py · dashboards.py · usage.py · trace.py · llm.py
                     activity.py collectors, privacy gate, rollup, activity.md
                     meetings.py repo + service · meeting_notes.py templates/enhance

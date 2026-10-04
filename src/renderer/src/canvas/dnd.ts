@@ -5,7 +5,7 @@ import type { DragKind, DragPayload } from '@shared/types'
 export const DRAG_MIME = 'application/x-personal-os'
 
 const KINDS: ReadonlySet<string> = new Set<DragKind>([
-  'conversation', 'todo', 'document', 'memory', 'board-card', 'project', 'widget', 'note', 'file', 'nav'
+  'conversation', 'todo', 'document', 'memory', 'project', 'widget', 'note', 'file', 'nav'
 ])
 
 /** Writes the payload plus a `text/plain` mirror of the label, so a drag also drops into a textarea. */

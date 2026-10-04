@@ -45,20 +45,6 @@ def test_can_capture_sine_everywhere() -> None:
     assert native_audio.can_capture("sine") is True
 
 
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"  ok  {fn.__name__}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(fns) - failed}/{len(fns)} passed")
-    sys.exit(1 if failed else 0)
-
-
 def test_a_missing_mic_uid_is_an_error_not_the_default_input() -> None:
     class _Node:
         pass
@@ -79,3 +65,18 @@ def test_a_missing_mic_uid_is_an_error_not_the_default_input() -> None:
         assert "not present" in str(e), e
     finally:
         native_audio._av_engine_cls, native_audio._device_id_for_uid = real
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"  ok  {fn.__name__}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    sys.exit(1 if failed else 0)
+

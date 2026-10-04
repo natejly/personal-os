@@ -1266,7 +1266,7 @@ class Meetings:
             # Claim first, as the tx's first statement: two overlapping requests (a double click)
             # would otherwise both see todo_id NULL and each create a todo and a Google task.
             claimed = c.execute("UPDATE meeting_action_items SET status='adding' WHERE id=? "
-                                "AND todo_id IS NULL AND status<>'adding'", (item_id,)).rowcount == 1
+                                "AND todo_id IS NULL AND status='proposed'", (item_id,)).rowcount == 1
             r = c.execute("SELECT * FROM meeting_action_items WHERE id=?", (item_id,)).fetchone()
             if not r:
                 return None
@@ -2093,8 +2093,14 @@ class MeetingService:
             return 0
         # Serialized, snapshot included: a second replay working from a stale list found the wav
         # the first one had just transcribed and deleted, and overwrote its text with 'empty'.
-        with self._replay_lock:
+        # The tick (no meeting id) skips a busy turn instead of waiting, so a long user replay
+        # never holds up the next nudge and auto-stop.
+        if not self._replay_lock.acquire(blocking=bool(meeting_id)):
+            return 0
+        try:
             return self._replay(meeting_id, limit, cfg)
+        finally:
+            self._replay_lock.release()
 
     def _replay(self, meeting_id: str, limit: int, cfg: dict[str, Any]) -> int:
         live = self.pool.live()

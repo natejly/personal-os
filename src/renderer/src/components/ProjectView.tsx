@@ -26,7 +26,7 @@ export default function ProjectView(): JSX.Element {
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
-  // The sidebar group lists these docs beside the chats, so 'View all' must show them too.
+  // The sidebar group lists these files beside the chats, so 'View all' must show them too.
   useEffect(() => { void api.docs.list(id).then((ds) => setDocs(ds.filter((d) => d.project_id === id))).catch(() => setDocs([])) }, [id])
 
   usePageContext(() => (project
@@ -49,9 +49,9 @@ export default function ProjectView(): JSX.Element {
 
   const TABS: { key: Tab; label: string; icon: JSX.Element; n?: number }[] = [
     { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: chats.length },
-    { key: 'docs', label: 'Docs', icon: <NotebookPen size={14} />, n: docs.length },
+    { key: 'docs', label: 'Files', icon: <NotebookPen size={14} />, n: docs.length },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
-    { key: 'knowledge', label: 'Knowledge', icon: <FileText size={14} />, n: st?.documents },
+    { key: 'knowledge', label: 'Uploads', icon: <FileText size={14} />, n: st?.documents },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
   ]
 
@@ -102,7 +102,7 @@ export default function ProjectView(): JSX.Element {
       )}
       {tab === 'docs' && (
         <div className="page-body">
-          {docs.length === 0 && <div className="empty-hint big"><p>No docs in this project yet. Docs you write in Files and file under this project show up here.</p></div>}
+          {docs.length === 0 && <div className="empty-hint big"><p>No files in this project yet. Files you write in Files and file under this project show up here.</p></div>}
           <div className="chat-rows">
             {docs.map((d) => (
               <div key={d.id} className="chat-row" onClick={() => void openDoc(d.id)} role="button" tabIndex={0}>

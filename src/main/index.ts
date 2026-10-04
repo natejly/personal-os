@@ -166,9 +166,9 @@ function buildMenu(): void {
       submenu: [
         { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new-chat') },
         // Not an OS-global shortcut: nothing outside the app acts. Files gets a doc in the default place.
-        { label: 'New Note', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
-        { label: "Today's Note", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
-        { label: 'Upload Document…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
+        { label: 'New File', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
+        { label: "Today's File", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
+        { label: 'Upload File…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
         ...(isMac
           ? []
@@ -206,7 +206,7 @@ function buildMenu(): void {
         { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
         { label: 'Memory', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
         { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
-        { label: 'Documents', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
+        { label: 'Uploads', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },

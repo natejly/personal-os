@@ -48,7 +48,7 @@ function SampleRow({ s }: { s: StyleSample }): JSX.Element {
       <div className="style-sample-main">
         <p onClick={() => setOpen((v) => !v)} title={open ? 'Collapse' : 'Show the whole passage'}>{open ? s.text : preview}</p>
         <div className="mem-meta">
-          <span className="tag" title={s.source === 'doc' ? 'From a doc you saved' : s.source === 'chat' ? 'A message you wrote' : 'Added by hand'}>
+          <span className="tag" title={s.source === 'doc' ? 'From a file you saved' : s.source === 'chat' ? 'A message you wrote' : 'Added by hand'}>
             {SOURCE_ICON[s.source] ?? <ClipboardPaste size={10} />}{s.source}
           </span>
           <span className="muted">{s.chars.toLocaleString()} chars</span>
@@ -128,7 +128,7 @@ export default function StyleView({ projectId, embedded = false }: { projectId?:
       {!profile && (
         <p className="empty-hint big">
           {stats.samples === 0
-            ? 'Nothing learned yet. Long messages you write and docs you save are banked below as samples; or paste a piece of your own writing to start.'
+            ? 'Nothing learned yet. Long messages you write and files you save are banked below as samples; or paste a piece of your own writing to start.'
             : `${stats.samples} sample${stats.samples === 1 ? '' : 's'} banked. Learn your style to turn them into a profile.`}
         </p>
       )}
@@ -187,7 +187,7 @@ export default function StyleView({ projectId, embedded = false }: { projectId?:
           </span>
         </h5>
         <p className="muted small">
-          Long messages you write and docs you save land here automatically; short instructions, code and quoted
+          Long messages you write and files you save land here automatically; short instructions, code and quoted
           text are skipped. Delete anything that isn’t your own writing — the profile is only as good as these.
         </p>
         <div className="add-row style-paste">

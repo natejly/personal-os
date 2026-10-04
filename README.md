@@ -13,7 +13,7 @@ their own instructions, knowledge files, memories and graph.
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
 │ Boards       │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
+│ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Uploads   │
 │ Files        │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
 │ PROJECTS   + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
 │ ■ Grain      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
@@ -27,8 +27,8 @@ their own instructions, knowledge files, memories and graph.
 
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
-- **Tools with permissions.** The assistant can search your documents, read and
-  revise your docs, search
+- **Tools with permissions.** The assistant can search your uploaded files, read and
+  revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing
   style before drafting as you, search the web and
   read pages, run Python in a sandbox, manage todos and kanban boards, and (once
@@ -58,11 +58,11 @@ their own instructions, knowledge files, memories and graph.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Documents.** Upload any file up to 20 MB. Text, PDF, and Word are read; other files are kept by name. Chunked,
+- **Uploaded files.** Upload any file up to 20 MB. Text, PDF, and Word are read; other files are kept by name. Chunked,
   full-text indexed, best excerpts pulled into replies.
-- **Files.** Docs of your own (the sidebar's **Files** view), in an editor rather than an upload box:
+- **Files.** Files of your own (the sidebar's **Files** view), in an editor rather than an upload box:
   markdown and LaTeX, a line-numbered editor beside a live preview, and full
-  revision history. The assistant can read and revise a doc — but its edits are
+  revision history. The assistant can read and revise a file — but its edits are
   *proposed*, never written straight in. Each one arrives as a diff you accept
   or reject, so you can point a model at prose you care about. Notes features:
   a `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a daily
@@ -134,7 +134,7 @@ their own instructions, knowledge files, memories and graph.
   candidate — there is no tool that approves one, and a revision of an approved
   procedure is forked beside it rather than overwriting the text in use. The
   preview shows the real injected block, assembled by the function the chat uses.
-- **Context management.** Per-chat toggles for memory, graph, documents, activity,
+- **Context management.** Per-chat toggles for memory, graph, files, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
@@ -388,7 +388,7 @@ and its verdict is kept on the row.
 | Shortcut | Action |
 |---|---|
 | ⌘N | New chat |
-| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
+| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Uploads |
 | ⌘7 | Memory, opened on the knowledge graph |
 | ⌘9 | Activity |
 | ⌘⇧M | Meetings |
@@ -636,7 +636,7 @@ scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research/roadmap.md    Feature research and roadmap
-docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
+docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
 ```

@@ -119,9 +119,9 @@ function MeetingsCard(): JSX.Element {
                 take notes
               </button>
               <button className="link small" disabled={docBusy || meetingBusy || active !== null || recorderOff}
-                title={recorderOff ? OFF_TITLE : 'Create a doc for this event and record into it'}
+                title={recorderOff ? OFF_TITLE : 'Create a file for this event and record into it'}
                 onClick={() => { setView('meetings'); void startFromEvent(c) }}>
-                in a doc
+                in a file
               </button>
             </li>
           ))}
@@ -405,7 +405,7 @@ export default function HomeView(): JSX.Element {
                 {d!.projects.map((p) => (
                   <li key={p.id} onClick={() => openProject(p.id)}>
                     <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
-                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural(p.stats?.docs ?? 0, 'doc')} · {plural(p.stats?.documents ?? 0, 'file')}</span>
+                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural((p.stats?.docs ?? 0) + (p.stats?.documents ?? 0), 'file')}</span>
                   </li>
                 ))}
               </ul>

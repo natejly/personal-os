@@ -81,7 +81,7 @@ function MadePanel(): JSX.Element {
         <input className="search" value={q} placeholder="Search by name" onChange={(e) => setQ(e.target.value)} />
       </div>
       {rows.length === 0 ? (
-        <div className="empty-hint big"><p>Nothing here yet.</p><p className="muted small">Docs, dashboards and boards you or the assistant create show up here.</p></div>
+        <div className="empty-hint big"><p>Nothing here yet.</p><p className="muted small">Files, dashboards and boards you or the assistant create show up here.</p></div>
       ) : (
         <div className="made-grid">
           {rows.map((r) => (

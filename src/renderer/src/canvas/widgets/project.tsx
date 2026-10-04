@@ -94,7 +94,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
       {tab === 'files' && (
         <div className="widget-scroll">
           {files.length === 0 ? (
-            <div className="widget-empty"><span>No documents.</span></div>
+            <div className="widget-empty"><span>No files.</span></div>
           ) : (
             <div className="widget-list">
               {files.map((d) => (

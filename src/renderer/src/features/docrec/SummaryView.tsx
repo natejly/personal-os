@@ -45,7 +45,7 @@ export default function SummaryView({ row, meeting, actions, summarizing, error,
         <div>
           <p className="dr-headline">{meeting.summary}</p>
           {onUseTitle && docTitle !== undefined && isUntitled(docTitle) && headlineTitle(meeting.summary) !== '' && (
-            <button className="ghost-btn dr-small" onClick={() => onUseTitle(headlineTitle(meeting.summary))}>Use as doc title</button>
+            <button className="ghost-btn dr-small" onClick={() => onUseTitle(headlineTitle(meeting.summary))}>Use as file title</button>
           )}
         </div>
       )}

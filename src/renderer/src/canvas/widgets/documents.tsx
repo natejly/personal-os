@@ -46,7 +46,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
     void refreshDocuments()
   }, [live, refreshDocuments])
 
-  if (!live) return <div className="widget"><div className="widget-empty">Documents · paused</div></div>
+  if (!live) return <div className="widget"><div className="widget-empty">Uploads · paused</div></div>
 
   const rows = documents.filter((d) => inScope(d, scope))
   return (
@@ -64,7 +64,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No documents in this scope.</div>
+        <div className="widget-empty">No uploaded files in this scope.</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((d) => <Row key={d.id} d={d} />)}</div></div>
       )}
@@ -74,7 +74,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
 
 export const def: WidgetDef = {
   kind: 'documents',
-  label: 'Documents',
+  label: 'Uploads',
   icon: <FileText size={15} />,
   defaultSize: { w: 400, h: 480 },
   minSize: { w: 280, h: 240 },

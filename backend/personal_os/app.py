@@ -6373,7 +6373,7 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
     if body.base_updated_at is not None:
         cur = docs.get(id)
         if cur and cur["updated_at"] > body.base_updated_at:
-            raise HTTPException(409, "This doc changed elsewhere since you opened it.")
+            raise HTTPException(409, "This file changed elsewhere since you opened it.")
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)
@@ -7013,7 +7013,7 @@ def create_meeting(body: MeetingIn) -> dict[str, Any]:
     if body.doc_id:
         doc = docs.get(body.doc_id)  # None when missing or trashed
         if not doc:
-            raise HTTPException(404, "That doc does not exist or is in the trash.")
+            raise HTTPException(404, "That file does not exist or is in the trash.")
         if body.doc_mode not in (None, "record", "dictate"):
             raise HTTPException(400, "doc_mode must be 'record' or 'dictate'")
         doc_project = doc["project_id"]
@@ -7231,7 +7231,7 @@ async def enhance_meeting(id: str, force: bool = False, template: str | None = N
     if not m:
         raise HTTPException(404)
     if m.get("doc_id"):
-        raise HTTPException(400, "This is a recording of a doc: use /meetings/{id}/summarize.")
+        raise HTTPException(400, "This is a recording of a file: use /meetings/{id}/summarize.")
     rev = await meeting_svc.enhance(id, force, template)
     if not rev:
         raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
@@ -7247,7 +7247,7 @@ async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]
     if not m:
         raise HTTPException(404)
     if not m.get("doc_id"):
-        raise HTTPException(400, "Only a recording made in a doc can be summarized into it.")
+        raise HTTPException(400, "Only a recording made in a file can be summarized into it.")
     return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
 
 
@@ -8157,13 +8157,13 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
         doc = docs.create(title, content, wsid(item.project_id) if item.project_id else None)
         fresh = docs.get(doc["id"])
         ok = bool(fresh) and fresh["content"] == content
-        return {"ref": doc["id"], "verified": ok, "error": None if ok else "the saved doc does not match the file"}
+        return {"ref": doc["id"], "verified": ok, "error": None if ok else "the saved file does not match what was delivered"}
     if dest == "doc_append":
         if not item.doc_id:
             return {"ref": None, "verified": False, "error": "doc_append needs a doc_id"}
         cur = docs.get(item.doc_id)
         if not cur:
-            return {"ref": None, "verified": False, "error": "no such doc"}
+            return {"ref": None, "verified": False, "error": "no such file"}
         after = (cur["content"].rstrip() + "\n\n" + content) if cur["content"].strip() else content
         # propose, never apply: the doc the user wrote is untouched until they accept the revision
         # in the existing Docs review UI. An agent never overwrites a document the user wrote.

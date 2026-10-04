@@ -147,14 +147,14 @@ export default function DiffView({
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </button>
         {onRestore && !pending && (
-          <button className="icon-btn ghost" title="Restore the document to this version" onClick={onRestore}><RotateCcw size={13} /></button>
+          <button className="icon-btn ghost" title="Restore the file to this version" onClick={onRestore}><RotateCcw size={13} /></button>
         )}
       </header>
 
       {revision.stale && (
         <p className="diff-stale">
           <AlertTriangle size={12} />
-          You edited this doc after the assistant proposed the change, so the diff below is against your current text.
+          You edited this file after the assistant proposed the change, so the diff below is against your current text.
           Accepting replaces it with the proposal.
         </p>
       )}
@@ -178,7 +178,7 @@ export default function DiffView({
       <footer>
         {lines.some((l) => l.op === 'same') && (
           <button className="link small" onClick={() => setWhole((w) => !w)}>
-            {whole ? 'Show changes only' : 'Show the whole document'}
+            {whole ? 'Show changes only' : 'Show the whole file'}
           </button>
         )}
         <span className="spacer" />

@@ -110,7 +110,7 @@ export default function ArtifactWidget({ window: win, live, onConfig, onTitle }:
         <span className="widget-meta">v{art.version}</span>
         <span className="spacer" />
         <button className={`widget-chip ${hist ? 'on' : ''}`} title="Version history" onClick={openHistory}><History size={11} /></button>
-        <button className={`widget-chip ${fit ? 'on' : ''}`} title="Fit the window to the document's height" onClick={() => onConfig({ fit: !fit })}>fit</button>
+        <button className={`widget-chip ${fit ? 'on' : ''}`} title="Fit the window to the page's height" onClick={() => onConfig({ fit: !fit })}>fit</button>
         <button className="widget-chip" title="Download .html" onClick={() => void download()}><Download size={11} /></button>
         <button className="widget-chip" title="Copy source" onClick={() => void copy()}><Copy size={11} /></button>
       </div>

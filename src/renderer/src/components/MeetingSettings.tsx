@@ -370,7 +370,7 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.keepAudio} onChange={(e) => patch({ keepAudio: e.target.checked })} />
         <span className="switch" />
       </label>
-      <NumberField label="Pause a doc recording after silence" hint="Minutes with no speech before the recorder pauses itself and asks. 0 never pauses"
+      <NumberField label="Pause a file recording after silence" hint="Minutes with no speech before the recorder pauses itself and asks. 0 never pauses"
         value={cfg.silencePauseMinutes} min={0} max={240} suffix="min"
         onCommit={(v) => patch({ silencePauseMinutes: v })} />
       <label className="toggle-row plain">

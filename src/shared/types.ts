@@ -436,17 +436,23 @@ export interface McpServer {
   }
   tools: McpTool[]
   eval: McpEvalRecord | null
+  /** Remote servers only: whether a browser sign-in left a token. null for a local server. */
+  signed_in: boolean | null
 }
 
 /** A launch config, as the add form holds it and as /mcp/check takes it. */
 export interface McpServerDraft {
   name: string
-  transport: 'stdio' | 'sse' | 'http'
+  /** sse is refused by the API; a remote server is streamable HTTP. */
+  transport: 'stdio' | 'http'
   command: string
   args: string[]
   cwd: string
   env: Record<string, string>
   secrets: Record<string, string>
+  /** Remote servers. Header values are stored as secrets; reads return the names with empty values. */
+  url: string
+  headers: Record<string, string>
   description: string
 }
 

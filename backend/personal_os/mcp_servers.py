@@ -304,7 +304,9 @@ class McpServers:
                       enabled: bool = True) -> dict[str, Any]:
         sid = new_id()
         t = now()
-        plain = {k: str(v) for k, v in (secrets or {}).items() if v}
+        # Every header value is kept as a secret and the row keeps only header names, so a credential in
+        # an oddly named header can never sit in the table as plaintext.
+        plain = {k: str(v) for k, v in {**(secrets or {}), **(headers or {})}.items() if v}
         for attempt in range(SLUG_ATTEMPTS):
             try:
                 with self.db.tx() as c:
@@ -314,7 +316,7 @@ class McpServers:
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
                         (sid, slugify(name, taken), name.strip() or "MCP server",
                          transport if transport in TRANSPORTS else "stdio", command.strip(), json.dumps(args or []),
-                         cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps(headers or {}),
+                         cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps({k: "" for k in headers or {}}),
                          description, 1 if enabled else 0, "idle" if enabled else "disabled", t, t),
                     )
                 break
@@ -329,6 +331,13 @@ class McpServers:
         fields: dict[str, Any] = {k: v for k, v in patch.items() if k in _SERVER_FIELDS and v is not None}
         if "transport" in fields and fields["transport"] not in TRANSPORTS:
             del fields["transport"]
+        incoming = dict(patch["secrets"]) if isinstance(patch.get("secrets"), dict) else {}
+        dropped = list(patch.get("clear_secrets") or [])
+        if isinstance(fields.get("headers"), dict):  # header values become secrets, as on create
+            old = (self.server(id) or {}).get("headers") or {}
+            dropped += [k for k in old if k not in fields["headers"]]
+            incoming.update({k: v for k, v in fields["headers"].items() if v})
+            fields["headers"] = {k: "" for k in fields["headers"]}
         for k in ("args", "env", "headers"):
             if k in fields:
                 fields[k] = json.dumps(fields[k])
@@ -340,13 +349,11 @@ class McpServers:
             if fields:
                 fields["updated_at"] = now()
                 c.execute(f"UPDATE mcp_servers SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
-            incoming = patch.get("secrets") if isinstance(patch.get("secrets"), dict) else None
-            dropped = list(patch.get("clear_secrets") or [])
             if incoming or dropped:
                 row = c.execute("SELECT secrets FROM mcp_servers WHERE id=?", (id,)).fetchone()
                 if row:
                     merged = self._load_secrets(id)
-                    for k, v in (incoming or {}).items():
+                    for k, v in incoming.items():
                         if v in (None, ""):  # an empty value means "leave it alone", as in dashboards
                             continue
                         merged[k] = str(v)

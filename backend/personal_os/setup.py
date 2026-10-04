@@ -47,6 +47,10 @@ def _headers(api_key: str | None) -> dict[str, str]:
     return h
 
 
+def _same_base(a: str | None, b: str | None) -> bool:
+    return (a or "").strip().rstrip("/") == (b or "").strip().rstrip("/")
+
+
 def _error_text(r: httpx.Response) -> str:
     try:
         err = r.json().get("error")
@@ -56,7 +60,9 @@ def _error_text(r: httpx.Response) -> str:
     return str(msg or r.text)[:300]
 
 
-async def test_connection(body: SetupIn) -> dict[str, Any]:
+async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None) -> dict[str, Any]:
+    """`stored` is the saved settings: with no key in the body, the saved key is reused, but only for the
+    endpoint it was saved for, so a key never travels to a different server."""
     base = body.baseUrl.strip()
     model = body.model.strip()
     fail = lambda msg: {"ok": False, "error": msg, "latencyMs": None, "models": None}  # noqa: E731
@@ -64,7 +70,10 @@ async def test_connection(body: SetupIn) -> dict[str, Any]:
         return fail("Enter a base URL first.")
     if not model:
         return fail("Choose a model first.")
-    headers = _headers(body.apiKey)
+    key = body.apiKey
+    if not (key or "").strip() and stored and _same_base(base, stored.get("baseUrl")):
+        key = stored.get("apiKey")
+    headers = _headers(key)
     t0 = time.time()
     models: list[str] | None = None
     try:
@@ -114,7 +123,7 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
 
     @r.post("/test")
     async def test(body: SetupIn) -> dict[str, Any]:
-        return await test_connection(body)
+        return await test_connection(body, get_settings())
 
     @r.post("/complete")
     def complete(body: SetupIn) -> dict[str, Any]:
@@ -131,8 +140,13 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
             raise HTTPException(422, f"{preset['name']} needs an API key")
         # extractionModel is cleared: one left over from another provider (a LiteLLM alias) would fail every
         # background call. Empty means "use the default model".
-        set_settings({"provider": body.provider, "baseUrl": base, "apiKey": key, "defaultModel": model,
-                      "extractionModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        patch = {"provider": body.provider, "baseUrl": base, "apiKey": key, "defaultModel": model,
+                 "extractionModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        # No key for the endpoint the saved key belongs to means "unchanged", as in PUT /settings; an empty
+        # value would delete it from the secret store. A different endpoint never inherits the old key.
+        if not key and _same_base(base, get_settings().get("baseUrl")):
+            del patch["apiKey"]
+        set_settings(patch)
         return status()
 
     @r.post("/reset")

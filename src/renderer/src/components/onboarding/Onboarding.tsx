@@ -41,7 +41,13 @@ export default function Onboarding(): JSX.Element {
   const dispatch = useCallback((a: WizardAction) => rawDispatch({ ...a, provider_: provider }), [provider])
 
   useEffect(() => {
-    api.setup.providers().then((r) => setProviders(r.providers)).catch((e: Error) => setLoadError(e.message))
+    api.setup.providers().then(async (r) => {
+      setProviders(r.providers)
+      // On "Run setup again", start from what is configured now. A fresh install has no provider yet.
+      const st = await api.setup.status().catch(() => null)
+      const p = r.providers.find((x) => x.id === st?.provider)
+      if (st && p) rawDispatch({ type: 'seed', provider: p, baseUrl: st.baseUrl || p.baseUrl, model: st.model || p.defaultModel })
+    }).catch((e: Error) => setLoadError(e.message))
   }, [])
 
   // Focus follows the step: the first input if there is one, else the heading.
@@ -57,7 +63,7 @@ export default function Onboarding(): JSX.Element {
     const run = ++testRun.current
     dispatch({ type: 'test', test: { state: 'testing' } })
     try {
-      const r = await api.setup.test({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: provider.needsKey ? state.apiKey.trim() : null, model: state.model.trim() })
+      const r = await api.setup.test({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() })
       if (run !== testRun.current) return
       dispatch({ type: 'test', test: r.ok ? { state: 'ok', latencyMs: r.latencyMs ?? undefined, models: r.models ?? undefined } : { state: 'fail', error: r.error ?? 'The connection failed.', models: r.models ?? undefined } })
     } catch (e) {
@@ -77,7 +83,7 @@ export default function Onboarding(): JSX.Element {
     if (!provider) return
     setSaved({ state: 'saving' })
     try {
-      await api.setup.complete({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: provider.needsKey ? state.apiKey.trim() : null, model: state.model.trim() })
+      await api.setup.complete({ provider: provider.id, baseUrl: state.baseUrl.trim(), apiKey: state.apiKey.trim() || null, model: state.model.trim() })
       // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
       useStore.setState({ settings: await api.settings.get() })
       void useStore.getState().loadModels()
@@ -138,7 +144,7 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'welcome' && (
           <>
             <p className="ob-lead">Grain is your personal AI workspace: chat, notes, calendar, mail and tasks in one place, with an assistant that can work across all of it.</p>
-            <p className="ob-privacy"><Lock size={13} /> Your data stays on this Mac. Only the messages you send go to the AI provider you choose.</p>
+            <p className="ob-privacy"><Lock size={13} /> Your data is stored on this Mac. Your messages, the context Grain adds to them (memories, docs, mail and calendar the assistant reads) and background learning go to the AI provider you choose. Web search and page reading use outside services.</p>
             <p className="muted">Setup takes about two minutes. You will need an API key from an AI provider (or a local model).</p>
           </>
         )}
@@ -154,7 +160,7 @@ export default function Onboarding(): JSX.Element {
                 return (
                   <button
                     key={p.id} type="button" role="radio" aria-checked={on} className={`ob-card-opt${on ? ' on' : ''}`}
-                    data-autofocus={on || (!state.providerId && p === providers[0]) ? '' : undefined}
+                    data-autofocus={on ? '' : undefined}
                     onClick={() => dispatch({ type: 'pick', provider: p })}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); e.stopPropagation(); dispatch({ type: 'pick', provider: p }); rawDispatch({ type: 'next', provider_: p }) } }}
                   >
@@ -180,16 +186,14 @@ export default function Onboarding(): JSX.Element {
                 <input data-autofocus value={state.baseUrl} onChange={(e) => field({ baseUrl: e.target.value })} placeholder={provider.baseUrl} spellCheck={false} />
               </label>
             )}
-            {provider.needsKey && (
-              <label><span>API key</span>
-                <div className="input-row">
-                  <input data-autofocus={showsBaseUrl(provider.id) ? undefined : ''} type={showKey ? 'text' : 'password'} value={state.apiKey} onChange={(e) => field({ apiKey: e.target.value })} placeholder="Paste your key" spellCheck={false} autoComplete="off" />
-                  <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                </div>
-              </label>
-            )}
+            <label><span>{provider.needsKey ? 'API key' : 'API key (optional)'}</span>
+              <div className="input-row">
+                <input data-autofocus={showsBaseUrl(provider.id) ? undefined : ''} type={showKey ? 'text' : 'password'} value={state.apiKey} onChange={(e) => field({ apiKey: e.target.value })} placeholder={provider.needsKey ? 'Paste your key' : 'Only if your server needs one'} spellCheck={false} autoComplete="off" />
+                <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+              </div>
+            </label>
             <label><span>Model</span>
-              <input data-autofocus={!provider.needsKey && !showsBaseUrl(provider.id) ? '' : undefined} list="ob-models" value={state.model} onChange={(e) => field({ model: e.target.value })} placeholder={provider.defaultModel} spellCheck={false} />
+              <input list="ob-models" value={state.model} onChange={(e) => field({ model: e.target.value })} placeholder={provider.defaultModel} spellCheck={false} />
               <datalist id="ob-models">{modelOptions(provider, state.test.models).map((m) => <option key={m} value={m} />)}</datalist>
             </label>
             <p className="muted small"><Lock size={11} /> Your key is stored on this Mac only.</p>
@@ -253,7 +257,7 @@ export default function Onboarding(): JSX.Element {
         {blocker && state.step !== 'test' && state.step !== 'welcome' && <p className="ob-hint">{blocker}</p>}
 
         <div className="ob-actions">
-          {state.step === 'welcome' && <button type="button" className="ghost-btn" onClick={closeWizard}>Set up later</button>}
+          {(state.step !== 'done' || saved.state === 'fail') && <button type="button" className="ghost-btn" onClick={closeWizard}>Set up later</button>}
           {state.step !== 'welcome' && state.step !== 'done' && (
             <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'back' })}><ArrowLeft size={13} /> Back</button>
           )}

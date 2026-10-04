@@ -55,7 +55,7 @@ export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
   const todos = useStore((s) => s.todos)
-  const { toggleSidebar, refreshTodos, setSettingsOpen, toast, newChat, send, updateTodo, setView } = useStore()
+  const { toggleSidebar, refreshTodos, toast, newChat, send, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -212,7 +212,7 @@ export default function CalendarView(): JSX.Element {
       </header>
 
       {!google?.connected && (
-        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button></div>
+        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button></div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 

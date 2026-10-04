@@ -47,6 +47,9 @@ function DeskNotifier(): null {
   const enabled = useStore((s) => s.settings.deskNotify !== false)
   const seen = useRef<Map<string, string> | null>(null)
   useEffect(() => {
+    // The list starts empty and is loaded at boot: seed from the first real load, not from that empty start, or
+    // every desk already in review at launch would ring as if it had just finished.
+    if (seen.current === null && desks.length === 0) return
     const seeding = seen.current === null
     const last = (seen.current ??= new Map())
     // Always walked, even when off, so turning the setting on later does not replay what happened meanwhile.
@@ -110,7 +113,7 @@ function JobNotifier(): null {
         const events = await api.inboxNotify(since)
         if (events.length) writeSeen(Math.max(...events.map((e) => e.at)))
         if (typeof Notification !== 'function' || Notification.permission === 'denied') return
-        for (const e of events) new Notification(e.title, { body: e.body })
+        for (const e of events) notify(e.title, e.body, { tag: e.id, onClick: () => useStore.getState().setView('home') })
       } catch {
         // A notification is never worth a render crash, and a backend that is down has nothing to say.
       } finally {

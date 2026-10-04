@@ -23,7 +23,6 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const connected = useStore((s) => s.google?.connected ?? false)
   const todos = useStore((s) => s.todos)
   const toast = useStore((s) => s.toast)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setView = useStore((s) => s.setView)
   const updateTodo = useStore((s) => s.updateTodo)
   const mode = readMode(win.config.mode)
@@ -194,7 +193,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
         )}
         <span className="spacer" />
         {connected && <button className="widget-chip" title="New event" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={11} /></button>}
-        {!connected && <button className="widget-chip" onClick={() => setSettingsOpen(true)}>Connect Google</button>}
+        {!connected && <button className="widget-chip" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button>}
         {error && <span className="widget-meta" title={error}>offline</span>}
       </div>
 

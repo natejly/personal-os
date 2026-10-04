@@ -1,5 +1,6 @@
 /**
- * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals) and
+ * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
+ * a link into every other review queue: doc edits, meeting notes, skills, workflow runs, memory tidy-ups) and
  * "While you were away" (what the scheduled jobs did, late fires and failures included).
  *
  * Everything here is rendered from the backend's journal rows — agent_runs, run_events, approvals and
@@ -7,10 +8,10 @@
  * its card, but no number, badge or state is read out of that text.
  */
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Wrench, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
+import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { SAFE_MD } from './Message'
@@ -348,16 +349,38 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
   )
 }
 
+/** Cards a bare Allow cannot decide: a plan has steps to read and edit, a question wants an answer. These, and any card
+ * of a desk, open where they are decided instead. */
+const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
+
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled, setView, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
   const paused = box.needs_you.paused_jobs ?? []
+  const deskRows = box.needs_you.desks ?? []
+  const elsewhere = box.needs_you.elsewhere ?? []
+
+  const goDesk = (deskId: string): void => {
+    setView('cowork')
+    void openDesk(deskId)
+  }
+  const goChat = (conversationId: string): void => {
+    setView('chat')
+    void selectChat(conversationId)
+  }
+  const goQueue = (key: InboxQueueKey): void => {
+    if (key === 'doc_edits') setView('docs')
+    else if (key === 'meetings') setView('meetings')
+    else if (key === 'suggestions') setView('activity')
+    else if (key === 'memory') { setMemoryMode('list'); openSettings('knowledge', 'memory') }
+    else { setLibraryTab(key); setView('library') }
+  }
   const away = box.while_you_were_away
   const quiet = box.counts.needs_you === 0 && away.length === 0
 
@@ -408,14 +431,34 @@ export default function AgentInbox(): JSX.Element | null {
                   <span className="muted small">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
                   {a.forced && <span className="chip warn">untrusted content in that chat</span>}
                   <span style={{ flex: 1 }} />
-                  <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
-                    <X size={13} /> Deny
-                  </button>
-                  <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
-                    <Check size={13} /> Allow
-                  </button>
+                  {a.desk_id || OPEN_ONLY.has(a.tool) ? (
+                    <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}
+                      onClick={() => { if (a.desk_id) goDesk(a.desk_id); else if (a.conversation_id) goChat(a.conversation_id) }}>
+                      Open {a.desk_id ? 'desk' : 'chat'} <ArrowRight size={13} />
+                    </button>
+                  ) : (
+                    <>
+                      <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
+                        <X size={13} /> Deny
+                      </button>
+                      <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
+                        <Check size={13} /> Allow
+                      </button>
+                    </>
+                  )}
                 </div>
                 <pre className="inbox-args">{argText(a.args)}</pre>
+              </li>
+            ))}
+            {deskRows.map((e) => (
+              <li className="inbox-item" key={e.id}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job"><Users size={12} /> {e.desk_title || 'Desk'}</span>
+                  <span className="muted small">{e.body || e.kind} · {fmtWhen(e.created_at)}</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="icon-btn sm" title="Mark seen" aria-label="Mark seen" onClick={() => void markDeskSeen(e.desk_id)}><X size={13} /></button>
+                  <button className="primary-btn sm" onClick={() => goDesk(e.desk_id)}>{e.kind === 'review' ? 'Review' : 'Open'} <ArrowRight size={13} /></button>
+                </div>
               </li>
             ))}
             {paused.map((p) => (
@@ -429,6 +472,16 @@ export default function AgentInbox(): JSX.Element | null {
               </li>
             ))}
             {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}
+            {elsewhere.map((q) => (
+              <li className="inbox-item" key={q.key}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job">{q.label}</span>
+                  <span className="chip">{q.count}</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="ghost-btn sm" onClick={() => goQueue(q.key)}>Review <ArrowRight size={13} /></button>
+                </div>
+              </li>
+            ))}
           </ul>
         </div>
       )}

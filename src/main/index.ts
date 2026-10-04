@@ -198,7 +198,7 @@ function buildMenu(): void {
         { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
         { label: 'Memory', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
         { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
-        { label: 'Documents', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
+        { label: 'Knowledge Base', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
@@ -211,8 +211,8 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
-        // ⌘I is the Cursor reflex: ask about what is on screen. The chat's context inspector, which
-        // used to own it, moves one modifier over.
+        // ⌘I asks about what is on screen. The chat's context inspector, which used to own it, moves one
+        // modifier over.
         { label: 'Ask About This Page', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
         { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
         { type: 'separator' },

@@ -337,3 +337,21 @@ def test_a_failed_one_off_is_retried_and_a_good_one_retires() -> None:
         return out
 
     assert len(asyncio.run(boot())) == 1 and r.launched[1]["retry_of"] == "run0"
+
+
+def test_inbox_lists_desks_and_every_review_queue() -> None:
+    conv = appmod.convos.create(None, "desk", "m")
+    desk = appmod.desks.create(conversation_id=conv["id"], brief="b", title="Waiting desk")
+    appmod.desks.set_status(desk["id"], "review")
+    doc = appmod.docs.create("Note", "one")
+    appmod.docs.propose(doc["id"], "two", summary="s")
+    body = client.get("/inbox").json()
+    rows = [d for d in body["needs_you"]["desks"] if d["desk_id"] == desk["id"]]
+    assert len(rows) == 1 and rows[0]["desk_title"] == "Waiting desk", "one row per desk waiting on the user"
+    queues = {q["key"]: q["count"] for q in body["needs_you"]["elsewhere"]}
+    assert all(n > 0 for n in queues.values()), "an empty queue is left out"
+    assert queues.get("doc_edits", 0) >= 1, "a proposed doc edit is counted"
+    assert body["counts"]["needs_you"] >= 1 + sum(queues.values())
+    appmod.desks.mark_desk_seen(desk["id"])
+    assert all(d["desk_id"] != desk["id"] for d in client.get("/inbox").json()["needs_you"]["desks"]), "seen clears it"
+    appmod.desks.delete(desk["id"])

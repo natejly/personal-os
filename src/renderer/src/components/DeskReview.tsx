@@ -129,7 +129,10 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
 
       {result && (
         result.ok && result.verified
-          ? <p className="desk-verified"><Check size={12} /> {result.kind === 'download' ? 'Downloaded' : 'Promoted and read back'}{result.ref ? ` — ${result.ref}` : ''}</p>
+          ? <p className="desk-verified"><Check size={12} /> {result.kind === 'download' ? 'Downloaded' : 'Promoted and read back'}
+              {result.ref && (result.kind === 'doc' || result.kind === 'doc_append')
+                ? <> — <button className="link" onClick={() => void useStore.getState().openDoc(result.ref as string)}>open the doc</button></>
+                : result.ref ? ` — ${result.ref}` : ''}</p>
           : <p className="desk-unverified"><TriangleAlert size={12} /> could not verify the write{result.error ? ` — ${result.error}` : ''}</p>
       )}
     </article>
@@ -139,7 +142,8 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
 export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
   const { acceptOutputs, rejectOutputs, messageDesk, refreshDocs, toast } = useStore()
   const busy = useStore((s) => s.deskBusy)
-  const [picked, setPicked] = useState<string[]>([])
+  // Everything undecided starts ticked: the desk was asked to make these, so the common case is one click.
+  const [picked, setPicked] = useState<string[]>(() => desk.outputs.filter((o) => !DECIDED.includes(o.status)).map((o) => o.id))
   const [dest, setDest] = useState<Record<string, PromotionKind>>({})
   const [docIds, setDocIds] = useState<Record<string, string>>({})
   const [results, setResults] = useState<Record<string, PromotionResult>>({})

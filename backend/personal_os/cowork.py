@@ -121,6 +121,8 @@ DESK_JSON, EVENT_JSON = ("budget",), ("data",)
 EVENT_KINDS = ("status", "plan", "step", "output", "question", "blocked", "review", "failed",
                "promoted", "interrupted", "note")
 TERMINAL = ("done", "failed", "stopped")
+# The statuses that hand work back: the chat a desk was started from is told when one is reached (see origin_report).
+REPORT_ON = ("review", "done", "failed")
 # An output the user has not finished deciding. `promote_failed` is here because §6.4 wants a failed
 # read-back to be retryable: the claim is cleared, so Accept can take it again.
 UNDECIDED_OUTPUTS = ("proposed", "stale", "promote_failed")
@@ -353,8 +355,13 @@ class Desks:
         self.workspace = workspace
         # Called with the desk row after any write that changes what the rail shows (see _notifies).
         self.on_change: Callable[[dict[str, Any]], None] | None = None
+        # Called once with the desk row when a desk started from a chat reaches a REPORT_ON status.
+        self.on_report: Callable[[dict[str, Any]], None] | None = None
         with db.tx() as c:
             c.executescript(SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(desks)")}
+            if "origin_conversation_id" not in cols:  # the chat that started it (desk_start); NULL for the Cowork form
+                c.execute("ALTER TABLE desks ADD COLUMN origin_conversation_id TEXT")
 
     # ---------------- views ----------------
     @staticmethod
@@ -425,7 +432,7 @@ class Desks:
 
     def create(self, *, conversation_id: str, brief: str, title: str = "",
                project_id: str | None = None, autonomy: str = "plan",
-               budget: dict[str, Any] | None = None) -> dict[str, Any]:
+               budget: dict[str, Any] | None = None, origin_conversation_id: str | None = None) -> dict[str, Any]:
         if autonomy not in AUTONOMY:
             raise ValueError(f"Unknown autonomy: {autonomy}")
         did = new_id()
@@ -438,10 +445,10 @@ class Desks:
             c.execute(
                 "INSERT INTO desks(id,conversation_id,project_id,title,brief,status,status_reason,headline,"
                 "question,autonomy,plan_id,run_id,workspace,turn,cost,budget,last_error,archived,"
-                "created_at,updated_at,ended_at)"
-                " VALUES(?,?,?,?,?,'draft','','','',?,NULL,NULL,?,0,0,?,NULL,0,?,?,NULL)",
+                "created_at,updated_at,ended_at,origin_conversation_id)"
+                " VALUES(?,?,?,?,?,'draft','','','',?,NULL,NULL,?,0,0,?,NULL,0,?,?,NULL,?)",
                 (did, conversation_id, project_id, name, brief, autonomy, rel,
-                 json.dumps(budget or {}), t, t),
+                 json.dumps(budget or {}), t, t, origin_conversation_id),
             )
             self._event(c, did, "status", _body("draft", "", None), needs_you=False, run_id=None,
                         data={"status": "draft"}, t=t)
@@ -496,14 +503,24 @@ class Desks:
         fields["ended_at"] = t if status in TERMINAL else None
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
-            if not c.execute("SELECT 1 FROM desks WHERE id=?", (id,)).fetchone():
+            prev = c.execute("SELECT status FROM desks WHERE id=?", (id,)).fetchone()
+            if not prev:
                 return None
             c.execute(f"UPDATE desks SET {sets} WHERE id=?", (*fields.values(), id))
             if event:
+                # A failure is not in NEEDS_YOU (the rail files it elsewhere), but it must still reach the inbox:
+                # otherwise a desk that died overnight was only a notification the user may never have seen.
                 self._event(c, id, _STATUS_KIND.get(status, "status"), _body(status, reason, error),
-                            needs_you=status in NEEDS_YOU, run_id=fields.get("run_id"),
+                            needs_you=status in NEEDS_YOU or status == "failed", run_id=fields.get("run_id"),
                             data={"status": status, "reason": reason, "error": error}, t=t)
-            return self._one(c, id)
+            row = self._one(c, id)
+        if (row and self.on_report is not None and status in REPORT_ON and prev[0] != status
+                and row.get("origin_conversation_id")):
+            try:
+                self.on_report(row)
+            except Exception:  # noqa: BLE001 - telling the origin chat must never fail the status write
+                pass
+        return row
 
     @_notifies
     def set_headline(self, id: str, headline: str) -> None:
@@ -747,6 +764,33 @@ class Desks:
                 return None
             r = c.execute("SELECT * FROM desk_outputs WHERE id=?", (output_id,)).fetchone()
         return self._output_view(r)
+
+
+def origin_report(desk: dict[str, Any], outputs: list[dict[str, Any]]) -> str:
+    """The message a desk leaves in the chat that started it. Written as an assistant turn on purpose: the chat's
+    agent reads it as context on its next reply, which is how work started from a chat comes back to that chat."""
+    title = desk.get("title") or "Desk"
+    status = desk.get("status")
+    head = {"review": f"**Desk \u201c{title}\u201d finished and is waiting for your review.**",
+            "done": f"**Desk \u201c{title}\u201d is done.**",
+            "failed": f"**Desk \u201c{title}\u201d failed.**"}.get(str(status), f"**Desk \u201c{title}\u201d: {status}.**")
+    lines = [head]
+    note = _line(desk.get("last_error") if status == "failed" else (desk.get("headline") or desk.get("status_reason")), 400)
+    if note:
+        lines.append(note)
+    live = [o for o in outputs if o.get("status") in ("proposed", "stale", "accepted", "promoted")]
+    if live:
+        lines.append("")
+        lines.append("Outputs:")
+        for o in live[:12]:
+            what = _line(o.get("title") or o.get("path"), 120)
+            summ = _line(o.get("summary"), 240)
+            done = " (accepted)" if o.get("status") == "promoted" else ""
+            lines.append(f"- {what}{done}" + (f" \u2014 {summ}" if summ else ""))
+    if status == "review":
+        lines.append("")
+        lines.append("Open the desk in Cowork (or the Agent inbox on Today) to accept or send back its work.")
+    return "\n".join(lines)
 
 
 def _title_from(brief: str) -> str:

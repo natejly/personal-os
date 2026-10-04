@@ -789,6 +789,41 @@ def test_desk_start_asks_and_plans() -> None:
         appmod.db.set_settings({"deskMaxLive": llm.DEFAULT_SETTINGS["deskMaxLive"]})
 
 
+def test_desk_start_hands_inputs_in_and_reports_back() -> None:
+    reset()
+    doc = appmod.docs.create("Targets", "Acme, Globex, Initech")
+    origin = new_conv()
+
+    async def go() -> Any:
+        out = await appmod.toolbox.call("desk_start", {"title": "Compare", "brief": "Compare them", "doc_ids": [doc["id"]]},
+                                        mkctx(origin))
+        await asyncio.sleep(0.3)
+        if out.get("conversation_id"):
+            appmod.bus.stop(out["conversation_id"])
+        await asyncio.sleep(0.1)
+        return out
+
+    out = run(go())
+    check(out.get("inputs") == ["inputs/Targets.md"], f"the doc is named as an input, got {out}")
+    did = out["desk_id"]
+    check(appmod.workspace.resolve_in(did, "inputs/Targets.md").read_text() == "Acme, Globex, Initech", "and copied in")
+    desk = appmod.desks.get(did, with_outputs=False)
+    check(desk["origin_conversation_id"] == origin, "the calling chat is the desk's origin")
+    check("inputs/Targets.md" in desk["brief"] or "Targets.md" in desk["brief"], "the brief tells the desk where its inputs are")
+
+    before = len(appmod.convos.get(origin)["messages"])
+    appmod.desks.set_status(did, "review", headline="Summary written")
+    msgs = appmod.convos.get(origin)["messages"]
+    check(len(msgs) == before + 1 and msgs[-1]["role"] == "assistant", "review posts one report into the origin chat")
+    check("Compare" in msgs[-1]["content"] and "review" in msgs[-1]["content"], f"naming the desk, got {msgs[-1]['content']!r}")
+    appmod.desks.set_status(did, "review")
+    check(len(appmod.convos.get(origin)["messages"]) == before + 1, "a repeated status does not post twice")
+
+    bad = run(appmod.toolbox.call("desk_start", {"title": "x", "brief": "y", "doc_ids": ["no such doc"]}, mkctx(new_conv())))
+    check("error" in bad, "an unknown doc is refused before any desk exists")
+    appmod.desks.delete(did)
+
+
 def test_pinned_notes_cannot_open_a_section() -> None:
     class Mem:
         def for_context(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:

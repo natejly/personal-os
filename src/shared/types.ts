@@ -1162,7 +1162,7 @@ export interface Settings {
   dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
   homeWidgets?: Record<string, boolean>
-  /** Sidebar views the user removed. Missing means library, cowork and meetings are hidden. */
+  /** Sidebar views the user removed. Missing means meetings and activity are hidden. */
   hiddenViews?: string[]
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
@@ -1397,7 +1397,7 @@ export type BackgroundEvent =
   /** A run's answering / status state moved: lets every window know about a reply it did not start. */
   | { event: 'run_state'; data: RunInfo }
   /** A conversation's title was rewritten off the run (model title or regenerate). */
-  | { event: 'conversation_changed'; data: { id: string; title: string } }
+  | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -2045,11 +2045,17 @@ export interface JobNotifyEvent {
   at: number
 }
 
+export type InboxQueueKey = 'doc_edits' | 'meetings' | 'skills' | 'workflows' | 'memory' | 'suggestions'
+
 export interface AgentInbox {
   needs_you: {
     approvals: (PendingApproval & { run_kind?: string | null; job?: string | null })[]
     proposals: AgentProposal[]
     paused_jobs: { id: string; name: string; reason: string; paused_at: number; consecutive_failures: number }[]
+    /** One unseen needs-you row per Cowork desk (its latest), unless an approval of that desk is already listed. */
+    desks?: DeskEvent[]
+    /** Every other review queue, as a count and a key the renderer maps to the place it is decided. */
+    elsewhere?: { key: InboxQueueKey; label: string; count: number }[]
   }
   while_you_were_away: JobRunSummary[]
   counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }

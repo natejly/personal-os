@@ -73,7 +73,6 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const openMemory = useStore((s) => s.openMemory)
   const openSettings = useStore((s) => s.openSettings)
   const memories = useStore((s) => s.memories)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const [showPrompt, setShowPrompt] = useState(false)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
@@ -134,7 +133,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {(ctx.skills?.length ?? 0) > 0 && (
         <section>
-          <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => setSettingsOpen(true)}>review</button></h5>
+          <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => { useStore.getState().setLibraryTab('skills'); useStore.getState().setView('library') }}>review</button></h5>
           <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
         </section>
       )}

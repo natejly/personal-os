@@ -585,6 +585,15 @@ class LearnJob:
     spans: list[dict[str, Any]]
 
 
+@dataclass
+class StyleJob:
+    """Re-read one scope's writing samples. Not tied to a chat: docs and pasted samples queue it too."""
+
+    project_id: str | None
+    settings: dict[str, Any]
+    model: str
+
+
 class LearnWorker:
     """Auto-learn, off the reply's critical path.
 
@@ -605,7 +614,11 @@ class LearnWorker:
         depth: int = 32,
         consolidator: Any = None,
         alive: Callable[[str], bool] | None = None,
+        style: Any = None,
     ) -> None:
+        self._style = style  # style.WritingStyle: StyleJobs relearn through it
+        self._style_queued: set[str] = set()  # scopes with a StyleJob waiting; one is enough, relearn reads them all
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._alive = alive  # False for a conversation that has since been trashed: its queued job is dropped
         self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
         self._since_tidy = 0
@@ -614,8 +627,12 @@ class LearnWorker:
         self._graph = graph
         self._set_trace = set_trace
         self._publish = publish
-        self._q: asyncio.Queue[LearnJob] = asyncio.Queue(depth)
+        self._q: asyncio.Queue[LearnJob | StyleJob] = asyncio.Queue(depth)
         self._task: asyncio.Task[None] | None = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """The app's loop, so a sync route running in the threadpool can still queue a StyleJob."""
+        self._loop = loop
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -639,17 +656,45 @@ class LearnWorker:
             log.warning("auto-learn queue full; dropping message %s", job.message_id)
             return False
 
+    def submit_style(self, project_id: str | None, settings: dict[str, Any], model: str) -> None:
+        """Queue a relearn of the scope's voice. Safe from a threadpool route; a scope already queued is not queued twice."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            if self._loop is not None and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self.submit_style, project_id, settings, model)
+            return
+        if self._style is None or (project_id or "") in self._style_queued:
+            return
+        self.start()
+        try:
+            self._q.put_nowait(StyleJob(project_id, settings, model))
+            self._style_queued.add(project_id or "")
+        except asyncio.QueueFull:
+            log.warning("auto-learn queue full; dropping style relearn")
+
     async def _drain(self) -> None:
         while True:
             job = await self._q.get()
             try:
-                await self._run(job)
+                if isinstance(job, StyleJob):
+                    self._style_queued.discard(job.project_id or "")
+                    await self._run_style(job)
+                else:
+                    await self._run(job)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - one bad exchange must not take the worker down
-                log.exception("auto-learn failed for message %s", job.message_id)
+                log.exception("auto-learn failed for %s", getattr(job, "message_id", "style relearn"))
             finally:
                 self._q.task_done()
+
+    async def _run_style(self, job: StyleJob) -> None:
+        """relearn applies the pending-sample threshold and the hand-edit freeze itself: most jobs end without a call."""
+        llm.usage_context.set({"project_id": job.project_id})
+        profile = await self._style.relearn(settings=job.settings, project_id=job.project_id, model=job.model)
+        if profile:
+            self._publish("style_learned", {"project_id": job.project_id, "profile": profile})
 
     async def _maybe_consolidate(self, job: LearnJob, added: int) -> None:
         """Every N new auto memories, queue tidy-up *proposals*. Creating them changes nothing; the user applies them."""

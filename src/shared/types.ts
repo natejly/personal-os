@@ -1481,6 +1481,8 @@ export type BackgroundEvent =
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   /** Auto tidy-up queued memory proposals. `count` is only the new ones: re-read the pending list for the badge. */
   | { event: 'proposals'; data: { count: number } }
+  /** The learn worker re-read a scope's writing samples into a new voice profile. */
+  | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */

@@ -271,7 +271,14 @@ events = Topic()
 consolidator = Consolidator(db, memories, graph)
 title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
-                     alive=lambda cid: convos.get(cid, with_messages=False) is not None)
+                     alive=lambda cid: convos.get(cid, with_messages=False) is not None, style=style)
+
+
+def queue_style_relearn(project_id: str | None, model: str | None = None) -> None:
+    """A sample was banked: let the worker re-read the scope's voice when enough has piled up. Off the run, never inline."""
+    cfg = settings()
+    if cfg.get("learnStyle", True):
+        learner.submit_style(project_id, cfg, model or cfg.get("defaultModel") or "")
 
 
 ENV_SEED = {
@@ -534,9 +541,11 @@ docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 @app.on_event("startup")
 async def _start_retrieval() -> None:
     retriever.bind_loop(asyncio.get_running_loop())
+    learner.bind_loop(asyncio.get_running_loop())  # PUT /docs and POST /style/samples queue relearns from the threadpool
     retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
+toolbox.style_relearn = queue_style_relearn
 toolbox.memory_index = memory_index
 toolbox.meeting_index = meeting_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
@@ -3249,6 +3258,36 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
+    # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
+    gone = convos.get(conv_id, with_messages=False) is None
+
+    # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
+    # the re-read is an LLM call, so it goes to the learn worker and reports `style_learned` on the app
+    # topic — the run ends here either way. A failure here is as quiet as a failed memory extraction.
+    # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
+    # that did nothing — and never leaves a span open for the UI to show as still running.
+    # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
+    # sample of how the user writes. The voice profile is injected into later chats.
+    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+            and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
+        sspan = tracer.start("style", "Learn writing style")
+        yield "span", {"message_id": am["id"], "span": sspan}
+        try:
+            banked = await learn_style_from_exchange(
+                settings=cfg, style=style, project_id=conv["project_id"], user_text=user_text, model=model,
+            )
+            tracer.end(sspan, {"sample_chars": (banked or {}).get("sample", {}).get("chars", 0)})
+            yield "span", {"message_id": am["id"], "span": sspan}
+            if banked:
+                queue_style_relearn(conv["project_id"], model)
+                # The banked-sample notice only; a refreshed profile arrives on /events.
+                yield "style_learned", {"project_id": conv["project_id"], "profile": None,
+                                        "sample_id": banked["sample"]["id"]}
+        except Exception as e:  # noqa: BLE001
+            tracer.end(sspan, error=str(e))
+            yield "span", {"message_id": am["id"], "span": sspan}
+        convos.set_trace(am["id"], tracer.spans)
+
     # Auto-learn is another LLM call, and the run owns the conversation for as long as this
     # generator lives — a second message is a 409 until it returns. So the exchange is handed to the
     # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
@@ -3256,8 +3295,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     # A tainted reply has read someone else's page or transcript. Mining it into memory would
     # plant that text in later chats. The user can still save a memory by approving the tool.
-    # A chat deleted mid-reply is not mined: the exchange is the user's to discard (Undo restores it unlearned).
-    gone = convos.get(conv_id, with_messages=False) is None
     if (not error and text and not gone and not proposal_only(run) and not tool_ctx["tainted"]
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
@@ -3280,32 +3317,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
               and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
             title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
-
-    # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
-    # the LLM re-reads the samples only on the message that crosses the threshold, so most turns add
-    # a row and stop. A failure here is as quiet as a failed memory extraction.
-    # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
-    # that did nothing — and never leaves a span open for the UI to show as still running.
-    # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
-    # sample of how the user writes. The voice profile is injected into later chats.
-    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
-            and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
-        sspan = tracer.start("style", "Learn writing style")
-        yield "span", {"message_id": am["id"], "span": sspan}
-        try:
-            banked = await learn_style_from_exchange(
-                settings=cfg, style=style, project_id=conv["project_id"], user_text=user_text, model=model,
-            )
-            tracer.end(sspan, {"sample_chars": (banked or {}).get("sample", {}).get("chars", 0),
-                               "profile_updated": bool(banked and banked["profile"])})
-            yield "span", {"message_id": am["id"], "span": sspan}
-            if banked:
-                yield "style_learned", {"project_id": conv["project_id"], "profile": banked["profile"],
-                                        "sample_id": banked["sample"]["id"]}
-        except Exception as e:  # noqa: BLE001
-            tracer.end(sspan, error=str(e))
-            yield "span", {"message_id": am["id"], "span": sspan}
-        convos.set_trace(am["id"], tracer.spans)
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -5285,6 +5296,7 @@ def add_style_sample(body: StyleSampleIn) -> dict[str, Any]:
     s = style.add_sample(wsid(body.project_id), body.text, source=body.source or "paste", ref=body.ref, check=False)
     if not s:
         raise HTTPException(400, "Empty sample")
+    queue_style_relearn(s["project_id"])
     return s
 
 
@@ -6997,7 +7009,8 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
     # under a stable ref, so editing one doc for a week refreshes one sample instead of adding seven.
     # Not for a doc with a recording in it: its accepted summaries are other people's speech, not the user's voice.
     if settings().get("learnStyle", True) and not meeting_store.records_doc(id):
-        style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}")
+        if style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}"):
+            queue_style_relearn(d["project_id"])
     return d
 
 

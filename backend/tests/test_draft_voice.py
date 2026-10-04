@@ -1,4 +1,4 @@
-"""The voice block is draft-only, untainted-only and volatile. Run: PYTHONPATH=backend python backend/tests/test_draft_voice.py"""
+"""The voice block is draft-only, untainted-only and volatile; off Draft mode a one-line hint points at the tool. Run: PYTHONPATH=backend python backend/tests/test_draft_voice.py"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from personal_os import app as A  # noqa: E402
 from personal_os.context import build_context  # noqa: E402
-from personal_os.style import STYLE_HEADER, voice_wanted  # noqa: E402
+from personal_os.style import STYLE_HEADER, STYLE_HINT, voice_wanted  # noqa: E402
 
 FIXTURE = "SHORTSENTENCEVOICE"
 A.style.save_profile(None, {"summary": FIXTURE, "guidelines": ["open with the ask"]})
@@ -29,17 +29,29 @@ def tool(conv_settings: dict, tainted: bool = False) -> dict:
     return asyncio.run(fn({"project_id": None, "conv_settings": conv_settings, "tainted": tainted}))
 
 
-def test_non_draft_omits_voice() -> None:
+def test_non_draft_carries_a_hint_and_the_tool_returns_the_voice() -> None:
     system, used = ctx({"useStyle": True}, draft=False)
     assert STYLE_HEADER not in system and FIXTURE not in system and used["style"] is None
-    assert tool({"useStyle": True})["profile"] is None
-    assert FIXTURE not in str(tool({"useStyle": True}))
+    assert STYLE_HINT in system and STYLE_HINT in used["stable_system"]
+    assert FIXTURE in str(tool({"useStyle": True}))  # calling the tool is the draft intent
+    system, _ = ctx({"useStyle": True, "useTools": False}, draft=False)
+    assert STYLE_HINT not in system  # nothing to call
+
+
+def test_no_profile_no_hint() -> None:
+    saved = A.style.profile(None)
+    A.style.save_profile(None, {"enabled": False})
+    try:
+        system, _ = ctx({"useStyle": True}, draft=False)
+        assert STYLE_HINT not in system and tool({"useStyle": True})["profile"] is None
+    finally:
+        A.style.save_profile(None, {"enabled": saved["enabled"]})
 
 
 def test_draft_is_volatile_then_gone() -> None:
     cs = {"useStyle": True, "draftMode": True}
     system, used = ctx(cs, draft=True)
-    assert STYLE_HEADER in system and FIXTURE in system
+    assert STYLE_HEADER in system and FIXTURE in system and STYLE_HINT not in system
     assert FIXTURE not in used["stable_system"]
     assert any(STYLE_HEADER in b and FIXTURE in b for b in used["volatile_blocks"])
     assert FIXTURE in str(tool(cs))
@@ -52,8 +64,12 @@ def test_taint_and_toggle_win() -> None:
     system, _ = ctx(cs, draft=True)
     assert STYLE_HEADER not in system and tool(cs, tainted=True)["profile"] is None
     assert tool({"useStyle": True, "draftMode": True}, tainted=True)["profile"] is None
+    system, _ = ctx({"useStyle": True, "tainted": True}, draft=False)
+    assert STYLE_HINT not in system and tool({"useStyle": True}, tainted=True)["profile"] is None
     system, _ = ctx({"useStyle": False}, draft=True)
     assert STYLE_HEADER not in system and tool({"useStyle": False, "draftMode": True})["profile"] is None
+    system, _ = ctx({"useStyle": False}, draft=False)
+    assert STYLE_HINT not in system and tool({"useStyle": False})["profile"] is None
 
 
 def test_pure_function() -> None:

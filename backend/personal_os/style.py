@@ -155,8 +155,15 @@ STYLE_FOOTER = (
 )
 
 
+STYLE_HINT = ("The user has a saved writing voice; call writing_style before drafting text they will send under "
+              "their name.")
+
+
 def voice_wanted(conv_settings: dict[str, Any], *, draft: bool, tainted: bool) -> bool:
-    """The voice is for drafting only: toggle on, an explicit draft turn, and a chat that has read nothing untrusted."""
+    """The voice is for drafting only: toggle on, an explicit draft turn, and a chat that has read nothing untrusted.
+
+    The writing_style tool passes draft=True: calling it is the model saying it is about to draft.
+    """
     return bool(draft) and not tainted and bool(conv_settings.get("useStyle", True))
 
 
@@ -417,13 +424,10 @@ async def learn_style_from_exchange(
     user_text: str,
     model: str,
 ) -> dict[str, Any] | None:
-    """Auto-learn hook: bank the user's message if it is prose, relearn when enough has piled up.
+    """Auto-learn hook: bank the user's message if it is prose. Never calls the model.
 
-    Returns {"sample": …, "profile": … | None} when something was banked, else None. Cheap in the
-    common case: the LLM only runs on the message that crosses the threshold.
+    Returns {"sample": …, "profile": None} when something was banked, else None. The relearn is the
+    caller's to queue on the background worker (LearnWorker.submit_style), off the reply's run.
     """
     sample = style.add_sample(project_id, user_text, source="chat")
-    if not sample:
-        return None
-    profile = await style.relearn(settings=settings, project_id=project_id, model=model)
-    return {"sample": sample, "profile": profile}
+    return {"sample": sample, "profile": None} if sample else None

@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from personal_os import app as A  # noqa: E402
 from personal_os import learn, llm  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 from personal_os.app import events as topic  # noqa: E402
@@ -215,8 +216,87 @@ def test_a_failing_extraction_reports_and_leaves_the_chat_alone() -> None:
         learn.learn_from_exchange = saved
 
 
+PROSE = ("I think we should push the launch to Tuesday. The copy is not ready and I would rather ship it right "
+         "than ship it fast. Can you tell the team and move the review to Monday afternoon? Thanks for holding the "
+         "line on this one, it matters more than the date does.")
+
+
+def _stub_relearn(gate: dict[str, bool], seen: list[Any]) -> Any:
+    async def relearn(*, settings: dict[str, Any], project_id: str | None, model: str, force: bool = False) -> Any:
+        seen.append(project_id)
+        while not gate["open"]:
+            await asyncio.sleep(0.01)
+        return {"project_id": project_id, "summary": "Plain.", "guidelines": []}
+    return relearn
+
+
+def test_style_relearn_runs_after_the_run_ends() -> None:
+    gate, seen = {"open": False}, []
+    real, A.style.relearn = A.style.relearn, _stub_relearn(gate, seen)
+    try:
+        j("PUT", "/settings", {"learnStyle": True})
+        cid = j("POST", "/conversations", {})["id"]
+        j("POST", f"/conversations/{cid}/chat", {"content": PROSE})
+        wait_until(lambda: not run_live(cid), "the run to end with the style relearn still pending")
+        wait_until(lambda: len(seen) == 1, "the learn worker to start the relearn")
+        check(not any(e == "style_learned" for _, e, _ in read_events()), "no profile yet: the relearn is held")
+        gate["open"] = True
+        wait_until(lambda: any(e == "style_learned" for _, e, _ in read_events()), "style_learned on the app topic")
+        data = next(d for _, e, d in read_events() if e == "style_learned")
+        check(data["profile"]["summary"] == "Plain.", "the new profile rides along for the toast")
+    finally:
+        A.style.relearn = real
+
+
+def test_doc_saves_and_pasted_samples_queue_a_relearn() -> None:
+    gate, seen = {"open": True}, []
+    real, A.style.relearn = A.style.relearn, _stub_relearn(gate, seen)
+    try:
+        j("PUT", "/settings", {"learnStyle": True})
+        doc = j("POST", "/docs", {"title": "Note", "content": ""})
+        j("PUT", f"/docs/{doc['id']}", {"content": PROSE, "title": "Note", "summary": ""})  # a threadpool route
+        wait_until(lambda: len(seen) >= 1, "a relearn from the doc save")
+        n = len(seen)
+        j("POST", "/style/samples", {"text": "Short pasted line of mine."})
+        wait_until(lambda: len(seen) > n, "a relearn from the pasted sample")
+        n = len(seen)
+        j("PUT", f"/docs/{doc['id']}", {"content": "fix", "title": "Note", "summary": ""})  # not prose: nothing banked
+        time.sleep(0.3)
+        check(len(seen) == n, "a save that banks no sample queues nothing")
+    finally:
+        A.style.relearn = real
+
+
+def test_style_jobs_for_one_scope_collapse() -> None:
+    class FakeStyle:
+        def __init__(self) -> None:
+            self.calls: list[Any] = []
+
+        async def relearn(self, *, settings: dict[str, Any], project_id: str | None, model: str) -> None:
+            self.calls.append(project_id)
+
+    fake = FakeStyle()
+    published: list[str] = []
+    worker = learn.LearnWorker(memories=None, graph=None, set_trace=lambda *_: None,  # type: ignore[arg-type]
+                               publish=lambda e, _d: published.append(e), style=fake)
+
+    async def go() -> None:
+        worker.submit_style(None, {}, "m")
+        worker.submit_style(None, {}, "m")  # still queued: dropped
+        worker.submit_style("p1", {}, "m")
+        await worker._q.join()
+        worker.submit_style(None, {}, "m")  # dequeued already: a new job is welcome
+        await worker._q.join()
+        await worker.stop()
+
+    asyncio.run(go())
+    check(fake.calls == [None, "p1", None], f"one job per queued scope, got {fake.calls}")
+    check(published == [], "a relearn that changed nothing announces nothing")
+
+
 TESTS = [test_the_run_ends_while_extraction_is_still_going, test_results_arrive_on_the_app_topic,
-         test_a_failing_extraction_reports_and_leaves_the_chat_alone]
+         test_a_failing_extraction_reports_and_leaves_the_chat_alone, test_style_relearn_runs_after_the_run_ends,
+         test_doc_saves_and_pasted_samples_queue_a_relearn, test_style_jobs_for_one_scope_collapse]
 
 if __name__ == "__main__":
     failures = 0

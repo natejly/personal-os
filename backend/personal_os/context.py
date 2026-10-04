@@ -7,7 +7,7 @@ from typing import Any
 
 from . import redact
 from .repos import Documents, Graph, Memories
-from .style import context_block as style_block, voice_wanted
+from .style import STYLE_HINT, context_block as style_block, voice_wanted
 
 
 def estimate_tokens(text: str) -> int:
@@ -388,13 +388,17 @@ def build_context(
     # The user's own voice, for drafting on their behalf (see style.py). One profile per chat — the
     # project's when it has one — and the block itself tells the model not to *reply* in that voice.
     # Draft turns only, never on a tainted chat, and volatile so the stable prefix stays byte-identical.
-    if style is not None and voice_wanted(conv_settings, draft=draft, tainted=bool(conv_settings.get("tainted"))):
+    # Off Draft mode, a usable profile costs one fixed line in the stable prefix: the model fetches the
+    # voice with writing_style when it is about to draft, and ordinary replies stay neutral.
+    if style is not None and voice_wanted(conv_settings, draft=True, tainted=bool(conv_settings.get("tainted"))):
         profile = style.for_context(project_id)
         block = style_block(profile)
-        if block:
+        if block and draft:
             volatile.append(block)
             used["style"] = {"project_id": profile["project_id"], "summary": profile["summary"],
                              "guidelines": profile["guidelines"], "block": block}
+        elif block and conv_settings.get("useTools", True):  # no tools, no writing_style to call
+            parts.append(STYLE_HINT)
 
     # Observed computer activity. Off unless the user turned the monitor on, and skippable per chat
     # like every other context source.

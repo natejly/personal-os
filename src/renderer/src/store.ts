@@ -1174,6 +1174,9 @@ export const useStore = create<State>((set, get) => {
             void get().refreshMemoryProposals()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          } else if (ev.event === 'style_learned') {
+            get().toast('Updated how you write', 'learned')
+            void get().refreshStyle()
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
@@ -1443,8 +1446,7 @@ export const useStore = create<State>((set, get) => {
             get().onLearned(ev.data)
             break
           case 'style_learned':
-            // A banked sample is quiet; a refreshed voice profile is worth saying once.
-            if (ev.data.profile) get().toast('Updated how you write', 'learned')
+            // A banked sample is quiet; the refreshed profile, if any, is announced from `/events`.
             void get().refreshStyle()
             break
           case 'learn_error':

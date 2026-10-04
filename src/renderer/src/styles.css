@@ -747,7 +747,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
    styling, so these form rules stop at its edge. */
 .modal label:not(.modal-free *) { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
 .modal label:not(.modal-free *) > span { color: var(--text-muted); }
-.modal input:not(.modal-free *), .modal textarea:not(.modal-free *), .modal select:not(.modal-free *) {
+.modal input:not(.modal-free *):not(:where([type=checkbox], [type=radio])), .modal textarea:not(.modal-free *), .modal select:not(.modal-free *) {
   background: var(--bg-input); border: 1px solid var(--border-strong);
   border-radius: 8px; padding: 8px 10px; outline: 0; width: 100%;
 }
@@ -760,6 +760,10 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .modal label.toggle-row .toggle-text { gap: 2px; font-size: 13px; }
 .modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.45; }
 .modal .toggle-row input { width: 1px; padding: 0; border: 0; }
+/* Same for checkbox rows and "Hold for [n] seconds": keep the box or field beside its text. */
+.modal label.check:not(.modal-free *), .modal label.chip-check-row:not(.modal-free *), .modal label.inline:not(.modal-free *) { flex-direction: row; align-items: center; white-space: normal; }
+.modal label.chip-check-row:not(.modal-free *) { margin-bottom: 0; }
+.modal label.inline input { width: 110px; }
 .accent-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 2px; }
 .accent-swatch {
   width: 28px; height: 28px; padding: 0; border-radius: 50%;
@@ -859,6 +863,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .send-hold { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .send-hold label.inline { display: flex; align-items: center; gap: 8px; }
 .send-hold label.inline input { width: 80px; }
+.send-hold .seg { align-self: flex-start; }
 
 /* Rendered inside .toasts, so the two share one bottom-right stack. */
 .pending-sends { display: flex; flex-direction: column; gap: 8px; }
@@ -1222,6 +1227,8 @@ textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Tool permissions ---------- */
 .tool-perms { display: flex; flex-direction: column; gap: 4px; }
+.tool-group > summary { cursor: pointer; }
+.tool-group > summary h5 { display: inline-flex; }
 .tool-group h5 { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .tool-perm { display: flex; align-items: center; gap: 8px; }
 .tool-perms.compact .tool-perm { padding: 3px 0; font-size: 12px; }
@@ -1606,7 +1613,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-jobs h5 { display: flex; align-items: center; gap: 8px; }
 .inbox-jobs li.spent .ev-title { color: var(--text-muted); }
 .new-task { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
-.new-task input, .new-task textarea {
+.new-task input:not([type=checkbox]), .new-task textarea {
   width: 100%; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 12.5px;
   background: var(--bg); border: 1px solid var(--border); color: var(--text);
 }

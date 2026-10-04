@@ -232,7 +232,7 @@ class Consolidator:
             extraction_model = settings.get("extractionModel") or model
             try:
                 raw = await llm.complete(settings, extraction_model, [{"role": "system", "content": PROMPT},
-                                                                      {"role": "user", "content": "\n".join(lines)}])
+                                                                      {"role": "user", "content": "\n".join(lines)}], "learn")
             except Exception:  # noqa: BLE001 - a dead model means no proposals, never a half-written state
                 log.exception("consolidation call failed")
                 continue

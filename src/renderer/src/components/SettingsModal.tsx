@@ -24,6 +24,7 @@ import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
+import PlannerMailSettings from './PlannerMailSettings'
 
 type Tab = SettingsTab
 
@@ -47,11 +48,31 @@ const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', gui
 /** Read-only: how much of the library has vectors for the current embedding model. */
 function IndexStatusLine(): JSX.Element | null {
   const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
-  useEffect(() => { api.documents.indexStatus().then(setSt).catch(() => undefined) }, [])
+  const [busy, setBusy] = useState(false)
+  const toast = useStore((s) => s.toast)
+  const refresh = (): void => { api.documents.indexStatus().then(setSt).catch(() => undefined) }
+  useEffect(refresh, [])
   if (!st) return null
   const total = st.chunks + (st.doc_chunks ?? 0)
   const done = st.embedded + (st.doc_embedded ?? 0)
-  return <p className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</p>
+  const reembed = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await api.documents.embedBackfill()
+      if (r.error) toast(r.error, 'error')
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(false)
+      refresh()
+    }
+  }
+  return (
+    <div className="test-row">
+      <span className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</span>
+      <button className="ghost-btn" type="button" disabled={busy || !st.model} onClick={() => void reembed()}>{busy ? 'Embedding…' : 'Re-embed now'}</button>
+    </div>
+  )
 }
 
 export default function SettingsModal(): JSX.Element {
@@ -71,6 +92,11 @@ export default function SettingsModal(): JSX.Element {
   const { setKnowledgeTab, setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
+  /** For the Knowledge base tab, whose changes apply immediately: keep the draft in step and save now. */
+  const applyNow = (p: Partial<Settings>): void => {
+    patch(p)
+    saveSettings(p).catch((e: Error) => toast(e.message, 'error'))
+  }
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
   const activeSpaceId = useCanvas((s) => s.activeCanvasId)
   const spaceName = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.name : undefined))
@@ -114,11 +140,12 @@ export default function SettingsModal(): JSX.Element {
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
-    await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
+    // Tests the draft without saving it: Cancel must still discard it. A blank key means the saved one.
     try {
-      const list = await api.models()
-      setReplacingKey(false)
-      setTest({ state: 'ok', msg: `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` })
+      const r = await api.setup.test({ provider: 'custom', baseUrl: draft.baseUrl, apiKey: draft.apiKey || null, model: draft.defaultModel })
+      if (!r.ok) return setTest({ state: 'fail', msg: r.error ?? 'The connection test failed.' })
+      const n = r.models?.length
+      setTest({ state: 'ok', msg: n == null ? 'Connected.' : `Connected. ${n} model${n === 1 ? '' : 's'} available.` })
     } catch (e) {
       setTest({ state: 'fail', msg: (e as Error).message })
     }
@@ -137,8 +164,13 @@ export default function SettingsModal(): JSX.Element {
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
+    // Day plan and reply tracker save through their own routes (PlannerMailSettings), so the draft's copies
+    // are stale and must not be sent back over them.
+    const payload: Record<string, unknown> = { ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+    delete payload.planner
+    delete payload.mailWatch
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
+      await saveSettings(payload as Partial<Settings>)
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
@@ -208,7 +240,7 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <div className="test-row">
                 <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
-                {test.msg && <span className={`test-msg ${test.state}`}>{test.msg}</span>}
+                {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
               </div>
               <div className="test-row">
                 <button className="ghost-btn" type="button" onClick={() => void rerunSetup()}><RotateCcw size={14} /> Run setup again</button>
@@ -232,10 +264,26 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
-              {knowledgeTab === 'documents' && <label className="toggle-row plain modal-free">
-                <span className="toggle-text"><b>Contextual chunks</b><small>When you run the embedding backfill, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
-                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
-              </label>}
+              {knowledgeTab === 'memory' && <p className="muted small">Auto-learn, the extraction model and the embedding model are under <button type="button" className="link-btn" onClick={() => setTab('memory')}>Memory &amp; learning</button>.</p>}
+              {/* Saved on change like the rest of this tab, so Re-embed now sees it before Save. */}
+              {knowledgeTab === 'documents' && <>
+                <label className="toggle-row plain modal-free">
+                  <span className="toggle-text"><b>Contextual chunks</b><small>On Re-embed now, ask the model to write one sentence situating each chunk in its document, and index it with the chunk (up to 64 chunks per press). Costs one model call per chunk. Off by default.</small></span>
+                  <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => applyNow({ contextualChunks: e.target.checked })} /><span className="switch" />
+                </label>
+                <label className="toggle-row plain modal-free">
+                  <span className="toggle-text"><b>Use Docs in chat context</b><small>Search your Docs notes for excerpts to add to replies. Uploaded files are switched per chat.</small></span>
+                  <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => applyNow({ useDocsInContext: e.target.checked })} /><span className="switch" />
+                </label>
+                <label className="toggle-row plain modal-free">
+                  <span className="toggle-text"><b>Search meetings by meaning</b><small>Embed meeting transcripts so meeting search matches meaning, not only words. Sends transcript text to your embedding provider. Off by default.</small></span>
+                  <input type="checkbox" checked={draft.meetingEmbeddings === true} onChange={(e) => applyNow({ meetingEmbeddings: e.target.checked })} /><span className="switch" />
+                </label>
+                <label><span>Rerank model <small className="muted">(blank = off; one extra model call per search)</small></span>
+                  <input defaultValue={draft.retrievalRerankModel ?? ''} placeholder="Off" spellCheck={false}
+                    onBlur={(e) => { const m = e.target.value.trim(); if (m !== (draft.retrievalRerankModel ?? '')) applyNow({ retrievalRerankModel: m, retrievalRerank: Boolean(m) }) }} />
+                </label>
+              </>}
               <div className="knowledge-body modal-free">
                 {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
               </div>
@@ -258,7 +306,7 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
-              <label><span>Embedding model <small className="muted">(shared with document search; changing it re-embeds both)</small></span>
+              <label><span>Embedding model <small className="muted">(shared with document search; after changing it, Save, then press Re-embed now under Knowledge base → Documents. Memories re-embed as they are searched)</small></span>
                 <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
               </label>
               <label className="toggle-row plain">
@@ -291,6 +339,7 @@ export default function SettingsModal(): JSX.Element {
                   Turning this off makes every send immediate and final.
                 </p>
               </div>
+              <PlannerMailSettings />
             </section>}
 
             {tab === 'meetings' && <section>
@@ -327,6 +376,9 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
+              <label><span>Time limit per reply <small className="muted">(seconds; 0 = unlimited)</small></span><input type="number" min={0} max={86400} step={30} value={draft.maxRunSeconds ?? 300} onChange={(e) => patch({ maxRunSeconds: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <label><span>Token limit per reply <small className="muted">(0 = unlimited)</small></span><input type="number" min={0} max={10000000} step={10000} value={draft.maxRunTokens ?? 200000} onChange={(e) => patch({ maxRunTokens: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <label><span>Cost limit per reply <small className="muted">($; 0 = unlimited)</small></span><input type="number" min={0} max={1000} step={0.1} value={draft.maxRunCost ?? 0.5} onChange={(e) => patch({ maxRunCost: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
               <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
               <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
@@ -346,6 +398,12 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'usage' && <section>
               <h3>Usage &amp; cost</h3>
               <p className="muted">Every model call is logged locally with its token counts and cost.</p>
+              <label className="inline"><span>Warn me when spend passes</span>
+                <input type="number" min={0} step={0.5} aria-label="Daily spend alert, dollars" value={draft.usageAlerts?.dailyCost ?? 0} onChange={(e) => patch({ usageAlerts: { monthlyCost: 0, ...draft.usageAlerts, dailyCost: Math.max(0, Number(e.target.value) || 0) } })} />
+                <span>$ a day or</span>
+                <input type="number" min={0} step={1} aria-label="Monthly spend alert, dollars" value={draft.usageAlerts?.monthlyCost ?? 0} onChange={(e) => patch({ usageAlerts: { dailyCost: 0, ...draft.usageAlerts, monthlyCost: Math.max(0, Number(e.target.value) || 0) } })} />
+                <span>$ a month (0 = off)</span>
+              </label>
               <UsageView />
             </section>}
 
@@ -399,6 +457,10 @@ export default function SettingsModal(): JSX.Element {
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>
                 <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Notify me about scheduled jobs</b><small>A system notification when a scheduled job fails, is paused or leaves proposals while Grain is in the background.</small></span>
+                <input type="checkbox" checked={draft.notifyJobs !== false} onChange={(e) => patch({ notifyJobs: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Theme</span>
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>

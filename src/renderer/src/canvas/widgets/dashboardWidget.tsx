@@ -95,7 +95,7 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
 
 export const def: WidgetDef = {
   kind: 'dashboard-widget',
-  label: 'Widget',
+  label: 'Dashboard widget',
   icon: <LayoutDashboard size={15} />,
   defaultSize: { w: 420, h: 340 },
   minSize: { w: 280, h: 200 },

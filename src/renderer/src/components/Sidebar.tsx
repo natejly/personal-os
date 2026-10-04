@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, Gauge, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -48,7 +48,7 @@ type ProjectRow =
 const SHELL_NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
-  { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
+  { view: 'dashboards', label: 'Dashboards', icon: <Gauge size={15} /> },
   { view: 'docs', label: 'Files', icon: <Files size={15} /> },
   // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
   // union would not typecheck — so the row is not a canvas drag source.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Package } from 'lucide-react'
 import type { Artifact } from '@shared/types'
 import { api } from '../lib/api'
@@ -11,12 +11,19 @@ export default function ArtifactsView(): JSX.Element {
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
 
-  const load = useCallback(async () => {
-    const rows = await api.artifacts.list({ q }).catch(() => [] as Artifact[])
-    setList(rows)
-    setSel((cur) => (cur && rows.some((r) => r.id === cur) ? cur : rows[0]?.id ?? null))
-  }, [q])
-  useEffect(() => { void load() }, [load])
+  const [reload, setReload] = useState(0)
+  // Debounced, with a stale flag so a slow response for an older query never overwrites a newer one.
+  useEffect(() => {
+    let stale = false
+    const t = setTimeout(() => {
+      void api.artifacts.list({ q }).catch(() => [] as Artifact[]).then((rows) => {
+        if (stale) return
+        setList(rows)
+        setSel((cur) => (cur && rows.some((r) => r.id === cur) ? cur : rows[0]?.id ?? null))
+      })
+    }, 200)
+    return () => { stale = true; clearTimeout(t) }
+  }, [q, reload])
 
   return (
     <div className="art-split">
@@ -36,7 +43,7 @@ export default function ArtifactsView(): JSX.Element {
         ))}
       </aside>
       <section className="art-detail">
-        {sel ? <ArtifactViewer key={sel} id={sel} inline onDeleted={() => void load()} /> : null}
+        {sel ? <ArtifactViewer key={sel} id={sel} inline onDeleted={() => setReload((n) => n + 1)} /> : null}
       </section>
     </div>
   )

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown, Pencil } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Board, BoardCard, BoardColumn, CardEvent } from '@shared/types'
@@ -84,7 +84,7 @@ function Column({ col, cards, board, onChange, onOpen }: { col: BoardColumn; car
     const cardId = e.dataTransfer.getData('text/card')
     if (!cardId) return
     // find the card we're dropping before (by y position)
-    const els = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.kcard'))
+    const els = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.kcard-wrap'))
     const before = els.find((el) => e.clientY < el.getBoundingClientRect().top + el.offsetHeight / 2 && el.dataset.id !== cardId)
     await api.boards.moveCard(cardId, col.id, before?.dataset.id ?? null)
     onChange()
@@ -133,6 +133,7 @@ export default function BoardsView(): JSX.Element {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [renamingBoard, setRenamingBoard] = useState(false)
   const colName = useRef<HTMLInputElement>(null)
 
   const loadList = async (): Promise<void> => {
@@ -189,14 +190,20 @@ export default function BoardsView(): JSX.Element {
           <SendToSpace items={[{ kind: 'board', refId: activeId }]} disabled={!activeId} />
           {/* Delete sits at the far end from "New board", and takes two clicks (same pattern as ProjectModal). */}
           {board && (confirmDelete
-            ? <button className="ghost-btn danger" onClick={() => void api.boards.delete(board.id).then(() => { setConfirmDelete(false); setActiveId(null); setBoard(null); void loadList() })}><Trash2 size={14} /> Really delete this board and its cards</button>
+            ? <button className="ghost-btn danger" onClick={() => void api.boards.delete(board.id).then(() => { setConfirmDelete(false); setActiveId(null); setBoard(null); void loadList() })}><Trash2 size={14} /> Really delete this board and its cards? This can't be undone</button>
             : <button className="icon-btn danger" title="Delete board" aria-label={`Delete board ${board.name}`} onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button>
           )}
           {boards.length > 0 && (
             <label className="model-picker">
-              <select aria-label="Active board" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.card_count})</option>)}</select>
+              <select aria-label="Active board" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.id === board?.id ? `${board.name} (${board.cards.length})` : `${b.name} (${b.card_count})`}</option>)}</select>
               <ChevronDown size={14} />
             </label>
+          )}
+          {board && (renamingBoard
+            ? <input className="no-drag" autoFocus aria-label="Board name" defaultValue={board.name}
+                onBlur={(e) => { const name = e.target.value.trim(); setRenamingBoard(false); if (name && name !== board.name) void api.boards.update(board.id, { name }).then(() => { void loadBoard(); void loadList() }).catch((err) => toast(err.message, 'error')) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { (e.target as HTMLInputElement).value = board.name; (e.target as HTMLInputElement).blur() } }} />
+            : <button className="icon-btn" title="Rename board" aria-label={`Rename board ${board.name}`} onClick={() => setRenamingBoard(true)}><Pencil size={14} /></button>
           )}
           {board && (
             <label className="model-picker" title="Project">

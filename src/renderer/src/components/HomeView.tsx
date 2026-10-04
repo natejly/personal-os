@@ -21,7 +21,7 @@ import { withoutTodoEvents } from './CalendarWeek'
 
 function greeting(): string {
   const h = new Date().getHours()
-  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.'
 }
 const fmtTime = (iso: string, allDay: boolean): string => (allDay ? 'All day' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
 const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toDateString()
@@ -290,7 +290,7 @@ export default function HomeView(): JSX.Element {
       </header>
       <div className="page-body wide">
         <div className="home-hero">
-          <h1 role="heading" aria-level={2}>{greeting()}.</h1>
+          <h1 role="heading" aria-level={2}>{greeting()}</h1>
           <div className="quick-ask">
             <MessageSquare size={16} />
             <input placeholder="Ask anything…" value={quick} onChange={(e) => setQuick(e.target.value)}

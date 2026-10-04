@@ -1,7 +1,7 @@
 import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { citeLabel, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil } from 'lucide-react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil, GitBranch } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -182,7 +182,7 @@ function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, branchable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; branchable?: boolean }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -260,6 +260,12 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {editable && isUser && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />
+              </button>
+            )}
+            {branchable && (
+              <button type="button" className="ctx-chip" title="Branch in new chat: a copy of the conversation up to here; this one is left as it is"
+                aria-label="Branch in new chat" onClick={() => void useStore.getState().forkChat(message.conversation_id, message.id)}>
+                <GitBranch size={11} />
               </button>
             )}
           </div>

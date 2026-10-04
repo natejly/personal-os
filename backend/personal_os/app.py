@@ -1243,6 +1243,33 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     return c
 
 
+class ForkIn(BaseModel):
+    message_id: str
+
+
+@app.post("/conversations/{id}/fork")
+def fork_conversation(id: str, body: ForkIn) -> dict[str, Any]:
+    """Branch into a new chat from any live message. Allowed while a reply runs: it copies committed rows only.
+    No approvals, runs, grants, plans or summaries come along; taint does, including a sandbox import the source
+    holds, because the fork does not hold that import and would otherwise start clean."""
+    row = convos.get(id, with_messages=False)
+    if not row:
+        raise HTTPException(404)
+    if row["settings"].get("deskId") or row["settings"].get("job_id"):
+        raise HTTPException(409, "A desk or job transcript cannot be branched")
+    try:
+        out = convos.fork(id, body.message_id)
+    except KeyError:
+        raise HTTPException(404, "No such message in this chat") from None
+    except ValueError:
+        raise HTTPException(409, "That message was replaced; branch from the current one") from None
+    if sandboxes.holds_import(id):
+        srcs = sorted({*(out["settings"].get("taint_sources") or []), "fork:sandbox_import"})
+        convos.update(out["id"], {"settings": {"tainted": True, "taint_sources": srcs}})
+        out = convos.get(out["id"]) or out
+    return out
+
+
 @app.post("/conversations/{id}/title")
 async def retitle_conversation(id: str) -> dict[str, Any]:
     """Regenerate the title on request, from the user's messages only. Replaces a typed title too: it was asked for."""

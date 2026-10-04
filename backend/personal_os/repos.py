@@ -403,6 +403,42 @@ class Conversations:
             hidden = [row_to_dict(r, ("tool_events",)) or {} for r in cut]
         return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
 
+    # Settings a branch carries over. The rest stays behind on purpose: standing tool grants (the `tools` map's
+    # "on" entries), skipPermissions, titles, and the desk/job markers.
+    FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "planMode", "useSkills", "tainted", "taint_sources")
+
+    def fork(self, conv_id: str, upto_mid: str) -> dict[str, Any]:
+        """A new chat holding the live transcript up to and including `upto_mid`; the source is untouched. Only rows a
+        reader sees are copied (superseded rows and inactive variants are not), with fresh ids and no variant links.
+        Raises KeyError for a message not in this chat, ValueError for a superseded one."""
+        cid = new_id()
+        t = now()
+        with self.db.tx() as c:
+            c.execute("BEGIN IMMEDIATE")  # one snapshot: a reply finishing mid-copy must not split the prefix
+            src = c.execute("SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL", (conv_id,)).fetchone()
+            tgt = c.execute("SELECT superseded_at FROM messages WHERE id=? AND conversation_id=?", (upto_mid, conv_id)).fetchone()
+            if not src or not tgt:
+                raise KeyError(upto_mid)
+            if tgt["superseded_at"] is not None:
+                raise ValueError(upto_mid)
+            rows = c.execute("SELECT * FROM messages WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at, rowid",
+                             (conv_id,)).fetchall()
+            rows = rows[:[r["id"] for r in rows].index(upto_mid) + 1]
+            ss = self._hydrate(src)["settings"]
+            st = {k: ss[k] for k in self.FORK_KEYS if k in ss}
+            st["tools"] = {k: v for k, v in (ss.get("tools") or {}).items() if v != "on"}
+            st.update(titleSource="auto", titleTurns=sum(r["role"] == "user" for r in rows), forkedFrom=conv_id)
+            c.execute(
+                "INSERT INTO conversations(id,project_id,title,model,settings,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (cid, src["project_id"], f"{src['title']} (branch)", src["model"], json.dumps(st), t, t))
+            # Original timestamps keep the order (and the inserts keep rowid ties in order); later turns sort after.
+            c.executemany(
+                "INSERT INTO messages(id,conversation_id,role,content,model,error,context_used,tool_events,created_at,outcome,error_kind) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                [(new_id(), cid, r["role"], r["content"], r["model"], r["error"], r["context_used"], r["tool_events"],
+                  r["created_at"], r["outcome"], r["error_kind"]) for r in rows])
+        return self.get(cid)  # type: ignore[return-value]
+
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
             rows = c.execute(

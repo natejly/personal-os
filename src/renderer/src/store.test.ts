@@ -851,3 +851,31 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
   assert.equal(other.conversation?.messages?.[0].status, undefined)
 })
+
+test('forkChat focuses the new branch, keeps the source session, and offers the original back', async () => {
+  const real = api.conversations.fork
+  const branch = { ...session().conversation, id: 'c2', title: 't (branch)', settings: { forkedFrom: 'c1' }, messages: [msg({ conversation_id: 'c2', id: 'm9' })] }
+  const calls: unknown[][] = []
+  api.conversations.fork = (async (...a: unknown[]) => { calls.push(a); return branch }) as never
+  useStore.setState({ toasts: [], conversations: [], focusedConversationId: 'c1', sessions: { c1: session({ streaming: null } as never) } })
+  try {
+    const c = await useStore.getState().forkChat('c1', 'm1')
+    const st = useStore.getState()
+    assert.deepEqual(calls, [['c1', 'm1']])
+    assert.equal(c?.id, 'c2')
+    assert.equal(st.focusedConversationId, 'c2')
+    assert.equal(st.view, 'chat')
+    assert.equal(st.conversations[0].id, 'c2')
+    assert.deepEqual(st.sessions.c2.conversation.messages?.map((m) => m.id), ['m9'])
+    assert.ok(st.sessions.c1, 'the source session stays')
+    assert.equal(st.toasts.at(-1)?.text, 'Branched from t')
+    assert.equal(st.toasts.at(-1)?.action?.label, 'Open original')
+
+    api.conversations.fork = (async () => { throw new Error('That message was replaced') }) as never
+    assert.equal(await useStore.getState().forkChat('c1', 'm1'), null)
+    assert.equal(useStore.getState().focusedConversationId, 'c2', 'a failed branch leaves focus alone')
+    assert.equal(useStore.getState().toasts.at(-1)?.kind, 'error')
+  } finally {
+    api.conversations.fork = real
+  }
+})

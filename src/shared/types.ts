@@ -650,6 +650,10 @@ export interface ConversationSettings {
   /** Set when this conversation is a scheduled job's transcript. Such chats are indexed by the Agent
    *  Inbox and left out of the sidebar list (GET /conversations?include_jobs=true includes them). */
   job_id?: string
+  /** Set when this conversation is a desk's transcript. Desk and job transcripts cannot be branched. */
+  deskId?: string
+  /** The chat this one was branched from (POST /conversations/{id}/fork). */
+  forkedFrom?: string
 }
 
 /** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */

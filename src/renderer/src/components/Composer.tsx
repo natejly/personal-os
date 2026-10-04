@@ -3,6 +3,7 @@ import { ArrowUp, Square, Paperclip, Loader2 } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
+import { hasModelKey } from '../lib/modelLabel'
 import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -35,7 +36,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const key = draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: activeId, draftProjectId })
   const [text, setText] = useDraft(key)
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
-  const hasKey = useStore((s) => !!s.settings.apiKeySet || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.settings.baseUrl ?? ''))
+  const hasKey = useStore((s) => hasModelKey(s.settings))
   // A local endpoint (Ollama, a local proxy) needs no key, so it is not "unfinished".
   // One selector per action: a bare useStore() subscribes this textarea to every streamed token.
   const send = useStore((s) => s.send)

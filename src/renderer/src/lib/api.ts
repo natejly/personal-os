@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillFinding, ToolResultHandle,
@@ -352,8 +352,6 @@ export const api = {
       proven(req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}/respond`, { method: 'POST', body: json({ response, calendar_id: calendarId }) })),
     gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12, refresh = false) =>
       req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}${fresh(refresh)}`),
-    tasks: (showCompleted = false, refresh = false) =>
-      req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}${fresh(refresh)}`),
     tasklists: () => req<GoogleTaskList[]>('/integrations/google/tasklists'),
     tasksSync: () => req<TasksSyncStatus>('/integrations/google/tasks-sync'),
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
@@ -363,7 +361,6 @@ export const api = {
     todoCalendarConfig: (patch: { enabled?: boolean; calendarId?: string; calendarName?: string; intervalMinutes?: number; keepCompleted?: boolean }) =>
       req<TodoCalendarStatus>('/integrations/google/todo-calendar', { method: 'PUT', body: json(patch) }),
     todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }),
-    drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
@@ -375,9 +372,7 @@ export const api = {
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
     gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
-    clearCache: (namespace?: string) =>
-      req<{ dropped: number }>(`/integrations/google/cache/clear${namespace ? `?namespace=${namespace}` : ''}`, { method: 'POST' })
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
   },
   /** Backups, restore and export (backend backups.py). */
   data: {

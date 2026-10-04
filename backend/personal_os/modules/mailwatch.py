@@ -35,12 +35,10 @@ class SnoozeIn(BaseModel):
 
 
 class MailWatchConfigIn(BaseModel):
-    enabled: bool | None = None
     awaitingAfterDays: int | None = None
     needsReplyAfterHours: int | None = None
     useLLM: bool | None = None
     query: str | None = None
-    proposeFollowups: bool | None = None
 
 
 def _clock() -> datetime:
@@ -102,10 +100,8 @@ class MailWatchModule(Module):
         def list_watch(status: str | None = None) -> dict[str, Any]:
             if status is not None and status not in mw.STATUSES:
                 raise HTTPException(400, f"status must be one of {', '.join(mw.STATUSES)}")
-            cfg = self.config()
             now = self.clock()
-            return {"threads": self.store.list(status, at=now), "counts": self.store.counts(cfg, now),
-                    "followups": self.store.propose_followups(cfg, now, now.astimezone().date())}
+            return {"threads": self.store.list(status, at=now), "counts": self.store.counts(self.config(), now)}
 
         @r.post("/mail/watch/refresh")
         async def refresh() -> dict[str, Any]:
@@ -120,15 +116,6 @@ class MailWatchModule(Module):
         @r.put("/mail/watch/{thread_id}")
         def dismiss(thread_id: str, body: DismissIn) -> dict[str, Any]:
             if not self.store.dismiss(thread_id, body.dismissed):
-                raise HTTPException(404)
-            return self.store.get(thread_id)  # type: ignore[return-value]
-
-        @r.put("/mail/watch/{thread_id}/snooze")
-        def snooze(thread_id: str, body: SnoozeIn) -> dict[str, Any]:
-            until = mw._aware(body.until) if body.until else None  # a naive stamp is read as UTC
-            if until is not None and until <= self.clock():
-                raise HTTPException(422, "until must be in the future")
-            if not self.store.snooze(thread_id, until, create=False):
                 raise HTTPException(404)
             return self.store.get(thread_id)  # type: ignore[return-value]
 

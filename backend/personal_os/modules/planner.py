@@ -2,7 +2,9 @@
 
 Suggesting is read-only: it reads calendar events and todos and returns proposals. The only write is
 POST /planner/apply, which the UI calls when the user presses "Add selected to calendar", and it goes
-through the same verified `calendar_create` as every other event. The agent tool never writes.
+through the same verified `calendar_create` as every other event. The agent tool never writes events: it returns
+the same blocks as calendar_propose changes the user approves on one card (with no mirror calendar yet, finding the
+target may create the empty one, as apply does).
 """
 from __future__ import annotations
 
@@ -46,6 +48,12 @@ class PlannerConfigIn(BaseModel):
     calendarName: str | None = None
 
 
+def focus_change(b: dict[str, Any], calendar_id: str) -> dict[str, Any]:
+    """A planned block as one calendar_propose create: the Focus title and todo-id description locked_from_events reads back."""
+    return {"op": "create", "calendar_id": calendar_id, "summary": f"{pl.FOCUS_PREFIX}{b.get('title') or 'Task'}",
+            "start": b["start"], "end": b["end"], "description": f"Planned by Grain from todo {b.get('todo_id')}"}
+
+
 class PlannerModule(Module):
     key = "planner"
     label = "Planner"
@@ -65,11 +73,12 @@ class PlannerModule(Module):
 
     def suggest_sync(self, days: int | None = None, project_id: str | None = None) -> dict[str, Any]:
         """Read events, plan. Blocking (Google); call from a worker thread. Writes nothing."""
-        cfg = self.config()
-        if days:
-            cfg = {**cfg, "lookaheadDays": max(1, min(int(days), 30))}
+        base = self.config()
+        cfg = {**base, "lookaheadDays": max(1, min(int(days), 30))} if days else base
         now = self.clock().replace(second=0, microsecond=0)
-        events = self.ctx.google.calendar_events(cfg["lookaheadDays"] + 1, "primary", 100, None, ["all"])
+        # Read at least the configured lookahead so a Focus block accepted later in the week still locks its todo.
+        span = max(cfg["lookaheadDays"], base["lookaheadDays"])
+        events = self.ctx.google.calendar_events(span + 1, "primary", 100, None, ["all"])
         mirror = self._mirror_ids()
         scope = "__all__" if project_id in (None, "", "all") else self.ctx.sid(project_id)
         todos = self.todos.list(scope, include_done=False)
@@ -78,19 +87,22 @@ class PlannerModule(Module):
         holds_untrusted = any(t.get("source") in UNTRUSTED_SOURCES for t in todos)
         return {**result, "generated_at": now.isoformat(timespec="minutes"), "holds_untrusted": holds_untrusted}
 
+    def _target(self) -> str:
+        return (self._mirror_ids() or [None])[0] or self.ctx.google.calendar_ensure(self.config()["calendarName"])["id"]
+
     def apply_sync(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         g = self.ctx.google
-        target = (self._mirror_ids() or [None])[0] or g.calendar_ensure(self.config()["calendarName"])["id"]
+        target = self._target()
         results: list[dict[str, Any]] = []
         for b in blocks:
             try:
                 start, end = datetime.fromisoformat(str(b["start"])), datetime.fromisoformat(str(b["end"]))
                 if end <= start:
                     raise ValueError("end must be after start")
-                title, tid = str(b.get("title") or "Task"), b.get("todo_id")
-                out = g.calendar_create({"summary": f"{pl.FOCUS_PREFIX}{title}", "start": start.isoformat(timespec="minutes"),
-                                         "end": end.isoformat(timespec="minutes"), "description": f"Planned by Grain from todo {tid}",
-                                         "transparency": "opaque"}, calendar_id=target, send_updates="none")
+                tid = b.get("todo_id")
+                c = focus_change({**b, "start": start.isoformat(timespec="minutes"), "end": end.isoformat(timespec="minutes")}, target)
+                out = g.calendar_create({k: c[k] for k in ("summary", "start", "end", "description")} | {"transparency": "opaque"},
+                                        calendar_id=target, send_updates="none")
                 if out.get("verified"):
                     results.append({"todo_id": tid, "ok": True, "event_id": out.get("id"), "link": out.get("link")})
                 else:  # unverified is a failure, never a success
@@ -145,20 +157,23 @@ class PlannerModule(Module):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("schedule_suggest")
             titles = {b["todo_id"]: b["title"] for b in plan["blocks"]}
+            target = await asyncio.to_thread(self._target) if plan["blocks"] else ""
             blocks = [{"todo_id": b["todo_id"], "title": b["title"], "start": b["start"], "end": b["end"], "part": b["part"],
                        "why": "due {due}, priority {priority}, energy {energy}, time {time} (weighted)".format(**b["why"])} for b in plan["blocks"]]
-            return {"proposed_blocks": blocks, "unplaced": [{**u, "title": titles.get(u["id"])} for u in plan["unplaced"]],
-                    "note": "Proposals only; nothing was added to the calendar. Present them and let the user press Plan my day, then Add selected to calendar."}
+            return {"proposed_blocks": blocks, "changes": [focus_change(b, target) for b in plan["blocks"]],
+                    "unplaced": [{**u, "title": titles.get(u["id"])} for u in plan["unplaced"]],
+                    "note": "Proposals only; nothing was added to the calendar. Pass `changes` unchanged to one calendar_propose call so the user approves them on one card."}
         box.specs["schedule_suggest"] = ToolSpec(
             "schedule_suggest",
-            "Suggest calendar time blocks for the user's open todos (uses their estimates, due dates, priorities, work hours and existing meetings). Read-only: it proposes and never creates events. Show the proposal and let the user apply it in the Todos view; do not call calendar_create for it unless they explicitly confirm.",
+            "Suggest calendar time blocks for the user's open todos (uses their estimates, due dates, priorities, work hours and existing meetings). Read-only: it proposes and never creates events. Pass its `changes` unchanged to one calendar_propose call so the user approves them on one card.",
             _obj({"days": {"type": "integer", "default": 5}}, []), schedule_suggest, "google",
             examples=[{}, {"days": 3}])
 
     def today(self) -> dict[str, Any]:
         """Proposed blocks from open todos and the saved calendar snapshot. Never calls Google; nothing is written."""
-        cfg = self.config()
-        events = self.ctx.google.calendar_saved(cfg["lookaheadDays"] + 1)
+        base = self.config()
+        cfg = {**base, "lookaheadDays": 1}  # the Day plan card: same span as its "Plan my day" button
+        events = self.ctx.google.calendar_saved(base["lookaheadDays"] + 1)  # wider, so later Focus blocks still lock their todo
         if events is None:  # no snapshot: planning around unknown meetings would be a guess
             return {"planner_blocks": []}
         now = self.clock().replace(second=0, microsecond=0)

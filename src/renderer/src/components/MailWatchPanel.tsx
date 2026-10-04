@@ -12,14 +12,14 @@ const age = (d: number): string => (d < 1 ? 'today' : d < 2 ? '1 day' : `${Math.
 /** Needs-reply / Awaiting-reply chips for the Mail page. Read-only toward Gmail: a follow-up todo is made only on click. */
 export default function MailWatchPanel(): JSX.Element {
   const toast = useStore((s) => s.toast)
-  const [kind, setKind] = useState<Kind | null>(null)
+  const [kind, setKind] = useState<Kind | null>(() => useStore.getState().mailWatchKind)
   const [data, setData] = useState<MailWatchList | null>(null)
   const [busy, setBusy] = useState(false)
 
   const load = async (): Promise<void> => {
     try { setData(await api.mailWatch.list()) } catch { setData(null) }
   }
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load(); useStore.setState({ mailWatchKind: null }) }, [])
 
   const refresh = async (): Promise<void> => {
     setBusy(true)

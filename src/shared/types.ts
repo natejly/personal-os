@@ -2737,7 +2737,6 @@ export interface MailWatchThread {
 export interface MailWatchList {
   threads: MailWatchThread[]
   counts: { to_reply: number; awaiting_reply_overdue: number }
-  followups: { thread_id: string; title: string; notes: string; due: string }[]
 }
 
 /** One proposed calendar block from `/planner/suggest`; nothing is written until it is applied. */

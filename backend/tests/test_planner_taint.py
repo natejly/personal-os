@@ -25,6 +25,9 @@ def _mod(source: str) -> PlannerModule:
         def calendar_events(self, *_a, **_k):
             return []
 
+        def calendar_ensure(self, summary):
+            return {"id": "grain-cal", "summary": summary, "created": False}
+
     class Ctx:
         google = Google()
 
@@ -79,6 +82,7 @@ def test_a_local_task_does_not_taint_the_day_plan() -> None:
     out = asyncio.run(box.call("schedule_suggest", {"days": 1}, ctx))
     assert "error" not in out, out
     assert ctx.get("tainted") is not True
+    assert "calendar_propose" in out["note"]  # the plan ends in one approvable card, not a button hunt
 
 
 if __name__ == "__main__":

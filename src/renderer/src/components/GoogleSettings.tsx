@@ -99,7 +99,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             {google?.connected
               ? <><Check size={11} /> Signed in as {google.email}</>
               : hasClient
-                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets.'
+                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets. Signing in turns on two-way Todos ↔ Google Tasks sync and creates a “Grain Todos” calendar for due todos; both can be switched off here in Settings → Integrations.'
                 : 'Needs a one-time OAuth client (about two minutes) before the first sign-in.'}
           </small>
         </div>

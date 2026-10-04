@@ -63,8 +63,7 @@ WATCH_MAX_ENTRIES = 2000
 # run costs money and nobody opted in yet (the Agent Inbox offers the toggle).
 SEED_JOBS: list[dict[str, Any]] = [
     {"name": "Morning brief", "cron": "30 7 * * *",
-     "allowed_tools": ["current_time", "calendar_events", "calendar_get", "gmail_search", "gmail_read", "todo_list",
-                       "google_tasks_list"],
+     "allowed_tools": ["current_time", "calendar_events", "calendar_get", "gmail_search", "gmail_read", "todo_list"],
      "prompt": "Give me my morning brief: check my calendar for today and tomorrow, scan unread email for anything "
                "that needs a reply, list my open todos and flag the overdue ones, and end with the three things I "
                "should do first. Be concise and use headers."},
@@ -75,7 +74,7 @@ SEED_JOBS: list[dict[str, Any]] = [
                "draft one: short, in my voice, and specific about what happens next. Skip newsletters, receipts and "
                "notifications. Finish with a one-line list of what you drafted and what you skipped."},
     {"name": "Weekly review", "cron": "0 17 * * 5",
-     "allowed_tools": ["current_time", "todo_list", "calendar_events", "calendar_get", "google_tasks_list", "search_memory"],
+     "allowed_tools": ["current_time", "todo_list", "calendar_events", "calendar_get", "search_memory"],
      "prompt": "Write my weekly review: what moved this week (from my todos, calendar and recent chats), what slipped, "
                "and the three things that matter most next week. Be specific and short; no filler."},
 ]

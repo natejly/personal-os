@@ -5036,18 +5036,6 @@ def google_calendar(days: int = 2, start: str | None = None, calendars: str = "p
     return _gcall(google.calendar_events, days, "primary", 60, start, ids, refresh=refresh)
 
 
-@app.get("/integrations/google/cache")
-def google_cache_stats() -> dict[str, Any]:
-    return google.cache_stats()
-
-
-@app.post("/integrations/google/cache/clear")
-def google_cache_clear(namespace: str = "") -> dict[str, Any]:
-    """Forget cached Google reads - all of them, or one namespace (calendar, gmail, ...)."""
-    dropped = google.forget(*([namespace] if namespace else []))
-    return {"dropped": dropped, **google.cache_stats()}
-
-
 class AttendeeIn(BaseModel):
     email: str
     optional: bool = False
@@ -5242,11 +5230,6 @@ async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
     return {"text": await assist.clean_dictation(settings(), body.text)}
 
 
-@app.get("/integrations/google/tasks")
-def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
-    return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
-
-
 @app.get("/integrations/google/tasklists")
 def google_tasklists() -> Any:
     return _gcall(google.tasks_lists)
@@ -5262,11 +5245,6 @@ async def _modules_startup() -> None:
 async def _modules_shutdown() -> None:
     for m in modules:
         await m.stop()
-
-
-@app.get("/integrations/google/drive")
-def google_drive(q: str = "", max_results: int = 20) -> Any:
-    return _gcall(google.drive_files, q, max_results)
 
 
 def _google_has(status: dict[str, Any], scope_tail: str) -> bool:

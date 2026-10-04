@@ -242,7 +242,7 @@ class TodosModule(Module):
             except ValueError as e:
                 return tool_error(str(e), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
             return {"id": t["id"], "title": t["title"], "due": t["due"]}
-        R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low).",
+        R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low). Not for your own working checklist — that is todo_write.",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
              "repeat_every": {"type": "integer", "description": "Repeat every N units (default 1)."}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},

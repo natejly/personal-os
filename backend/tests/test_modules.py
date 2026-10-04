@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os.app import AUTH_TOKEN, app, modules, toolbox  # noqa: E402
 from personal_os.google import GoogleNotConnected  # noqa: E402
-from personal_os.modules import Module, get  # noqa: E402
+from personal_os.modules import get  # noqa: E402
 from personal_os.modules.todos import TodosModule  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -59,16 +59,17 @@ class ToolTests(unittest.TestCase):
         box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
         self.assertFalse(set(TODO_TOOLS) & set(box.specs))
 
-    def test_tool_available_can_veto(self) -> None:
-        class Veto(Module):
-            key = "veto"
+    def test_google_tasks_tools_hide_while_tasks_sync_is_on(self) -> None:
+        class Google:
+            def status(self) -> dict:
+                return {"connected": True}
 
-            def tool_available(self, name: str) -> bool | None:
-                return False if name == "todo_list" else None
-
-        box = Toolbox(None, None, None, lambda: {}, modules=[todos, Veto(todos.ctx)])  # type: ignore[arg-type]
-        self.assertFalse(box.available("todo_list"))
-        self.assertTrue(box.available("todo_add"))
+        cfg: dict = {}
+        box = Toolbox(None, None, None, lambda: cfg, google=Google())  # type: ignore[arg-type]
+        self.assertFalse(box.available("google_tasks_list"))  # sync defaults on
+        self.assertTrue(box.available("calendar_events"))
+        cfg["googleTasksSync"] = {"enabled": False}
+        self.assertTrue(box.available("google_tasks_list"))
 
     def test_tools_use_the_modules_store(self) -> None:
         t = asyncio.run(toolbox.specs["todo_add"].fn({"project_id": None}, title="module tool todo"))

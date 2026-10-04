@@ -706,6 +706,10 @@ class Toolbox:
         """Some tools need an integration to be connected. Pass google_ok to avoid one settings read per google tool."""
         spec = self.specs.get(name)
         if spec and spec.group == "google":
+            if name.startswith("google_tasks_"):  # two-way sync makes them todos; todo_* is the one way in
+                from .gtasks import DEFAULT_CONFIG as gtasks_default
+                if (self.settings().get("googleTasksSync") or {}).get("enabled", gtasks_default["enabled"]):
+                    return False
             return self._google_ok() if google_ok is None else google_ok
         if spec and spec.group == "sandbox":  # needs a container runtime; the check is TTL-cached
             return self.sandboxes is not None and self.sandboxes.available()
@@ -718,10 +722,6 @@ class Toolbox:
                 return bool(spec.available_fn())
             except Exception:  # noqa: BLE001 - a probe that throws means "cannot work", not a 500
                 return False
-        for m in self.modules:
-            v = m.tool_available(name)
-            if v is not None:
-                return v
         return spec is not None
 
     # ---- permission model: mode per tool = on | ask | off ----

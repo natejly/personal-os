@@ -106,11 +106,16 @@ def allowed_path(raw: str) -> Path:
 
 
 def allowed_root(raw: str) -> Path:
-    """`allowed_path`, minus the home folder itself: a granted root is writable by the shell and the file tools, and the
-    home folder holds the rc files, ~/Library and ~/.ssh, and is never snapshotted, so writes there could not be undone."""
+    """`allowed_path`, minus the home folder itself and any folder holding the app's data: a granted root is writable
+    by the shell and the file tools, and is snapshotted for undo. The home folder holds the rc files, ~/Library and
+    ~/.ssh, and is never snapshotted; a root around the data folder would snapshot the live database and auth token,
+    so an undo could roll them back."""
     p = allowed_path(raw)
     if p == home():
         raise LocalPathError("the whole home folder cannot be granted; pick a folder inside it")
+    data = _app_data_dir()
+    if data is not None and _under(data, p):
+        raise LocalPathError(f"{p} contains the app's own data folder; pick a folder that does not")
     return p
 
 

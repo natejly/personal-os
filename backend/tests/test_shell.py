@@ -218,6 +218,24 @@ def test_home_and_non_home_roots_are_never_granted(tmp_path: Path, fake_home: Pa
     assert mac.allowed_path("~") == fake_home  # the file tools may still read under home
 
 
+def test_a_root_around_the_data_dir_is_never_granted(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import fsx, mac
+    (fake_home / "proj" / "data").mkdir(parents=True)
+    (fake_home / "other").mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(fake_home / "proj" / "data"))
+    with pytest.raises(mac.LocalPathError, match="contains the app's own data folder"):
+        mac.allowed_root(str(fake_home / "proj"))
+    stored = {"workspaceRoots": [str(fake_home / "proj"), str(fake_home / "other")]}
+    assert shell.granted_roots(stored, None) == [fake_home / "other"]
+
+    class B:
+        workspace = None
+
+        def settings(self) -> dict[str, Any]:
+            return stored
+    assert fsx.grants_for(B(), {}).roots == [fake_home / "other"]
+
+
 @needs_seatbelt
 def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"

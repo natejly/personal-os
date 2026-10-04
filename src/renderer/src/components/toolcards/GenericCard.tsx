@@ -25,10 +25,12 @@ export function GenericBody({ event }: { event: ToolEvent }): JSX.Element {
  * as a list, and Approve / Deny, with the standing grants the old modal had. A forced approval (untrusted content
  * in this reply) offers no standing grant: the backend would downgrade it to one-shot anyway.
  */
-export function GenericApproval({ event, decide, grant }: {
+export function GenericApproval({ event, decide, grant, onWhy }: {
   event: ToolEvent
   decide: (approve: boolean) => Promise<void>
   grant: (d: 'always_chat' | 'always_global') => Promise<void>
+  /** Opens the context panel (it lists the taint sources and has Clear); only where that panel shows this chat. */
+  onWhy?: () => void
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const d = describeCall(event.name, event.arguments)
@@ -46,7 +48,8 @@ export function GenericApproval({ event, decide, grant }: {
     >
       <div className="approval-text">
         <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced
-          ? 'This reply read untrusted content, so it needs your OK each time.'
+          ? <>This chat has read untrusted content, so this needs your OK each time.
+            {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
           : 'This acts outside the app.'}
       </div>
       <ArgList rows={argRows(event.arguments)} />

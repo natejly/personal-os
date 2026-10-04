@@ -210,6 +210,10 @@ def test_failure_and_off() -> None:
     time.sleep(0.3)
     check(conv(cid)["title"] == titles.placeholder(LONG), "placeholder stays on failure")
     reset()
+    j("POST", f"/conversations/{cid}/chat", {"content": "and a second turn"})
+    wait_until(lambda: conv(cid)["settings"].get("titleSource") == "auto", "a later turn retries the failed title")
+    check(conv(cid)["title"] == "Trip planning for Lisbon", "retried title replaces the placeholder")
+    reset()
     client.put("/settings", json={"autoTitle": False})
     try:
         cid = j("POST", "/conversations", {})["id"]

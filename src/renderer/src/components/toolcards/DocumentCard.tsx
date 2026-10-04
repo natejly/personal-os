@@ -1,5 +1,6 @@
-import { FileOutput } from 'lucide-react'
-import { str } from '../../lib/toolResult'
+import { FilePlus, FileOutput } from 'lucide-react'
+import { num, str } from '../../lib/toolResult'
+import { useStore } from '../../store'
 import CardShell from './CardShell'
 import { ErrorLine, Meta, unreadable, useParsed } from './blocks'
 import { registerToolCard, type ToolCardProps } from './registry'
@@ -35,5 +36,21 @@ export default function DocumentCard(props: ToolCardProps): JSX.Element {
   )
 }
 
+/** doc_create: the new doc's title and size, and a way to open it. The raw id and the model-facing note stay hidden. */
+function DocCreateCard(props: ToolCardProps): JSX.Element {
+  const { event } = props
+  const p = useParsed(event)
+  const id = str(p.data?.doc_id)
+  const words = num(p.data?.words)
+  return (
+    <CardShell {...props} icon={<FilePlus size={14} />} title="Create doc" subject={str(p.data?.created) || str(event.arguments.title) || undefined} hideResult={!unreadable(p, event)}>
+      <Meta items={[['Filed under', str(p.data?.filed_under) || str(event.arguments.folder) || null], ['Words', words !== null ? words.toLocaleString() : null]]} />
+      {id && <button type="button" className="ghost-btn" onClick={() => void useStore.getState().openDoc(id)}>Open</button>}
+      <ErrorLine event={event} />
+    </CardShell>
+  )
+}
+
+registerToolCard('doc_create', DocCreateCard)
 registerToolCard('convert_document', DocumentCard)
 registerToolCard('render_preview', DocumentCard)

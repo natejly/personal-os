@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -171,6 +171,11 @@ export default function Sidebar(): JSX.Element {
     if (archivedOpen) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
   }, [archivedOpen, archiveBump])
   const archiveChat = useStore((s) => s.archiveChat)
+  // Search narrows the archived rows by title too, like the active list.
+  const shownArchived = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? archived.filter((c) => c.title.toLowerCase().includes(q)) : archived
+  }, [archived, query])
   // ⌘⇧F: the store opens the sidebar; this brings the search field up. The tick seen at mount is
   // skipped, or a remount would reopen the search for a press handled before it.
   const searchTick = useStore((s) => s.sidebarSearchTick)
@@ -348,13 +353,14 @@ export default function Sidebar(): JSX.Element {
           </section>
         )}
         <section>
-          <h4 className="archived-head"><button className="section-toggle" onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
-          {archivedOpen && archived.length === 0 && <p className="empty-hint">Nothing archived.</p>}
-          {archivedOpen && archived.map((c) => (
+          <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
+          {archivedOpen && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
+          {archivedOpen && shownArchived.map((c) => (
             <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}
               onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(c.id) } }}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
+              <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id).then(() => setArchived((a) => a.filter((x) => x.id !== c.id))) }}><Trash2 size={13} /></button>
             </div>
           ))}
         </section>

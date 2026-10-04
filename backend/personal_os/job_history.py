@@ -54,6 +54,17 @@ def summarize_run(run: dict[str, Any], event_counts: dict[str, int] | None = Non
     }
 
 
+def skip_record(row: dict[str, Any]) -> dict[str, Any]:
+    """A job_skips row as a history line: status 'skipped', placed by when the slot was turned away."""
+    return {"run_id": f"skip:{row['id']}", "conversation_id": None, "status": "skipped", "reason": row["reason"],
+            "due_at": row.get("due_at"), "started_at": row["at"]}
+
+
+def merge_skips(runs: list[dict[str, Any]], skips: Iterable[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Runs and skip lines together, newest first, `limit` in all."""
+    return sorted([*runs, *(skip_record(k) for k in skips)], key=lambda r: r["started_at"], reverse=True)[:limit]
+
+
 def stats(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Health of a job over a set of summarised runs. Runs still going are not counted either way."""
     done = [r for r in rows if r["status"] != "running" and not r.get("dry_run")]

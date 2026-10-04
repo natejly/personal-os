@@ -4180,6 +4180,9 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
 
 @app.delete("/jobs/{id}")
 def delete_job(id: str) -> dict[str, bool]:
+    # Its pending proposals go with it: nobody is left to own them, so they must not sit in "Needs you".
+    if jobs.get(id):
+        proposals.reject_job(id, "job deleted")
     if not jobs.delete(id):
         raise HTTPException(404, "No such job")
     return {"ok": True}
@@ -4224,7 +4227,7 @@ def _known_job(id: str) -> dict[str, Any]:
 def job_runs(id: str, limit: int = 50) -> list[dict[str, Any]]:
     """The job's last runs (50 by default, 200 at most): status incl. timed_out, duration, cost, tool and proposal counts."""
     _known_job(id)
-    return _job_run_summaries(run_store.of_job(id, limit))
+    return job_history.merge_skips(_job_run_summaries(run_store.of_job(id, limit)), jobs.skips(id, limit), max(1, min(limit, 200)))
 
 
 @app.get("/jobs/{id}/stats")
@@ -4232,7 +4235,8 @@ def job_stats(id: str, days: float = 30.0) -> dict[str, Any]:
     _known_job(id)
     since = time.time() - max(0.0, float(days)) * 86400
     rows = [job_history.summarize_run(r, None, None) for r in run_store.of_job(id, 200, since)]
-    return job_history.stats(rows)
+    # A skipped slot is not a run: counted on its own, never in runs or success_rate.
+    return {**job_history.stats(rows), "skipped": len(jobs.skips(id, 200, since))}
 
 
 @app.get("/jobs/{id}/runs.csv")
@@ -4266,7 +4270,7 @@ class ProposalIn(BaseModel):
 def list_proposals(status: str | None = "pending", run_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     """Outward-facing calls a background run recorded instead of making. Pending by default."""
     if status not in (None, "", "all", *PROPOSAL_STATUSES):
-        raise HTTPException(400, "status must be pending, accepted, rejected or all")
+        raise HTTPException(400, "status must be pending, accepted, rejected, expired or all")
     return proposals.list(None if status in (None, "", "all") else status, run_id, _clamp(limit))
 
 
@@ -4303,7 +4307,16 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
     row = proposals.record(pid, result, err)
     if err and "verification" not in result:
         row = proposals.reopen(pid)  # nothing was written (an unverified write might have been): it can be accepted again
-    return {"ok": not err, "proposal": row, "replayed": replayed, "result": summarize_result(result, 2000)}
+    # A held send (outbox.queued_result) has not gone out yet; the renderer must not say it did.
+    queued = isinstance(result, dict) and bool(result.get("queued"))
+    return {"ok": not err, "proposal": row, "replayed": replayed, "result": summarize_result(result, 2000),
+            "queued": queued, "sends_in_seconds": result.get("sends_in_seconds") if queued else None}
+
+
+@app.post("/proposals/reject_all")
+def reject_all_proposals(job_id: str) -> dict[str, Any]:
+    """Reject every pending proposal of one job at once. Other jobs' proposals are untouched."""
+    return {"ok": True, "rejected": proposals.reject_job(job_id)}
 
 
 @app.post("/proposals/{pid}/reject")
@@ -4359,7 +4372,8 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
         row = run_store.get(a["run_id"]) if a["run_id"] else None
         pending_approvals.append({**a, "live": a["call_id"] in _approvals, "run_kind": (row or {}).get("kind"),
                                   "job": ((row or {}).get("input") or {}).get("job")})
-    pending_proposals = proposals.list("pending", limit=100)
+    names = {jb["id"]: jb["name"] for jb in jobs.list()}
+    pending_proposals = [{**p, "job": names.get(p["job_id"] or "")} for p in proposals.list("pending", limit=100)]
 
     runs = run_store.of_kind("job", since=cutoff, limit=_clamp(limit))
     if not include_dry:  # a preview is not something that happened while the user was away

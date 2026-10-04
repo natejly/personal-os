@@ -6,7 +6,7 @@ import type {
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
-  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
+  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit,
@@ -182,7 +182,7 @@ export const api = {
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
     /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
     dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
-    runs: (id: string, limit = 50) => req<JobRunRecord[]>(`/jobs/${id}/runs?limit=${limit}`),
+    runs: (id: string, limit = 50) => req<(JobRunRecord | JobSkipRecord)[]>(`/jobs/${id}/runs?limit=${limit}`),
     stats: (id: string, days = 30) => req<JobStats>(`/jobs/${id}/stats?days=${days}`),
     /** The run history as CSV text, fetched with the auth header (a plain link could not carry it). */
     csv: async (id: string): Promise<string> => {
@@ -195,11 +195,13 @@ export const api = {
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
   proposals: {
-    list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
+    list: (status: AgentProposal['status'] | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
     accept: (id: string, args?: Record<string, unknown>) =>
-      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }, NO_TIMEOUT),
-    reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
+      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string; queued?: boolean; sends_in_seconds?: number | null }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }, NO_TIMEOUT),
+    reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' }),
+    /** Rejects every pending proposal of one job. */
+    rejectAll: (jobId: string) => req<{ ok: boolean; rejected: number }>(`/proposals/reject_all?job_id=${encodeURIComponent(jobId)}`, { method: 'POST' })
   },
   boards: {
     list: () => req<Board[]>('/boards'),

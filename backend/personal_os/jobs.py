@@ -54,7 +54,9 @@ LATE_GRACE_S = 90.0
 # Upper bound on how many skipped slots are counted, so a job asleep for a year does not walk a million dates.
 MAX_MISSED_COUNTED = 500
 
-PROPOSAL_STATUSES = ("pending", "accepted", "rejected")
+PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "expired")
+# Skipped slots kept per job in job_skips; older ones are dropped as new ones arrive.
+SKIP_KEEP = 200
 KINDS = ("cron", "once", "watch")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
 WATCH_MAX_ENTRIES = 2000
@@ -442,10 +444,21 @@ class Jobs:
             r = c.execute("SELECT consecutive_failures AS n FROM jobs WHERE id=?", (id,)).fetchone()
         return int(r["n"]) if r else 0
 
-    def record_skip(self, id: str, reason: str, at: float | None = None) -> None:
+    def record_skip(self, id: str, reason: str, at: float | None = None, due_at: float | None = None) -> None:
+        """The latest skip on the job row (the list chip) and one history row, keeping the last SKIP_KEEP."""
+        t = at if at is not None else now()
         with self.db.tx() as c:
-            c.execute("UPDATE jobs SET last_skip_at=?, last_skip_reason=? WHERE id=?",
-                      (at if at is not None else now(), reason, id))
+            c.execute("UPDATE jobs SET last_skip_at=?, last_skip_reason=? WHERE id=?", (t, reason, id))
+            c.execute("INSERT INTO job_skips(job_id, due_at, reason, at) VALUES(?,?,?,?)", (id, due_at, reason, t))
+            c.execute("DELETE FROM job_skips WHERE job_id=? AND id NOT IN "
+                      "(SELECT id FROM job_skips WHERE job_id=? ORDER BY at DESC, id DESC LIMIT ?)", (id, id, SKIP_KEEP))
+
+    def skips(self, id: str, limit: int = 50, since: float | None = None) -> list[dict[str, Any]]:
+        """Newest first."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, due_at, reason, at FROM job_skips WHERE job_id=? AND at>=? ORDER BY at DESC, id DESC LIMIT ?",
+                             (id, since if since is not None else 0.0, max(1, min(int(limit), SKIP_KEEP)))).fetchall()
+        return [dict(r) for r in rows]
 
     def pause(self, id: str, reason: str, at: float | None = None) -> None:
         """Switch a job off and say why. Not `update`: that clears the reason, which is the user's acknowledgement."""
@@ -551,6 +564,18 @@ class Proposals:
                           (at if at is not None else now(), id)).rowcount
         return self.get(id) if n else None
 
+    def reject_job(self, job_id: str, note: str | None = None, at: float | None = None) -> int:
+        """Reject every pending proposal of one job. `note` says why, in `error` (rejected rows have no result)."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE proposals SET status='rejected', decided_at=?, error=? WHERE job_id=? AND status='pending'",
+                             (at if at is not None else now(), note, job_id)).rowcount
+
+    def expire(self, before: float, at: float | None = None) -> int:
+        """Pending proposals created before `before` stop being actionable. Accepting one is then a 409."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE proposals SET status='expired', decided_at=? WHERE status='pending' AND created_at<?",
+                             (at if at is not None else now(), before)).rowcount
+
     def reopen(self, id: str) -> dict[str, Any] | None:
         """Put an accepted proposal back to 'pending', for an accept whose call failed before writing anything."""
         with self.db.tx() as c:
@@ -564,10 +589,10 @@ class Proposals:
         return self.get(id)
 
 
-def _expire_days(policy: Any) -> float:
-    """`jobExpireDays` (0 = recurring jobs never expire)."""
+def _expire_days(policy: Any, key: str = "jobExpireDays") -> float:
+    """`jobExpireDays` / `proposalExpireDays` (0 = never)."""
     try:
-        return max(0.0, float(policy.settings().get("jobExpireDays") or 0)) if policy is not None else 0.0
+        return max(0.0, float(policy.settings().get(key) or 0)) if policy is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
 
@@ -643,6 +668,8 @@ class Scheduler:
             with self.jobs.db.tx() as c:
                 c.execute("UPDATE jobs SET expires_at=? WHERE enabled=1 AND kind!='once' AND expires_at IS NULL",
                           (at + days * 86400,))
+        if (pdays := _expire_days(self.policy, "proposalExpireDays")) > 0:
+            Proposals(self.jobs.db).expire(at - pdays * 86400, at)
         due = self.jobs.due(at)
         # Directory jobs: one listing each. A job that is also clock-due is still one launch this tick.
         seen = {j["id"] for j in due}

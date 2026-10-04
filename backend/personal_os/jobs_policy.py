@@ -85,7 +85,7 @@ class JobPolicy:
             return True, None
         why = "previous run still running"
         if not fire.get("manual"):
-            self.jobs.record_skip(job["id"], why, self.clock())
+            self.jobs.record_skip(job["id"], why, self.clock(), fire.get("due_at"))
         return False, why
 
     # ---- the watcher ----

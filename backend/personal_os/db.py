@@ -350,9 +350,20 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(enabled, next_due_at);
 
+-- A slot a job did not run, kept as history (jobs.last_skip_* only holds the latest). Only overlap skips land here:
+-- slots missed while the app was closed are on the late run's input.missed_slots. Capped per job (jobs.SKIP_KEEP).
+CREATE TABLE IF NOT EXISTS job_skips (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  due_at REAL,
+  reason TEXT NOT NULL,
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_skips_job ON job_skips(job_id, at);
+
 -- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
 -- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
--- status: pending | accepted | rejected
+-- status: pending | accepted | rejected | expired (left pending past settings.proposalExpireDays)
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,

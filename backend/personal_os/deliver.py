@@ -469,6 +469,8 @@ def register(tb: Any) -> None:
             # Beside the source, inside the granted folder: view_image reads only under home, and
             # pages are named by source and number, so a re-render overwrites rather than piles up.
             outdir = src.parent / "previews"
+            if not fsx.grants_for(tb, ctx).in_roots(Path(os.path.realpath(outdir))):  # a previews symlink leading out
+                return tool_error(f"{outdir} leads outside the folders you may use.", field="path")
         res = await asyncio.to_thread(_render_sync, src, pages, dpi_n, outdir, src.stem)
         if "error" in res:
             return res

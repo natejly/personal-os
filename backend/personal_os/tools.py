@@ -410,6 +410,20 @@ def _norm_url(url: str) -> str | None:
     return f"{host}{f':{port}' if port else ''}{path}" + (f"?{u.query}" if u.query else "")
 
 
+def _cite(ctx: dict[str, Any], h: dict[str, Any]) -> int:
+    """This excerpt's citation number in the reply. ctx["citations"] is the message's context_used chunks
+    (app.py), so a passage found by search is saved with the message and opens like a prompt excerpt."""
+    from .context import cite_ref
+    refs = ctx.setdefault("citations", [])
+    key = (h.get("source", "file"), h["chunk_id"])
+    for r in refs:
+        if (r.get("source", "file"), r["chunk_id"]) == key:
+            return int(r["n"])
+    r = cite_ref(h, len(refs) + 1)
+    refs.append(r)
+    return int(r["n"])
+
+
 def _allowed_urls(ctx: dict[str, Any]) -> set[str]:
     return {n for u in (ctx.get("allowed_urls") or ()) if (n := _norm_url(str(u)))}
 
@@ -887,11 +901,13 @@ class Toolbox:
                 hits = [byk[k] for k, _ in order][:off + lim]
             else:
                 hits = await one(query)
-            rows = [{"source": h.get("source", "file"), "document_id": None if h.get("source") == "doc" else h["document_id"],
+            # Only the rows this page returns get a number: page() drops the ones before `off`.
+            rows = [{"cite": _cite(ctx, h) if i >= off else None, "source": h.get("source", "file"),
+                     "document_id": None if h.get("source") == "doc" else h["document_id"],
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
-                     "page": h.get("page"), "text": h["text"]} for h in hits]
+                     "page": h.get("page"), "text": h["text"]} for i, h in enumerate(hits)]
             return page(_scrub_public_text(rows), offset=off, limit=lim, key="results")
-        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
+        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Each excerpt has a cite number: when a sentence of your answer relies on it, end the sentence with that number in brackets, like [4]. Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
                   "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"},
                   "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4, "description": "For a compound question, up to 4 sub-queries (one per fact needed) instead of query; results are fused into one ranking"}}, []), search_documents, "knowledge",

@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import egress, redact, sandbox
+from . import egress, mac, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -104,11 +104,15 @@ def _remember_cwd(conversation_id: str | None, p: str) -> None:
 
 
 def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path]:
-    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder."""
+    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder `mac.allowed_root` accepts,
+    so a root stored before that check (the home folder, "/") never widens what the shell may write."""
     out: list[Path] = [_real(desk_root)] if desk_root else []
     for r in settings.get("workspaceRoots") or []:
         if isinstance(r, str) and r.strip() and os.path.isabs(os.path.expanduser(r.strip())):
-            p = _real(r.strip())
+            try:
+                p = mac.allowed_root(r)
+            except mac.LocalPathError:
+                continue
             if p.is_dir() and p not in out:
                 out.append(p)
     return out

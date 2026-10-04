@@ -101,7 +101,7 @@ def grants_for(box: Any, ctx: dict[str, Any]) -> Grants:
     raw = box.settings().get("workspaceRoots") or []
     for r in raw if isinstance(raw, list) else []:
         try:
-            p = mac.allowed_path(str(r))
+            p = mac.allowed_root(str(r))
         except mac.LocalPathError:
             continue
         if p.is_dir() and p not in roots:

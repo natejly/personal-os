@@ -28,8 +28,8 @@ needs_seatbelt = pytest.mark.skipif(not HAVE_SEATBELT, reason="sandbox-exec is n
 
 class Box:
     def __init__(self, tmp: Path, **settings: Any):
-        self.root = (tmp / "work").resolve()
-        self.root.mkdir()
+        self.root = (tmp / "home" / "work").resolve()  # a granted root must sit inside the home folder (the fixture below)
+        self.root.mkdir(parents=True)
         self.settings: dict[str, Any] = {"workspaceRoots": [str(self.root)], **settings}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:  # stored tool results hang off a conversation row
@@ -45,6 +45,14 @@ class Box:
 
     async def arun(self, name: str, **args: Any) -> Any:
         return await self.tb.call(name, args, self.ctx)
+
+
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    h = (tmp_path / "home").resolve()
+    h.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(h))
+    return h
 
 
 @pytest.fixture
@@ -137,6 +145,95 @@ def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
     assert not (box.root / ".git" / "hooks" / "pre-commit").exists()
     assert (box.root / ".git" / "config").read_text() == "[core]\n"
     assert (box.root / ".git" / "HEAD").read_text().strip() == "z"  # the rest of .git is ordinary workspace
+
+
+PROTECTED = (".zshrc", ".bash_profile", ".envrc", ".gitconfig", ".mcp.json", ".git/info/exclude",
+             ".vscode/tasks.json", ".vscode/settings.json", ".husky/pre-commit")
+
+
+@needs_seatbelt
+def test_rc_files_and_tool_config_are_not_writable_inside_a_root(box: Box) -> None:
+    for rel in PROTECTED:
+        (box.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (box.root / rel).write_text("orig\n")
+    cmd = "; ".join(f"echo x >> {rel}" for rel in PROTECTED) + "; echo ok > ok.txt; echo done"
+    r = box.run("shell_run", command=cmd)
+    assert "done" in r["output"] and r["exit_code"] == 0
+    for rel in PROTECTED:
+        assert (box.root / rel).read_text() == "orig\n", rel
+    assert (box.root / "ok.txt").read_text() == "ok\n"
+    r = box.run("shell_run", command="echo x >> .zshrc")
+    assert r["exit_code"] != 0  # the shell sees the refusal
+
+
+@needs_seatbelt
+def test_desk_under_the_data_dir_stays_writable_but_its_database_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = (tmp_path / "appdata").resolve()
+    desk = data / "desks" / "d1"
+    desk.mkdir(parents=True)
+    (data / "personal-os.db").write_text("live")
+    (desk / "personal-os.db").write_text("live")
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    b = Box(tmp_path, workspaceRoots=[])
+
+    class Ws:
+        def ensure(self, desk_id: str) -> Path:
+            return desk
+    b.tb.workspace = Ws()
+    b.ctx["desk_id"] = "d1"
+    r = b.run("shell_run", command="touch made.txt; echo x > personal-os.db; echo x > ../../personal-os.db; "
+                                   "echo x > .zshrc; touch ../../stray; echo done")
+    assert "done" in r["output"] and (desk / "made.txt").exists()
+    assert (desk / "personal-os.db").read_text() == "live" and (data / "personal-os.db").read_text() == "live"
+    assert not (desk / ".zshrc").exists() and not (data / "stray").exists()
+
+
+def test_profile_write_denies_sit_around_the_desk_reallow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = (tmp_path / "appdata").resolve()
+    (data / "desks" / "d1").mkdir(parents=True)
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    p = sandbox.shell_profile([str(data / "desks" / "d1")])
+    reallow = p.index("(allow file-read* file-write* (subpath")
+    assert p.index(f'(deny file-write* (subpath "{data}")') < reallow  # the data dir loses its write allow ...
+    assert p.index('(deny file-read* file-write* (regex #"/\\.env') > reallow  # ... the desk gets it back, minus its secrets
+    assert p.rindex("(deny file-write*") > reallow and "zshrc|" in p[p.rindex("(deny file-write*"):]  # rc files lose last
+    home = os.path.realpath(os.path.expanduser("~"))
+    assert f'(subpath "{os.path.join(home, "Library")}")' in p and "/\\.[^/]+" in p
+
+
+def test_home_and_non_home_roots_are_never_granted(tmp_path: Path, fake_home: Path) -> None:
+    from personal_os import fsx, mac
+    (fake_home / "proj").mkdir()
+    stored = {"workspaceRoots": [str(fake_home), "~", "/", str(tmp_path), str(fake_home / "proj")]}
+    assert shell.granted_roots(stored, None) == [fake_home / "proj"]
+
+    class B:
+        workspace = None
+
+        def settings(self) -> dict[str, Any]:
+            return stored
+    assert fsx.grants_for(B(), {}).roots == [fake_home / "proj"]
+    with pytest.raises(mac.LocalPathError, match="home folder"):
+        mac.allowed_root("~")
+    assert mac.allowed_path("~") == fake_home  # the file tools may still read under home
+
+
+def test_a_root_around_the_data_dir_is_never_granted(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import fsx, mac
+    (fake_home / "proj" / "data").mkdir(parents=True)
+    (fake_home / "other").mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(fake_home / "proj" / "data"))
+    with pytest.raises(mac.LocalPathError, match="contains the app's own data folder"):
+        mac.allowed_root(str(fake_home / "proj"))
+    stored = {"workspaceRoots": [str(fake_home / "proj"), str(fake_home / "other")]}
+    assert shell.granted_roots(stored, None) == [fake_home / "other"]
+
+    class B:
+        workspace = None
+
+        def settings(self) -> dict[str, Any]:
+            return stored
+    assert fsx.grants_for(B(), {}).roots == [fake_home / "other"]
 
 
 @needs_seatbelt

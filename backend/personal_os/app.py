@@ -826,10 +826,10 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")
             # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
-            # would refuse is rejected here rather than stored and then silently ignored.
+            # would refuse is rejected here rather than stored and then silently ignored. The home folder itself is refused too.
             for root in v:
                 try:
-                    mac.allowed_path(root)
+                    mac.allowed_root(root)
                 except mac.LocalPathError as e:
                     raise HTTPException(422, f"{root} cannot be a workspace folder: {e}") from e
     for k in SECRET_SETTINGS:

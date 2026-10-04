@@ -83,6 +83,9 @@ def main() -> None:
     assert bad.status_code == 422 and "hidden" in bad.text, f"a root inside a hidden folder is rejected: {bad.status_code} {bad.text}"
     outside = client.put("/settings", json={"workspaceRoots": ["/etc"]})
     assert outside.status_code == 422 and "home folder" in outside.text, outside.text
+    for whole in ("~", str(HOME)):  # the home folder itself holds rc files, ~/Library and ~/.ssh, and is never snapshotted
+        r = client.put("/settings", json={"workspaceRoots": [whole]})
+        assert r.status_code == 422 and "whole home folder" in r.text, r.text
     assert client.get("/settings").json()["workspaceRoots"] == [str(HOME / "projects")], "a rejected update changes nothing"
     print("test_stream_retry_and_roots: ok")
 

@@ -5160,15 +5160,42 @@ def index_status() -> dict[str, Any]:
     return retriever.status(settings())
 
 
+def _loose(s: str) -> re.Pattern[str]:
+    """`s` matched with any whitespace (or none) between its tokens: the chunker rejoins lines with \\n
+    and hard-cuts mid-word."""
+    return re.compile(r"\s*".join(re.escape(t) for t in s.split()))
+
+
+def _find_chunk(text: str, chunk: str, pos: int) -> tuple[int, int]:
+    """Where a chunk sits in its source, from `pos`, or (-1, -1). Verbatim first; then whitespace-insensitive
+    without the `## A > B` labels a merge inserts; then the start of its first part and the end of its
+    last as anchors, for a merged chunk whose source had heading lines between its parts."""
+    i = text.find(chunk, pos)
+    if i >= 0:
+        return i, i + len(chunk)
+    # The labels split a merged chunk into the parts that sit apart in the source.
+    parts = [" ".join(p.split()) for p in re.split(r"(?m)^## .+$", chunk)]
+    parts = [p for p in parts if p]
+    if not parts:
+        return -1, -1
+    if m := _loose(" ".join(parts)).search(text, pos):
+        return m.start(), m.end()
+    a = _loose(parts[0][:60]).search(text, pos)
+    b = a and _loose(parts[-1][-60:]).search(text, a.start())
+    if not a or not b:
+        return -1, -1
+    return a.start(), max(a.end(), b.end())
+
+
 def _chunk_span(text: str, rows: list[Any], chunk_id: str) -> dict[str, Any]:
     """Offsets of one chunk in its source text. Chunks overlap, so each search starts at the previous
-    chunk's start (not the document start) and a chunk whose text is not found verbatim gets -1."""
+    chunk's start (not the document start); a chunk found nowhere gets -1."""
     pos = 0
     for r in rows:
-        i = text.find(r["text"], pos)
+        i, end = _find_chunk(text, r["text"], pos)
         if r["id"] == chunk_id:
             return {"text": r["text"], "heading": r["heading"] if "heading" in r.keys() else "", "page": r["page"] if "page" in r.keys() else None,
-                    "start": i, "end": i + len(r["text"]) if i >= 0 else -1}
+                    "start": i, "end": end}
         if i >= 0:
             pos = i + 1
     raise HTTPException(404)

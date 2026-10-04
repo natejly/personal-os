@@ -244,6 +244,13 @@ export default function DocsView(): JSX.Element {
       setDocMode('split')
     } else editor.current?.jumpToLine(line)
   }
+  // A cited passage opened from chat: jump once its doc is the one on screen.
+  const docJump = useStore((s) => s.docJump)
+  useEffect(() => {
+    if (!docJump || activeDoc?.id !== docJump.docId) return
+    useStore.setState({ docJump: null })
+    jumpToLine(docJump.line)
+  }, [docJump, activeDoc?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (docMode === 'preview' || pendingJump.current === null) return
     editor.current?.jumpToLine(pendingJump.current)

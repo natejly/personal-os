@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { FileText, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { splitHighlight } from '../lib/highlight'
+import { lineAt, splitHighlight } from '../lib/highlight'
+import { useStore } from '../store'
 import type { ContextUsed } from '@shared/types'
 
 export type ChunkRef = ContextUsed['chunks'][number]
@@ -28,11 +29,19 @@ export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClo
   useEffect(() => { markRef.current?.scrollIntoView({ block: 'center' }) }, [view])
 
   const [a, m, b] = view ? splitHighlight(view.text, view.start, view.end) : ['', '', '']
+  // A Docs passage opens in the editor itself, at the cited line, where it can be changed.
+  const openInDocs = (): void => {
+    if (!view || !chunk.doc_id) return
+    onClose()
+    void useStore.getState().openDoc(chunk.doc_id, view.start >= 0 ? { line: lineAt(view.text, view.start) } : undefined)
+  }
   return (
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() } }}>
       <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-        <header><h2>{chunk.name}</h2><button autoFocus className="icon-btn" aria-label="Close excerpt" onClick={onClose}><X size={16} /></button></header>
+        <header><h2>{chunk.name}</h2>
+          {isDoc && view && <button className="ghost-btn sm" style={{ marginLeft: 'auto', marginRight: 8 }} onClick={openInDocs}><FileText size={14} /> Open in Docs</button>}
+          <button autoFocus className="icon-btn" aria-label="Close excerpt" onClick={onClose}><X size={16} /></button></header>
         {err ? <p className="muted small" style={{ padding: 20 }}>This excerpt is no longer available.</p>
           : <pre className="doc-text" style={{ maxHeight: '70vh', overflow: 'auto' }}>{a}{m && <mark ref={markRef}>{m}</mark>}{b}</pre>}
       </div>

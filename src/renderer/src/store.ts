@@ -519,7 +519,10 @@ export interface State {
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
-  openDoc: (id: string) => Promise<void>
+  /** `at.line` scrolls the editor to that line once the doc is open (a cited passage). */
+  openDoc: (id: string, at?: { line: number }) => Promise<void>
+  /** A line DocsView still has to jump to in `docId`; it clears this once it has. */
+  docJump: { docId: string; line: number } | null
   /** Refuses (with a toast) while the open doc holds edits its last save could not write. */
   closeDocTab: (id: string) => Promise<void>
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
@@ -1644,6 +1647,7 @@ export const useStore = create<State>((set, get) => {
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
+    docJump: null,
     meetings: [],
     activeMeeting: null,
     meetingStatus: null,
@@ -2412,11 +2416,12 @@ export const useStore = create<State>((set, get) => {
         set({ docsPending: (await api.docs.pending()).pending })
       } catch { /* a badge is not worth a toast */ }
     },
-    openDoc: async (id) => {
+    openDoc: async (id, at) => {
       if (get().activeDoc?.id !== id) {
         await get().flushDoc()
         if (docUnsaved()) return
       }
+      if (at) set({ docJump: { docId: id, line: at.line } })
       set((st) => ({ view: 'docs', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)

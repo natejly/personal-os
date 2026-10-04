@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { statusText, statusTicks } from './runStatus'
+import { statusText, statusTicks, waitText } from './runStatus'
 
 test('statusText names the cause and counts down, rounding up', () => {
   const s = { kind: 'retry' as const, attempt: 2, max: 3, until: 12_000, reason: 'rate_limit' as const }
@@ -19,4 +19,10 @@ test('statusTicks only while a retry countdown is still running', () => {
   assert.equal(statusTicks({ kind: 'retry', until: 5_000 }, 1_000), true)
   assert.equal(statusTicks({ kind: 'retry', until: 5_000 }, 6_000), false)
   assert.equal(statusTicks({ kind: 'compacting' }, 0), false)
+})
+
+test('waitText stays quiet for 5s, then counts, then says the model is slow', () => {
+  assert.equal(waitText(4_999), null)
+  assert.equal(waitText(5_000), 'Thinking… 5s')
+  assert.equal(waitText(65_400), 'Still waiting on the model… 65s')
 })

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import ProjectChip from './ProjectChip'
-import MessageView, { PendingUserMessage } from './Message'
+import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
 import FindBar from './FindBar'
 import Composer from './Composer'
@@ -124,9 +124,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {draftPending && <PendingUserMessage text={draftPending.text} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
-                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><span className="thinking"><span /><span /><span /></span></div></div>
+                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><Thinking /></div></div>
                 )}
-                {pending.length === 0 && !draftPending && <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />}
+                {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>
             )}
           </div>

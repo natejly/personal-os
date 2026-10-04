@@ -3106,6 +3106,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
               and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
             title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
+        elif fresh and not fs.get("titleSource") and fresh["title"] == titles.placeholder(user_texts[0]):
+            # The first title job failed (model error, shutdown, an errored first turn): retry on a later turn.
+            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
 
     # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
     # the LLM re-reads the samples only on the message that crosses the threshold, so most turns add

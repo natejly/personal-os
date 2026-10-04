@@ -23,7 +23,7 @@ interface ComposerProps {
   draftKey?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder, draftKey }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Message Grain…', draftKey }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
@@ -164,6 +164,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           onChange={setText}
           onPaste={onPaste}
           placeholder={streaming ? 'Steer the reply…' : placeholder}
+          ariaLabel="Message"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
             // Escape ends the reply; while an input method is composing it belongs to the method.

@@ -1321,6 +1321,10 @@ export const useStore = create<State>((set, get) => {
         case 'desk_handoff':
           handoff = ev.data
           break
+        // The sidebar's Files count and pending badge read the store, which only the Files view refreshed.
+        case 'tool_result':
+          if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
+          break
       }
     }
     try {
@@ -1354,7 +1358,7 @@ export const useStore = create<State>((set, get) => {
             void get().refreshConversations()
             break
           case 'restored_message':
-            if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
+            get().toast(ev.data.reason ? `Regenerate failed: ${ev.data.reason}. The previous answer is back.` : 'Regenerate stopped. The previous answer is back.', ev.data.reason ? 'error' : 'info')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {

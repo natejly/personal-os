@@ -182,7 +182,7 @@ export type ResultView =
   | { kind: 'list'; items: string[]; total: number }
 
 /** Keys the backend adds for its own bookkeeping; a person does not need them in a result. */
-const RESULT_NOISE = new Set(['verification', 'replayed', 'ok', 'next_offset', 'has_more', 'truncated', 'handle'])
+const RESULT_NOISE = new Set(['verification', 'replayed', 'ok', 'next_offset', 'has_more', 'truncated', 'handle', 'note'])
 
 function oneLine(v: unknown): string {
   if (v && typeof v === 'object' && !Array.isArray(v)) {

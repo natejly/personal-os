@@ -46,7 +46,7 @@ export default function PlanApproval({ event, conversationId }: { event: ToolEve
         Approve once, and only these arguments run. Change or remove anything you are not happy with — a step that
         does not match what you approve asks you again on its own.
       </div>
-      {event.forced && <div className="plan-warn"><AlertCircle size={12} /> This reply has read untrusted content: read the arguments closely.</div>}
+      {event.forced && <div className="plan-warn"><AlertCircle size={12} /> This chat has read untrusted content: read the arguments closely.</div>}
       <ol className="plan-steps">
         {drafts.map((d) => {
           const args = argsOf(d)

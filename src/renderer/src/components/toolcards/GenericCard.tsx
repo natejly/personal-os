@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
+import { useStore } from '../../store'
 import { ArgList, RawDetails, ResultBlock } from './parts'
 import './toolcards.css'
 
@@ -46,7 +47,9 @@ export function GenericApproval({ event, decide, grant }: {
     >
       <div className="approval-text">
         <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced
-          ? 'This reply read untrusted content, so it needs your OK each time.'
+          ? <>This chat read untrusted content earlier, so this needs your OK each time.{' '}
+            {/* Taint is sticky for the whole chat; the context panel names the sources and has Clear. */}
+            <button type="button" className="link small" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>See why</button></>
           : 'This acts outside the app.'}
       </div>
       <ArgList rows={argRows(event.arguments)} />

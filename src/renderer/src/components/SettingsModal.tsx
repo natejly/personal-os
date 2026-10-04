@@ -367,7 +367,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'modules' && <section>
               <h3>Modules</h3>
               <p className="muted">Pick which views the app offers (sidebar, title-bar apps and menu shortcuts) and which cards Today shows.</p>
-              <div className="module-grid">
+              <div className="module-grid modal-free">
                 <div>
                   <h4 className="module-head">Views</h4>
                   {OPTIONAL_VIEWS.map((v) => (

@@ -359,7 +359,7 @@ const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled, setView, openFiles, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
@@ -379,7 +379,12 @@ export default function AgentInbox(): JSX.Element | null {
     void selectChat(conversationId)
   }
   const goQueue = (key: InboxQueueKey): void => {
-    if (key === 'doc_edits') openFiles('notes')
+    if (key === 'doc_edits') {
+      // Straight to the first doc with an edit waiting, so the diff is on screen rather than a marker in the tree.
+      const first = useStore.getState().docs.find((d) => typeof d.pending === 'number' && d.pending > 0)
+      if (first) void openDoc(first.id)
+      else openFiles('notes')
+    }
     else if (key === 'meetings') setView('meetings')
     else if (key === 'suggestions') setView('activity')
     else if (key === 'memory') { setMemoryMode('list'); openSettings('memory') }

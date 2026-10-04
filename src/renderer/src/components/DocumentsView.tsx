@@ -22,18 +22,17 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
   const view = async (d: Document): Promise<void> => setOpen(await api.documents.get(d.id))
 
-  const uploadBtn = (
-    <>
-      <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
-        onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
-      <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
-    </>
+  const fileInput = (
+    <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
+      onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
   )
+  const uploadBtn = <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
 
   const body = (
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
+      {fileInput}
       {documents.length > 0 && <div className="add-row">{uploadBtn}<span className="muted small">Drop more files here.</span></div>}
       {documents.length === 0 && (
         <div className="empty-state">

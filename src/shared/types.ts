@@ -361,6 +361,8 @@ export interface McpServer {
   headers: Record<string, string>
   description: string
   enabled: boolean
+  /** Remote servers only: whether a browser sign-in is stored. null for stdio. */
+  signed_in?: boolean | null
   status: string
   status_detail: string
   last_connected_at: number | null
@@ -389,6 +391,8 @@ export interface McpServerDraft {
   env: Record<string, string>
   secrets: Record<string, string>
   description: string
+  /** Remote (`http`) servers only. */
+  url?: string
 }
 
 export interface ToolEvent {
@@ -2027,6 +2031,8 @@ export interface JobRunRecord {
   attempt: number
   retry_of: string | null
   manual: boolean
+  /** A read-only preview, not a real run; left out of the stats. */
+  dry_run: boolean
   tool_calls: number
   proposals: { pending: number; accepted: number; rejected: number }
   cost: number | null

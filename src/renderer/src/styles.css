@@ -910,6 +910,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* ---------- Nav ---------- */
 .nav { display: flex; flex-direction: column; padding: 0 10px; margin-bottom: 6px; }
 .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text-muted); font-size: 13px; }
+.nav-item.nav-more { color: var(--text-faint); }
 .nav-item:hover { background: var(--hover); color: var(--text); }
 .nav-item.active { background: var(--active); color: var(--text); }
 /* --text-faint drops to 3.85:1 over the lighter .active row background. */
@@ -1547,7 +1548,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-tool .toggle-text > b { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mcp-tool .toggle-text .mono { font-size: 10px; }
 .mcp-add .mcp-head { border-bottom: 1px solid var(--border); }
-.mcp-add label { margin: 0; }
+/* The add form lives on the Library page, outside any .modal, so it carries the modal's field rules itself. */
+.mcp-add label { display: flex; flex-direction: column; gap: 5px; margin: 0; font-size: 13px; }
+.mcp-add label > span { color: var(--text-muted); }
+.mcp-add input, .mcp-add textarea, .mcp-add select {
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 8px 10px; outline: 0; font: inherit;
+}
+.mcp-add input:focus, .mcp-add textarea:focus, .mcp-add select:focus { border-color: var(--accent); }
+.mcp-add textarea { resize: vertical; }
 .mcp-foot { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
@@ -1613,13 +1622,14 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-jobs h5 { display: flex; align-items: center; gap: 8px; }
 .inbox-jobs li.spent .ev-title { color: var(--text-muted); }
 .new-task { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
-.new-task input:not([type=checkbox]), .new-task textarea {
+.new-task input:not([type=checkbox]), .new-task textarea, .new-task select {
   width: 100%; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 12.5px;
   background: var(--bg); border: 1px solid var(--border); color: var(--text);
 }
 .new-task textarea { resize: vertical; }
 .new-task .new-task-when { display: flex; align-items: center; gap: 8px; }
-.new-task .new-task-when input[type=datetime-local], .new-task .new-task-when input[type=text] { flex: 1; min-width: 0; }
+.new-task .new-task-when input[type=datetime-local], .new-task .new-task-when input[type=text], .new-task .new-task-when input[type=time] { flex: 1; min-width: 0; }
+.new-task .new-task-when select { width: auto; }
 .new-task .chip-check-row { white-space: nowrap; }
 .chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px;
@@ -2285,7 +2295,7 @@ select:focus-visible {
 .skills-review h4 { margin: 14px 0 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 /* ---------------- Library: skills and what has been made ----------------
-   The connectors shelf renders McpSettings, which brings its own styles. */
+   The connectors shelf renders McpSettings; its add form is styled under .mcp-add. */
 .library-panel { display: flex; flex-direction: column; gap: 14px; }
 .library-panel .add-row { align-items: flex-start; }
 .library-panel .add-row .muted.small { flex: 1; line-height: 1.5; }

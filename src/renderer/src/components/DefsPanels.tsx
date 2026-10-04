@@ -84,7 +84,10 @@ export function CommandsPanel(): JSX.Element {
   return (
     <div className="library-panel">
       <div className="add-row">
-        <p className="muted small">A command is a saved prompt. The assistant fills in $ARGUMENTS or $1, $2 and follows it; mark it as a subtask to run it as a separate agent.</p>
+        <div className="muted small">
+          <p>A command is a saved prompt the assistant follows; mark it as a subtask to run it as a separate agent.</p>
+          <details><summary>Placeholders</summary>Write $ARGUMENTS where what you type after the command goes, or $1, $2 for its separate words.</details>
+        </div>
         <button className="primary-btn small" onClick={() => setEdit('new')}><Plus size={13} /> New command</button>
       </div>
       {edit === 'new' && <div className="skill-row"><Editor initial={COMMAND_SKELETON} save={api.commands.create} onDone={done} /></div>}

@@ -506,10 +506,16 @@ class Desks:
             return self._one(c, id)
 
     @_notifies
-    def set_headline(self, id: str, headline: str) -> None:
-        """Debounced by the caller (see DeskRuntime, §3.5). Never called from a delta."""
+    def set_headline(self, id: str, headline: str, live_only: bool = False) -> None:
+        """Debounced by the caller (see DeskRuntime, §3.5). Never called from a delta.
+        `live_only`: a run's tool label lands only while the desk is LIVE, so a tool_result that arrives
+        after desk_done settled the desk cannot put "thinking" back over "waiting on your review"."""
         with self.db.tx() as c:
-            c.execute("UPDATE desks SET headline=? WHERE id=?", (headline, id))
+            if live_only:
+                c.execute(f"UPDATE desks SET headline=? WHERE id=? AND status IN ({','.join('?' * len(LIVE))})",
+                          (headline, id, *LIVE))
+            else:
+                c.execute("UPDATE desks SET headline=? WHERE id=?", (headline, id))
 
     def update_run(self, id: str, run_id: str | None) -> dict[str, Any] | None:
         """Which run is driving the desk right now. Not a status change, so no event."""
@@ -838,5 +844,5 @@ class DeskRuntime:
         if event not in _IMMEDIATE and t - self._flushed_at < HEADLINE_FLUSH_S:
             return None
         self._flushed_at, self._pending = t, False
-        self.desks.set_headline(self.desk_id, self.headline)
+        self.desks.set_headline(self.desk_id, self.headline, live_only=event in ("tool_call", "tool_result"))
         return self.desks.get(self.desk_id, with_outputs=False)

@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm'
 import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { WEEKDAYS, buildCron, describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -155,7 +156,9 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
       {err && <p className="msg-error">{err}</p>}
       {stats && (
         <div className="job-history-stats muted small">
-          {stats.success_rate === null ? 'No finished runs in 30 days' : `${Math.round(stats.success_rate * 100)}% ok`}
+          {stats.success_rate === null
+            ? (runs?.some((r) => r.dry_run) ? `No scheduled runs yet (${runs.filter((r) => r.dry_run).length} preview${runs.filter((r) => r.dry_run).length === 1 ? '' : 's'})` : 'No finished runs in 30 days')
+            : `${Math.round(stats.success_rate * 100)}% ok`}
           {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
@@ -170,7 +173,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
-          {r.manual && <span className="chip">by hand</span>}
+          {r.dry_run ? <span className="chip">preview</span> : r.manual && <span className="chip">by hand</span>}
           <span className="muted">{r.tool_calls} call{r.tool_calls === 1 ? '' : 's'}</span>
           {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
@@ -247,11 +250,11 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       )}
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
-        : <code className="muted small">{job.cron}</code>}
+        : <span className="muted small" title={job.cron}>{describeCron(job.cron)}</span>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
-          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
+          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'paused'}
       </span>
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
@@ -295,7 +298,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', cron: '', freq: '*', time: '09:00', repeat: false, onlyTools: false }
 
 /** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
 function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
@@ -303,7 +306,8 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
   const [f, setF] = useState(BLANK)
   const [busy, setBusy] = useState(false)
   const [picked, setPicked] = useState<string[]>(['current_time'])
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
+  const cron = f.freq === 'custom' ? f.cron.trim() : buildCron(f.freq, f.time)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!cron : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -312,7 +316,7 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
     const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
     const ok = await createJob(f.repeat
-      ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
+      ? { ...common, kind: 'cron' as const, cron }
       : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
     setBusy(false)
     if (ok) {
@@ -332,9 +336,19 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
           <input type="checkbox" checked={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.checked })} />
           <span>Repeat</span>
         </label>
+        {f.repeat && (
+          <select value={f.freq} aria-label="How often" onChange={(e) => setF({ ...f, freq: e.target.value })}>
+            <option value="*">Every day</option>
+            <option value="1-5">Weekdays</option>
+            {WEEKDAYS.map((d, i) => <option key={d} value={String(i)}>{d}</option>)}
+            <option value="custom">Advanced (cron)</option>
+          </select>
+        )}
         {f.repeat
-          ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
-              onChange={(e) => setF({ ...f, cron: e.target.value })} />
+          ? f.freq === 'custom'
+            ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
+                onChange={(e) => setF({ ...f, cron: e.target.value })} />
+            : <input type="time" value={f.time} aria-label="At what time" onChange={(e) => setF({ ...f, time: e.target.value })} />
           : <input type="datetime-local" value={f.when} aria-label="When it should run"
               onChange={(e) => setF({ ...f, when: e.target.value })} />}
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>

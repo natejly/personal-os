@@ -168,5 +168,18 @@ class LoopTests(unittest.TestCase):
         asyncio.run(todos.stop())
 
 
+class ModulesStampTests(unittest.TestCase):
+    def test_stamp_4_shows_library_once_and_keeps_other_hides(self) -> None:
+        from personal_os import app as appmod
+        appmod.db.set_settings({"modulesDefault": 3, "hiddenViews": ["library", "cowork"]})
+        appmod._seed_hidden_modules()
+        s = appmod.db.get_settings()
+        self.assertEqual(s["hiddenViews"], ["cowork"])
+        self.assertEqual(s["modulesDefault"], 4)
+        appmod.db.set_settings({"hiddenViews": ["library"]})  # hidden again by the user after stamp 4
+        appmod._seed_hidden_modules()
+        self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["library"])
+
+
 if __name__ == "__main__":
     unittest.main()

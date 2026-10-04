@@ -931,6 +931,20 @@ def test_a_planning_desk_is_not_offered_desk_done_or_desk_start() -> None:
           "an approved/ask desk is offered desk_done, and still never desk_start")
 
 
+def test_a_chat_is_offered_desk_start_only_while_cowork_is_shown() -> None:
+    settings_patch(hiddenViews=["cowork"])
+    try:
+        script({"text": "ok"})
+        _chat_turn(_chat("off"), "start a desk")
+        check("desk_start" not in SCRIPT["tools"][0], "with Cowork hidden a chat is not offered desk_start")
+        settings_patch(hiddenViews=[])
+        script({"text": "ok"})
+        _chat_turn(_chat("off"), "start a desk")
+        check("desk_start" in SCRIPT["tools"][0], "with Cowork shown it is")
+    finally:
+        settings_patch(hiddenViews=list(llm.DEFAULT_SETTINGS["hiddenViews"]))
+
+
 def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
     script({"text": "I think that is everything."}, {"text": "Still nothing."})
     did = make_desk("Do it", autonomy="ask")["desk"]["id"]
@@ -945,6 +959,7 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
 
 
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
+         test_a_chat_is_offered_desk_start_only_while_cowork_is_shown,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
          test_a_desk_is_told_it_is_a_desk,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,

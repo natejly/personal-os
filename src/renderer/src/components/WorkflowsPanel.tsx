@@ -181,7 +181,10 @@ export default function WorkflowsPanel(): JSX.Element {
   return (
     <div className="library-panel">
       <div className="add-row">
-        <p className="muted small">A workflow is a saved plan of steps. You approve a run by its hash before anything happens, every step goes through the same permissions as chat, and a run that stops can be resumed without repeating finished steps.</p>
+        <div className="muted small">
+          <p>A workflow is a saved plan of steps. You approve a run before anything happens, every step goes through the same permissions as chat, and a run that stops can be resumed without repeating finished steps.</p>
+          <details><summary>How approval works</summary>An approval covers the exact steps and inputs you were shown, checked by a fingerprint (hash), so a run whose steps change has to be approved again.</details>
+        </div>
         <button className="primary-btn small" onClick={() => setMode({ kind: 'edit', id: 'new' })}><Plus size={13} /> New workflow</button>
       </div>
       {mode?.kind === 'edit' && mode.id === 'new' && <div className="skill-row"><Editor wf={null} onDone={() => { setMode(null); void load() }} /></div>}

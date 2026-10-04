@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, RotateCcw, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, LayoutGrid, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
@@ -7,9 +7,7 @@ import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
-import type { Settings, ShortcutState, SnapMode } from '@shared/types'
-import { GRID_SIZES } from '../canvas/snapping'
-import { useCanvas } from '../canvas/store'
+import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import { WorkspaceRoots } from './WorkspaceRoots'
@@ -20,7 +18,6 @@ import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
 import MemoryPanel from './MemoryPanel'
-import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
@@ -28,30 +25,45 @@ import TrashPanel from './TrashPanel'
 type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
-  { id: 'provider', label: 'Provider', icon: Cpu },
-  { id: 'knowledge', label: 'Knowledge base', icon: BookOpen },
-  { id: 'memory', label: 'Memory & learning', icon: Brain },
+  { id: 'provider', label: 'Provider & cost', icon: Cpu },
+  { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'integrations', label: 'Integrations', icon: Mail },
   { id: 'meetings', label: 'Meetings', icon: Mic },
   { id: 'tools', label: 'Tools', icon: Wrench },
-  { id: 'usage', label: 'Usage & cost', icon: Gauge },
-  { id: 'spaces', label: 'Spaces', icon: Magnet },
   { id: 'modules', label: 'Modules', icon: LayoutGrid },
   { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal },
-  { id: 'data', label: 'Data', icon: Database },
-  { id: 'trash', label: 'Trash', icon: Trash2 }
+  { id: 'data', label: 'Data', icon: Database }
 ]
 
-const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
-
-/** Read-only: how much of the library has vectors for the current embedding model. */
+/** How much of the library has vectors for the current embedding model, and the button that fills the gap. */
 function IndexStatusLine(): JSX.Element | null {
+  const toast = useStore((s) => s.toast)
   const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
-  useEffect(() => { api.documents.indexStatus().then(setSt).catch(() => undefined) }, [])
+  const [busy, setBusy] = useState(false)
+  const load = (): void => { api.documents.indexStatus().then(setSt).catch(() => undefined) }
+  useEffect(load, [])
+  // One backfill call embeds a batch; what is left shows in the status line, and another press continues.
+  const rebuild = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await api.documents.embedBackfill()
+      if (r.error) toast(r.error, 'error')
+      else toast(`Embedded ${r.embedded} passage${r.embedded === 1 ? '' : 's'}${r.remaining ? `, ${r.remaining} left. Press again to continue.` : '.'}`)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+    setBusy(false)
+    load()
+  }
   if (!st) return null
   const total = st.chunks + (st.doc_chunks ?? 0)
   const done = st.embedded + (st.doc_embedded ?? 0)
-  return <p className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</p>
+  return (
+    <div className="test-row">
+      <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
+      <span className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</span>
+    </div>
+  )
 }
 
 export default function SettingsModal(): JSX.Element {
@@ -65,20 +77,13 @@ export default function SettingsModal(): JSX.Element {
   const [replacingKey, setReplacingKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
+  const [capShortcut, setCapShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
-  const knowledgeTab = useStore((s) => s.knowledgeTab)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { setKnowledgeTab, setLibraryScope } = useStore()
+  const { setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
-  const activeSpaceId = useCanvas((s) => s.activeCanvasId)
-  const spaceName = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.name : undefined))
-  const [snap, setSnap] = useState<{ mode: SnapMode; grid: number }>(() => {
-    const c = useCanvas.getState()
-    const space = c.activeCanvasId ? c.canvases[c.activeCanvasId] : undefined
-    return { mode: space?.snap_mode ?? 'both', grid: space?.grid_size ?? 16 }
-  })
   /** Reset the onboarding stamp, then show the wizard over the app. The modal's unsaved draft is dropped with it. */
   const rerunSetup = async (): Promise<void> => {
     try {
@@ -95,7 +100,8 @@ export default function SettingsModal(): JSX.Element {
   // state is pulled as well as watched.
   useEffect(() => {
     void window.os.shortcuts.gather().then(setShortcut).catch(() => undefined)
-    return window.os.shortcuts.onFailure(setShortcut)
+    void window.os.shortcuts.capture().then(setCapShortcut).catch(() => undefined)
+    return window.os.shortcuts.onFailure((s) => (s.which === 'capture' ? setCapShortcut : setShortcut)(s))
   }, [])
 
   // In a narrow window the tabs are a horizontal strip; keep the selected one on screen.
@@ -131,7 +137,8 @@ export default function SettingsModal(): JSX.Element {
     if (applied) setShortcut(applied)
     const capAccel = (draft.quickCaptureShortcut ?? '').trim()
     const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
-    if (capApplied && !capApplied.ok) return toast(capApplied.message ?? `${capApplied.accelerator} could not be registered.`, 'error')
+    if (capApplied) setCapShortcut(capApplied)
+    if (capApplied && !capApplied.ok) return setTab('behavior')
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
@@ -140,12 +147,6 @@ export default function SettingsModal(): JSX.Element {
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
-    }
-    if (activeSpaceId) {
-      const space = useCanvas.getState().canvases[activeSpaceId]
-      if (space && (space.snap_mode !== snap.mode || space.grid_size !== snap.grid)) {
-        await useCanvas.getState().setSnap(activeSpaceId, { snap_mode: snap.mode, grid_size: snap.grid })
-      }
     }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
     if ((draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)) setView('home')
@@ -175,7 +176,7 @@ export default function SettingsModal(): JSX.Element {
 
   return (
     <div className="modal-backdrop" {...backdrop}>
-      <div className={`modal settings-modal ${tab === 'knowledge' ? 'wide-pane' : ''}`} {...modal}>
+      <div className={`modal settings-modal ${tab === 'memory' ? 'wide-pane' : ''}`} {...modal}>
         <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
 
         <div className="settings-body">
@@ -219,30 +220,27 @@ export default function SettingsModal(): JSX.Element {
                 <datalist id="model-options">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
               </label>
             </section>}
+            {tab === 'provider' && <section>
+              <h3>Usage &amp; cost</h3>
+              <p className="muted">Every model call is logged locally with its token counts and cost.</p>
+              <UsageView />
+            </section>}
 
-            {tab === 'knowledge' && <section className="knowledge-section">
+            {tab === 'memory' && <section className="knowledge-section">
               <div className="knowledge-head">
-                <h3>Knowledge base</h3>
+                <h3>Memory</h3>
                 <div className="knowledge-controls modal-free">
-                  <div className="seg" role="group" aria-label="Knowledge base section">
-                    <button className={knowledgeTab === 'memory' ? 'active' : ''} aria-pressed={knowledgeTab === 'memory'} onClick={() => setKnowledgeTab('memory')}><Brain size={13} /><span>Memory</span></button>
-                    <button className={knowledgeTab === 'documents' ? 'active' : ''} aria-pressed={knowledgeTab === 'documents'} onClick={() => setKnowledgeTab('documents')}><FileText size={13} /><span>Documents</span></button>
-                  </div>
                   <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
                 </div>
               </div>
-              <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
-              {knowledgeTab === 'documents' && <label className="toggle-row plain modal-free">
-                <span className="toggle-text"><b>Contextual chunks</b><small>When you run the embedding backfill, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
-                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
-              </label>}
+              <p className="muted small">What the assistant knows: memories and graph relations learned from chats. Changes here apply immediately.</p>
               <div className="knowledge-body modal-free">
-                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
+                <MemoryPanel embedded />
               </div>
             </section>}
 
             {tab === 'memory' && <section>
-              <h3>Memory &amp; learning</h3>
+              <h3>Learning &amp; search</h3>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Auto-learn</b><small>After each reply, extract memories and knowledge-graph relations.</small></span>
                 <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
@@ -252,7 +250,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
+                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it above under Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
@@ -266,6 +264,11 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.hybridRetrieval !== false} onChange={(e) => patch({ hybridRetrieval: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <IndexStatusLine />
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Contextual chunks</b><small>When you rebuild the search index, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
+                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
+              </label>
             </section>}
 
             {tab === 'integrations' && <section>
@@ -291,6 +294,16 @@ export default function SettingsModal(): JSX.Element {
                   Turning this off makes every send immediate and final.
                 </p>
               </div>
+              <h3>Web search</h3>
+              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
+              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
+              <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
+              <label><span>SearXNG URL <small className="muted">(optional; your own instance, searched beside Exa. Needs <code>json</code> under search.formats)</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
+              <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
+              <label className="check">
+                <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
+                Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
+              </label>
             </section>}
 
             {tab === 'meetings' && <section>
@@ -320,41 +333,41 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
               </label>
               <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
-                <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
+              <label><span>Plan mode for new chats <small className="muted">(a chat can change its own with ⌘⇧P)</small></span>
+                <select value={draft.planMode ?? 'off'} onChange={(e) => patch({ planMode: e.target.value as Settings['planMode'] })}>
+                  <option value="off">Off: act straight away</option>
+                  <option value="auto">Auto: plan the first time it wants to change something</option>
+                  <option value="always">Always: every turn drafts a plan you approve first</option>
+                </select>
               </label>
               <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
-              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
-              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
-              <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
-              <label><span>SearXNG URL <small className="muted">(optional; your own instance, searched beside Exa. Needs <code>json</code> under search.formats)</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
-              <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
-              <label className="check">
-                <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
-                Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
-              </label>
               <h3 id="cowork-settings">Cowork</h3>
               <p className="muted">Limits and reach for desks: the parallel sessions that work on a task in their own folder.</p>
               <CoworkSettings draft={draft} patch={patch} />
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
+                <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
+              </label>
             </section>}
 
-            {tab === 'data' && <DataSettings />}
-
-            {tab === 'usage' && <section>
-              <h3>Usage &amp; cost</h3>
-              <p className="muted">Every model call is logged locally with its token counts and cost.</p>
-              <UsageView />
-            </section>}
+            {tab === 'data' && <>
+              <DataSettings />
+              <TrashPanel />
+              <section>
+                <h3>Diagnostics</h3>
+                <SupportSettings draft={draft} patch={patch} />
+                <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
+              </section>
+            </>}
 
             {tab === 'modules' && <section>
               <h3>Modules</h3>
-              <p className="muted">Pick which views the sidebar offers and which cards the Today screen shows. Everything can be turned back on here later.</p>
+              <p className="muted">Pick which views the app offers (sidebar, title-bar apps and menu shortcuts) and which cards Today shows.</p>
               <div className="module-grid">
                 <div>
-                  <h4 className="module-head">Sidebar views</h4>
+                  <h4 className="module-head">Views</h4>
                   {OPTIONAL_VIEWS.map((v) => (
                     <label key={v.view} className="chip-check-row">
                       <input type="checkbox" checked={!hidden.includes(v.view)} onChange={() => toggleView(v.view)} />
@@ -373,25 +386,6 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
             </section>}
-
-            {tab === 'spaces' && <section>
-              <h3>Spaces</h3>
-              <p className="muted">
-                {spaceName ? <>Snapping for <b>{spaceName}</b>. New spaces start on grid and guides.</> : 'New spaces start on grid and guides.'}
-              </p>
-              <label><span>Snapping</span>
-                <select value={snap.mode} disabled={!activeSpaceId} onChange={(e) => setSnap((s) => ({ ...s, mode: e.target.value as SnapMode }))}>
-                  {(Object.keys(SNAP_LABEL) as SnapMode[]).map((m) => <option key={m} value={m}>{SNAP_LABEL[m]}</option>)}
-                </select>
-              </label>
-              <label><span>Grid size</span>
-                <select value={snap.grid} disabled={!activeSpaceId} onChange={(e) => setSnap((s) => ({ ...s, grid: Number(e.target.value) }))}>
-                  {GRID_SIZES.map((g) => <option key={g} value={g}>{g} pt</option>)}
-                </select>
-              </label>
-            </section>}
-
-            {tab === 'trash' && <TrashPanel />}
 
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
@@ -434,6 +428,9 @@ export default function SettingsModal(): JSX.Element {
                 <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
                   placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
               </label>
+              {capShortcut && !capShortcut.ok && (
+                <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>
+              )}
               <label><span>Dictation chord <small className="muted">(in a doc: hold to dictate, tap to latch)</small></span>
                 <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
                   placeholder="Control+Alt+D" spellCheck={false} />
@@ -441,8 +438,6 @@ export default function SettingsModal(): JSX.Element {
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
               )}
-              <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
-              <SupportSettings draft={draft} patch={patch} />
             </section>}
           </div>
         </div>

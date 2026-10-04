@@ -35,6 +35,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts' | 'agents' | 'commands'
+export type FilesSection = 'notes' | 'uploads' | 'pages'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -49,9 +50,8 @@ export const readDocMode = (): DocMode => {
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'data' | 'trash'
-export type KnowledgeTab = 'memory' | 'documents'
+/** Settings sections. 'memory' holds the Memory panel above the learning and search-index controls. */
+export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'modules' | 'behavior' | 'data'
 export type { Scope, SessionStatus }
 
 /**
@@ -205,8 +205,6 @@ export interface State {
   settingsOpen: boolean
   /** The tab Settings opens on. Read once when the dialog mounts. */
   settingsTab: SettingsTab
-  /** Which half of Settings → Knowledge base is showing. */
-  knowledgeTab: KnowledgeTab
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   toasts: Toast[]
 
@@ -323,9 +321,8 @@ export interface State {
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
-  /** Open Settings on one tab — how the rest of the app reaches memory and documents now. */
-  openSettings: (tab: SettingsTab, knowledge?: KnowledgeTab) => void
-  setKnowledgeTab: (t: KnowledgeTab) => void
+  /** Open Settings on one tab — how the rest of the app reaches memory now. */
+  openSettings: (tab: SettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
@@ -398,6 +395,9 @@ export interface State {
 
   libraryTab: LibraryTab
   setLibraryTab: (tab: LibraryTab) => void
+  filesSection: FilesSection
+  /** The one way into Files: switches to it, on the given section. */
+  openFiles: (section: FilesSection) => void
   /** Everything the Library shows that it does not already hold. Safe to call on every entry. */
   refreshLibrary: () => Promise<void>
 
@@ -970,11 +970,11 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
-      else if (action === 'view:documents') s.openSettings('knowledge', 'documents')
+      else if (action === 'view:documents') s.openFiles('uploads')
       else if (action.startsWith('desk:')) { s.setView('cowork'); void s.openDesk(action.slice(5)) }
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
-        s.openSettings('knowledge', 'documents')
+        s.openFiles('uploads')
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
     })
@@ -1637,6 +1637,7 @@ export const useStore = create<State>((set, get) => {
     contextOpen: false,
     contextTab: 'last',
     libraryTab: 'skills',
+    filesSection: 'notes',
     desks: [],
     activeDeskId: null,
     activeDesk: null,
@@ -1654,7 +1655,6 @@ export const useStore = create<State>((set, get) => {
     traceMessageId: null,
     settingsOpen: false,
     settingsTab: 'provider',
-    knowledgeTab: 'memory',
     projectModal: null,
     toasts: [],
     conversations: [],
@@ -1796,7 +1796,7 @@ export const useStore = create<State>((set, get) => {
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
       if (memoryMode) set({ memoryMode })
-      get().openSettings('knowledge', 'memory')
+      get().openSettings('memory')
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
@@ -1844,8 +1844,7 @@ export const useStore = create<State>((set, get) => {
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
     setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'provider' } : { settingsOpen }),
-    openSettings: (settingsTab, knowledgeTab) => set(knowledgeTab ? { settingsOpen: true, settingsTab, knowledgeTab } : { settingsOpen: true, settingsTab }),
-    setKnowledgeTab: (knowledgeTab) => set({ knowledgeTab }),
+    openSettings: (settingsTab) => set({ settingsOpen: true, settingsTab }),
     setProjectModal: (projectModal) => set({ projectModal }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
@@ -2652,6 +2651,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     setLibraryTab: (libraryTab) => set({ libraryTab }),
+    openFiles: (filesSection) => { set({ filesSection }); get().setView('docs') },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {

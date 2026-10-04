@@ -378,7 +378,7 @@ export default function AgentInbox(): JSX.Element | null {
     if (key === 'doc_edits') setView('docs')
     else if (key === 'meetings') setView('meetings')
     else if (key === 'suggestions') setView('activity')
-    else if (key === 'memory') { setMemoryMode('list'); openSettings('knowledge', 'memory') }
+    else if (key === 'memory') { setMemoryMode('list'); openSettings('memory') }
     else { setLibraryTab(key); setView('library') }
   }
   const away = box.while_you_were_away

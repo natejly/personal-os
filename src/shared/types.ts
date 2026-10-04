@@ -2097,7 +2097,7 @@ export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bo
 
 export interface GatherState { gathered: boolean; popped: string[] }
 
-export interface ShortcutState { accelerator: string; ok: boolean; message: string | null }
+export interface ShortcutState { accelerator: string; ok: boolean; message: string | null; which?: 'gather' | 'capture' }
 
 export type BusKind = 'window-bounds' | 'window-state' | 'window-config' | 'chat-status' | 'todo-changed' | 'note-changed' | 'canvas-invalidate'
 

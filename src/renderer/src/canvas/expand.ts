@@ -52,7 +52,7 @@ export function expandWindow(w: CanvasWindow): void {
       app.openMemory('graph')
       break
     case 'documents':
-      app.openSettings('knowledge', 'documents')
+      app.openFiles('uploads')
       break
     case 'recap':
       app.setView('home')

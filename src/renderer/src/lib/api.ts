@@ -575,7 +575,9 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
-    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
+    /** Embed a batch of passages that have no vector for the current model; `remaining` is what is left. */
+    embedBackfill: () => req<{ embedded: number; remaining: number; error?: string }>('/documents/embed-backfill', { method: 'POST' })
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),

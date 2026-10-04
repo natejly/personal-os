@@ -32,9 +32,9 @@ export function focusFirstItem(menu: HTMLElement | null): void {
   if (menu && !menu.contains(document.activeElement)) menu.querySelector<HTMLElement>(ITEM)?.focus({ preventScroll: true })
 }
 
-/** On the role="menu" element: arrows, Home and End move between rows, Tab closes. Fields inside keep their keys. */
+/** On the role="menu" element: arrows, Home and End move between rows, Tab closes. Anything else inside (a form) keeps its keys. */
 export function menuKeyDown(e: ReactKeyboardEvent<HTMLElement>, onClose: () => void): void {
-  if ((e.target as HTMLElement).closest('input, textarea, select')) return
+  if (!(e.target as HTMLElement).closest('[role="menuitem"]')) return
   const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(ITEM))
   const at = items.indexOf(document.activeElement as HTMLElement)
   const go = (i: number): void => {

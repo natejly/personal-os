@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
+from .microvm import DEFAULT_IMAGE
 log = logging.getLogger("personal_os.llm")
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
@@ -220,6 +221,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
+    # The sandbox_* containers: network detached unless this is on (then their output taints the reply), the image a
+    # fresh one starts from, and the CLI that drives them (docker, podman or nerdctl).
+    "sandboxNetwork": False,
+    "sandboxImage": DEFAULT_IMAGE,
+    "sandboxRuntime": "docker",
     # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
     # own workspace is always granted; anywhere else those tools ask first.
     "workspaceRoots": [],

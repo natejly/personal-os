@@ -64,7 +64,7 @@ from .cowork import (AUTO_RESUME_FROM, AUTONOMY, MESSAGE_FROM, PAUSE_FROM, RESUM
                      origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
-from .microvm import Sandboxes
+from .microvm import SandboxError, Sandboxes
 from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
@@ -752,7 +752,11 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
+    "sandboxKeepDays": (0, 3_650),
 }
+SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
+# An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
+IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?$")
 
 
 def _check_numeric_setting(key: str, value: Any) -> int | float:
@@ -822,6 +826,11 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
                 if h not in hosts:
                     hosts.append(h)
             clean[k] = hosts
+        elif k == "sandboxRuntime" and v not in SANDBOX_RUNTIMES:
+            # The value is run as a program: only a known container CLI, never whatever resolves on PATH.
+            raise HTTPException(422, f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}")
+        elif k == "sandboxImage" and v and not IMAGE_REF.match(v):  # empty = the default image
+            raise HTTPException(422, "sandboxImage must be an image reference such as python:3.12-slim")
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")
@@ -838,6 +847,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         elif k in clean and clean[k] is not None and not isinstance(clean[k], str):
             raise HTTPException(422, f"{k} must be a string or null")
     db.set_settings(clean)
+    if "sandboxRuntime" in clean:
+        sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     return public_settings()
 
 
@@ -3477,6 +3488,62 @@ def _shell_wake(conversation_id: str | None) -> None:
 
 
 toolbox.shell.on_note = _shell_wake
+# Shell jobs start and end on the event loop, so the topic is published directly; the Running list refetches on it.
+toolbox.shell.on_change = lambda: events.publish("shell_jobs", {"live": toolbox.shell.running_background()})
+
+
+# ---------------- running views: shell jobs and sandboxes ----------------
+def _shell_job(job_id: str) -> Any:
+    job = toolbox.shell.jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "No such shell job")
+    return job
+
+
+@app.get("/shell/jobs")
+def list_shell_jobs() -> dict[str, Any]:
+    return {"jobs": toolbox.shell.list()}
+
+
+@app.get("/shell/jobs/{job_id}/tail")
+def shell_job_tail(job_id: str, limit: int = 4000) -> dict[str, Any]:
+    """The end of a job's output for the user. It never moves the model's shell_poll cursor."""
+    return toolbox.shell.tail(_shell_job(job_id), _clamp(limit, 50_000))
+
+
+@app.post("/shell/jobs/{job_id}/kill")
+async def kill_shell_job(job_id: str) -> dict[str, Any]:
+    job = _shell_job(job_id)
+    await toolbox.shell.kill(job)
+    return job.info()
+
+
+@app.get("/sandboxes")
+def list_sandboxes() -> dict[str, Any]:
+    st = sandboxes.status()
+    items: list[dict[str, Any]] = []
+    if st["available"]:
+        try:
+            items = sandboxes.list()
+        except SandboxError as e:
+            st = {**st, "reason": str(e)}
+        for it in items:
+            c = convos.get(it["conversation_id"], with_messages=False) if it["conversation_id"] else None
+            it["title"] = c["title"] if c else None
+    return {**st, "items": items}
+
+
+@app.post("/sandboxes/{key}/reset")
+def reset_sandbox(key: str) -> dict[str, Any]:
+    """Remove a sandbox and its checkpoints. `key` is a conversation id, or the container name of one made before
+    containers carried their conversation."""
+    if not sandboxes.available():
+        raise HTTPException(409, "The sandbox runtime is not available")
+    if key.startswith("pos-sbx-"):
+        if not re.fullmatch(r"pos-sbx-[0-9a-f]{12}", key):
+            raise HTTPException(400, "Not a sandbox name")
+        return sandboxes.reset_name(key)
+    return sandboxes.reset(key)
 
 
 @app.post("/conversations/{id}/chat")

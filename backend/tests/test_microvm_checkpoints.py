@@ -53,7 +53,15 @@ class FakeDocker:
                 return cp(0, "default" if c["net"] else "none")
         if cmd == "ps":
             running_only = "-a" not in argv
-            return cp(0, "\n".join(n for n, c in self.containers.items() if c["running"] or not running_only))
+            names = [n for n, c in self.containers.items() if c["running"] or not running_only]
+            if "\t" in argv[-1]:  # list(): name, state, created, conversation label
+                rows = []
+                for n in names:
+                    a = self.containers[n].get("argv") or []
+                    conv = next((x.split("=", 1)[1] for x in a if x.startswith(microvm.CONV_LABEL + "=")), "")
+                    rows.append(f"{n}\t{'running' if self.containers[n]['running'] else 'exited'}\t2026-10-01 12:00:00\t{conv}")
+                return cp(0, "\n".join(rows))
+            return cp(0, "\n".join(names))
         if cmd == "run":
             name = argv[argv.index("--name") + 1]
             image = argv[-3]
@@ -263,3 +271,42 @@ def test_export_file_read_passes_the_export_cap_to_the_real_runner(monkeypatch: 
     monkeypatch.setattr(sb, "ensure", lambda cid: "c")
     assert len(sb.export_file("c1", "big.bin")[1]) == size
     assert seen[-1] > size
+
+
+def test_run_args_carry_the_conversation_label_and_no_network_by_default() -> None:
+    sb, d = make()
+    sb.ensure("conv-a")
+    run = d.cmds("run")[0]
+    assert f"{microvm.CONV_LABEL}=conv-a" in run and run[run.index("--network") + 1] == "none"
+    sb.checkpoint("conv-a", "x")
+    sb.restore("conv-a", "x")
+    assert f"{microvm.CONV_LABEL}=conv-a" in d.cmds("run")[-1], "a restored container keeps its conversation"
+
+
+def test_list_maps_containers_back_to_conversations(tmp_path: Any) -> None:
+    sb, d = make()
+    sb._import_dir = tmp_path
+    sb.ensure("conv-a")
+    sb.checkpoint("conv-a", "clean")
+    sb.note_import("conv-a")
+    d.containers["pos-sbx-000000000000"] = {"running": False, "finished": "x", "image": "x", "net": False}  # pre-label
+    items = {i["name"]: i for i in sb.list()}
+    a = items[sb._name("conv-a")]
+    assert a["conversation_id"] == "conv-a" and a["status"] == "running" and a["checkpoints"] == ["clean"]
+    assert a["holds_import"] is True and a["networked"] is False and a["last_used"]
+    old = items["pos-sbx-000000000000"]
+    assert old["conversation_id"] is None and old["status"] == "exited" and old["checkpoints"] == []
+    sb.reset_name("pos-sbx-000000000000")
+    assert "pos-sbx-000000000000" not in d.containers
+
+
+def test_status_says_why_the_runtime_is_unavailable(monkeypatch: Any) -> None:
+    sb, d = make({"sandboxRuntime": "definitely-not-a-binary-xyz"})
+    assert sb.status() == {"available": False, "runtime": "definitely-not-a-binary-xyz",
+                           "reason": "definitely-not-a-binary-xyz is not on PATH"}
+    sb, d = make()
+    monkeypatch.setattr(microvm.shutil, "which", lambda b: "/usr/local/bin/" + b)
+    sb._run = lambda argv, **kw: cp(1, "", "Cannot connect to the Docker daemon. Is the docker daemon running?")  # type: ignore[assignment]
+    st = sb.status()
+    assert st["available"] is False and st["reason"].startswith("`docker info` failed: Cannot connect")
+    assert llm.DEFAULT_SETTINGS["sandboxImage"] == microvm.DEFAULT_IMAGE and llm.DEFAULT_SETTINGS["sandboxNetwork"] is False

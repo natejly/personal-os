@@ -255,7 +255,8 @@ class Job:
     def info(self) -> dict[str, Any]:
         return {"job_id": self.id, "pid": self.pid, "pgid": self.pgid, "cwd": self.cwd, "run_id": self.run_id,
                 "conversation_id": self.conversation_id, "command": self.command[:200], "status": self.status,
-                "exit_code": self.exit_code, "started": self.started}
+                "exit_code": self.exit_code, "started": self.started, "finished": self.finished,
+                "background": self.background, "total": self.total}
 
 
 class ShellJobs:
@@ -266,6 +267,7 @@ class ShellJobs:
         self.jobs: dict[str, Job] = {}
         self.notes: dict[str, list[str]] = {}
         self.on_note: Any = None       # called with the conversation id when a completion note is queued (wakes an idle desk)
+        self.on_change: Any = None     # called with no arguments when a job starts, ends or is killed (the Running list)
         self.sandbox_failed = False    # the OS refused to apply the profile once: unsandboxed may now be asked for
         self.egress = egress.Egress()  # the allowlisting proxy; binds its port on first use
         self.state_path = state_path
@@ -332,6 +334,25 @@ class ShellJobs:
             return None  # one chat cannot poll or kill another chat's job
         return j
 
+    def list(self) -> list[dict[str, Any]]:
+        """Every tracked job for the user's Running view: live and orphaned first, newest first within each."""
+        return [j.info() for j in sorted(self.jobs.values(),
+                                         key=lambda j: (j.status not in ("running", "orphaned"), -j.started))]
+
+    def tail(self, job: Job, limit: int = 4000) -> dict[str, Any]:
+        """The last `limit` chars of a job's output. Reads the buffer directly, so the model's poll cursor stays put."""
+        out = {**job.info(), "output": _scrub(job.buf[-limit:]) if limit > 0 else ""}
+        if job.status == "orphaned":
+            out["note"] = "Started by an earlier run of the app: its output is gone. Kill stops it."
+        return out
+
+    def _changed(self) -> None:
+        if self.on_change:
+            try:
+                self.on_change()
+            except Exception:  # noqa: BLE001 - a UI refresh must never fail a shell job
+                pass
+
     def running_background(self) -> int:
         return sum(1 for j in self.jobs.values() if j.background and j.status in ("running", "orphaned"))
 
@@ -362,6 +383,7 @@ class ShellJobs:
         job.pgid = job.pid  # start_new_session makes the child its own group leader
         self.jobs[job.id] = job
         self._persist()
+        self._changed()
         job.pump = asyncio.create_task(self._pump(job))
         job.watch = asyncio.create_task(self._watch(job, timeout))
         return job
@@ -411,6 +433,7 @@ class ShellJobs:
         job.finished = time.time()
         self._cleanup(job)
         self._persist()
+        self._changed()
         job.promoted.set()
         if job.notify and not job.notified and job.status != "killed":
             job.notified = True
@@ -481,8 +504,9 @@ class ShellJobs:
                 _signal_group(job.pgid, signal.SIGKILL)
             job.status, job.finished = "killed", time.time()
             self._persist()
+            self._changed()
             return job.status
-        if job.live():
+        if job.live():  # _watch publishes the end
             job.status = "killed"
             await self._terminate(job)
             if job.watch:

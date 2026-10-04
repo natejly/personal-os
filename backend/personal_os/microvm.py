@@ -39,6 +39,7 @@ WORKSPACE = "/workspace"
 DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
 DEFAULT_IMAGE = "python:3.12-slim"
 LABEL = "personal-os.sandbox"
+CONV_LABEL = "personal-os.conv"  # which conversation a container belongs to; survives an app restart
 MAX_SANDBOXES = 5           # LRU-reaped: a desktop should not quietly accumulate VMs
 CKPT_REPO = "pos-sbx-ckpt"  # checkpoint images: pos-sbx-ckpt/<container suffix>:<label>
 MAX_CKPTS = 3               # per conversation, oldest evicted
@@ -124,6 +125,7 @@ class Sandboxes:
         self._run = runner or _run
         self._import_dir = Path(import_dir) if import_dir else None
         self._avail: tuple[float, bool] | None = None
+        self._avail_reason = ""              # why available() said no, for the Settings status line
         self._lock = threading.Lock()   # ensure() can race between parallel runs
         self._last: dict[str, float] = {}    # container name -> last use, for LRU reaping
         self._shell: dict[str, str] = {}     # container name -> bash|sh
@@ -149,14 +151,39 @@ class Sandboxes:
         if self._avail and now - self._avail[0] < AVAILABLE_TTL_S:
             return self._avail[1]
         binary = self._bin()
-        ok = False
+        ok, reason = False, f"{binary} is not on PATH"
         if shutil.which(binary):
             try:
-                ok = self._run([binary, "info", "--format", "{{.ServerVersion}}"], timeout=4).returncode == 0
-            except Exception:  # noqa: BLE001 - a hung daemon means "not available", not a crash
-                ok = False
-        self._avail = (now, ok)
+                p = self._run([binary, "info", "--format", "{{.ServerVersion}}"], timeout=4)
+                ok = p.returncode == 0
+                reason = "" if ok else f"`{binary} info` failed: {_line(p.stderr) or 'the daemon is not responding'}"
+            except Exception as e:  # noqa: BLE001 - a hung daemon means "not available", not a crash
+                reason = f"`{binary} info` failed: {type(e).__name__}"
+        self._avail, self._avail_reason = (now, ok), reason
         return ok
+
+    def status(self) -> dict[str, Any]:
+        ok = self.available()
+        return {"available": ok, "runtime": self._bin(), "reason": "" if ok else self._avail_reason}
+
+    def list(self) -> list[dict[str, Any]]:
+        """Every labeled container, stopped ones included, for the Settings view. Containers made before the
+        conversation label existed report conversation_id None and can still be reset by name."""
+        binary = self._bin()
+        fmt = "{{.Names}}\t{{.State}}\t{{.CreatedAt}}\t{{.Label \"" + CONV_LABEL + "\"}}"
+        p = self._run([binary, "ps", "-a", "--filter", f"label={LABEL}=1", "--format", fmt], timeout=10)
+        if p.returncode != 0:
+            raise SandboxError(f"could not list sandboxes: {_line(p.stderr)}")
+        items = []
+        for ln in p.stdout.decode(errors="replace").splitlines():
+            name, state, created, conv = (ln.split("\t") + ["", "", ""])[:4]
+            name = name.strip()
+            if not name:
+                continue
+            items.append({"name": name, "conversation_id": conv.strip() or None, "status": state.strip(),
+                          "created": created.strip(), "last_used": self._last.get(name), "networked": self._net.get(name),
+                          "holds_import": self._holds(name), "checkpoints": [t for t, _ in self._ckpt_tags(binary, name)]})
+        return items
 
     def _name(self, conversation_id: str) -> str:
         return "pos-sbx-" + hashlib.sha1(conversation_id.encode()).hexdigest()[:12]
@@ -184,7 +211,7 @@ class Sandboxes:
             self._reap(binary)
             cfg = self.settings()
             self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), bool(cfg.get("sandboxNetwork")),
-                         self._desk_mount(conversation_id))
+                         self._desk_mount(conversation_id), conversation_id)
             return name
 
     def _desk_mount(self, conversation_id: str) -> str | None:
@@ -197,20 +224,24 @@ class Sandboxes:
             return None
         return str(path) if path else None
 
-    def _run_args(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> list[str]:
+    def _run_args(self, binary: str, name: str, image: str, net: bool, mount: str | None = None,
+                  conv: str | None = None) -> list[str]:
         """One place for the isolation flags, shared by a fresh create and a checkpoint restore."""
         # --init: `sleep` as PID 1 ignores SIGTERM, so without it every stop waits out the whole grace period.
         args = [binary, "run", "-d", "--init", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
                 "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
+        if conv:
+            args += ["--label", f"{CONV_LABEL}={conv}"]
         if not net:
             args += ["--network", "none"]
         if mount:  # the one bind mount there is: a desk's workspace, nothing else of the host
             args += ["-v", f"{mount}:{DESK_MOUNT}:rw"]
         return args + [image, "sleep", "infinity"]
 
-    def _create(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> None:
-        p = self._run(self._run_args(binary, name, image, net, mount), timeout=240)  # generous: the first run of an image pulls it
+    def _create(self, binary: str, name: str, image: str, net: bool, mount: str | None = None,
+                conv: str | None = None) -> None:
+        p = self._run(self._run_args(binary, name, image, net, mount, conv), timeout=240)  # generous: the first run of an image pulls it
         if p.returncode != 0 and b"already in use" not in p.stderr:
             raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
         self._net[name] = net
@@ -303,7 +334,9 @@ class Sandboxes:
         (self._import_dir / name).write_text("1")
 
     def holds_import(self, conversation_id: str) -> bool:
-        name = self._name(conversation_id)
+        return self._holds(self._name(conversation_id))
+
+    def _holds(self, name: str) -> bool:
         if name in self._imported:
             return True
         if self._import_dir and (self._import_dir / name).is_file():
@@ -317,7 +350,9 @@ class Sandboxes:
             (self._import_dir / name).unlink(missing_ok=True)
 
     def reset(self, conversation_id: str) -> dict[str, Any]:
-        name = self._name(conversation_id)
+        return self.reset_name(self._name(conversation_id))
+
+    def reset_name(self, name: str) -> dict[str, Any]:
         binary = self._bin()
         p = self._run([binary, "rm", "-f", name], timeout=30)
         self._forget(name)
@@ -385,7 +420,7 @@ class Sandboxes:
             self._forget(name)
             # Networking is decided now, from current settings: a checkpoint cannot re-enable it.
             self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", bool(self.settings().get("sandboxNetwork")),
-                         self._desk_mount(conversation_id))
+                         self._desk_mount(conversation_id), conversation_id)
         return {"restored": slug}
 
     def networked(self, conversation_id: str) -> bool:

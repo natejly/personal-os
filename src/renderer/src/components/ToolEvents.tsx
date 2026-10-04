@@ -9,7 +9,7 @@ import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
-import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS } from '../lib/toolDisplay'
+import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles } from './toolcards/parts'
@@ -322,6 +322,9 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
             if (id) { useStore.getState().setView('cowork'); void useStore.getState().openDesk(id) }
           }}>Open the desk</button>
         )}
+        {t.name === 'search_memory' && !t.pending && !t.error && recalledChats(t.result_preview).map((c) => (
+          <button key={c.id} className="link small" title="Open this chat" onClick={() => void useStore.getState().selectChat(c.id)}>{c.title}</button>
+        ))}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
         {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
         {/* A question is answered, not permitted: its options and a text box instead of Allow/Deny. */}

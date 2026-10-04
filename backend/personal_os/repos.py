@@ -30,15 +30,32 @@ def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
     With prefix=True each term also matches longer words that start with it, so
     a search box filters as you type ("lite" finds "LiteLLM").
     """
-    terms = re.findall(r"[A-Za-z0-9_][A-Za-z0-9_'-]{2,}", text)
     seen: list[str] = []
-    for t in terms:
-        t = t.lower().strip("'-")
-        if t and t not in seen:
+    for raw in re.findall(r"\w[\w'-]*", text):
+        raw = raw.strip("'-_")
+        # Short words are mostly noise ("of", "an"), except an acronym (AI), a code with a digit (Q3) or any
+        # non-Latin word (café, Zürich, 会議), which the tokenizer indexes like any other.
+        if not (len(raw) >= 3 or (len(raw) == 2 and (raw.isupper() or any(ch.isdigit() for ch in raw))) or not raw.isascii()):
+            continue
+        t = raw.lower()
+        if t not in seen:
             seen.append(t)
     seen = seen[:max_terms]
     star = "*" if prefix else ""
     return " OR ".join(f'"{t}"{star}' for t in seen)
+
+
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
+
+
+def cjk_like(col: str, text: str) -> tuple[str, list[str]]:
+    """A LIKE clause matching any CJK run of `text` inside `col`, or ("", []) when there is none. The tokenizer
+    indexes a whole unspaced run as one token, so FTS never finds a word inside it.
+    ponytail: LIKE scan over the scope; add a trigram FTS table if the corpus makes the scan slow."""
+    runs = list(dict.fromkeys(_CJK.findall(text)))[:6]
+    if not runs:
+        return "", []
+    return "(" + " OR ".join(f"{col} LIKE ?" for _ in runs) + ")", [f"%{r}%" for r in runs]
 
 
 # ---------------- Projects ----------------
@@ -603,6 +620,10 @@ class Memories:
                         WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
                     (fq, *args),
                 ).fetchall()
+            like, largs = cjk_like("content", query)
+            if like:
+                hits += c.execute(f"SELECT * FROM memories WHERE {like} AND {where} AND invalid_at IS NULL AND deleted_at IS NULL "
+                                  "ORDER BY updated_at DESC LIMIT 15", (*largs, *args)).fetchall()
         out: dict[str, dict[str, Any]] = {}
         for r in [*hits, *base]:
             d = row_to_dict(r)
@@ -900,15 +921,29 @@ class Documents:
 
     def search(self, project_id: str | None, query: str, limit: int = 6) -> list[dict[str, Any]]:
         fq = fts_query(query)
-        if not fq:
+        like, largs = cjk_like("ch.text", query)
+        if not fq and not like:
             return []
         where, args = _scope_clause(project_id)
+        scope = where.replace('project_id', 'd.project_id')
+        rows: list[Any] = []
         with self.db.tx() as c:
-            rows = c.execute(
-                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
-                    FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
-                    WHERE chunks_fts MATCH ? AND d.deleted_at IS NULL AND {where.replace('project_id', 'd.project_id')}
-                    ORDER BY score LIMIT ?""",
-                (fq, *args, limit),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            if fq:
+                rows = c.execute(
+                    f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
+                        FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
+                        WHERE chunks_fts MATCH ? AND d.deleted_at IS NULL AND {scope}
+                        ORDER BY score LIMIT ?""",
+                    (fq, *args, limit),
+                ).fetchall()
+            if like and len(rows) < limit:
+                rows += c.execute(
+                    f"""SELECT ch.id AS chunk_id, ch.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, 0 AS score
+                        FROM chunks ch JOIN documents d ON d.id=ch.document_id
+                        WHERE {like} AND d.deleted_at IS NULL AND {scope} LIMIT ?""",
+                    (*largs, *args, limit),
+                ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:  # FTS rank first, LIKE hits after
+            out.setdefault(r["chunk_id"], dict(r))
+        return list(out.values())[:limit]

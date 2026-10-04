@@ -22,6 +22,10 @@ import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
+/** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
+export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
+/** Reply tracker settings (modules/mailwatch.py). */
+export interface MailWatchConfig { enabled: boolean; awaitingAfterDays: number; needsReplyAfterHours: number; useLLM: boolean; query: string; proposeFollowups: boolean }
 
 let base = ''
 let token = ''
@@ -285,7 +289,9 @@ export const api = {
   planner: {
     suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }),
     /** The one write: the user pressed "Add selected to calendar". */
-    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) })
+    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) }),
+    config: () => req<PlannerConfig>('/planner/config'),
+    setConfig: (patch: Partial<PlannerConfig>) => req<PlannerConfig>('/planner/config', { method: 'PUT', body: json(patch) })
   },
   mailWatch: {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
@@ -294,7 +300,9 @@ export const api = {
     followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' }),
     /** Local only: hides the thread in the mail list until `until` (ISO). */
     snooze: (id: string, until: string | null) => req<{ until: string | null }>(`/mail/threads/${encodeURIComponent(id)}/snooze`, { method: 'POST', body: json({ until }) }),
-    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed')
+    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed'),
+    config: () => req<MailWatchConfig>('/mail/watch/config'),
+    setConfig: (patch: Partial<MailWatchConfig>) => req<MailWatchConfig>('/mail/watch/config', { method: 'PUT', body: json(patch) })
   },
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
@@ -575,7 +583,9 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
-    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
+    /** Contextualize (when contextualChunks is on) and embed every chunk without a vector for the current model. */
+    embedBackfill: () => req<{ embedded: number; remaining: number; error?: string }>('/documents/embed-backfill', { method: 'POST' })
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),

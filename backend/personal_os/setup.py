@@ -114,6 +114,12 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
 
     @r.post("/test")
     async def test(body: SetupIn) -> dict[str, Any]:
+        # Settings never holds the saved key, so a blank key means "the saved one", but only against the
+        # saved base URL, so testing a new host can't send it the old key.
+        if not (body.apiKey or "").strip():
+            saved = get_settings()
+            if body.baseUrl.strip().rstrip("/") == (saved.get("baseUrl") or "").strip().rstrip("/"):
+                body.apiKey = saved.get("apiKey") or None
         return await test_connection(body)
 
     @r.post("/complete")

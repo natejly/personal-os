@@ -150,7 +150,7 @@ export default function UsageView(): JSX.Element {
           <div className="usage-tiles">
             <Tile label="Spend" value={money(t.cost)} sub={t.unpriced ? `${t.unpriced} call${t.unpriced === 1 ? '' : 's'} unpriced` : `over ${report.days} days`} />
             <Tile label="Tokens" value={compact(t.tokens)} sub={`${compact(t.prompt_tokens)} in · ${compact(t.completion_tokens)} out`} />
-            <Tile label="Model calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} auto-learn`} />
+            <Tile label="Model calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} auto-learn${t.other_calls ? ` · ${t.other_calls} other` : ''}`} />
             <Tile label="Avg latency" value={ms(t.avg_ms)} sub="per model call" />
             <Tile label="Cache hit rate" value={pct(t.cache_hit_rate ?? 0)} sub={`${compact(t.cached_tokens ?? 0)} input tokens served from the provider cache`} />
             <Tile label="Reasoning tokens" value={compact(t.reasoning_tokens ?? 0)} sub={`${pct(t.reasoning_share ?? 0)} of output tokens`} />

@@ -1311,7 +1311,7 @@ def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn", *,
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
                    effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
     """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts).
 

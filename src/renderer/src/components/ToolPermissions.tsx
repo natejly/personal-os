@@ -1,4 +1,5 @@
 import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
+import { useState } from 'react'
 import { useStore } from '../store'
 import type { ToolMode, ToolOverride } from '@shared/types'
 
@@ -49,27 +50,38 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
 /** Global modes (Settings). Missing = the tool's default (external actions ask; everything else on). */
 export function ToolGlobalToggles({ value, onChange }: { value: Record<string, ToolMode | boolean>; onChange: (next: Record<string, ToolMode>) => void }): JSX.Element {
   const tools = useStore((s) => s.tools)
-  const groups = [...new Set(tools.map((t) => t.group))]
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? tools.filter((t) => `${t.name.replace(/_/g, ' ')} ${t.group} ${t.description}`.toLowerCase().includes(needle)) : tools
+  const groups = [...new Set(shown.map((t) => t.group))]
   const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
   const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
+  // Groups start collapsed and open while filtering; the full model-facing description is the row's tooltip.
   return (
     <div className="tool-perms">
-      {groups.map((g) => (
-        <div key={g} className="tool-group">
-          <h5>{GROUP_ICON[g]} {g}</h5>
-          {tools.filter((t) => t.group === g).map((t) => {
-            const mode = current(t.name, t.default_mode)
-            return (
-              <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
-                <span className="toggle-text"><b>{t.name.replace(/_/g, ' ')} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small>{t.description}</small></span>
-                <div className="seg">
-                  {(['on', 'ask', 'off'] as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
+      <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter tools" aria-label="Filter tools" spellCheck={false} />
+      {groups.map((g) => {
+        const rows = shown.filter((t) => t.group === g)
+        return (
+          <details key={g} className="tool-group" open={needle ? true : undefined}>
+            <summary><h5>{GROUP_ICON[g]} {g} <small className="muted">{rows.length}</small></h5></summary>
+            {rows.map((t) => {
+              const mode = current(t.name, t.default_mode)
+              return (
+                <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description}>
+                  <span className="toggle-text"><b>{t.name.replace(/_/g, ' ')} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small>{firstSentence(t.description)}</small></span>
+                  <div className="seg">
+                    {(['on', 'ask', 'off'] as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
-      ))}
+              )
+            })}
+          </details>
+        )
+      })}
+      {needle && groups.length === 0 && <p className="muted small">No tool matches “{q.trim()}”.</p>}
     </div>
   )
 }
+
+const firstSentence = (s: string): string => s.split(/(?<=[.!?])\s/)[0] ?? s

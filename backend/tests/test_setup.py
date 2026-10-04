@@ -157,6 +157,23 @@ class TestRouteTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["error"], "Model nope not found.")
 
+    def test_blank_key_uses_saved_key_only_for_saved_host(self) -> None:
+        db.set_settings({"baseUrl": "https://api.openai.com/v1/", "apiKey": "sk-saved"})
+        seen: list[str | None] = []
+
+        def h(req: httpx.Request) -> httpx.Response:
+            seen.append(req.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [], "choices": []})
+        _mock(h)
+        try:
+            self.assertTrue(self._post(apiKey="")["ok"])
+            self.assertEqual(set(seen), {"Bearer sk-saved"})
+            seen.clear()
+            self._post(apiKey=None, baseUrl="http://elsewhere:9/v1")
+            self.assertEqual(set(seen), {None})
+        finally:
+            _clear()
+
     def test_missing_fields_never_500(self) -> None:
         self.assertFalse(self._post(baseUrl="")["ok"])
         self.assertFalse(self._post(model="")["ok"])

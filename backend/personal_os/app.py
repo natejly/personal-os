@@ -2337,7 +2337,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
                 # A reply that already ran tools has something to close out with (see below), so it does not raise.
                 if not "".join(buf).strip() and not any(m.get("role") == "tool" for m in messages):
-                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
+                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise 'Time limit per reply' in Settings → Tools.")
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)

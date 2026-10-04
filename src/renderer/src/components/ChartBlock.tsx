@@ -110,7 +110,10 @@ export function parseSpec(source: string): Spec {
 export const fmtNum = (v: unknown, unit = ''): string => {
   const n = num(v)
   if (n === null) return String(v ?? '')
-  const s = new Intl.NumberFormat(undefined, { maximumFractionDigits: Math.abs(n) >= 100 ? 0 : 2, notation: Math.abs(n) >= 100000 ? 'compact' : 'standard' }).format(n)
+  const a = Math.abs(n)
+  // Below 1, two significant digits: sub-cent ticks would all round to "0" with fixed decimals.
+  const digits = a > 0 && a < 1 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: a >= 100 ? 0 : 2 }
+  const s = new Intl.NumberFormat(undefined, { ...digits, notation: a >= 100000 ? 'compact' : 'standard' }).format(n)
   if (unit === '$' || unit === '€' || unit === '£') return unit + s
   if (unit === '%') return s + '%'
   return unit ? `${s} ${unit}` : s

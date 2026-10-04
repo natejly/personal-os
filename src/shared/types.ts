@@ -1144,6 +1144,13 @@ export interface Settings {
   autoLearn: boolean
   /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean
+  /** Embed meeting transcripts so meeting search matches by meaning (sends transcript text to the embedding provider). */
+  meetingEmbeddings?: boolean
+  /** Docs-editor notes are searched for chat context; uploaded files are governed per chat. */
+  useDocsInContext?: boolean
+  /** Rerank search hits with this model; blank = off. retrievalRerank follows it. */
+  retrievalRerank?: boolean
+  retrievalRerankModel?: string
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */

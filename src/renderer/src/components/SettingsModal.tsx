@@ -45,6 +45,9 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'trash', label: 'Trash', icon: Trash2 }
 ]
 
+/** The backend's defaults (llm.DEFAULT_SETTINGS); a cleared field saves these. */
+const CONTEXT_DEFAULTS = { contextWindow: 128000, compactAt: 0.7, compactKeepRecent: 8 }
+
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
 /** Read-only: how much of the library has vectors for the current embedding model. */
@@ -156,7 +159,9 @@ export default function SettingsModal(): JSX.Element {
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
-    const next: Settings = { ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+    // A cleared context field goes back to the default; out-of-range numbers are refused by the backend (422, toasted).
+    const next: Settings = { ...draft, maxToolRounds: rounds,
+      contextWindow: draft.contextWindow ?? CONTEXT_DEFAULTS.contextWindow, compactKeepRecent: draft.compactKeepRecent ?? CONTEXT_DEFAULTS.compactKeepRecent,gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
     // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
     const seed = base.current as unknown as Record<string, unknown>
     const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(seed[k]))) as Partial<Settings>
@@ -292,6 +297,24 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.hybridRetrieval !== false} onChange={(e) => patch({ hybridRetrieval: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <h3 id="context-settings">Context</h3>
+              <p className="muted">How much chat history is replayed, and when older messages are summarized. Type <code>/compact</code> in a chat, or use Compact now in its context panel, to summarize on demand.</p>
+              <label><span>Context window <small className="muted">(tokens; blank = 128,000. A model with a smaller limit uses its own)</small></span>
+                <input type="number" min={1000} max={4000000} step={1000} value={draft.contextWindow ?? ''} placeholder="128000"
+                  onChange={(e) => patch({ contextWindow: e.target.value === '' ? undefined : Number(e.target.value) })} />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Compact automatically</b><small>Summarize older messages once the history fills the share of the window below. Off means only on demand.</small></span>
+                <input type="checkbox" checked={draft.autoCompact !== false} onChange={(e) => patch({ autoCompact: e.target.checked })} /><span className="switch" />
+              </label>
+              <label><span>Compact at <small className="muted">({Math.round((draft.compactAt ?? CONTEXT_DEFAULTS.compactAt) * 100)}% of the window)</small></span>
+                <input type="range" min={0.5} max={0.9} step={0.05} aria-label="Compact at share of the window" disabled={draft.autoCompact === false}
+                  value={draft.compactAt ?? CONTEXT_DEFAULTS.compactAt} onChange={(e) => patch({ compactAt: Number(e.target.value) })} />
+              </label>
+              <label><span>Keep recent messages verbatim <small className="muted">(2–200; never summarized)</small></span>
+                <input type="number" min={2} max={200} value={draft.compactKeepRecent ?? ''} placeholder={String(CONTEXT_DEFAULTS.compactKeepRecent)}
+                  onChange={(e) => patch({ compactKeepRecent: e.target.value === '' ? undefined : Number(e.target.value) })} />
+              </label>
             </section>}
 
             {tab === 'integrations' && <section>

@@ -550,6 +550,8 @@ kbd {
 .compact-note { display: block; margin-top: 6px; padding: 0; background: none; border: 0; font: inherit; font-size: 11px; color: var(--text-faint); cursor: pointer; text-align: left; }
 .compact-note:hover { color: var(--text); text-decoration: underline; }
 .ctx-usage { color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
+.ctx-compact-focus { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ctx-compact-focus input { flex: 1; min-width: 0; font-size: 12px; }
 .model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-error {
   display: flex; align-items: center; gap: 6px;

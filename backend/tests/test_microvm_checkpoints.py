@@ -34,6 +34,7 @@ class FakeDocker:
         self.commit_error = ""
         self.clock = 0
         self.networks: set[str] = set()
+        self.image_env: dict[str, dict[str, str]] = {}  # tag -> env a commit kept from the container
         self.px_log: tuple[int, str] | None = None  # (rc, stdout) of reading the proxy sidecar's report
 
     def __call__(self, argv: list[str], *, input: bytes | None = None, timeout: float = 60) -> "subprocess.CompletedProcess[bytes]":
@@ -89,6 +90,7 @@ class FakeDocker:
                 return cp(1, "", f"Usage: docker commit\nError response from daemon: {self.commit_error}")
             self.clock += 1
             self.images[argv[-1]] = f"2026-10-01 12:00:{self.clock:02d} +0000 UTC"
+            self.image_env[argv[-1]] = _env(self.containers[argv[-2]]["argv"])  # commit keeps the container's Config.Env
             return cp(0, "sha256:abc")
         if cmd == "images":
             repo = argv[2]
@@ -391,3 +393,25 @@ def test_an_orphaned_sidecar_is_swept_once_per_app_run() -> None:
     sb2 = Sandboxes(lambda: {"sandboxNetwork": "off"}, runner=d)
     sb2.ensure("c2")
     assert px not in d.containers and not d.networks
+
+
+def test_restore_out_of_proxy_mode_blanks_the_proxy_env_the_checkpoint_carries() -> None:
+    sb, d = make({"sandboxNetwork": "proxy"})
+    name = sb.ensure("c1")
+    sb.checkpoint("c1", "clean")
+    (tag,) = d.image_env
+    assert d.image_env[tag]["HTTPS_PROXY"].startswith("http://grain:")
+    sb._settings["sandboxNetwork"] = "open"  # type: ignore[attr-defined]
+    sb.restore("c1", "clean")
+    run = d.containers[name]["argv"]
+    env = {**d.image_env[tag], **_env(run)}  # what the restored container sees: image env, then its -e overrides
+    assert all(env.get(k, "") == "" for k in microvm.PROXY_VARS) and "--network" not in run
+
+
+def test_removing_a_sandbox_whose_mode_is_not_recovered_yet_still_removes_its_sidecar() -> None:
+    sb, d = make({"sandboxNetwork": "proxy"})
+    name = sb.ensure("c1")
+    px = microvm.PX_PREFIX + name[len("pos-sbx-"):]
+    sb2 = Sandboxes(lambda: {"sandboxNetwork": "proxy"}, runner=d)  # a later app run that has not touched c1 yet
+    sb2.reset("c1")
+    assert name not in d.containers and px not in d.containers and not d.networks

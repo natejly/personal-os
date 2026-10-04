@@ -59,6 +59,7 @@ AVAILABLE_TTL_S = 120
 NET_PREFIX = "pos-sbx-net-"     # a proxy-mode sandbox's own internal network
 PX_PREFIX = "pos-sbx-px-"       # and the sidecar that is its only way out
 PROXY_LABEL = "personal-os.sandbox-proxy"
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy")
 PROXY_ALIAS = "egress"          # the sidecar's name on the internal network
 PROXY_PORT = 3128
 PROXY_LOG = "/tmp/egress.json"  # in the sidecar's own filesystem: survives stop/start, goes with the container
@@ -253,7 +254,9 @@ class Sandboxes:
 
     def _create(self, binary: str, name: str, image: str, net: Any, mount: str | None = None) -> None:
         mode = net_mode(net)
-        env = self._start_proxy(binary, name) if mode == "proxy" else None
+        # Not proxy: blank the proxy variables, since a checkpoint committed in proxy mode carries them in its image
+        # and they would point at a sidecar that no longer exists.
+        env = self._start_proxy(binary, name) if mode == "proxy" else dict.fromkeys(PROXY_VARS, "")
         p = self._run(self._run_args(binary, name, image, mode, mount, env), timeout=240)  # generous: the first run of an image pulls it
         if p.returncode != 0 and b"already in use" not in p.stderr:
             raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
@@ -293,10 +296,11 @@ class Sandboxes:
         self._run([binary, "network", "rm", NET_PREFIX + self._sfx(name)], timeout=30)
 
     def _rm(self, binary: str, name: str) -> "subprocess.CompletedProcess[bytes]":
-        """Remove a sandbox (and, in proxy mode, its sidecar and network). Sidecars of sandboxes this app run never
-        touched are swept by _reap_stale."""
+        """Remove a sandbox (and, in proxy mode, its sidecar and network). A sandbox whose mode this app run has not
+        recovered yet is checked for a sidecar by name."""
         p = self._run([binary, "rm", "-f", name], timeout=30)
-        if self._net.get(name) == "proxy":
+        mode = self._net.get(name)
+        if mode == "proxy" or (mode is None and PX_PREFIX + self._sfx(name) in self._live(binary, label=PROXY_LABEL)):
             self._rm_proxy(binary, name)
         self._forget(name)
         return p

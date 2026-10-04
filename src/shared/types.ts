@@ -1506,8 +1506,6 @@ export type BackgroundEvent =
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
-  /** Auto-learn queued memory tidy-up proposals (they change nothing until applied). */
-  | { event: 'proposals'; data: { count: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */

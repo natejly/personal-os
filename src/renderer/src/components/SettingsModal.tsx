@@ -12,7 +12,6 @@ import { ACCENTS, accentId } from '../lib/accents'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
-import StandingGrants from './StandingGrants'
 import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
 import CoworkSettings from './CoworkSettings'
@@ -424,8 +423,7 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
-              <StandingGrants draft={draft} patch={patch} />
-              <GrantsPanel />
+              <GrantsPanel draft={draft} patch={patch} />
               <RunSafetySettings draft={draft} patch={patch} />
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>

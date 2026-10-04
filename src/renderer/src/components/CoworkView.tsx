@@ -81,7 +81,7 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
               </span>
             ))}
             <select
-              aria-label="Add a doc or uploaded document"
+              aria-label="Add a file or upload"
               value=""
               onChange={(e) => {
                 const [kind, id] = e.target.value.split(':')
@@ -89,8 +89,8 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
                 if (kind === 'document') addInput({ kind, id }, documents.find((d) => d.id === id)?.name || 'Document')
               }}
             >
-              <option value="">Add a doc…</option>
-              {docs.length > 0 && <optgroup label="Docs">{docs.map((d) => <option key={d.id} value={`doc:${d.id}`}>{d.title || 'Untitled'}</option>)}</optgroup>}
+              <option value="">Add a file…</option>
+              {docs.length > 0 && <optgroup label="Notes">{docs.map((d) => <option key={d.id} value={`doc:${d.id}`}>{d.title || 'Untitled'}</option>)}</optgroup>}
               {documents.length > 0 && <optgroup label="Uploads">{documents.map((d) => <option key={d.id} value={`document:${d.id}`}>{d.name}</option>)}</optgroup>}
             </select>
             <button className="ghost-btn" onClick={() => void pickFiles()}>Add files…</button>

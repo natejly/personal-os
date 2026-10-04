@@ -200,7 +200,7 @@ kbd {
 }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 /* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
-   Docs, Calendar, Boards and the canvas alike. */
+   Files, Calendar, Todos and the canvas alike. */
 .app.page-agent-open { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--page-agent-w); }
 .app.page-agent-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--page-agent-w); }
 .app.loading { background: var(--bg); }
@@ -1714,10 +1714,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcol { width: 272px; flex-shrink: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; max-height: 100%; }
 .kcol.over { border-color: var(--accent); }
 .kcol > header { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; font-weight: 600; font-size: 13px; }
-.kcol-name { flex: 1; cursor: text; }
-.kcol > header input { flex: 1; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; outline: 0; font: inherit; }
-.kcol > header .ghost { opacity: 0; }
-.kcol:hover > header .ghost { opacity: 1; }
+.kcol-name { flex: 1; }
 .kcol-cards { padding: 4px 8px 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
 .kcard { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: grab; font-size: 13px; }
 .kcard:hover { border-color: var(--border-strong); }
@@ -1728,13 +1725,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcard.done .kcard-title { text-decoration: line-through; }
 .kcard-title { line-height: 1.4; }
 .kcard-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
-.kcard-add textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 8px; padding: 8px; outline: 0; font: inherit; resize: none; }
-.kcard-add .row { display: flex; gap: 6px; margin-top: 6px; }
 .kcol-addbtn { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; color: var(--text-faint); font-size: 12px; }
 .kcol-addbtn:hover { background: var(--hover); color: var(--text); }
-.kcol.new { background: none; border-style: dashed; padding: 8px; }
-.kcol.new input { width: 100%; background: none; border: 0; outline: 0; color: var(--text-muted); font-size: 13px; }
-.board-foot { padding: 4px 20px 10px; }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .row { display: flex; gap: 8px; align-items: center; }
 

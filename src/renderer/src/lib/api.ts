@@ -779,7 +779,6 @@ export const api = {
       req<FullMeeting>(`/meetings/${id}`, autosave(patch)),
     del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
     status: () => req<MeetingStatusInfo>('/meetings/status'),
-    /** Registered under both verbs; a GET keeps the ten-minute cache honest in the devtools network log. */
     preflight: (force = false) => req<MeetingPreflight>(`/meetings/preflight?force=${force}`),
     config: () => req<MeetingConfig>('/meetings/config'),
     /** Returns the whole status, like `/activity/config` does — the config is under `.config`. */

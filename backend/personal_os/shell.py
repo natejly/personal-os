@@ -207,6 +207,13 @@ def _pgid_of(pid: int) -> int | None:
         return None
 
 
+async def _exited(proc: asyncio.subprocess.Process) -> None:
+    """Until the leader exits. proc.wait() also waits for its pipes to close (Python 3.12+), and a leftover child holding
+    stdout keeps them open, so the group kill that ends that child would never run."""
+    while proc.returncode is None:
+        await asyncio.sleep(0.05)
+
+
 def _signal_group(pgid: int | None, sig: int) -> None:
     if not pgid or pgid <= 1:
         return
@@ -412,13 +419,13 @@ class ShellJobs:
         timed_out = False
         try:
             try:
-                await asyncio.wait_for(job.proc.wait(), timeout)
+                await asyncio.wait_for(_exited(job.proc), timeout)
             except asyncio.TimeoutError:
                 if not self._promote(job):
                     raise
                 # Out of foreground time with the work unfinished: it carries on as a background job for the usual
                 # background lifetime instead of losing everything it did.
-                await asyncio.wait_for(job.proc.wait(), BACKGROUND_TIMEOUT)
+                await asyncio.wait_for(_exited(job.proc), BACKGROUND_TIMEOUT)
         except asyncio.TimeoutError:
             timed_out = True
             await self._terminate(job)
@@ -464,12 +471,12 @@ class ShellJobs:
         """SIGTERM to the whole group, SIGKILL after TERM_GRACE."""
         _signal_group(job.pgid, signal.SIGTERM)
         try:
-            await asyncio.wait_for(job.proc.wait(), TERM_GRACE)  # type: ignore[union-attr]
+            await asyncio.wait_for(_exited(job.proc), TERM_GRACE)  # type: ignore[union-attr]
         except asyncio.TimeoutError:
             pass
         _signal_group(job.pgid, signal.SIGKILL)
         try:
-            await asyncio.wait_for(job.proc.wait(), 2.0)  # type: ignore[union-attr]
+            await asyncio.wait_for(_exited(job.proc), 2.0)  # type: ignore[union-attr]
         except asyncio.TimeoutError:
             pass
 

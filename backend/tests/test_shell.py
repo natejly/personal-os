@@ -856,13 +856,18 @@ def test_run_python_profile_allows_the_mime_tables_python_reads_at_import() -> N
 @needs_seatbelt
 def test_matplotlib_warm_up_runs_the_work_venv_under_seatbelt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The venv's site-packages (and their .pth files) run at import, so the warm-up must be sandboxed too, and still work."""
-    pytest.importorskip("matplotlib")
+    mpl = pytest.importorskip("matplotlib")
     import subprocess
+    # The venv that holds matplotlib, not sys.executable: under `uv run --with` that is an overlay env whose packages
+    # arrive via a .pth into another venv the profile (rightly) does not allow.
+    py = Path(mpl.__file__).parents[4] / "bin" / "python"
+    if not py.exists():
+        pytest.skip(f"no interpreter beside {mpl.__file__}")
     seen: list[list[str]] = []
     real = subprocess.run
     monkeypatch.setattr(sandbox.subprocess, "run", lambda cmd, **kw: (seen.append(cmd), real(cmd, **kw))[1])
     monkeypatch.setattr(sandbox, "MPL_CACHE", str(tmp_path))
     monkeypatch.setattr(sandbox, "_mpl_warmed", False)
-    sandbox._warm_mpl(sys.executable)
+    sandbox._warm_mpl(str(py))
     assert seen and seen[0][0] == "sandbox-exec"
     assert any(n.startswith("fontlist-") for n in os.listdir(tmp_path))

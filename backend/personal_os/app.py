@@ -5319,6 +5319,11 @@ def restore_memory(id: str) -> dict[str, Any]:
     return m
 
 
+@app.get("/memories/{id}/history")
+def memory_history(id: str) -> list[dict[str, Any]]:
+    return memories.history(id)
+
+
 @app.post("/memories")
 def create_memory(body: MemoryIn) -> dict[str, Any]:
     if not body.content.strip():

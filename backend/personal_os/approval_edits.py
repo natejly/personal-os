@@ -24,6 +24,7 @@ Trust model (read this before changing anything):
 """
 from __future__ import annotations
 
+from email.utils import getaddresses
 from typing import Any, Callable
 
 # Tools whose arguments a person can sensibly rewrite on the card. calendar_propose is the calendar
@@ -118,7 +119,7 @@ def validate(tool: str, args: Any, parameters: dict[str, Any] | None) -> dict[st
 
 # ---- built-in validators ----
 def _gmail(args: dict[str, Any]) -> str | None:
-    parts = [a.strip() for a in str(args.get("to", "")).replace(";", ",").split(",") if a.strip()]
+    parts = [a for _, a in getaddresses([str(args.get("to", "")).replace(";", ",")]) if a]
     if not parts or not all("@" in p for p in parts):
         return "to must be one or more email addresses"
     if not str(args.get("body", "")).strip():

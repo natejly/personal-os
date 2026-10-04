@@ -1453,7 +1453,7 @@ def _register_google(self: Toolbox) -> None:
         return {k: v for k, v in out.items() if v is not None and v != ""}
 
     async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
-        rows = await run(g.calendar_events, days, "primary", 30, start, ["all"] if all_calendars else None)
+        rows = await run(g.calendar_events, days, "primary", 0, start, ["all"] if all_calendars else None)
         return page(_scrub_public_text([_brief_event(e) for e in rows]), offset=offset, limit=30, key="events")
     R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days on the primary calendar). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. all_calendars includes every calendar. calendar_get has an event's full details.",
         _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
@@ -1668,7 +1668,8 @@ def _register_google(self: Toolbox) -> None:
 
     async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
-        rows = _scrub_public_text(await run(g.gmail_search, query, off + n))
+        # One past the page, so page() can tell whether more exist.
+        rows = _scrub_public_text(await run(g.gmail_search, query, off + n + 1))
         return page(rows, offset=off, limit=n, key="messages")
     R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'is:unread in:inbox', 'from:alice newer_than:7d', 'subject:invoice'). Returns headers and snippets.",
         _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 15}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
@@ -1765,7 +1766,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"message_id": "18f2c1a9b7e4d0aa", "mark_read": True}, {"message_id": "18f2c1a9b7e4d0aa", "archive": True}, {"message_id": "18f2c1a9b7e4d0aa", "star": True}]))
 
     async def gtasks_list(ctx: dict[str, Any], show_completed: bool = False, offset: int = 0) -> Any:
-        rows = await run(g.tasks_list, "@default", show_completed)
+        rows = await run(g.tasks_list, "@default", show_completed, max(0, int(offset)) + 51)
         return page(rows, offset=offset, limit=50, key="tasks")
     R("google_tasks_list", ToolSpec("google_tasks_list", "List the user's Google Tasks (default list).",
         _obj({"show_completed": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0}}, []), gtasks_list, "google",

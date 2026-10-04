@@ -23,7 +23,8 @@ def parse_recipients(raw: str) -> list[str]:
     """Split a To field on commas/semicolons/newlines into addresses, keeping a `Name <a@b.c>` form intact.
     Raises ApprovalEditError naming the first entry that is not an address."""
     out: list[str] = []
-    for part in re.split(r"[,;\n]", raw or ""):
+    # Separators inside a quoted display name ("Doe, John" <j@x.com>) do not split it.
+    for part in re.findall(r'(?:"[^"]*"|[^,;\n"])+|"', raw or ""):
         part = part.strip()
         if not part:
             continue
@@ -34,24 +35,32 @@ def parse_recipients(raw: str) -> list[str]:
         name = m.group("name").strip().strip('"') if m else ""
         if any(c in name for c in '<>"\r\n'):
             raise ApprovalEditError(f"'{part}' is not a valid recipient.")
+        if name and re.search(r"[,;]", name):
+            name = f'"{name}"'  # stays one recipient when the list is joined and split again
         out.append(f"{name} <{addr}>" if name else addr)
     return out
 
 
-def _clean(args: dict[str, Any], *, allow_draft_flag: bool) -> dict[str, Any]:
-    out = dict(args)
-    to = parse_recipients(str(out.get("to") or ""))
-    if not to:
+def check_send(to: str, subject: str) -> list[str]:
+    """The recipients of a send, or ApprovalEditError. Outbox.queue runs it too, so a bad address
+    fails before the hold starts rather than when Gmail rejects it later."""
+    rcpt = parse_recipients(str(to or ""))
+    if not rcpt:
         raise ApprovalEditError("Add at least one recipient.")
-    if len(to) > MAX_RECIPIENTS:
+    if len(rcpt) > MAX_RECIPIENTS:
         raise ApprovalEditError(f"At most {MAX_RECIPIENTS} recipients.")
-    out["to"] = ", ".join(to)
-    subject = str(out.get("subject") or "")
+    subject = str(subject or "")
     if "\n" in subject or "\r" in subject:  # a newline here is header injection, not a long subject
         raise ApprovalEditError("The subject must be a single line.")
     if len(subject) > MAX_SUBJECT:
         raise ApprovalEditError(f"The subject is over {MAX_SUBJECT} characters.")
-    out["subject"] = subject.strip()
+    return rcpt
+
+
+def _clean(args: dict[str, Any], *, allow_draft_flag: bool) -> dict[str, Any]:
+    out = dict(args)
+    out["to"] = ", ".join(check_send(str(out.get("to") or ""), str(out.get("subject") or "")))
+    out["subject"] = str(out.get("subject") or "").strip()
     body = str(out.get("body") or "")
     if len(body) > MAX_BODY:
         raise ApprovalEditError(f"The body is over {MAX_BODY:,} characters.")

@@ -39,6 +39,11 @@ def _line(text: str, limit: int = 2000) -> str:
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
 
 
+def _notes(text: str) -> str:
+    """Notes keep their line breaks; Google allows 8192 characters."""
+    return str(text or "").replace("\r\n", "\n").replace("\r", "\n")[:8192]
+
+
 def _remote_wins(rt: dict[str, Any], td: dict[str, Any]) -> bool:
     try:
         return _parse_iso(rt.get("updated") or "").timestamp() >= float(td["updated_at"])
@@ -239,7 +244,7 @@ class TasksSync:
             title = _line(rt.get("title") or "", 500)
             if eid in linked or rt.get("deleted") or not title:
                 continue
-            td = self.todos.create(title, notes=_line(rt.get("notes") or ""), due=_date_only(rt.get("due")),
+            td = self.todos.create(title, notes=_notes(rt.get("notes") or ""), due=_date_only(rt.get("due")),
                                    source="google", external_id=eid, notify=False)
             if rt.get("status") == "completed":
                 td = self.todos.update(td["id"], {"done": True}, notify=False) or td
@@ -298,7 +303,7 @@ class TasksSync:
         title = _line(rt.get("title") or "", 500)
         if title and title != td["title"]:
             patch["title"] = title
-        notes = _line(rt.get("notes") or "")
+        notes = _notes(rt.get("notes") or "")
         if notes != (td.get("notes") or ""):
             patch["notes"] = notes
         if _date_only(rt.get("due")) != td["due"]:

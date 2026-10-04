@@ -39,7 +39,7 @@ import time
 from typing import Any, Callable
 
 from .db import Database, new_id, row_to_dict
-from . import verify
+from . import mail_edits, verify
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +117,7 @@ class Outbox:
     def queue(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
               origin: str = "app", conversation_id: str | None = None) -> dict[str, Any]:
         """Hold a send. With the hold turned off it goes out immediately, verification and all."""
+        mail_edits.check_send(to, subject)  # ValueError now, not a failed row 90s later
         cfg = self.config()
         if not cfg["enabled"]:
             out = self.google.gmail_send(to, subject, body, reply_to_message_id)

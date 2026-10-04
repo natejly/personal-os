@@ -48,6 +48,12 @@ class ValidatorTests(unittest.TestCase):
             with self.assertRaises(EditError, msg=str(args)[:60]):
                 approval_edits.validate("gmail_send", args, schema)
 
+    def test_a_quoted_name_with_a_comma_is_one_recipient(self) -> None:
+        out = approval_edits.validate("gmail_send", {**GOOD, "to": '"Doe, John" <john@x.com>, ana@example.com'},
+                                      appmod.toolbox.specs["gmail_send"].parameters)
+        self.assertEqual(out["to"], '"Doe, John" <john@x.com>, ana@example.com')
+        self.assertEqual(mail_edits.parse_recipients(out["to"]), ['"Doe, John" <john@x.com>', "ana@example.com"])
+
     def test_as_draft_is_not_a_draft_tool_argument(self) -> None:
         with self.assertRaises(ApprovalEditError):
             mail_edits._clean({**GOOD, "as_draft": True}, allow_draft_flag=False)

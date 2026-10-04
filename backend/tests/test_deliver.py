@@ -333,12 +333,21 @@ def test_image_is_returned_as_is_and_html_is_out_of_scope(env: Any) -> None:
     assert "error" in env.call("render_preview", path="work/z.zip")
 
 
-def test_render_outside_a_desk_uses_a_temp_dir(env: Any) -> None:
+def test_render_outside_a_desk_lands_beside_the_file(env: Any) -> None:
     (env.grant / "a.pdf").write_bytes(b"%PDF")
     out = env.call("render_preview", ctx=env.chat, path=str(env.grant / "a.pdf"), pages="1")
     p = Path(out["pages"][0]["path"])
-    assert p.is_absolute() and p.is_file() and env.grant not in p.parents
-    shutil.rmtree(p.parent, ignore_errors=True)
+    # view_image only reads under home, so a system temp folder was a dead end.
+    assert p.is_absolute() and p.is_file() and p.parent == Path(os.path.realpath(env.grant)) / "previews"
+
+
+def test_render_refuses_a_previews_link_that_leads_out(env: Any, tmp_path: Path) -> None:
+    (env.grant / "b.pdf").write_bytes(b"%PDF")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (env.grant / "previews").symlink_to(outside)
+    out = env.call("render_preview", ctx=env.chat, path=str(env.grant / "b.pdf"), pages="1")
+    assert "error" in out and not list(outside.iterdir())
 
 
 # ---- doc_guide ----

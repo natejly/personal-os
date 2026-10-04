@@ -466,7 +466,11 @@ def register(tb: Any) -> None:
         if did:
             outdir = tb.workspace.ensure(did) / "work" / "previews"
         else:
-            outdir = Path(tempfile.mkdtemp(prefix="grain-preview-"))
+            # Beside the source, inside the granted folder: view_image reads only under home, and
+            # pages are named by source and number, so a re-render overwrites rather than piles up.
+            outdir = src.parent / "previews"
+            if not fsx.grants_for(tb, ctx).in_roots(Path(os.path.realpath(outdir))):  # a previews symlink leading out
+                return tool_error(f"{outdir} leads outside the folders you may use.", field="path")
         res = await asyncio.to_thread(_render_sync, src, pages, dpi_n, outdir, src.stem)
         if "error" in res:
             return res
@@ -484,7 +488,7 @@ def register(tb: Any) -> None:
     spec = ToolSpec("render_preview", "Render pages of a PDF or office file (docx/xlsx/pptx/odt/ods/odp) to PNG images so you can look at them "
                     "with view_image. Use it after producing a document, deck or spreadsheet to check the layout before you hand it over. "
                     "`pages` like \"1-3\" (default the first 3, at most 8 per call), `dpi` default 80 (max 150). Images land in "
-                    "work/previews/. Web pages are out of scope: use the browser's screenshot.",
+                    "work/previews/ in a desk, otherwise in a previews/ folder beside the file. Web pages are out of scope: use the browser's screenshot.",
                     _obj({"path": {"type": "string"}, "pages": {"type": "string", "description": "e.g. 1-3 or 1,4"},
                           "dpi": {"type": "integer", "default": DEFAULT_DPI}}, ["path"]),
                     render_preview, "deliver", "writes",

@@ -5041,7 +5041,7 @@ def google_calendars(refresh: bool = False) -> Any:
 @app.get("/integrations/google/calendar")
 def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
-    return _gcall(google.calendar_events, days, "primary", 60, start, ids, refresh=refresh)
+    return _gcall(google.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
 
 
 @app.get("/integrations/google/cache")

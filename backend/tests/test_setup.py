@@ -197,6 +197,28 @@ class CompleteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["baseUrl"], "http://localhost:11434/v1")
 
+    def test_keyless_rerun_keeps_saved_key_for_same_endpoint(self) -> None:
+        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": "sk-proxy"})
+        seen: list[str | None] = []
+
+        def h(req: httpx.Request) -> httpx.Response:
+            seen.append(req.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [], "choices": []})
+        _mock(h)
+        try:
+            body = {"provider": "litellm", "baseUrl": "http://localhost:4000/", "apiKey": None, "model": "kimi-k3"}
+            self.assertTrue(client.post("/setup/test", json=body).json()["ok"])
+            self.assertEqual(set(seen), {"Bearer sk-proxy"})
+            seen.clear()
+            client.post("/setup/test", json={**body, "baseUrl": "http://other:4000"})
+            self.assertEqual(set(seen), {None})
+        finally:
+            setup._transport = None
+        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
+        self.assertEqual(db.get_settings()["apiKey"], "sk-proxy")
+        client.post("/setup/complete", json={**body, "provider": "custom", "baseUrl": "http://other:8080"})
+        self.assertEqual(db.get_settings()["apiKey"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

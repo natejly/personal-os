@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { basename, extname, isAbsolute, join } from 'path'
 import { hostBlocked, isPrivateHost } from './pageGuard'
 import { handle } from './ipc'
+import { clearSignIn, listSignIns } from './agentCookies'
 import { buildSnapshot, hintsFromDomSnapshot, riskOf, type NodeHint, type RefEntry } from './axSnapshot'
 
 const PARTITION = 'persist:agent'
@@ -1055,5 +1056,15 @@ export function registerAgentBrowserIpc(): void {
   handle('agentBrowser:unsubscribe', (e, name: string) => {
     subscribers.get(String(name))?.delete(e.sender)
     stopFramesIfIdle()
+  })
+  handle('agentBrowser:signIns', () => listSignIns(getSession()))
+  handle('agentBrowser:clearSignIns', async (_e, domain?: string) => {
+    if (domain) return void (await clearSignIn(getSession(), String(domain)))
+    // Everything: nothing may still be signed in mid-page, so every window on this session goes first,
+    // the interactive sessions and any page fetch in flight (they share the partition).
+    const ses = getSession()
+    closeAllAgentBrowsers()
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.webContents.session === ses) w.destroy()
+    await ses.clearStorageData()
   })
 }

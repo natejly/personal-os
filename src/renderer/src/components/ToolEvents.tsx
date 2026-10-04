@@ -14,6 +14,7 @@ import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
+import { latestBrowserCall } from '../lib/browserApproval'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -328,10 +329,12 @@ function Row({ render }: { render: () => JSX.Element }): JSX.Element {
 
 const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(t.name === 'desk_ask' && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
 
-function ToolEvents({ events, conversationId, streaming = false }: { events: ToolEvent[]; conversationId: string; streaming?: boolean }): JSX.Element {
+/** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
+function ToolEvents({ events, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  const lastBrowser = browserSession ? latestBrowserCall(events) : null
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
 
@@ -399,7 +402,8 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
       <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
         {Card ? (
           <>
-            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)}
+              conversationId={conversationId} streaming={streaming} browserSession={t.id === lastBrowser ? browserSession : undefined} />
             {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
             {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>

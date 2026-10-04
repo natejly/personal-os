@@ -432,6 +432,8 @@ export const api = {
     listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
+    /** The chat as Markdown: active rows in order, tool calls as one-line summaries. */
+    exportMd: (id: string) => req<{ title: string; text: string }>(`/conversations/${id}/export`),
     search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`)
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */

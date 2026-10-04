@@ -1160,6 +1160,17 @@ def get_conversation(id: str) -> dict[str, Any]:
     return c
 
 
+@app.get("/conversations/{id}/export")
+def export_conversation_md(id: str) -> dict[str, str]:
+    """One chat as Markdown: the active rows in order, tool calls as one-line summaries. The renderer names the file."""
+    c = convos.get(id)  # None for a trashed chat too
+    if not c:
+        raise HTTPException(404)
+    p = projects.get(c["project_id"]) if c.get("project_id") else None
+    name = p["name"] if p else "(global)"
+    return {"title": c["title"] or "Untitled", "text": backups.render_conversation_md(c, c["messages"], name, exported=time.time())}
+
+
 @app.patch("/conversations/{id}")
 def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True)

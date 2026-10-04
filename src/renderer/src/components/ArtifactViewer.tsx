@@ -23,7 +23,7 @@ const when = (t: number): string => new Date(t * 1000).toLocaleString([], { mont
 
 /**
  * A full-size artifact with its version history. `inline` fills its container (the Artifacts list);
- * otherwise it is a full-window dialog (Open from a chat card or from Library -> Made).
+ * otherwise it is a full-window dialog (Open from a chat card or from Library -> Artifacts).
  */
 export default function ArtifactViewer({ id, onClose, onDeleted, inline = false }: {
   id: string

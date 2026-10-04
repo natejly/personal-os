@@ -109,7 +109,7 @@ their own instructions, knowledge files, memories and graph.
   then whisper.cpp, then your LLM proxy. Meetings never expire, are unreachable
   from the activity monitor's purge, and never reach auto-learn. See
   [docs/meetings.md](docs/meetings.md).
-- **Cowork desks** (the view starts hidden; turn it on in Settings → Modules).
+- **Cowork desks** (the view starts hidden; turn it on in Settings → Modules). A desk that needs you shows up in the Agent inbox on Today, next to approvals and proposals.
   A desk is a task you hand over: its own conversation, its own
   folder, and one plan you approve before it acts. Several run at once. Long
   autonomy is bought by chaining bounded replies, never by a longer leash — each
@@ -125,7 +125,7 @@ their own instructions, knowledge files, memories and graph.
   it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
   the procedures it can be asked to repeat; **Connectors**, the MCP servers whose
-  tools join the toolbox; and **Made**, every doc, dashboard and board built here.
+  tools join the toolbox; and **Artifacts**, every doc, page, dashboard and board built here.
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -161,7 +161,7 @@ their own instructions, knowledge files, memories and graph.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
   repeatedly on a cron expression ("every Friday at 17:00, write my weekly
-  review"). Schedule it from the Agent inbox on Today, or just ask in a chat —
+  review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
   it runs in a fresh chat on a tighter budget, it can read and write inside

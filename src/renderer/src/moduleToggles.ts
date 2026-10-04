@@ -6,7 +6,7 @@
 import type { Settings } from '@shared/types'
 
 /** Matches backend llm.DEFAULT_SETTINGS. Used when settings have not loaded yet. */
-export const DEFAULT_HIDDEN_VIEWS = ['library', 'cowork', 'meetings', 'activity'] as const
+export const DEFAULT_HIDDEN_VIEWS = ['meetings', 'activity'] as const
 const DEFAULT_OFF_HOME = new Set<string>(['cowork', 'meetings'])
 
 export const homeModuleOn = (s: Settings, key: string): boolean => {

@@ -1157,7 +1157,7 @@ def register(tb: Any) -> None:
         "agent_stop", "Cancel a subagent and everything it started. It returns whatever partial output it had.",
         _obj({"id": {"type": "string"}}, ["id"]), agent_stop, GROUP, "safe", taints=True, examples=[{"id": "sa_abc"}]))
 
-    async def desk_start(ctx: dict[str, Any], title: str, brief: str, mode: str = "plan") -> Any:
+    async def desk_start(ctx: dict[str, Any], title: str, brief: str, mode: str = "plan", doc_ids: list[str] | None = None) -> Any:
         starter = getattr(tb, "desk_starter", None)
         if starter is None:
             return tool_error("Starting a desk is not available here.")
@@ -1165,12 +1165,17 @@ def register(tb: Any) -> None:
             return tool_error(f"A desk started by an agent plans first: mode must be one of {', '.join(DESK_MODES)}.", field="mode")
         if not str(brief or "").strip():
             return tool_error("A desk needs a brief.", field="brief")
-        return await starter(ctx, str(title or ""), str(brief), mode)
+        if doc_ids is not None and not (isinstance(doc_ids, list) and all(isinstance(d, str) for d in doc_ids)):
+            return tool_error("doc_ids must be a list of doc ids or titles.", field="doc_ids")
+        return await starter(ctx, str(title or ""), str(brief), mode, doc_ids or None)
 
     R("desk_start", ToolSpec(
         "desk_start", "Start a new desk: a separate autonomous work session with its own conversation and workspace that plans first "
         "and waits for the user to approve the plan. Always shows the user a card. Use it for substantial work that should "
-        "continue on its own rather than inside this reply.",
-        _obj({"title": {"type": "string"}, "brief": {"type": "string", "description": "What the desk should accomplish"},
-              "mode": {"type": "string", "enum": list(DESK_MODES), "default": "plan"}}, ["title", "brief"]),
-        desk_start, GROUP, "plan", examples=[{"title": "Competitor comparison", "brief": "Compare the five companies in docs/targets.md and write a one-page summary."}]))
+        "continue on its own rather than inside this reply. Pass the docs it needs as doc_ids: they are copied into its "
+        "inputs/ folder (a desk cannot read this chat). When it finishes, its report is posted back into this chat.",
+        _obj({"title": {"type": "string"}, "brief": {"type": "string", "description": "What the desk should accomplish, and what done looks like"},
+              "mode": {"type": "string", "enum": list(DESK_MODES), "default": "plan"},
+              "doc_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 10,
+                          "description": "Docs (ids or exact titles) to copy into the desk's inputs/ folder"}}, ["title", "brief"]),
+        desk_start, GROUP, "plan", examples=[{"title": "Competitor comparison", "brief": "Compare the five companies in the targets doc and write a one-page summary.", "doc_ids": ["Targets"]}]))

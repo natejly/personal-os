@@ -41,6 +41,11 @@ export default function PendingSends(): JSX.Element | null {
   useEffect(() => {
     if (!googleConnected) return
     void refresh()
+    // Anything that queues mail (Mail's Send, an accepted proposal, the assistant's gmail_send) says so, so the undo
+    // countdown shows up at once instead of on the next launch.
+    const on = (): void => void refresh()
+    window.addEventListener('grain-outbox-changed', on)
+    return (): void => window.removeEventListener('grain-outbox-changed', on)
   }, [googleConnected, refresh])
 
   // One shared second-tick: counts down locally, and re-reads the server as each hold runs out so

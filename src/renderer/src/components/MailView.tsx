@@ -47,7 +47,7 @@ const RANGES = [
 export default function MailView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
-  const { toggleSidebar, setSettingsOpen, toast, askAboutEmail } = useStore()
+  const { toggleSidebar, toast, askAboutEmail } = useStore()
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
   const [loading, setLoading] = useState(false)
@@ -194,6 +194,7 @@ export default function MailView(): JSX.Element {
       const queued = await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
       if (queued.status === 'sent' && queued.verified === false) toast(queued.error ?? 'Sent, but Gmail did not confirm it. Check your Sent folder.', 'error')
       else toast(queued.status === 'sent' ? 'Email sent.' : `Sending in ${queued.seconds_left}s — you can still undo it.`)
+      window.dispatchEvent(new Event('grain-outbox-changed'))
       setCompose(null)
       setReview(null)
     } catch (e) {
@@ -268,7 +269,7 @@ export default function MailView(): JSX.Element {
           <MailIcon size={28} />
           <h2>Connect your inbox</h2>
           <p>Grain reads and triages Gmail once Google is connected. Nothing is sent without asking you first.</p>
-          <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
+          <button className="primary-btn" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button>
         </div>
       )}
       {error && <div className="notice-bar error">{error}</div>}

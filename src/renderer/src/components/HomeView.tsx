@@ -207,7 +207,7 @@ export default function HomeView(): JSX.Element {
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap, openMemory } = useStore()
+  const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, refreshRecap, openMemory } = useStore()
   const recap = useStore((s) => s.recap)
   const recapLoading = useStore((s) => s.recapLoading)
   const settings = useStore((s) => s.settings)
@@ -313,7 +313,7 @@ export default function HomeView(): JSX.Element {
           {on('calendar') && <section className="widget">
             <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
             {!google?.connected ? (
-              <ConnectGoogle what="your calendar" onConnect={() => setSettingsOpen(true)} />
+              <ConnectGoogle what="your calendar" onConnect={() => useStore.getState().openSettings('integrations')} />
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
@@ -333,7 +333,7 @@ export default function HomeView(): JSX.Element {
 
           {on('inbox') && <section className="widget">
             <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
-            {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => setSettingsOpen(true)} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+            {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => useStore.getState().openSettings('integrations')} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
                   <li key={m.id} onClick={() => void askAboutEmail(m.id, m.subject)} title="Ask the assistant about this email">
@@ -355,7 +355,7 @@ export default function HomeView(): JSX.Element {
 
           {on('gtasks') && <section className="widget">
             <header><ListChecks size={14} /> Google Tasks</header>
-            {!google?.connected ? <ConnectGoogle what="Google Tasks" onConnect={() => setSettingsOpen(true)} /> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
+            {!google?.connected ? <ConnectGoogle what="Google Tasks" onConnect={() => useStore.getState().openSettings('integrations')} /> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
               <ul className="events">
                 {d!.tasks!.slice(0, 8).map((t) => (
                   <li key={t.id}><span className="ev-title">{t.title || '(untitled)'}</span>{t.due && <span className="muted small">{fmtDue(t.due)}</span>}</li>
@@ -366,11 +366,11 @@ export default function HomeView(): JSX.Element {
 
           {on('drive') && <section className="widget">
             <header><HardDrive size={14} /> Drive {google?.connected && d?.drive && <span className="muted small">recently modified</span>}</header>
-            {!google?.connected ? <ConnectGoogle what="recent Drive files" onConnect={() => setSettingsOpen(true)} />
+            {!google?.connected ? <ConnectGoogle what="recent Drive files" onConnect={() => useStore.getState().openSettings('integrations')} />
               : google.missing_scopes.some((s) => s.includes('drive')) ? (
                 <div className="widget-empty">
                   <p className="muted">Drive needs a fresh sign-in.</p>
-                  <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Reconnect Google</button>
+                  <button className="primary-btn" onClick={() => useStore.getState().openSettings('integrations')}>Reconnect Google</button>
                 </div>
               ) : d?.errors.drive ? <p className="msg-error">{d.errors.drive}</p> : (d?.drive?.length ?? 0) === 0 ? <p className="muted">No recent files.</p> : (
                 <ul className="events">

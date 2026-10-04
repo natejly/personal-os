@@ -13,7 +13,7 @@ import { adjacentChatId } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
-import { viewHidden } from './moduleToggles'
+import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
@@ -1109,7 +1109,7 @@ export const useStore = create<State>((set, get) => {
     if (st.activeDeskId === d.id) void get().openDesk(d.id)
     if (d.status === 'review') void get().loadDeskFiles(d.id)
     if (inboxTimer === null) {
-      inboxTimer = setTimeout(() => { inboxTimer = null; void get().refreshDeskInbox() }, 300)
+      inboxTimer = setTimeout(() => { inboxTimer = null; void get().refreshDeskInbox(); void get().refreshAgentInbox() }, 300)
     }
   }
 
@@ -1152,7 +1152,14 @@ export const useStore = create<State>((set, get) => {
               else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
             }
           } else if (ev.event === 'conversation_changed') {
-            applyTitle(ev.data.id, ev.data.title)
+            if (ev.data.title) applyTitle(ev.data.id, ev.data.title)
+            if (ev.data.reload) {
+              // A desk posted its report into this chat. An open, idle session re-reads it; a streaming one picks
+              // the row up when its run settles, and the list re-sorts on the next refresh either way.
+              const sess = get().sessions[ev.data.id]
+              if (sess && !sess.streaming) void get().openSession(ev.data.id).catch(() => undefined)
+              void get().refreshConversations().catch(() => undefined)
+            }
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data
@@ -1224,6 +1231,9 @@ export const useStore = create<State>((set, get) => {
   const step = (s: ChatSession, ev: ChatEvent, visible: boolean, seq: number | null): ChatSession => {
     const next = applyEvent(s, ev, visible, seq)
     if (next === s) return s
+    if (ev.event === 'tool_result' && (ev.data as { name?: string }).name === 'gmail_send') {
+      setTimeout(() => window.dispatchEvent(new Event('grain-outbox-changed')), 0)  // the undo countdown, now
+    }
     // Only the events that open or settle a gate can move the count, and delta must stay free
     // of any recount: it is the one event that arrives per token.
     const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
@@ -1240,6 +1250,7 @@ export const useStore = create<State>((set, get) => {
     const key = `${runId}:${kind}`
     if (seen.has(key)) return
     seen.add(key)
+    if (kind === 'approval') void get().refreshAgentInbox()  // the Today badge counts every open card, this one too
     if (get().settings.chatNotify === false) return
     if (visible && typeof document !== 'undefined' && document.hasFocus()) return
     if (get().desks.some((d) => d.conversation_id === convId)) return
@@ -1694,7 +1705,8 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
       void get().refreshDashboard()
       void get().refreshTodos()
-      void get().refreshRecap()
+      // The recap is a model call: only make it for a card that is on (Regenerate and the canvas widget still can).
+      if (homeModuleOn(get().settings, 'recap')) void get().refreshRecap()
       void get().refreshDocsPending()
       void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
@@ -1706,6 +1718,9 @@ export const useStore = create<State>((set, get) => {
       // The sidebar's needs-you badge and the Today card read this; without it they stay empty until
       // Cowork or Home happens to mount.
       void get().refreshDeskInbox()
+      // The desk notifier watches `desks`, and `desk_status` events only update rows already loaded: without this
+      // a desk finishing before Cowork was first opened raised no notification.
+      void get().refreshDesks()
       // Both for the sidebar: the review badge, and the indicator that says a recording is running.
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
@@ -2840,6 +2855,7 @@ export const useStore = create<State>((set, get) => {
       } catch {
         void get().refreshDeskInbox()
       }
+      void get().refreshAgentInbox()  // after the write, or the inbox re-reads the row it is clearing
     },
 
     refreshSkills: async () => set({ skills: await api.skills.list() }),
@@ -3643,7 +3659,10 @@ export const useStore = create<State>((set, get) => {
       try {
         const res = accept ? await api.proposals.accept(id, args) : await api.proposals.reject(id)
         if (accept && !res.ok) get().toast(`That did not go through: ${res.proposal.error ?? 'unknown error'}`, 'error')
-        else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+        else if (accept && res.proposal.tool === 'gmail_send') {
+          get().toast('Queued — it sends after the undo window.', 'info')
+          window.dispatchEvent(new Event('grain-outbox-changed'))
+        } else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       } finally {
@@ -3652,10 +3671,12 @@ export const useStore = create<State>((set, get) => {
     },
     approveTool: async (callId, decision, conversationId, opts) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id) return
       // Clears the card's pending state. The tool_result event fills in the rest, and the count settles
       // now rather than when the tool returns, since an external action can take seconds.
-      const clear = (approval?: ApprovalDecision): void =>
+      const clear = (approval?: ApprovalDecision): void => {
+        // Answered from the Agent inbox, the card may belong to no chat this window has open: the row is all there is.
+        void get().refreshAgentInbox()
+        if (!id) return
         patchSession(id, (s) => {
           const conversation = { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === callId
             ? { ...t, needs_approval: false, ...(approval ? { approval } : {}), ...(approval && opts?.arguments && approval !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
@@ -3663,6 +3684,7 @@ export const useStore = create<State>((set, get) => {
           const pendingApprovals = countApprovals(conversation)
           return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
         })
+      }
       try {
         await api.approve(callId, decision, opts)
         clear(decision)

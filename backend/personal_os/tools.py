@@ -587,7 +587,7 @@ async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, 
 class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
     subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
-    desk_starter: Any = None  # async (ctx, title, brief, mode) -> result, wired in app.py for desk_start
+    desk_starter: Any = None  # async (ctx, title, brief, mode, doc_ids) -> result, wired in app.py for desk_start
     workflows: Any = None  # workflows.Workflows and its Engine, commands.Commands: wired in app.py
     workflow_engine: Any = None
     commands: Any = None

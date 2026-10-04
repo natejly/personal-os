@@ -17,7 +17,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator, Callable
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -60,7 +60,7 @@ from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
-                     parked_report)
+                     origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
 from .microvm import Sandboxes
@@ -291,8 +291,11 @@ def _seed_settings_from_env() -> None:
 
 _seed_settings_from_env()
 
-_MODULES_DEFAULT = 3
-_DEFAULT_OFF_VIEWS = ("library", "cowork", "meetings", "activity")
+_MODULES_DEFAULT = 4
+_DEFAULT_OFF_VIEWS = ("meetings", "activity")
+# Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
+# meant the user could not find work the assistant had already handed back.
+_SHOWN_AT_4 = ("library", "cowork")
 _DEFAULT_OFF_HOME = ("cowork", "meetings")
 
 
@@ -311,6 +314,8 @@ def _seed_hidden_modules() -> None:
     for v in add:
         if v not in hidden:
             hidden.append(v)
+    if current < 4:
+        hidden = [v for v in hidden if v not in _SHOWN_AT_4]
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
     if not current:
         for k in _DEFAULT_OFF_HOME:
@@ -4311,6 +4316,31 @@ def reject_proposal(pid: str) -> dict[str, Any]:
 INBOX_SUMMARY_CHARS = 1400
 
 
+def _review_queues() -> list[dict[str, Any]]:
+    """Every other queue of agent work waiting on a human, as a count and the place it is decided. The inbox links to
+    each rather than re-implementing its review UI. A queue that fails to count is left out, never fatal."""
+    queues: list[tuple[str, str, Callable[[], int]]] = [
+        ("doc_edits", "Proposed doc edits", docs.pending_count),
+        ("meetings", "Meeting notes to review", meeting_store.pending_count),
+        ("skills", "Skills to approve", lambda: len(skills.list(status="candidate", project_id="__all__"))),
+        ("workflows", "Workflow runs to approve",
+         lambda: sum(1 for r in workflow_store.list_runs(limit=200) if r.get("status") == "awaiting_approval")),
+        ("memory", "Memory tidy-ups", lambda: len(consolidator.list("pending", ALL))),
+        ("suggestions", "Activity suggestions",
+         lambda: sum(1 for s in monitor.insights.list_suggestions() if s.get("status") == "new")),
+    ]
+    out = []
+    for key, label, count in queues:
+        try:
+            n = int(count())
+        except Exception:  # noqa: BLE001 - one broken queue must not blank the inbox
+            log.exception("inbox: counting %s failed", key)
+            continue
+        if n:
+            out.append({"key": key, "label": label, "count": n})
+    return out
+
+
 @app.get("/inbox")
 def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
@@ -4352,9 +4382,18 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
                     "consecutive_failures": jb["consecutive_failures"]}
                    for jb in jobs.list() if not jb["enabled"] and jb.get("paused_reason")]
-    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals, "paused_jobs": paused_jobs},
+    # One row per desk waiting on the user, unless one of its approvals is already listed above (same thing, twice).
+    asked = {a.get("desk_id") for a in pending_approvals if a.get("desk_id")}
+    desk_rows: dict[str, dict[str, Any]] = {}
+    for e in desks.inbox(100):  # newest first, so the first row per desk is its latest state
+        if e["desk_id"] not in asked and e["desk_id"] not in desk_rows:
+            desk_rows[e["desk_id"]] = e
+    elsewhere = _review_queues()
+    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals, "paused_jobs": paused_jobs,
+                          "desks": list(desk_rows.values()), "elsewhere": elsewhere},
             "while_you_were_away": away,
-            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals) + len(paused_jobs),
+            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals) + len(paused_jobs) + len(desk_rows)
+                       + sum(q["count"] for q in elsewhere),
                        "paused_jobs": len(paused_jobs),
                        "approvals": len(pending_approvals), "proposals": len(pending_proposals),
                        "runs": len(away), "late": sum(1 for a in away if a["late"]),
@@ -7713,6 +7752,12 @@ def list_desks(project_id: str | None = None, status: str | None = None, archive
 
 @app.post("/cowork/desks")
 async def create_desk(body: DeskIn) -> dict[str, Any]:
+    return await _create_desk(body)
+
+
+async def _create_desk(body: DeskIn, *, origin: str | None = None, inputs: dict[str, str] | None = None) -> dict[str, Any]:
+    """`origin` is the chat that asked for the desk (it is told when the desk finishes); `inputs` maps a file name to
+    the text copied into the desk's inputs/ folder before its first turn, so the desk starts with the material."""
     brief = (body.brief or "").strip()
     if not brief:
         raise HTTPException(400, "A desk needs a brief")
@@ -7727,10 +7772,18 @@ async def create_desk(body: DeskIn) -> dict[str, Any]:
     conv = convos.create(pid, _title_from(body.title or brief), cfg["defaultModel"])
     try:
         desk = desks.create(conversation_id=conv["id"], brief=brief, title=(body.title or "").strip(),
-                            project_id=pid, autonomy=body.autonomy or "plan", budget=body.budget)
+                            project_id=pid, autonomy=body.autonomy or "plan", budget=body.budget,
+                            origin_conversation_id=origin)
     except ValueError as e:
         convos.delete(conv["id"])        # the conversation exists only to hold this desk's transcript
         raise HTTPException(400, str(e)) from e
+    try:
+        for name, text in (inputs or {}).items():
+            workspace.write(desk["id"], f"inputs/{name}", text, mode="overwrite")
+    except WorkspaceError as e:          # a desk without the material it was promised would plan blind
+        desks.delete(desk["id"])
+        convos.delete(conv["id"])
+        raise HTTPException(400, f"Could not copy the inputs: {e}") from e
     # Marked here rather than in Desks: `deskId` is what keeps the conversation out of Recent
     # chats. planMode follows the autonomy the user picked — 'ask as it goes' cards each change
     # instead of planning first, so writing 'always' for it would make the two modes identical and
@@ -7747,15 +7800,61 @@ async def create_desk(body: DeskIn) -> dict[str, Any]:
     return out
 
 
-async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: str) -> dict[str, Any]:
-    """desk_start: the same creation the REST route does, started at once, in plan (or tighter) autonomy."""
+DESK_INPUT_MAX_DOCS = 10
+
+
+def _input_name(title: str, taken: set[str]) -> str:
+    stem = re.sub(r"[^A-Za-z0-9 ._-]+", "", title or "").strip().replace(" ", "-")[:60] or "doc"
+    name, n = f"{stem}.md", 2
+    while name.casefold() in taken:
+        name, n = f"{stem}-{n}.md", n + 1
+    taken.add(name.casefold())
+    return name
+
+
+async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: str,
+                           doc_ids: list[str] | None = None) -> dict[str, Any]:
+    """desk_start: the same creation the REST route does, started at once, in plan (or tighter) autonomy. The chat
+    that called it is the desk's origin, and the docs it names are copied in as the desk's inputs."""
+    inputs: dict[str, str] = {}
+    taken: set[str] = set()
+    for ref in (doc_ids or [])[:DESK_INPUT_MAX_DOCS]:
+        d = docs.find(str(ref))
+        if not d:
+            return tools.tool_error(f"No doc {ref!r}: pass an id or title from doc_list/doc_search.", field="doc_ids")
+        inputs[_input_name(d["title"], taken)] = d["content"]
+    if inputs:
+        brief = brief.rstrip() + "\n\nInputs, copied into inputs/ in your workspace: " + ", ".join(inputs) + "."
     try:
-        out = await create_desk(DeskIn(brief=brief, title=title or None, project_id=ctx.get("project_id"), autonomy=mode, start=True))
+        out = await _create_desk(DeskIn(brief=brief, title=title or None, project_id=ctx.get("project_id"), autonomy=mode,
+                                        start=True), origin=ctx.get("conversation_id"), inputs=inputs)
     except HTTPException as e:
         detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
         return tools.tool_error(f"The desk was not started: {detail}")
     return {"desk_id": out["desk"]["id"], "conversation_id": out["conversation_id"], "run_id": out.get("run_id"), "mode": mode,
-            "note": "The desk is planning. It will wait for the user to approve its plan before it does anything."}
+            "inputs": [f"inputs/{n}" for n in inputs],
+            "note": "The desk is planning. It will wait for the user to approve its plan before it does anything. When it "
+                    "finishes, its report is posted back into this chat."}
+
+
+def _desk_report(desk: dict[str, Any]) -> None:
+    """Post a finished desk's report into the chat that started it, and tell any open window to re-read that chat."""
+    origin = desk.get("origin_conversation_id")
+    if not origin or not convos.get(origin):
+        return  # the chat was deleted since: nothing to tell
+    convos.add_message(origin, "assistant", origin_report(desk, desks.outputs(desk["id"])))
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    payload = {"id": origin, "reload": True}
+    if running is not None:
+        events.publish("conversation_changed", payload)
+    elif _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "conversation_changed", payload)
+
+
+desks.on_report = _desk_report
 
 
 toolbox.desk_starter = _desk_start_tool

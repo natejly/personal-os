@@ -362,12 +362,14 @@ def test_queue() -> None:
     check([d["id"] for d in desks.queued()] == [a["id"], b["id"]], "the queue is oldest first")
     check(desks.queue_position(b["id"]) == 2 and desks.queue_position(fresh()["id"]) == 0, "positions are 1-based")
     n_events = len(desks.events(a["id"]))
-    again = desks.enqueue(a["id"], "job finished", ("draft",))
+    check(desks.enqueue(a["id"], "Write the brief", ("draft",)) is None,
+          "a queued desk is only appended to by a caller that names 'queued' (a second Start does not)")
+    again = desks.enqueue(a["id"], "job finished", ("queued",))
     check(again["queued_message"] == "Write the brief\n\njob finished",
           "a second wake while queued appends, so nothing that woke it is lost")
     check(again["queued_at"] == qa["queued_at"] and desks.queue_position(a["id"]) == 1, "…and keeps its place in line")
     check(len(desks.events(a["id"])) == n_events, "…without a second timeline row")
-    check(desks.enqueue(a["id"], "", ())["queued_message"] == again["queued_message"], "an empty wake changes nothing")
+    check(desks.enqueue(a["id"], "", ("queued",))["queued_message"] == again["queued_message"], "an empty wake changes nothing")
     claimed = desks.claim_run(a["id"], ("queued",))
     check(claimed["status"] == "planning" and claimed["queued_message"] == "" and claimed["queued_at"] is None,
           "claiming out of the queue clears what it held")

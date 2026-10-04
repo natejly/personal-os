@@ -851,6 +851,10 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     db.set_settings(clean)
     if "sandboxRuntime" in clean:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
+    if "deskMaxLive" in clean and _loop is not None and not _loop.is_closed():
+        # A raised cap frees slots no desk's ending will report; launch queued desks into them now.
+        # (A sync route runs in the threadpool, and launching creates tasks on the loop.)
+        _loop.call_soon_threadsafe(_drain_queue)
     return public_settings()
 
 
@@ -3464,6 +3468,10 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
     desk = desks.get(desk_id, with_outputs=False)
     if not desk or bus.live(desk["conversation_id"]):
         return None
+    if desk["status"] == "queued" and "queued" not in from_statuses:
+        # Already in line, and this way in (start) does not add to what the desk will be woken with:
+        # a second Start must not re-send the brief or jump the queue.
+        return desk
     # Every way in counts against the cap - start, resume, a message, a wake from an approval, a
     # background job's result - so this is the one place it is checked. The desk is not live yet,
     # so it is not counted.
@@ -3472,7 +3480,6 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
     if desk["status"] == "queued":
         # Out of the queue: the turn carries everything that woke the desk while it waited.
         content = "\n\n".join(x for x in (desk.get("queued_message") or "", (content or "").strip()) if x)
-        from_statuses = (*from_statuses, "queued")
     claimed = desks.claim_run(desk_id, from_statuses)
     if not claimed:
         return None
@@ -3525,7 +3532,7 @@ def _shell_wake(conversation_id: str | None) -> None:
     notes = toolbox.shell.drain_notes(conversation_id)
     if notes:
         # Over the cap this queues the notes as the desk's next turn rather than dropping them.
-        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done"))
+        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done", "queued"))
 
 
 toolbox.shell.on_note = _shell_wake

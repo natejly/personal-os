@@ -18,7 +18,7 @@ SQLITE_BUSY_SNAPSHOT instead of making it wait.
 `needs_you=1` rows are what the rail's Needs you section and the Today card are built from, so a desk
 that finished or broke while the app was closed is still visible without a poller. `recover()` is the
 other half of that: on boot every LIVE desk becomes `interrupted` with a needs_you event, and nothing
-is ever auto-resumed — the user presses Resume.
+is auto-resumed unless deskAutoResume is on — otherwise the user presses Resume.
 
 `desks.workspace` stores the RELATIVE `cowork/<id>` that `Workspace.rel_root` builds, never an
 absolute path, so moving the data directory does not strand every desk.
@@ -122,7 +122,8 @@ START_FROM = ("draft",)
 # and Desks.recover() sweeps that status, so Resume has to be able to claim out of it.
 RESUME_FROM = ("awaiting_plan", "blocked", "paused", "interrupted", "review")
 # A typed message may also wake a desk the user had let finish — the same box, awake or not.
-MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped")
+# A message to a queued desk is appended to what it will wake with; Start on one is not (it holds the brief already).
+MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped", "queued")
 # Pause holds a desk that is doing something; pausing one in review or done would make it resumable
 # work it is not. Stop ends anything not already over.
 PAUSE_FROM = (*LIVE, "awaiting_plan")
@@ -341,7 +342,7 @@ _STATUS_BODY = {
     "needs_approval": "Waiting for your approval.",
     "blocked": "Blocked.",
     "paused": "Paused.",
-    "interrupted": "Interrupted when the app stopped. Nothing was resumed for you.",
+    "interrupted": "Interrupted when the app stopped.",
     "review": "Finished. Outputs are waiting for review.",
     "done": "Done.",
     "failed": "Failed.",
@@ -655,9 +656,9 @@ class Desks:
     def enqueue(self, id: str, message: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
         """Wait for a free slot under deskMaxLive instead of being refused. Atomic like claim_run: None
         means the desk was not in `from_statuses`. A desk already queued keeps its place in line, and
-        the new message is appended to the one it holds, so nothing that woke it is lost."""
-        statuses = tuple(dict.fromkeys((*from_statuses, "queued")))
-        marks = ",".join("?" for _ in statuses)
+        the new message is appended to the one it holds, so nothing that woke it is lost. Only callers
+        that pass 'queued' in `from_statuses` (a message, a shell result) append to a queued desk."""
+        marks = ",".join("?" for _ in from_statuses)
         t = now()
         msg = (message or "").strip()
         with self.db.tx() as c:
@@ -670,7 +671,7 @@ class Desks:
                 " queued_at = CASE WHEN status='queued' THEN queued_at ELSE ? END,"
                 " status='queued', status_reason='', run_id=NULL, ended_at=NULL, updated_at=?"
                 f" WHERE id=? AND status IN ({marks})",
-                (msg, msg, msg, t, t, id, *statuses),
+                (msg, msg, msg, t, t, id, *from_statuses),
             )
             if not cur.rowcount:
                 return None

@@ -605,6 +605,7 @@ class Toolbox:
     workflows: Any = None  # workflows.Workflows and its Engine, commands.Commands: wired in app.py
     workflow_engine: Any = None
     commands: Any = None
+    style_relearn: Any = None  # (project_id) -> None: queues a background voice relearn; wired in app.py
 
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
@@ -2118,12 +2119,12 @@ def _register_style(self: Toolbox) -> None:
     R = self.specs.__setitem__
 
     async def writing_style(ctx: dict[str, Any]) -> Any:
-        if not voice_wanted(ctx.get("conv_settings") or {}, draft=bool((ctx.get("conv_settings") or {}).get("draftMode")),
-                            tainted=bool(ctx.get("tainted"))):
-            return {"profile": None, "note": "The voice is off for this turn: it needs Draft mode on in the context drawer, "
-                                             "Writing style on, and a chat that has not read untrusted content."}
+        # Calling this tool is the draft intent, so Draft mode is not required here; the toggle and taint still are.
+        if not voice_wanted(ctx.get("conv_settings") or {}, draft=True, tainted=bool(ctx.get("tainted"))):
+            return {"profile": None, "note": "The voice is off for this chat: it needs Writing style on in the context "
+                                             "drawer and a chat that has not read untrusted content."}
         p = self.style.for_context(ctx["project_id"])
-        if not p or not (p["summary"] or p["guidelines"]):
+        if not p or not p["enabled"] or not (p["summary"] or p["guidelines"]):
             return {"profile": None,
                     "note": "No writing-style profile yet. Write in plain, direct prose, and ask the user for a "
                             "sample of their own writing if matching their voice matters."}
@@ -2141,6 +2142,8 @@ def _register_style(self: Toolbox) -> None:
         s = self.style.add_sample(None if personal else ctx["project_id"], text, source="chat", check=False)
         if not s:
             return tool_error("Empty sample.", field="text", expected="a passage the user wrote, at least a short paragraph")
+        if self.style_relearn is not None:
+            self.style_relearn(s["project_id"])
         return {"saved": s["id"], "chars": s["chars"],
                 "note": "Banked as evidence of their voice. The profile refreshes on its own; the user can review or "
                         "delete samples under Memory → Voice."}

@@ -1387,6 +1387,8 @@ export interface Learned {
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
+  /** The learn worker re-read a scope's writing samples into a new voice profile. */
+  | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */

@@ -510,10 +510,11 @@ class McpServers:
                           (slug, scope, scope_id or "")).fetchone()
         return row_to_dict(r)  # type: ignore[return-value]
 
-    def clear_grant(self, tool_slug: str, scope: str = "global", scope_id: str | None = None) -> None:
+    def clear_grant(self, tool_slug: str, scope: str = "global", scope_id: str | None = None) -> int:
+        """Rows deleted: 0 means the (scope, scope_id) named no grant."""
         with self.db.tx() as c:
-            c.execute("DELETE FROM mcp_grants WHERE lower(tool_slug)=lower(?) AND scope=? AND scope_id=?",
-                      (tool_slug, scope, scope_id or ""))
+            return c.execute("DELETE FROM mcp_grants WHERE lower(tool_slug)=lower(?) AND scope=? AND scope_id=?",
+                             (tool_slug, scope, scope_id or "")).rowcount
 
     def effective_mode(self, tool_slug: str, project_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:
         """chat grant → project grant → global grant → tool default, then the stale-schema veto.

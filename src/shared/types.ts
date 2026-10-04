@@ -249,6 +249,30 @@ export interface PermissionCard {
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
 export interface PermissionRules { allow: string[]; ask: string[]; deny: string[] }
 
+/** A remembered MCP tool mode (`mcp_grants`), bound to the schema it approved. scope_id is '' for global. */
+export interface McpGrant {
+  id: string
+  tool_slug: string
+  scope: 'global' | 'project' | 'chat'
+  scope_id: string
+  mode: ToolMode
+  schema_hash: string
+  granted_by: string
+  created_at: number
+  updated_at: number
+}
+
+/** GET /permissions/grants: every standing grant, so one view shows what runs without asking. */
+export interface PermissionGrants {
+  /** 'Allow for this chat session' keys, in memory until restart. */
+  session: { conversation_id: string; title: string; keys: string[] }[]
+  chat_overrides: { conversation_id: string; title: string; tool: string; mode: ToolMode }[]
+  project_overrides: { project_id: string; title: string; tool: string; mode: ToolMode }[]
+  global: Record<string, ToolMode>
+  mcp: McpGrant[]
+  rules: PermissionRules
+}
+
 export interface PermissionEvaluation {
   action: 'allow' | 'ask' | 'deny' | 'none'
   hardline: boolean
@@ -2084,6 +2108,9 @@ export interface PendingApproval {
   parked_at?: number | null
   /** A run in this process is waiting on it right now. */
   live?: boolean
+  /** What the user said with the answer. */
+  note?: string | null
+  conversation_title?: string | null
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */

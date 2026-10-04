@@ -2162,7 +2162,7 @@ def _register_docs(self: Toolbox) -> None:
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
                 for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
-    R("doc_list", ToolSpec("doc_list", "List the files the user writes in the app's Files view (its markdown editor) — their notes, drafts and documents are all just files. Uploads (PDFs and other files added under Settings → Knowledge base or a project's Knowledge tab) are a different store: use search_documents for those. Start here when they mention 'my notes', 'my files', 'my essay' or 'the file' and you need its id.",
+    R("doc_list", ToolSpec("doc_list", "List the files the user writes in the app's Files view (its markdown editor) — their notes, drafts and documents are all just files. Uploads (PDFs and other files added under Settings → Knowledge base or a project's Uploads tab) are a different store: use search_documents for those. Start here when they mention 'my notes', 'my files', 'my essay' or 'the file' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
@@ -3012,7 +3012,7 @@ def _register_cowork(self: Toolbox) -> None:
             out["warning"] = ("The file still contains placeholder text: " + ", ".join(marks)
                               + ". If these are unfinished, fix them and deliver again.")
         return out
-    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a doc, a document or a download.",
+    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a file or a download.",
         _obj({"path": {"type": "string", "description": "A path under outputs/"},
               "title": {"type": "string", "description": "What the user will see this called"},
               "summary": {"type": "string", "description": "One or two lines: what it is and what you would do with it"}},

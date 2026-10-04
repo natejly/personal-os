@@ -2666,7 +2666,13 @@ export const useStore = create<State>((set, get) => {
     },
 
     setLibraryTab: (libraryTab) => set({ libraryTab }),
-    openFiles: (filesSection) => { set({ filesSection }); get().setView('docs') },
+    openFiles: (filesSection) => {
+      set({ filesSection })
+      // ponytail: Files has no Uploads section yet, so uploads (and the #doc-upload-input ⌘U clicks) still live in
+      // Settings → Knowledge base → Documents. The files-view package replaces this with plain setView('docs').
+      if (filesSection === 'uploads') get().openSettings('knowledge', 'documents')
+      else get().setView('docs')
+    },
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {

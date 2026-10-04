@@ -87,21 +87,23 @@ const withDom = async (doc: object, fn: () => void | Promise<void>): Promise<voi
   try { await fn() } finally { delete g.document; delete g.KeyboardEvent }
 }
 
-test('view:documents and upload open Files on Uploads, never Settings', async () => {
-  useStore.getState().setView('todos')
+test('view:documents and upload reach the uploads list, where the upload input renders', async () => {
+  // Until Files has an Uploads section, uploads live in Settings → Knowledge base → Documents.
+  const atUploads = (): void => {
+    assert.equal(useStore.getState().filesSection, 'uploads')
+    assert.equal(useStore.getState().settingsOpen, true)
+    assert.equal(useStore.getState().settingsTab, 'knowledge')
+    assert.equal(useStore.getState().knowledgeTab, 'documents')
+    useStore.getState().setSettingsOpen(false)
+  }
   fire('view:documents')
-  assert.equal(useStore.getState().view, 'docs')
-  assert.equal(useStore.getState().filesSection, 'uploads')
-  assert.equal(useStore.getState().settingsOpen, false)
-  useStore.getState().setView('todos')
+  atUploads()
   const clicked: string[] = []
   await withDom({ activeElement: null, getElementById: (id: string) => ({ click: () => clicked.push(id) }) }, async () => {
     fire('upload')
-    assert.equal(useStore.getState().view, 'docs')
-    assert.equal(useStore.getState().filesSection, 'uploads')
     await new Promise((r) => setTimeout(r, 150))
   })
-  assert.equal(useStore.getState().settingsOpen, false)
+  atUploads()
   assert.deepEqual(clicked, ['doc-upload-input'])
 })
 

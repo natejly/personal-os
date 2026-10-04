@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import ArtifactViewer from './ArtifactViewer'
 import '../styles/artifacts.css'
 
-/** The Artifacts tab of the Library: newest first, with the selected one full size beside the list. */
+/** Files -> Pages: artifacts, newest first, with the selected one full size beside the list. */
 export default function ArtifactsView(): JSX.Element {
   const [list, setList] = useState<Artifact[] | null>(null)
   const [sel, setSel] = useState<string | null>(null)

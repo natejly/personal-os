@@ -4960,14 +4960,6 @@ def delete_document(id: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.get("/documents/{id}/search")
-def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience for a single doc
-    d = documents.get(id)
-    if not d:
-        raise HTTPException(404)
-    return [h for h in documents.search(d["project_id"], q, limit=20) if h["document_id"] == id]
-
-
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there

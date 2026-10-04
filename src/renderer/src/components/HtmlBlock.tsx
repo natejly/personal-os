@@ -9,7 +9,7 @@ import '../styles/artifacts.css'
 /**
  * A fenced ```html block in an assistant reply. Code | Preview toggle; the preview is a `srcdoc` iframe in an
  * opaque origin (sandbox allow-scripts, never allow-same-origin) with a CSP meta tag injected first. Model
- * output is never executed in the app's origin. "Save as artifact" files it under Library -> Made, where it
+ * output is never executed in the app's origin. "Save as artifact" files it under Files -> Pages, where it
  * is served by the artifact render route and its scripts can run.
  */
 export default function HtmlBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
@@ -26,7 +26,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
       const st = useStore.getState()
       const a = await api.artifacts.create({ title: titleOf(source), code: source, conversation_id: st.focusedConversationId ?? undefined })
       setSaved(a.id)
-      st.toast('Saved as artifact', 'info')
+      st.toast('Saved to Files → Pages', 'info', { label: 'Open', run: () => useStore.getState().openFiles('pages') })
     } catch (e) {
       useStore.getState().toast((e as Error).message, 'error')
     } finally {
@@ -43,7 +43,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
             <button role="tab" aria-selected={showing === 'code'} className={showing === 'code' ? 'on' : ''} onClick={() => setMode('code')}><Code2 size={11} /> Code</button>
             <button role="tab" aria-selected={showing === 'preview'} className={showing === 'preview' ? 'on' : ''} disabled={streaming} onClick={() => setMode('preview')}><Eye size={11} /> Preview</button>
           </span>
-          <button className="icon-btn ghost" title={saved ? 'Saved to Library → Made' : 'Save as artifact'} aria-label="Save as artifact" disabled={streaming || busy || !!saved} onClick={() => void save()}>
+          <button className="icon-btn ghost" title={saved ? 'Saved to Files → Pages' : 'Save as artifact'} aria-label="Save as artifact" disabled={streaming || busy || !!saved} onClick={() => void save()}>
             {saved ? <Check size={13} /> : <Package size={13} />}
           </button>
           <CopyButton text={source} />

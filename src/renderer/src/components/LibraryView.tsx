@@ -1,102 +1,19 @@
-import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
+import { useEffect } from 'react'
+import { BookOpen, PanelLeftOpen, Plug, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
-import { api } from '../lib/api'
-import type { Artifact, Board, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
 import { AgentsPanel, CommandsPanel } from './DefsPanels'
 import AppSwitcher from './AppSwitcher'
-import ArtifactsView from './ArtifactsView'
-import ArtifactViewer from './ArtifactViewer'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Procedures the assistant may follow again' },
   { key: 'workflows', label: 'Workflows', icon: <Workflow size={14} />, blurb: 'Repeatable multi-step jobs you approve once, by hash' },
   { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Agent roles you write; they cannot be spawned until you approve them' },
   { key: 'commands', label: 'Commands', icon: <Terminal size={14} />, blurb: 'Saved prompt templates with $ARGUMENTS' },
-  { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' },
-  { key: 'artifacts', label: 'Artifacts', icon: <Package size={14} />, blurb: 'Interactive pages the assistant built, with version history' },
-  { key: 'made', label: 'Made', icon: <BookOpen size={14} />, blurb: 'Everything built in this app, in one place' }
+  { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' }
 ]
-
-/** One row of the Made tab: anything with a name, a kind and a view that can open it. */
-interface Made {
-  id: string
-  kind: 'doc' | 'dashboard' | 'board' | 'artifact'
-  name: string
-  meta: string
-  at: number
-}
-
-const KIND_ICON: Record<Made['kind'], JSX.Element> = {
-  doc: <FileText size={14} />, artifact: <Package size={14} />, dashboard: <LayoutDashboard size={14} />, board: <KanbanSquare size={14} />
-}
-
-function MadePanel(): JSX.Element {
-  const docs = useStore((s) => s.docs)
-  const { setView, openDoc } = useStore()
-  const [extra, setExtra] = useState<Made[]>([])
-  const [kind, setKind] = useState<'all' | Made['kind']>('all')
-  const [q, setQ] = useState('')
-  const [viewing, setViewing] = useState<string | null>(null)
-
-  // Boards and dashboards live in their own views, so the Library fetches them rather than holding them.
-  useEffect(() => {
-    let live = true
-    void Promise.all([api.dashboards.list().catch(() => [] as Dashboard[]), api.boards.list().catch(() => [] as Board[]), api.artifacts.list().catch(() => [] as Artifact[])])
-      .then(([dashboards, boards, arts]) => {
-        if (!live) return
-        setExtra([
-          ...arts.map((a) => ({ id: a.id, kind: 'artifact' as const, name: a.title || 'Untitled', meta: `artifact · v${a.version}`, at: a.updated_at })),
-          ...dashboards.map((d) => ({ id: d.id, kind: 'dashboard' as const, name: d.name, meta: d.description || 'dashboard', at: d.created_at })),
-          ...boards.map((b) => ({ id: b.id, kind: 'board' as const, name: b.name, meta: `${b.card_count ?? b.cards?.length ?? 0} cards`, at: b.created_at }))
-        ])
-      })
-    return () => { live = false }
-  }, [])
-
-  const rows: Made[] = [
-    ...docs.map((d) => ({ id: d.id, kind: 'doc' as const, name: d.title || 'Untitled', meta: d.folder || 'doc', at: d.updated_at ?? 0 })),
-    ...extra
-  ]
-    .filter((r) => (kind === 'all' || r.kind === kind) && (!q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase())))
-    .sort((a, b) => b.at - a.at)
-
-  const open = (r: Made): void => {
-    if (r.kind === 'doc') void openDoc(r.id)
-    else if (r.kind === 'artifact') setViewing(r.id)
-    else setView(r.kind === 'board' ? 'boards' : 'dashboards')
-  }
-
-  return (
-    <div className="library-panel">
-      <div className="add-row">
-        <div className="seg">
-          {(['all', 'doc', 'artifact', 'dashboard', 'board'] as const).map((k) => (
-            <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{k === 'all' ? 'everything' : `${k}s`}</button>
-          ))}
-        </div>
-        <input className="search" value={q} placeholder="Search by name" onChange={(e) => setQ(e.target.value)} />
-      </div>
-      {rows.length === 0 ? (
-        <div className="empty-hint big"><p>Nothing here yet.</p><p className="muted small">Docs, dashboards and boards you or the assistant create show up here.</p></div>
-      ) : (
-        <div className="made-grid">
-          {rows.map((r) => (
-            <div key={`${r.kind}:${r.id}`} className="made-card" onClick={() => open(r)} role="button" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter') open(r) }}>
-              <div className="made-head">{KIND_ICON[r.kind]}<span className="made-name" title={r.name}>{r.name}</span></div>
-              <div className="made-meta muted small">{r.meta}{r.at ? ` · ${new Date(r.at * 1000).toLocaleDateString()}` : ''}</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} />}
-    </div>
-  )
-}
 
 export default function LibraryView(): JSX.Element {
   const tab = useStore((s) => s.libraryTab)
@@ -131,8 +48,6 @@ export default function LibraryView(): JSX.Element {
         {tab === 'agents' && <AgentsPanel />}
         {tab === 'commands' && <CommandsPanel />}
         {tab === 'connectors' && <div className="library-panel"><McpSettings /></div>}
-        {tab === 'artifacts' && <ArtifactsView />}
-        {tab === 'made' && <MadePanel />}
       </div>
     </main>
   )

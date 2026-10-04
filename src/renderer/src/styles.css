@@ -2316,11 +2316,6 @@ select:focus-visible {
 .row-actions button.small:disabled { opacity: 0.5; }
 .row-actions .primary-btn.small { border-color: transparent; }
 
-.made-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-.made-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
-.made-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.made-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.made-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .skill-title { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: none; padding: 0; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
 .skill-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-faint); }

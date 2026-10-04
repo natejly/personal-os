@@ -71,7 +71,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const setView = useStore((s) => s.setView)
   const openMemory = useStore((s) => s.openMemory)
-  const openSettings = useStore((s) => s.openSettings)
+  const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
   const [showPrompt, setShowPrompt] = useState(false)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
@@ -145,7 +145,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
+          <h5><FileText size={12} /> Uploads ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openFiles('uploads')}>Files</button></h5>
           <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><button className="link" title="Open the passage in its source" onClick={() => setViewing(c)}><b>{c.name}</b> · chunk {c.idx + 1}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
           {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>

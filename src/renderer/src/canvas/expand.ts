@@ -6,8 +6,8 @@ import { useStore } from '../store'
 /** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */
 const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'board', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project'])
 
-/** Kinds whose classic equivalent is a view the user can hide (Settings → Modules). Memory and documents
- * live in Settings → Knowledge base, which cannot be hidden. */
+/** Kinds whose classic equivalent is a view the user can hide (Settings → Modules). Memory lives in
+ * Settings → Knowledge base and uploads in Files, neither of which can be hidden. */
 const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
   todos: 'todos', calendar: 'calendar', board: 'boards', 'dashboard-widget': 'dashboards'
 }
@@ -22,8 +22,8 @@ export const canExpand = (w: CanvasWindow): boolean => {
   return true
 }
 
-/** Navigate the main window to the classic equivalent. Leaves the canvas; the window stays. Memory,
- * graph and documents open Settings → Knowledge base over the canvas instead. */
+/** Navigate the main window to the classic equivalent. Leaves the canvas; the window stays. Memory and
+ * graph open Settings → Knowledge base over the canvas instead; uploads open Files -> Uploads. */
 export function expandWindow(w: CanvasWindow): void {
   if (!canExpand(w)) return
   const app = useStore.getState()
@@ -52,7 +52,7 @@ export function expandWindow(w: CanvasWindow): void {
       app.openMemory('graph')
       break
     case 'documents':
-      app.openSettings('knowledge', 'documents')
+      app.openFiles('uploads')
       break
     case 'recap':
       app.setView('home')

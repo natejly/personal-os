@@ -1213,6 +1213,12 @@ export interface Settings {
   workspaceRoots?: string[]
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
+  /** Linux sandbox containers: network attached (results then taint), the image a fresh one starts from, the CLI. */
+  sandboxNetwork?: boolean
+  sandboxImage?: string
+  sandboxRuntime?: 'docker' | 'podman' | 'nerdctl'
+  /** A stopped sandbox nobody came back to is removed after this many days (0 = never). */
+  sandboxKeepDays?: number
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number
@@ -1398,6 +1404,24 @@ export type BackgroundEvent =
   | { event: 'run_state'; data: RunInfo }
   /** A conversation's title was rewritten off the run (model title or regenerate). */
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
+  /** A shell job started, ended or was killed: the Running list refetches. */
+  | { event: 'shell_jobs'; data: { live: number } }
+
+/** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
+export interface ShellJobInfo {
+  job_id: string; pid: number | null; pgid: number | null; cwd: string; run_id: string | null
+  conversation_id: string | null; command: string
+  status: 'running' | 'exited' | 'killed' | 'timed_out' | 'orphaned' | 'failed'
+  exit_code: number | null; started: number; finished: number | null; background: boolean; total: number
+}
+export interface ShellJobTail extends ShellJobInfo { output: string; note?: string }
+
+/** One sandbox container (GET /sandboxes). conversation_id is null for one made before containers were labelled. */
+export interface SandboxInfo {
+  name: string; conversation_id: string | null; title: string | null; status: string; created: string
+  last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
+}
+export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number

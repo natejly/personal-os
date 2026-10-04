@@ -401,6 +401,36 @@ def test_restart_marks_survivors_orphaned_and_never_adopts_them(tmp_path: Path, 
     asyncio.run(go())
 
 
+def test_running_view_lists_tails_without_moving_the_poll_cursor_and_kills(tmp_path: Path) -> None:
+    jobs = shell.ShellJobs()
+    changes: list[int] = []
+    jobs.on_change = lambda: changes.append(1)
+
+    async def go() -> None:
+        old = shell.Job("old", "x", "/", "c1", None, True, False, 10)
+        old.status, old.finished, old.started = "exited", time.time(), 1.0
+        jobs.jobs["old"] = old
+        j = await jobs.start(["/bin/sh", "-c", "echo one; sleep 30"], command="echo one; sleep 30", cwd=str(tmp_path),
+                             env=dict(os.environ), tmp=None, conversation_id="c1", run_id=None, background=True,
+                             notify=False, timeout=60, max_background=4)
+        assert changes == [1]
+        listed = jobs.list()
+        assert [r["job_id"] for r in listed] == [j.id, "old"]  # live first
+        assert listed[0]["status"] == "running" and listed[0]["background"] is True and listed[0]["cwd"] == str(tmp_path)
+        for _ in range(40):
+            if "one" in jobs.tail(j)["output"]:
+                break
+            await asyncio.sleep(0.1)
+        assert "one" in jobs.tail(j)["output"] and jobs.tail(j)["total"] >= 4
+        assert "one" in jobs.poll(j)["output"], "the user's tail must leave the model's new output unread"
+        await jobs.kill(j)
+        assert j.status == "killed" and len(changes) >= 2
+        await asyncio.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.killpg(j.pgid, 0)
+    asyncio.run(go())
+
+
 def test_dead_or_recycled_pids_are_not_listed_as_orphans(tmp_path: Path) -> None:
     state = tmp_path / "s.json"
     state.write_text(json.dumps([{"job_id": "gone", "pid": 2_999_999, "pgid": 2_999_999, "cwd": "/", "run_id": None},

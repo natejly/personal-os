@@ -16,7 +16,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail
 } from '@shared/types'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
@@ -160,6 +160,11 @@ export const api = {
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
+  shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),
+  shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
+  killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
+  sandboxes: () => req<SandboxStatus>('/sandboxes'),
+  resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,

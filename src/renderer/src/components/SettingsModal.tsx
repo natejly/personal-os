@@ -14,6 +14,7 @@ import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import { WorkspaceRoots } from './WorkspaceRoots'
 import CoworkSettings from './CoworkSettings'
+import SandboxSettings from './SandboxSettings'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import SupportSettings from './SupportSettings'
@@ -341,10 +342,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
               </label>
               <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
-                <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
-              </label>
+              <SandboxSettings draft={draft} patch={patch} />
               <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>

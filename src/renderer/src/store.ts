@@ -1147,6 +1147,8 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'shell_jobs') {
+            window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
             get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {

@@ -139,6 +139,7 @@ test('doc autosave: a 409 keeps the draft and offers Reload; each save and move 
     return docFull({ content: (p as { content: string }).content, updated_at: ++n })
   }
   docs.move = async () => docFull({ folder: 'x', updated_at: 10 })
+  docs.get = async () => docFull({ content: 'rewritten elsewhere', updated_at: 11 })
   docs.list = async () => []
   docs.folders = async () => []
   docs.revisions = async () => []
@@ -171,6 +172,100 @@ test('doc autosave: starring refreshes the base too', async () => {
     assert.equal(useStore.getState().activeDoc?.updated_at, 7)
   } finally {
     Object.assign(docs, orig)
+  }
+})
+
+test('doc autosave: pinning refreshes the base too', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.patch = async () => docFull({ pinned: 1, updated_at: 8 })
+  docs.list = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never })
+    await useStore.getState().setDocPin('d1', true)
+    assert.equal(useStore.getState().activeDoc?.updated_at, 8)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('doc autosave: a 409 over an unchanged or appended body rebases and saves again', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: { content: string; base: number }[] = []
+  let server = docFull({ content: 'notes\n', updated_at: 1 })
+  docs.save = async (_id, p) => {
+    const { content, base_updated_at: base } = p as { content: string; base_updated_at: number }
+    sent.push({ content, base })
+    if (base < server.updated_at) throw Object.assign(new Error('stale'), { status: 409 })
+    server = docFull({ content, updated_at: server.updated_at + 1 })
+    return server
+  }
+  docs.get = async () => server
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    // Metadata only (a pin from another window): same body, newer stamp.
+    server = docFull({ content: 'notes\n', updated_at: 5 })
+    useStore.setState({ activeDoc: docFull({ content: 'notes\n', updated_at: 1 }) as never, docDraft: 'notes\nmine', docTitleDraft: null, toasts: [] })
+    await useStore.getState().flushDoc()
+    await useStore.getState().flushDoc()
+    assert.deepEqual(sent.map((s) => s.base), [1, 5])
+    assert.equal(server.content, 'notes\nmine')
+    assert.equal(useStore.getState().docDraft, null)
+
+    // A quick capture appended a line: the typing and the line both land.
+    sent.length = 0
+    const base = server.content
+    server = docFull({ content: base + '\n- 10:00 call back\n', updated_at: 20 })
+    useStore.setState({ docDraft: base + ' more' })
+    await useStore.getState().flushDoc()
+    await useStore.getState().flushDoc()
+    assert.equal(server.content, 'notes\nmine more\n- 10:00 call back\n')
+    assert.ok(!useStore.getState().toasts.some((t) => t.action?.label === 'Reload'), 'no conflict was shown')
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('a doc whose save failed is not navigated away from, so the draft survives', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  let opened = 0
+  docs.save = async () => { throw new Error('offline') }
+  docs.get = async () => { opened++; return docFull({ id: 'd2' }) }
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'unsaved', docTitleDraft: null, toasts: [] })
+    await useStore.getState().openDoc('d2')
+    await useStore.getState().closeDocTab('d1')
+    const st = useStore.getState()
+    assert.equal(opened, 0)
+    assert.equal(st.activeDoc?.id, 'd1')
+    assert.equal(st.docDraft, 'unsaved')
+    assert.deepEqual(st.docTabs, ['d1'])
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('a meeting whose notes failed to save is not navigated away from', async () => {
+  const { api } = await import('./lib/api')
+  const meetings = api.meetings as unknown as Stubs
+  const orig = { ...meetings }
+  let opened = 0
+  meetings.patch = async () => { throw new Error('offline') }
+  meetings.get = async () => { opened++; return { id: 'm2', notes: '' } }
+  try {
+    useStore.setState({ activeMeeting: { id: 'm1', notes: 'a' } as never, meetingNotesDraft: 'a typed', toasts: [] })
+    await useStore.getState().openMeeting('m2')
+    assert.equal(opened, 0)
+    assert.equal(useStore.getState().activeMeeting?.id, 'm1')
+    assert.equal(useStore.getState().meetingNotesDraft, 'a typed')
+  } finally {
+    Object.assign(meetings, orig)
   }
 })
 

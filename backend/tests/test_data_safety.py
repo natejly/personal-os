@@ -178,6 +178,20 @@ class BackupTests(unittest.TestCase):
         self.assertIn("prerestore", [b["kind"] for b in backups.list_backups(self.d)])
         self.assertIsNone(backups.apply_pending_restore(self.d))
 
+    def test_restore_over_a_corrupt_live_database_sets_its_bytes_aside(self) -> None:
+        m = backups.create(self.d, "manual")
+        backups.stage_restore(self.d, m["name"])
+        live = self.d / backups.DB_NAME
+        for suffix in ("-wal", "-shm"):
+            (self.d / (backups.DB_NAME + suffix)).unlink(missing_ok=True)
+        live.write_bytes(b"not a database at all" * 100)
+        self.assertEqual(backups.apply_pending_restore(self.d), m["name"])
+        aside = [b for b in backups.list_backups(self.d) if b["kind"] == "prerestore"]
+        self.assertEqual(len(aside), 1)
+        self.assertEqual((self.d / "backups" / aside[0]["name"]).read_bytes(), b"not a database at all" * 100)
+        with Database(self.d).tx() as c:
+            self.assertEqual([r[0] for r in c.execute("SELECT content FROM memories")], ["likes tea"])
+
     def test_stage_rejects_unknown_traversal_and_newer_schema(self) -> None:
         for bad in ("nope.db", "../personal-os.db"):
             with self.assertRaises(FileNotFoundError):

@@ -69,6 +69,12 @@ j("PUT", f"/docs/{did}", {"content": "# Paper\n\nA better intro with $\\beta$, p
 revs = j("GET", f"/docs/{did}/revisions")
 check(len(revs) == 1, f"quick successive saves coalesce into one revision, got {len(revs)}")
 check(revs[0]["author"] == "user" and revs[0]["status"] == "applied", "a user save is applied immediately")
+cut = docs.create("Cut", "x" * 1000)
+docs.save(cut["id"], "x" * 1000 + "y")
+docs.save(cut["id"], "x" * 100)
+cut_revs = docs.revisions(cut["id"])
+check(len(cut_revs) == 2 and len(cut_revs[0]["after"]) == 100 and len(cut_revs[1]["after"]) == 1001,
+      "a large deletion starts its own revision, so the text before it can be restored")
 
 # ---- metadata changes stay out of the history ----
 before = len(j("GET", f"/docs/{did}/revisions"))

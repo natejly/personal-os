@@ -7229,7 +7229,7 @@ def meeting_action_dismiss(id: str, action_id: str) -> dict[str, Any]:
 @app.post("/meetings/{id}/retranscribe")
 async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     """Replay the failed segments whose wav is still on disk. One HTTP request per segment, so it
-    runs in a thread; a segment past its attempt ceiling is left alone."""
+    runs in a thread. Attempts are reset first: the ceiling is there for the unattended tick."""
     if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     # `retranscribe` settles every meeting it touched itself, rebuilding `transcript`, the FTS row
@@ -7237,6 +7237,7 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     # `error = "" if text and not failed_segments(id)`, which cleared the WHOLE column - throwing
     # away banners that are still true after a replay, like a dead loopback channel or a failed
     # enhance pass. Let the service own it.
+    meeting_store.reset_attempts(id)  # the user asked: segments past the tick's ceiling get another go
     settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
     return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
 

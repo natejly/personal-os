@@ -513,7 +513,8 @@ export interface State {
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
   openDoc: (id: string) => Promise<void>
-  closeDocTab: (id: string) => void
+  /** Refuses (with a toast) while the open doc holds edits its last save could not write. */
+  closeDocTab: (id: string) => Promise<void>
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
@@ -1189,6 +1190,20 @@ export const useStore = create<State>((set, get) => {
    * flush the unconditional `meetingNotesDraft: null` that follows eats everything typed since the
    * click. Returns the saved row when it flushed one, so the caller can adopt its notes.
    */
+  const docUnsaved = (): boolean => {
+    const { activeDoc: d, docDraft, docTitleDraft } = get()
+    const left = !!d && ((docDraft !== null && docDraft !== d.content) || (docTitleDraft !== null && !!docTitleDraft.trim() && docTitleDraft !== d.title))
+    // Leaving would reset the drafts, and they are the only copy of what the failed save held.
+    if (left) get().toast('This doc has edits that could not be saved. Copy them out or retry before leaving it.', 'error')
+    return left
+  }
+  const meetingUnsaved = (): boolean => {
+    const { activeMeeting: m, meetingNotesDraft: draft } = get()
+    const left = !!m && draft !== null && draft !== m.notes
+    if (left) get().toast('These notes could not be saved. Copy them out or retry before leaving the meeting.', 'error')
+    return left
+  }
+
   const flushOutgoing = async (outgoing: string | null): Promise<FullMeeting | null> => {
     if (outgoing === null || get().activeMeeting?.id !== outgoing || get().meetingNotesDraft === null) return null
     await get().flushMeetingNotes()
@@ -2357,7 +2372,10 @@ export const useStore = create<State>((set, get) => {
       } catch { /* a badge is not worth a toast */ }
     },
     openDoc: async (id) => {
-      if (get().activeDoc?.id !== id) await get().flushDoc()
+      if (get().activeDoc?.id !== id) {
+        await get().flushDoc()
+        if (docUnsaved()) return
+      }
       set((st) => ({ view: 'docs', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)
@@ -2368,9 +2386,12 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    closeDocTab: (id) => {
+    closeDocTab: async (id) => {
+      if (get().activeDoc?.id === id) {
+        await get().flushDoc()
+        if (docUnsaved()) return
+      }
       const st = get()
-      if (st.activeDoc?.id === id) void st.flushDoc()
       const tabs = st.docTabs.filter((t) => t !== id)
       set({ docTabs: tabs })
       if (st.activeDoc?.id === id) {
@@ -2451,7 +2472,28 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        // Stale base. When the server body is still the draft's base (a pin, a metadata patch) or that
+        // base with something appended (a quick capture, an accepted section), rebase onto it and save
+        // again; the retry queues behind this flush. Anything else is a real conflict.
+        if ((e as { status?: number }).status === 409) {
+          const server = await api.docs.get(doc.id).catch(() => null)
+          const st = get()
+          if (server && st.activeDoc?.id === doc.id && server.updated_at > doc.updated_at) {
+            if (server.content === doc.content) {
+              set({ activeDoc: server })
+              void get().flushDoc()
+              return
+            }
+            if (st.docDraft !== null && server.content.startsWith(doc.content)) {
+              const tail = server.content.slice(doc.content.length)
+              const sep = st.docDraft.endsWith('\n') || tail.startsWith('\n') ? '' : '\n'
+              set({ activeDoc: server, docDraft: st.docDraft + sep + tail })
+              void get().flushDoc()
+              return
+            }
+          }
+        }
+        // A real conflict: another window saved first. The draft stays on screen; reloading is the user's call.
         if ((e as { status?: number }).status === 409) {
           get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
             { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
@@ -2469,7 +2511,8 @@ export const useStore = create<State>((set, get) => {
       await get().refreshDocs()
     },
     setDocPin: async (id, pinned) => {
-      await api.docs.patch(id, { pinned })
+      const d = await api.docs.patch(id, { pinned })
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, pinned: d.pinned, updated_at: d.updated_at } : st.activeDoc }))
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -2521,7 +2564,10 @@ export const useStore = create<State>((set, get) => {
         if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
-        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
+        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) {
+          set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
+          void get().closeDocTab(open.id)
+        }
         else if (open) void get().openDoc(open.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2544,7 +2590,8 @@ export const useStore = create<State>((set, get) => {
     deleteDoc: async (id) => {
       const title = get().docs.find((d) => d.id === id)?.title
       await api.docs.delete(id)
-      get().closeDocTab(id)
+      if (get().activeDoc?.id === id) set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
+      await get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
@@ -2909,7 +2956,10 @@ export const useStore = create<State>((set, get) => {
     },
     openMeeting: async (id) => {
       const outgoing = get().activeMeeting?.id ?? null
-      if (outgoing !== id) await get().flushMeetingNotes()
+      if (outgoing !== id) {
+        await get().flushMeetingNotes()
+        if (meetingUnsaved()) return
+      }
       openingMeeting = id
       set({ view: 'meetings' })
       try {

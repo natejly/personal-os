@@ -19,6 +19,8 @@ import wave
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import activity, insights, meeting_recorder, meetings, native_audio  # noqa: E402
@@ -104,6 +106,30 @@ def test_recover_turns_interrupted_segments_into_replayable_failures() -> None:
         c.execute("UPDATE meetings SET audio_dir=? WHERE id=?", (str(tmp / "rec"), mid))
     svc._sweep_audio({**svc.config(), "keepAudio": False})
     assert wav.exists()
+
+
+def test_spent_failures_neither_starve_the_replay_window_nor_lose_their_audio() -> None:
+    tmp = _tmp()
+    repo, svc = _svc(tmp)
+    mid = repo.create(title="Call")["id"]
+    t0 = time.time() - 600
+    for seq in range(12):
+        wav = _wav(tmp / "rec" / f"mic-{seq:05d}.wav")
+        sid = repo.add_segment(mid, "mic", seq, float(seq), seq + 1.0, t0 + seq, str(wav), wav.stat().st_size)["id"]
+        spent = meetings.RETRANSCRIBE_MAX_ATTEMPTS if seq < 11 else 0
+        repo.finish_segment(sid, state="failed", error="stt down", wav_path=str(wav),
+                            wav_bytes=wav.stat().st_size, attempts=spent)
+    # The one fresh failure is newest; a window of 10 by created_at would only ever see spent rows.
+    assert [s["seq"] for s in repo.failed_segments(mid, limit=10, replayable=True)] == [11]
+
+    with repo.db.tx() as c:
+        c.execute("UPDATE meetings SET status='ready', ended_at=?, audio_dir=? WHERE id=?", (time.time(), str(tmp / "rec"), mid))
+        c.execute("UPDATE meeting_segments SET attempts=? WHERE meeting_id=?", (meetings.RETRANSCRIBE_MAX_ATTEMPTS, mid))
+    svc._sweep_audio({**svc.config(), "keepAudio": False})
+    assert (tmp / "rec" / "mic-00000.wav").exists()  # a manual Retranscribe can still use it
+
+    repo.reset_attempts(mid)
+    assert len(repo.failed_segments(mid, replayable=True)) == 12
 
 
 # ---------------------------------------------------------------- 2. delete while recording
@@ -362,6 +388,28 @@ def test_native_loop_reports_empty_reads_without_ending_the_channel() -> None:
 
     assert cap.error == ""  # cleared once audio arrived again
     assert list(tmp.glob("mic-*.wav"))
+
+
+def test_native_loop_reopens_the_device_after_a_run_of_empty_reads() -> None:
+    tmp = _tmp()
+    cap = meeting_recorder.ChannelCapture("mic", ["native", "sine"], tmp, 1, 600, threading.Event(), lambda *a: None)
+    cap.session_start = time.time()
+    reads: list[int] = []
+
+    class Gone:
+        """A route change: the old input delivers no frames at all, ever, and no error."""
+        error = ""
+
+        def read_seconds(self, secs, halt_):
+            reads.append(1)
+            return b""
+
+        def drain(self):
+            return b""
+
+    with pytest.raises(RuntimeError, match=meeting_recorder.NO_AUDIO):
+        cap._native_loop(Gone())  # raising is what sends _work_native back to Capture.from_spec
+    assert len(reads) == meeting_recorder.EMPTY_READS_BEFORE_REOPEN
 
 
 def test_read_seconds_surfaces_a_tap_callback_error() -> None:

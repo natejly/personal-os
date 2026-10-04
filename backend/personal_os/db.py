@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS projects (
   system_prompt TEXT NOT NULL DEFAULT '',
   color TEXT NOT NULL DEFAULT '#d97757',
   tools TEXT NOT NULL DEFAULT '{}',
+  memory_mode TEXT NOT NULL DEFAULT 'shared',
   created_at REAL NOT NULL
 );
 
@@ -561,7 +562,7 @@ class Database:
         wanted = {
             # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
             # whose deletion took it along, so restoring the project brings back exactly those rows.
-            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL"},
+            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'"},
             "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},

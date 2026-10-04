@@ -22,7 +22,7 @@ from typing import Any
 from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
 from .extract_text import markdown_blocks, safe_upload_name
-from .repos import ALL, _scope_clause, cjk_like, fts_query
+from .repos import ALL, _scope_clause, cjk_like, fts_query, is_isolated
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -461,6 +461,7 @@ class Docs:
         if not q:
             return []
         match = " OR ".join(f'"{w}"' for w in re.findall(r"\w+", q)) or f'"{q}"'
+        isolated = is_isolated(self.db, project_id)
         with self.db.tx() as c:
             try:
                 rows = c.execute(
@@ -475,8 +476,8 @@ class Docs:
                 d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (r["doc_id"],)).fetchone()
                 if not d:
                     continue
-                if project_id != "__all__" and d["project_id"] not in (None, project_id):  # a project sees its own plus personal
-                    continue
+                if project_id != "__all__" and d["project_id"] != project_id and (d["project_id"] is not None or isolated):
+                    continue  # a project sees its own plus personal, or only its own when isolated
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break

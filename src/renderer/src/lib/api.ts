@@ -462,7 +462,7 @@ export const api = {
   },
   projects: {
     list: () => req<Project[]>('/projects'),
-    create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
+    create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
     update: (id: string, patch: Partial<Project>) => req<Project>(`/projects/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean; stopped?: number }>(`/projects/${id}`, { method: 'DELETE' }),
     globalStats: () => req<NonNullable<Project['stats']>>('/projects/global/stats')

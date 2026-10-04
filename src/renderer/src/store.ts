@@ -339,7 +339,7 @@ export interface State {
 
   refreshProjects: () => Promise<void>
   openProject: (id: string) => void
-  createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => Promise<void>
+  createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => Promise<void>
   updateProject: (id: string, patch: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
 

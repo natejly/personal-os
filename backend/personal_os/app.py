@@ -38,7 +38,7 @@ from .embed import Embedder
 from .memory_index import MemoryIndex
 from .meeting_index import MeetingIndex
 from .retrieval import Retriever
-from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
+from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
 from .artifacts import Artifacts
 from .boards import Boards
@@ -896,6 +896,7 @@ class ProjectIn(BaseModel):
     description: str = ""
     system_prompt: str = ""
     color: str = "#d97757"
+    memory_mode: Literal["shared", "isolated"] = "shared"
 
 
 class ProjectPatch(BaseModel):
@@ -904,6 +905,8 @@ class ProjectPatch(BaseModel):
     system_prompt: str | None = None
     color: str | None = None
     tools: dict[str, str] | None = None
+    # 'isolated' = this project's chats see no personal memory, graph, docs, skills or voice. Can be changed later.
+    memory_mode: Literal["shared", "isolated"] | None = None
 
 
 @app.get("/tools")
@@ -1164,7 +1167,7 @@ def list_projects() -> list[dict[str, Any]]:
 
 @app.post("/projects")
 def create_project(body: ProjectIn) -> dict[str, Any]:
-    return projects.create(body.name, body.description, body.system_prompt, body.color)
+    return projects.create(body.name, body.description, body.system_prompt, body.color, body.memory_mode)
 
 
 @app.put("/projects/{id}")
@@ -5196,6 +5199,8 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
     cur = memories.get(id)
     if not cur:
         raise HTTPException(404)
+    if "project_id" in patch and patch["project_id"] is None and is_isolated(memories.db, cur["project_id"]):
+        raise HTTPException(409, "This project keeps its memory to itself. Switch it to shared memory to make this personal.")
     content = patch.pop("content", None)
     if content is not None and content.strip() and content.strip() != cur["content"]:
         # A hand edit is a new version, like the model's: the old wording stays in history and can be restored.

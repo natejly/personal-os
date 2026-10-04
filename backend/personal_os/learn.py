@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
-from .repos import Graph, Memories
+from .repos import Graph, Memories, _scope_clause
 from .trace import Tracer
 
 log = logging.getLogger("personal_os")
@@ -405,8 +405,9 @@ class Skills:
             if project_id is None:
                 where.append("project_id IS NULL")
             else:
-                where.append("(project_id = ? OR project_id IS NULL)")
-                args.append(project_id)
+                w, a = _scope_clause(project_id)  # project + personal, unless the project is isolated
+                where.append(w)
+                args += a
         sql = "SELECT * FROM skills" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY updated_at DESC"
         with self.db.tx() as c:
             return [row_to_dict(r, ("references",)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]

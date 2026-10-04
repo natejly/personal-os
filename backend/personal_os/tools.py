@@ -46,7 +46,7 @@ from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .microvm import SandboxError, Sandboxes, net_mode
-from .repos import Documents, Graph, Memories
+from .repos import Documents, Graph, Memories, is_isolated
 from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
@@ -1079,13 +1079,17 @@ class Toolbox:
             def learned() -> dict[str, Any]:
                 return ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
             prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
+            isolated = is_isolated(self.memories.db, ctx.get("project_id"))
+            if personal and not (replaces or forget) and isolated:
+                return tool_error("This project keeps its memory to itself, so nothing said here can be saved as personal.",
+                                  field="personal", expected="false (save it to this project)")
             old = None
             if replaces or forget:
                 if not replaces:
                     return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
                                       alternative="search_memory to find the memory's id")
                 old = self.memories.get(replaces)
-                if not old or old["invalid_at"] is not None or old["project_id"] not in (None, ctx.get("project_id")):
+                if not old or old["invalid_at"] is not None or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id"))):
                     return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
                                       alternative="search_memory for the memory's current id")
                 # Pinned rows are the user's own curation, as in auto-learn: the model never rewrites or drops them.
@@ -2366,6 +2370,8 @@ def _register_style(self: Toolbox) -> None:
         _obj({}, []), writing_style, "style", examples=[{}]))
 
     async def save_writing_sample(ctx: dict[str, Any], text: str, personal: bool = True) -> Any:
+        if is_isolated(self.style.db, ctx["project_id"]):
+            personal = False  # an isolated project's writing stays in the project
         s = self.style.add_sample(None if personal else ctx["project_id"], text, source="chat", check=False)
         if not s:
             return tool_error("Empty sample.", field="text", expected="a passage the user wrote, at least a short paragraph")
@@ -2400,15 +2406,28 @@ def _register_docs(self: Toolbox) -> None:
         lo = max(1, int(start))
         return "\n".join(f"{i:>4}| {lines[i - 1]}" for i in range(lo, hi + 1))
 
-    def _missing(key: str) -> dict[str, Any]:
-        return {"error": f"No doc matching '{key}'", "docs": [d["title"] for d in self.docs.list()][:10],
+    def _visible(ctx: dict[str, Any], d: dict[str, Any]) -> bool:
+        # An isolated project's chat sees only its own docs; any other chat sees its project plus personal.
+        pid = ctx.get("project_id")
+        if is_isolated(self.docs.db, pid):
+            return d["project_id"] == pid
+        return d["project_id"] in (None, pid)
+
+    def _find(ctx: dict[str, Any], key: str) -> dict[str, Any] | None:
+        d = self.docs.find(key)
+        if d and is_isolated(self.docs.db, ctx.get("project_id")) and d["project_id"] != ctx.get("project_id"):
+            return None
+        return d
+
+    def _missing(ctx: dict[str, Any], key: str) -> dict[str, Any]:
+        return {"error": f"No doc matching '{key}'", "docs": [d["title"] for d in self.docs.list() if _visible(ctx, d)][:10],
                 "hint": "pass a doc id or exact title from doc_list, or use doc_create to start one"}
 
     async def doc_list(ctx: dict[str, Any], query: str = "") -> Any:
         return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
-                for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
+                for d in self.docs.list(q=query) if _visible(ctx, d)]
     R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
@@ -2422,9 +2441,9 @@ def _register_docs(self: Toolbox) -> None:
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
 
     async def doc_read(ctx: dict[str, Any], doc: str, from_line: int = 1, to_line: int | None = None) -> Any:
-        d = self.docs.find(doc)
+        d = _find(ctx, doc)
         if not d:
-            return _missing(doc)
+            return _missing(ctx, doc)
         total = len(d["content"].splitlines())
         hi = total if to_line is None else int(to_line)
         out = {"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
@@ -2436,7 +2455,7 @@ def _register_docs(self: Toolbox) -> None:
             out["cite"] = _cite(ctx, range_ref("doc", d["title"], d["content"], start, end, doc_id=d["id"], document_id=d["id"]))
         # Titles only (no snippets), and only on the first page so paging costs no extra scan.
         if int(from_line) <= 1:
-            links = [b["title"] for b in (self.docs.backlinks(d["id"]) or [])[:10]]
+            links = [b["title"] for b in (self.docs.backlinks(d["id"]) or []) if _find(ctx, b["id"])][:10]
             if links:
                 out["linked_from"] = links
         return _scrub_public_text(out)
@@ -2458,9 +2477,9 @@ def _register_docs(self: Toolbox) -> None:
     async def doc_edit(ctx: dict[str, Any], doc: str, edits: list[dict[str, Any]] | None = None,
                        content: str | None = None, append: str | None = None,
                        title: str | None = None, summary: str = "") -> Any:
-        d = self.docs.find(doc)
+        d = _find(ctx, doc)
         if not d:
-            return _missing(doc)
+            return _missing(ctx, doc)
         body = d["content"]
         if content is not None:
             new = content
@@ -2492,14 +2511,14 @@ def _register_docs(self: Toolbox) -> None:
             return {"doc_id": d["id"], "unchanged": True, "note": "The edit produced no change, so nothing was proposed."}
         rev = self.docs.propose(d["id"], new, summary or "Assistant edit", tool="doc_edit", title_after=retitle)
         if not rev:
-            return _missing(doc)
+            return _missing(ctx, doc)
         # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
         # A scheduled run has nobody at the keyboard, so accept-all does not apply there either.
         if (str((ctx.get("settings") or {}).get("docEditMode") or "review") == "apply"
                 and not ctx.get("proposal_only")):
             applied = self.docs.accept(rev["id"])
             if not applied:
-                return _missing(doc)
+                return _missing(ctx, doc)
             rev = self.docs.revision(rev["id"]) or rev
             return {"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
@@ -2899,21 +2918,26 @@ def _register_skills(self: Toolbox) -> None:
     """
     R = self.specs.__setitem__
 
-    def _find(key: str) -> dict[str, Any] | None:
+    def _rows(ctx: dict[str, Any], status: str | None = None) -> list[dict[str, Any]]:
+        # An isolated project's chat sees only its own procedures; elsewhere every scope is listed.
+        pid = ctx.get("project_id")
+        return self.skills.list(status=status, project_id=pid if is_isolated(self.skills.db, pid) else "__all__")
+
+    def _find(ctx: dict[str, Any], key: str) -> dict[str, Any] | None:
         key = (key or "").strip()
         if not key:
             return None
-        hit = self.skills.get(key)
+        rows = _rows(ctx)
+        hit = next((s for s in rows if s["id"] == key), None)
         if hit:
             return hit
-        rows = self.skills.list()
         low = key.lower()
         return (next((s for s in rows if s["name"].lower() == low), None)
                 or next((s for s in rows if low in s["name"].lower()), None))
 
-    def _missing(key: str) -> dict[str, Any]:
+    def _missing(ctx: dict[str, Any], key: str) -> dict[str, Any]:
         return {"error": f"No procedure matching '{key}'",
-                "procedures": [s["name"] for s in self.skills.list()][:10],
+                "procedures": [s["name"] for s in _rows(ctx)][:10],
                 "hint": "pass an id or exact name from skill_list, or use skill_draft to propose a new one"}
 
     def _lint(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
@@ -2921,7 +2945,7 @@ def _register_skills(self: Toolbox) -> None:
                                      existing=self.skills.list(), skill_id=skill_id)
 
     async def skill_list(ctx: dict[str, Any], query: str = "", status: str = "") -> Any:
-        rows = self.skills.list(status=status or None, project_id="__all__")
+        rows = _rows(ctx, status or None)
         if query:
             q = query.lower()
             rows = [s for s in rows if q in s["name"].lower() or q in s["description"].lower() or q in s["procedure"].lower()]
@@ -2976,9 +3000,9 @@ def _register_skills(self: Toolbox) -> None:
 
     async def skill_revise(ctx: dict[str, Any], skill: str, name: str | None = None, description: str | None = None,
                            procedure: str | None = None, summary: str = "") -> Any:
-        s = _find(skill)
+        s = _find(ctx, skill)
         if not s:
-            return _missing(skill)
+            return _missing(ctx, skill)
         patch = {k: v for k, v in (("name", name), ("description", description), ("procedure", procedure)) if v is not None}
         if not patch:
             return tool_error("Nothing to change", field="procedure",
@@ -3005,7 +3029,7 @@ def _register_skills(self: Toolbox) -> None:
                             "them what you would change and that the old one is still the one in effect."}
         updated = self.skills.update(s["id"], {**patch, "status": "candidate"})
         if not updated:
-            return _missing(skill)
+            return _missing(ctx, skill)
         return {"skill_id": updated["id"], "name": updated["name"], "status": updated["status"],
                 "summary": summary, "lint": skillbuild.lint_summary(findings), "findings": findings,
                 "note": "Edited in place; it was already a candidate, so it is still waiting for the user's approval."}

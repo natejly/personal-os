@@ -635,6 +635,49 @@ def test_a_spent_one_off_is_never_re_armed_and_is_rescheduled_by_moving_its_time
     assert len(job_runs(job["id"])) == 2
 
 
+def test_editing_a_job_over_the_api_re_arms_it_and_a_spent_one_off_runs_again_at_a_new_time() -> None:
+    made = j("POST", "/jobs", {"name": "edit me", "cron": "0 9 * * *", "prompt": "old", "timezone": "UTC", "enabled": True})
+    edited = j("PATCH", f"/jobs/{made['id']}", {"prompt": "new", "cron": "30 7 * * 1-5", "timezone": "America/New_York",
+                                                 "max_retries": 3, "name": "edited"})
+    assert (edited["prompt"], edited["name"], edited["max_retries"]) == ("new", "edited", 3)
+    assert edited["next_due_at"] == next_fire("30 7 * * 1-5", "America/New_York", edited["updated_at"])
+    assert edited["next_due_at"] != made["next_due_at"]
+    assert j("DELETE", f"/jobs/{made['id']}") == {"ok": True}
+
+    ROUNDS.append(["first"])
+    once = once_job("spent api", T0 + HOUR, at=T0)
+    tick(T0 + HOUR)
+    assert "already ran" in j("PATCH", f"/jobs/{once['id']}", {"enabled": True}, expect=400)["detail"]
+    later = time.time() + 2 * HOUR
+    again = j("PATCH", f"/jobs/{once['id']}", {"run_at": later, "enabled": True})
+    assert again["enabled"] is True and again["next_due_at"] == later and spent(again) is False
+
+
+def test_the_schedule_preview_lists_the_next_fires_in_the_zone_and_writes_nothing() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    before = len(j("GET", "/jobs"))
+    r = j("GET", "/jobs/preview?cron=30%207%20*%20*%201-5&timezone=America/New_York&n=5")
+    assert r["ok"] is True and len(r["next"]) == 5 and r["next"] == sorted(set(r["next"]))
+    for ts in r["next"]:
+        d = datetime.fromtimestamp(ts, ZoneInfo("America/New_York"))
+        assert (d.hour, d.minute) == (7, 30) and d.weekday() < 5, d
+    assert r["next"][0] > time.time()
+    # Across the fall-back day an ambiguous wall time fires once, not twice.
+    fall_back = datetime(2026, 11, 1, 0, 0, tzinfo=ZoneInfo("America/New_York")).timestamp()
+    t, fires = fall_back, []
+    for _ in range(3):
+        t = next_fire("30 1 * * *", "America/New_York", t)
+        fires.append(t)
+    assert len({datetime.fromtimestamp(x, ZoneInfo("America/New_York")).date() for x in fires}) == 3
+    assert j("GET", "/jobs/preview?cron=*%20*%20*%20*%20*&n=500")["next"].__len__() == 10, "n is capped"
+
+    bad = j("GET", "/jobs/preview?cron=every%20morning")
+    assert bad["ok"] is False and "not a cron expression" in bad["error"] and bad["next"] == []
+    assert j("GET", "/jobs/preview?cron=0%209%20*%20*%20*&timezone=Mars/Olympus")["ok"] is False
+    assert len(j("GET", "/jobs")) == before
+
+
 def test_a_one_off_with_no_time_at_all_is_disarmed_rather_than_spun_on() -> None:
     job = once_job("broken", T0 + HOUR, at=T0)
     with appmod.db.tx() as c:  # a row hand-edited into nonsense

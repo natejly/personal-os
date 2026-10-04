@@ -14,6 +14,7 @@ import remarkGfm from 'remark-gfm'
 import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { SAFE_MD } from './Message'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -212,6 +213,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
   const [history, setHistory] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   const preview = async (): Promise<void> => {
     try {
@@ -257,6 +259,12 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
       )}
+      {(job.kind === 'cron' || job.kind === 'once') && (
+        <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
+          aria-label={`Edit ${job.name}`} onClick={() => setEditing((v) => !v)}>
+          <Pencil size={12} />
+        </button>
+      )}
       <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
         aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
         <Wrench size={12} />
@@ -291,33 +299,97 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           that leaves the app is still a proposal.</p>
       </li>
     )}
+    {editing && <li className="job-history"><NewTask job={job} onDone={() => setEditing(false)} /></li>}
     {history && <JobHistory job={job} />}
     </>
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', repeat: false, onlyTools: false }
 
-/** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
-function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
-  const createJob = useStore((s) => s.createJob)
-  const [f, setF] = useState(BLANK)
+/** Hourly / daily / weekdays / weekly presets that compile to cron, with Custom for the raw field, and the next fires. */
+function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChange: (s: Schedule) => void; timezone?: string }): JSX.Element {
+  const cron = presetCron(value)
+  const [preview, setPreview] = useState<{ next: number[]; error?: string } | null>(null)
+  useEffect(() => {
+    if (!cron) { setPreview(null); return }
+    let live = true
+    const t = setTimeout(() => {
+      api.jobs.preview(cron, timezone)
+        .then((r) => { if (live) setPreview(r) })
+        .catch((e: Error) => { if (live) setPreview({ next: [], error: e.message }) })
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+  }, [cron, timezone])
+  const timed = value.preset !== 'hourly' && value.preset !== 'custom'
+  return (
+    <>
+      <select value={value.preset} aria-label="How often" onChange={(e) => onChange({ ...value, preset: e.target.value as Preset })}>
+        <option value="hourly">Hourly</option>
+        <option value="daily">Daily</option>
+        <option value="weekdays">Weekdays</option>
+        <option value="weekly">Weekly</option>
+        <option value="custom">Custom cron</option>
+      </select>
+      {value.preset === 'weekly' && (
+        <select value={value.day} aria-label="Day of the week" onChange={(e) => onChange({ ...value, day: Number(e.target.value) })}>
+          {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+        </select>
+      )}
+      {timed && <input type="time" value={value.time} aria-label="At" onChange={(e) => onChange({ ...value, time: e.target.value })} />}
+      {value.preset === 'custom' && (
+        <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={value.cron} aria-label="Cron expression"
+          onChange={(e) => onChange({ ...value, cron: e.target.value })} />
+      )}
+      {preview && (
+        <span className={preview.error ? 'msg-error small' : 'muted small'}>
+          {preview.error ?? `Next: ${preview.next.map(fmtWhen).join(', ')}`}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** Schedule a task by hand (a one-off instant by default, a repeating schedule if it should repeat), or, given `job`,
+ * edit that one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
+function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
+  const { createJob, updateJob } = useStore()
+  const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
+  const [f, setF] = useState(job
+    ? { ...BLANK, name: job.name, prompt: job.prompt, repeat: job.kind === 'cron', when: job.run_at && !spent ? toLocalInput(job.run_at) : '' }
+    : BLANK)
+  const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
   const [picked, setPicked] = useState<string[]>(['current_time'])
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
+  const cron = presetCron(sched)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!cron : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     if (!ready || busy) return
     setBusy(true)
-    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
+    setErr(null)
+    const common = { name: f.name.trim(), prompt: f.prompt.trim() }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
-    const ok = await createJob(f.repeat
-      ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
-      : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
+    const schedule = f.repeat
+      ? { kind: 'cron' as const, cron }
+      // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
+      : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
+    let ok: boolean
+    if (job) {
+      const patch = diffJob<Job>(job, { ...common, ...schedule })
+      // A one-off that already ran is switched back on by giving it a new time; the backend refuses `enabled` alone.
+      if (spent) patch.enabled = true
+      const refused = Object.keys(patch).length ? await updateJob(job.id, patch) : null
+      setErr(refused)
+      ok = refused === null
+    } else {
+      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools ? picked : null })
+    }
     setBusy(false)
     if (ok) {
-      setF(BLANK)
+      if (!job) setF(BLANK)
       onDone()
     }
   }
@@ -334,17 +406,23 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
           <span>Repeat</span>
         </label>
         {f.repeat
-          ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
-              onChange={(e) => setF({ ...f, cron: e.target.value })} />
-          : <input type="datetime-local" value={f.when} aria-label="When it should run"
-              onChange={(e) => setF({ ...f, when: e.target.value })} />}
-        <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
+          ? <SchedulePicker value={sched} onChange={setSched} timezone={job?.timezone} />
+          : <>
+              {spent && <span className="muted small">Run again at…</span>}
+              <input type="datetime-local" value={f.when} aria-label={spent ? 'Run again at' : 'When it should run'}
+                onChange={(e) => setF({ ...f, when: e.target.value })} />
+            </>}
+        {job && <button className="ghost-btn sm" type="button" onClick={onDone}>Cancel</button>}
+        <button className="primary-btn sm" type="submit" disabled={!ready || busy}>{job ? 'Save' : 'Schedule'}</button>
       </div>
-      <label className="chip-check-row small">
-        <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
-        <span>Only allow some tools</span>
-      </label>
-      {f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
+      {err && <p className="msg-error">{err}</p>}
+      {!job && (
+        <label className="chip-check-row small">
+          <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
+          <span>Only allow some tools</span>
+        </label>
+      )}
+      {!job && f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
     </form>
   )
 }

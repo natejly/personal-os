@@ -49,8 +49,8 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
-                   valid_tz)
+from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, next_fire, spent,
+                   valid_cron, valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
@@ -4098,6 +4098,11 @@ class JobPatch(BaseModel):
 BACKDATE_GRACE_S = 120.0
 
 
+def _cron_error(expr: str | None) -> str:
+    return (f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
+            if expr else "A repeating job needs a cron expression (five fields, e.g. '30 7 * * *')")
+
+
 def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool,
                     watch_dir: str | None = None) -> None:
     """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
@@ -4120,8 +4125,7 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         return
     if kind == "cron":
         if not valid_cron(expr or ""):
-            raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
-                                     if expr else "A repeating job needs a cron expression (five fields, e.g. '30 7 * * *')")
+            raise HTTPException(400, _cron_error(expr))
         return
     if run_at is None:
         raise HTTPException(400, "A one-off task needs run_at, the unix timestamp to run it at")
@@ -4143,6 +4147,23 @@ def _check_allowed_tools(allowed: list[str] | None) -> None:
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
     return jobs.list()
+
+
+@app.get("/jobs/preview")
+def preview_schedule(cron: str = "", timezone: str | None = None, n: int = 5) -> dict[str, Any]:
+    """The next `n` fires of a cron expression in a zone, for the form to show before anything is saved. Writes nothing."""
+    tz = timezone or local_tz_name()
+    if not valid_tz(tz):
+        return {"ok": False, "error": f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')", "next": []}
+    expr = cron.strip()
+    if not valid_cron(expr):
+        return {"ok": False, "error": _cron_error(expr), "next": []}
+    out: list[float] = []
+    t = time.time()
+    for _ in range(max(1, min(n, 10))):
+        t = next_fire(expr, tz, t)
+        out.append(t)
+    return {"ok": True, "timezone": tz, "next": out}
 
 
 @app.post("/jobs")

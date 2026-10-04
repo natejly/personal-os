@@ -488,6 +488,8 @@ export interface State {
   createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
   deleteJob: (id: string) => Promise<void>
   setJobEnabled: (id: string, enabled: boolean) => Promise<void>
+  /** PATCH a job; resolves to the backend's refusal text, or null when it saved. The caller shows the refusal inline. */
+  updateJob: (id: string, patch: Parameters<typeof api.jobs.update>[1]) => Promise<string | null>
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
@@ -3718,6 +3720,16 @@ export const useStore = create<State>((set, get) => {
         void get().refreshAgentInbox()
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    updateJob: async (id, patch) => {
+      try {
+        const job = await api.jobs.update(id, patch)
+        set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
+        void get().refreshAgentInbox()
+        return null
+      } catch (e) {
+        return (e as Error).message
       }
     },
     runJobNow: async (id) => {

@@ -922,15 +922,17 @@ def register(box: Any) -> None:
               "replace_all": {"type": "boolean", "default": False}}, ["path", "old", "new"]), fs_edit, "files", "writes",
         examples=[{"path": "~/Documents/project/main.py", "old": "retries = 2", "new": "retries = 5"}]))
 
-    def _copy_tree(src: Path, dst: Path) -> int:
+    def _copy_tree(src: Path, dst: Path, skipped: list[str]) -> int:
         n = total = 0
         for d, dirs, files in os.walk(src, followlinks=False):
-            dirs[:] = [x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS]
             rel = Path(d).relative_to(src)
+            skipped += [str(rel / x) + "/" for x in dirs if x.startswith(".") or x in SKIP_DIRS]
+            dirs[:] = [x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS]
             (dst / rel).mkdir(parents=True, exist_ok=True)
             for f in files:
                 s = Path(d) / f
                 if s.is_symlink() or sensitive_reason(s) or s.suffix.lower() in mac.BLOCKED_WRITE_SUFFIXES:
+                    skipped.append(str(rel / f))
                     continue
                 n += 1
                 total += s.stat().st_size
@@ -941,6 +943,8 @@ def register(box: Any) -> None:
 
     async def fs_copy(ctx: dict[str, Any], src: str, dst: str) -> Any:
         snap: dict[str, Any] | None = None
+        skipped: list[str] = []
+        made: Path | None = None
         try:
             g = grants_for(box, ctx)
             s = resolve_path(src, g)
@@ -963,15 +967,19 @@ def register(box: Any) -> None:
                 except mac.LocalPathError:
                     snap = None  # a desk workspace sits outside the home rules and keeps its own baseline
             if s.is_dir():
-                count = await asyncio.to_thread(_copy_tree, s, d)
+                made = d  # it did not exist (checked above): a copy that fails part way removes it again
+                count = await asyncio.to_thread(_copy_tree, s, d, skipped)
             else:
                 await asyncio.to_thread(shutil.copy2, s, d)
                 count = 1
-        except (FsError, mac.LocalPathError) as e:
-            return fail("fs_copy", e, field="dst")
-        except OSError as e:
-            return fail("fs_copy", e.strerror or e, field="dst")
+        except (FsError, mac.LocalPathError, OSError) as e:
+            if made is not None:
+                await asyncio.to_thread(shutil.rmtree, made, True)
+            return fail("fs_copy", (e.strerror or e) if isinstance(e, OSError) else e, field="dst")
         out: dict[str, Any] = {"from": str(s), "path": str(d), "files": count}
+        if skipped:  # hidden folders, dependency folders, symlinks, secrets and launchers are left out on purpose
+            out["skipped"] = len(skipped)
+            out["skipped_sample"] = skipped[:10]
         if snap and snap.get("snapshot_id"):
             await asyncio.to_thread(box.filesnap.finalize, snap["snapshot_id"], str(d))
             out["undo"] = {"snapshot_id": snap["snapshot_id"]}
@@ -980,7 +988,7 @@ def register(box: Any) -> None:
             copied = [Path(dirpath) / name for dirpath, _dirs, names in os.walk(d) for name in names]
         carry_desk_copies(box, ctx, g, copied)
         return out
-    R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files are not copied. Writing outside the desk workspace and the user's workspace folders asks first.",
+    R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files, symlinks, hidden and dependency folders are not copied (counted in skipped). Writing outside the desk workspace and the user's workspace folders asks first.",
         _obj({"src": {"type": "string"}, "dst": {"type": "string"}}, ["src", "dst"]), fs_copy, "files", "writes",
         examples=[{"src": "~/Documents/project/config.json", "dst": "~/Documents/project/config.backup.json"}]))
 

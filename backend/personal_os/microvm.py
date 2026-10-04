@@ -199,7 +199,8 @@ class Sandboxes:
 
     def _run_args(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> list[str]:
         """One place for the isolation flags, shared by a fresh create and a checkpoint restore."""
-        args = [binary, "run", "-d", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
+        # --init: `sleep` as PID 1 ignores SIGTERM, so without it every stop waits out the whole grace period.
+        args = [binary, "run", "-d", "--init", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
                 "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
         if not net:

@@ -444,6 +444,8 @@ def test_shell_profile_shape() -> None:
     p = sandbox.shell_profile(["/tmp/w"], network=False)
     assert "(deny network*)" in p and "(allow network*)" not in p and "(deny default)" in p
     assert ".ssh" in p and "Keychains" in p and "gcloud" in p and r"\.env" in p
+    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials"):
+        assert os.path.join(os.path.expanduser("~"), secret) in p, secret
     assert "hooks" in p and "/tmp/w" in p
     assert "(allow network*)" in sandbox.shell_profile(["/tmp/w"], network=True)
 
@@ -612,6 +614,8 @@ def test_cd_persists_between_calls_and_an_explicit_cwd_wins(box: Box) -> None:
 
 @needs_seatbelt
 def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> None:
+    box.ctx["desk_id"] = "d1"  # only a desk's jobs outlive the reply
+
     async def go() -> None:  # one loop: the job's watcher lives on it
         t0 = time.time()
         r = await box.arun("shell_run", command="echo started; sleep 3; echo finished", timeout_s=1)
@@ -630,12 +634,23 @@ def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> Non
 def test_timeout_kills_when_asked_or_when_no_slot_is_free(box: Box) -> None:
     r = box.run("shell_run", command="sleep 30", timeout_s=1, on_timeout="kill")
     assert r["timed_out"] is True and "still_running" not in r
+    box.ctx["desk_id"] = "d1"
     box.settings["shellMaxBackground"] = 1
     first = box.run("shell_run", command="sleep 30", background=True)
     r = box.run("shell_run", command="sleep 30", timeout_s=1)
     assert r["timed_out"] is True and "process group" in r["note"]
     box.run("shell_kill", job_id=first["job_id"])
     assert "on_timeout" in box.run("shell_run", command="true", on_timeout="later")["error"]
+
+
+@needs_seatbelt
+def test_outside_a_desk_jobs_end_with_the_reply(box: Box) -> None:
+    """A chat kills its jobs when the reply ends, so a timeout kills and a background job says it will be stopped."""
+    r = box.run("shell_run", command="sleep 30", timeout_s=1)  # on_timeout=background is the default
+    assert r["timed_out"] is True and "still_running" not in r
+    r = box.run("shell_run", command="sleep 30", background=True)
+    assert "stopped when this reply ends" in r["note"] and "told when it finishes" not in r["note"]
+    box.run("shell_kill", job_id=r["job_id"])
 
 
 def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> None:

@@ -607,6 +607,10 @@ def register(tb: Any) -> None:
             return tool_error("shell_run needs a command.", field="command", example={"command": "ls -la"})
         if on_timeout not in ("background", "kill"):
             return tool_error("on_timeout must be 'background' or 'kill'.", field="on_timeout", example={"on_timeout": "kill"})
+        # A chat's background jobs end with its reply (only a desk's outlive a turn), so in a chat a timeout kills.
+        in_desk = bool(ctx.get("desk_id"))
+        if not in_desk:
+            on_timeout = "kill"
         # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that is
         # still inside a granted root (the roots may have changed since), otherwise the default folder.
         roots = granted_roots(s, desk_root(ctx))
@@ -694,7 +698,8 @@ def register(tb: Any) -> None:
         if background:
             return {"job_id": job.id, "pid": job.pid, "background": True, **base,
                     "note": "Running in the background. shell_poll(job_id) reads new output; shell_kill(job_id) stops it."
-                            + (" You are told when it finishes." if job.notify else "")}
+                            + (" You are told when it finishes." if job.notify and in_desk else "")
+                            + ("" if in_desk else " It is stopped when this reply ends, so finish with it before replying.")}
         t0 = time.time()
         try:
             await jobs.wait(job)
@@ -752,6 +757,7 @@ def register(tb: Any) -> None:
                     "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
+                    "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
                     "unsandboxed=true escapes the sandbox and always asks the user.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "A folder inside the working folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},

@@ -232,7 +232,9 @@ def _writable_path(raw: str) -> Path:
 
 
 def _write_nofollow(path: Path, text: str, mode: str) -> None:
-    """Write `path` without following a symlink planted at the final component after the check."""
+    """Write `path` without following a symlink planted at the final component after the check. An overwrite goes to
+    a temp file in the same folder and is renamed over the original, so a write that fails leaves it as it was."""
+    data = text.encode("utf-8")  # text that cannot be encoded fails here, before anything is opened or truncated
     parent = path.parent
     flags = os.O_RDONLY | os.O_DIRECTORY
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -242,6 +244,9 @@ def _write_nofollow(path: Path, text: str, mode: str) -> None:
     except OSError as e:
         raise LocalPathError(f"could not open {parent.name}") from e
     try:
+        if mode == "overwrite":
+            _replace_at(dirfd, path.name, data, nofollow)
+            return
         oflags = os.O_WRONLY | os.O_CREAT | nofollow
         oflags |= os.O_APPEND if mode == "append" else os.O_TRUNC
         if mode == "create":
@@ -254,10 +259,32 @@ def _write_nofollow(path: Path, text: str, mode: str) -> None:
             if e.errno == errno.ELOOP:
                 raise LocalPathError("refusing to write through a symlink") from e
             raise
-        with os.fdopen(fd, "a" if mode == "append" else "w", encoding="utf-8") as f:
-            f.write(text)
+        with os.fdopen(fd, "ab" if mode == "append" else "wb") as f:
+            f.write(data)
     finally:
         os.close(dirfd)
+
+
+def _replace_at(dirfd: int, name: str, data: bytes, nofollow: int) -> None:
+    """Write `data` to a temp file in the folder `dirfd`, then rename it over `name`. A rename replaces a symlink
+    planted at `name` instead of writing through it."""
+    try:
+        perm = os.stat(name, dir_fd=dirfd, follow_symlinks=False).st_mode & 0o777
+    except FileNotFoundError:
+        perm = 0o644
+    tmp = f".grain-write-{os.urandom(6).hex()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600, dir_fd=dirfd)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            os.fchmod(f.fileno(), perm)
+        os.replace(tmp, name, src_dir_fd=dirfd, dst_dir_fd=dirfd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dirfd)
+        except OSError:
+            pass
+        raise
 
 
 def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]:

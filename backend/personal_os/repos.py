@@ -365,6 +365,13 @@ class Conversations:
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
                        trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
                        outcome: str | None = None, error_kind: str | None = None) -> None:
+        if context_used and context_used.get("chunks"):
+            # Every saved reply goes through here: check its [n] against the full excerpts, then keep a prefix.
+            # Mutates in place, so the 'done' event that follows carries the same ledger as the row.
+            from .context import CITE_TEXT_KEEP, cite_check
+            cite_check(content, context_used["chunks"])
+            for r in context_used["chunks"]:
+                r["text"] = str(r.get("text") or "")[:CITE_TEXT_KEEP]
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "

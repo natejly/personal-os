@@ -17,7 +17,7 @@ export interface ContextUsed {
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
   /** `n` is the excerpt's citation number in the reply ("[n]"); absent on messages saved before citations. */
-  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null; n?: number; heading?: string; page?: number | null }[]
+  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null; n?: number; heading?: string; page?: number | null; quote?: string; support?: 'ok' | 'weak' }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */

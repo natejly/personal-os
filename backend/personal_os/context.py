@@ -90,7 +90,45 @@ def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
     """What a message keeps about cited excerpt `n`: enough to label it and open the passage in its source."""
     return {"n": n, "chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"],
             "heading": h.get("heading") or "", "page": h.get("page"), "source": h.get("source", "file"),
-            "doc_id": h.get("doc_id"), "text": h["text"][:400]}
+            "doc_id": h.get("doc_id"), "text": h["text"]}  # full while the run lives: cite_check quotes from it
+
+
+CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message trims to this)
+_STOP = frozenset("a an and are as at be been but by can did do does for from had has have he her his i if in into is it its "
+                  "me my no not of on or our she so than that the their them then there these they this to was we were what "
+                  "when which who will with would you your".split())
+_CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.S)
+_SENTS = re.compile(r"(?<=[.!?\]])\s+|\n+")
+_MARK = re.compile(r"\[(\d{1,3})\]")
+
+
+def _terms(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", _MARK.sub(" ", text).lower()) if w not in _STOP}
+
+
+def cite_check(reply: str, refs: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Checks each [n] in the reply against excerpt n, with no model call. For every sentence that cites n, the
+    excerpt sentence sharing the most words with it is the quote; under 20% of the sentence's words found
+    there is 'weak'. A number with no excerpt is 'invalid'. Code is skipped. Cited refs gain quote and support."""
+    byn = {int(r["n"]): r for r in refs if r.get("n")}
+    best: dict[int, tuple[float, str]] = {}
+    out: dict[int, dict[str, Any]] = {}
+    for sent in _SENTS.split(_CODE.sub(" ", reply or "")):
+        words = _terms(sent)
+        for n in dict.fromkeys(int(m) for m in _MARK.findall(sent)):
+            r = byn.get(n)
+            if r is None:
+                out[n] = {"quote": "", "support": "invalid"}
+                continue
+            # ponytail: the best-supported sentence speaks for n; a second, unsupported use of [n] is not flagged.
+            for cs in (c.strip() for c in _SENTS.split(str(r.get("text") or ""))):
+                score = len(words & _terms(cs)) / len(words) if words else 0.0
+                if cs and (n not in best or score > best[n][0]):
+                    best[n] = (score, cs)
+    for n, (score, quote) in best.items():
+        out[n] = {"quote": quote[:300], "support": "ok" if score >= 0.2 else "weak"}
+        byn[n].update(out[n])
+    return out
 
 
 def _excerpt_header(h: dict[str, Any]) -> str:

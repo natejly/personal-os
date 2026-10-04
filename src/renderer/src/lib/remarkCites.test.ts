@@ -1,6 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import remarkCites, { citeNumber } from './remarkCites'
+import remarkCites, { citeNumber, citeTitle, splitSources } from './remarkCites'
+
+test('splitSources: cited in first-use order, adjacency counts twice, code and unknown numbers ignored', () => {
+  const chunks = [{ n: 1 }, { n: 2 }, { n: 3 }, { n: 4 }, {}]
+  const { cited, consulted } = splitSources('Rent [3][1]. Again [3]. Ref [9].\n```\nx[2]\n```\nAnd `y[4]`.', chunks)
+  assert.deepEqual(cited.map((c) => c.n), [3, 1])
+  assert.deepEqual(consulted.map((c) => c.n), [2, 4])
+})
+
+test('citeTitle shows the quote, or warns on weak support', () => {
+  assert.equal(citeTitle({ label: 'lease.txt', quote: 'Notice is 30 days.' }), '“Notice is 30 days.”\n— lease.txt')
+  assert.ok(citeTitle({ label: 'lease.txt', quote: 'x', weak: true }).startsWith('Source may not support this'))
+  assert.equal(citeTitle({ label: 'lease.txt' }), 'lease.txt')
+})
 
 const para = (value: string) => ({ type: 'root', children: [{ type: 'paragraph', children: [{ type: 'text', value }] }] })
 type N = { type: string; value?: string; url?: string; children?: N[] }

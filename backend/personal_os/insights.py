@@ -1068,10 +1068,13 @@ class Insights:
 
             created_mem = ""
             if auto_memory and conf >= min_conf:
-                if mem_id and self.memories.get(mem_id):
-                    self.memories.update(mem_id, {"content": statement, "kind": kind})
-                else:
-                    mem_id = created_mem = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)["id"]
+                mine = self.memories.get(mem_id) if mem_id else None
+                if mine and mine.get("source") == MEMORY_SOURCE:
+                    if not mine.get("pinned"):  # a pin is the user keeping that wording
+                        self.memories.update(mem_id, {"content": statement, "kind": kind})
+                else:  # create dedupes on content: a user's own row comes back, and a habit never adopts (or later rewrites) it
+                    row = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)
+                    mem_id = created_mem = row["id"] if row.get("source") == MEMORY_SOURCE else ""
             elif mem_id and not auto_memory:
                 self._drop_memory(mem_id)
                 mem_id = ""

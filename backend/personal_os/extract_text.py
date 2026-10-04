@@ -6,6 +6,7 @@ find it by name.
 """
 from __future__ import annotations
 
+import contextvars
 import io
 import re
 import unicodedata
@@ -127,8 +128,9 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
     """Blocks in reading order: headings, paragraphs, tables and (PDF) page markers."""
     ext = Path(name).suffix.lower()
     if ext == ".pdf" or mime == "application/pdf":
-        out: list[Block] = []
-        for n, page_text in enumerate(_pdf_page_texts(data)[0], start=1):
+        texts, ocr = _pdf_page_texts(data)
+        out: list[Block] = [_blk("para", _OCR_NOTE)] if ocr else []
+        for n, page_text in enumerate(texts, start=1):
             out.append(_blk("page", page=n))
             for para in re.split(r"\n\s*\n", page_text):
                 para = para.strip()
@@ -142,6 +144,7 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
         from docx.table import Table
         from docx.text.paragraph import Paragraph
 
+        _check_zip(data)
         d = docx.Document(io.BytesIO(data))
         out = []
         for child in d.element.body.iterchildren():
@@ -205,13 +208,32 @@ def extract_text(name: str, data: bytes, mime: str = "") -> str:
     return NO_TEXT_NOTE.format(name=name, kind=kind, size=len(data))
 
 
+_OCR_NOTE = "[OCR text: this PDF has no text layer, so the words below were read from page images and may contain mistakes]"
+# Set only inside extract_both: one upload asks for text and blocks, and a scanned PDF must not be OCRed twice.
+_PDF_MEMO: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar("_PDF_MEMO", default=None)
+
+
+def extract_both(name: str, data: bytes, mime: str = "") -> tuple[str, list[Block] | None]:
+    """extract_text and extract_structured over one PDF parse (and one OCR run). Blocks are None when they fail."""
+    token = _PDF_MEMO.set({})
+    try:
+        text = extract_text(name, data, mime)
+        try:
+            blocks: list[Block] | None = extract_structured(name, data, mime)
+        except Exception:  # noqa: BLE001 - the chunker falls back to the plain text
+            blocks = None
+        return text, blocks
+    finally:
+        _PDF_MEMO.reset(token)
+
+
 def _parsed(ext: str, mime: str, data: bytes) -> str | None:
     try:
         if ext == ".pdf" or mime == "application/pdf":
             texts, ocr = _pdf_page_texts(data)
             body = _bounded(texts, MAX_PDF_PAGES)
             if ocr:
-                return "[OCR text: this PDF has no text layer, so the words below were read from page images and may contain mistakes]\n\n" + body
+                return _OCR_NOTE + "\n\n" + body
             return body
         if ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             import docx
@@ -356,6 +378,7 @@ def _xlsx_openpyxl(data: bytes) -> str | None:
         import openpyxl
     except ImportError:
         return None
+    _check_zip(data)  # openpyxl inflates parts whole; the caller falls to the per-part-bounded zip parser
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     try:
         out = []
@@ -641,6 +664,16 @@ def _ocr_pdf(data: bytes, pages: int) -> list[str] | None:
 
 def _pdf_page_texts(data: bytes) -> tuple[list[str], bool]:
     """(page texts, ocr). A scan with no text layer is OCRed when the binaries exist."""
+    memo = _PDF_MEMO.get()
+    if memo is not None and "pdf" in memo:
+        return memo["pdf"]
+    got = _pdf_page_texts_uncached(data)
+    if memo is not None:
+        memo["pdf"] = got
+    return got
+
+
+def _pdf_page_texts_uncached(data: bytes) -> tuple[list[str], bool]:
     from pypdf import PdfReader
 
     pages = list(PdfReader(io.BytesIO(data)).pages)[:MAX_PDF_PAGES]

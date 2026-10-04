@@ -403,7 +403,7 @@ async def checked_code(settings: dict[str, Any], model: str, code: str, prompt: 
     if report["blocked"] and code.strip():
         try:
             fixed = await repair_artifact_code(settings, model, code, report["blocked"], prompt)
-        except ValueError:
+        except (ValueError, llm.LLMError):  # a timeout or provider error on the repair must not lose the generation
             return code, {**report, "repaired": False}
         if fixed:
             after = lint(fixed)

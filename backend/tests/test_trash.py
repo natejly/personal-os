@@ -173,6 +173,21 @@ class ProjectCascadeTests(_Base):
         # The chat trashed on its own before the project keeps its own retention window.
         self.assertTrue(self.trash.restore("conversation", self.other_conv["id"]))
 
+    def test_purge_project_spares_items_trashed_on_their_own(self) -> None:
+        pid = self.p["id"]
+        f = Path(self.tmp.name) / "own.txt"
+        f.write_text("x")
+        own = self.documents.create(pid, "own.txt", "text/plain", 1, str(f), "walrus facts")
+        mem = self.memories.create(pid, "Atlas walrus budget")
+        self.trash.trash("document", own["id"])
+        self.trash.trash("memory", mem["id"])
+        self.trash.trash("project", pid)
+        self.trash.purge("project", pid)
+        self.assertTrue(f.exists())
+        self.assertTrue(self.trash.restore("document", own["id"]))
+        self.assertTrue(self.trash.restore("memory", mem["id"]))
+        self.assertEqual([m["id"] for m in self.memories.list(None, q="walrus")], [mem["id"]])
+
     def test_purge_refuses_live_items(self) -> None:
         self.assertFalse(self.trash.purge("project", self.p["id"]))
         self.assertFalse(self.trash.purge("conversation", self.conv["id"]))

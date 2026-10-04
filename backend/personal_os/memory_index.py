@@ -62,7 +62,7 @@ class MemoryIndex:
         with self.db.tx() as c:
             rows = c.execute(
                 """SELECT m.id, m.content, v.content_hash, v.model FROM memories m
-                   LEFT JOIN memory_vectors v ON v.memory_id=m.id WHERE m.invalid_at IS NULL""").fetchall()
+                   LEFT JOIN memory_vectors v ON v.memory_id=m.id WHERE m.invalid_at IS NULL AND m.deleted_at IS NULL""").fetchall()
         return [r for r in rows if r["model"] != model or r["content_hash"] != _hash(r["content"])]
 
     def pending_count(self, model: str) -> int:
@@ -121,7 +121,7 @@ class MemoryIndex:
             return []
         rows = c.execute(
             f"""SELECT m.id FROM memories_fts f JOIN memories m ON m.id=f.memory_id
-                WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL
+                WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL AND m.deleted_at IS NULL
                 ORDER BY bm25(memories_fts) LIMIT ?""", (fq, *args, RANK_DEPTH)).fetchall()
         return [r["id"] for r in rows]
 
@@ -130,7 +130,7 @@ class MemoryIndex:
             return []
         rows = c.execute(
             f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
-                WHERE v.model=? AND m.invalid_at IS NULL AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
+                WHERE v.model=? AND m.invalid_at IS NULL AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
             (model, *args, VECTOR_CAP)).fetchall()
         scored = [(float(unpack(r["vec"]) @ qvec), r["memory_id"]) for r in rows if r["dim"] == qvec.shape[0]]
         scored.sort(key=lambda s: -s[0])

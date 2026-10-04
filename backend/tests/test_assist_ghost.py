@@ -19,9 +19,29 @@ def test_a_completion_cannot_add_a_second_instruction() -> None:
 
 
 def test_quotes_and_blank_lines_collapse() -> None:
-    assert ghost_text('  "hello   there"  ') == "hello there"
+    assert ghost_text('"hello   there"  ') == "hello there"
+    assert ghost_text('  "hello   there"  ') == " hello there"
     assert ghost_text("") == ""
     assert len(ghost_text("word " * 200)) == 280
+
+
+def _complete(before: str, reply: str) -> str:
+    async def fake(settings: object, model: str, messages: list[dict[str, str]], kind: str = "assist") -> str:
+        return reply
+
+    real = assist.llm.complete
+    assist.llm.complete = fake  # type: ignore[assignment]
+    try:
+        return asyncio.run(assist.complete_text({"defaultModel": "m"}, "note", before))
+    finally:
+        assist.llm.complete = real  # type: ignore[assignment]
+
+
+def test_a_new_word_keeps_its_space_and_only_whole_word_echoes_are_cut() -> None:
+    assert _complete("See you at the", " meeting tomorrow") == " meeting tomorrow"
+    assert _complete("See you at the ", " meeting") == "meeting"
+    assert _complete("at the", "every Monday") == "every Monday"  # a shared first letter is not an echo
+    assert _complete("Let's meet at the", "at the office") == " office"
 
 
 def _inside(text: str) -> None:
@@ -67,5 +87,6 @@ def test_other_peoples_text_cannot_close_the_quote() -> None:
 if __name__ == "__main__":
     test_a_completion_cannot_add_a_second_instruction()
     test_quotes_and_blank_lines_collapse()
+    test_a_new_word_keeps_its_space_and_only_whole_word_echoes_are_cut()
     test_other_peoples_text_cannot_close_the_quote()
     print("ok")

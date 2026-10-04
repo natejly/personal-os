@@ -299,3 +299,27 @@ def test_negative_limits_are_clamped() -> None:
 def test_board_routes_do_not_500_on_bad_ids() -> None:
     assert client.post("/boards/nope/cards", json={"title": "x", "column_id": "nope"}).status_code in (400, 404)
     assert client.post("/boards/nope/columns", json={"name": "x"}).status_code in (400, 404)
+
+
+def test_a_board_can_move_back_to_no_project() -> None:
+    proj = appmod.projects.create("p")["id"]
+    board = client.post("/boards", json={"name": "b", "project_id": proj}).json()
+    assert board["project_id"] == proj
+    assert client.put(f"/boards/{board['id']}", json={"name": "b2"}).json()["project_id"] == proj  # untouched
+    assert client.put(f"/boards/{board['id']}", json={"project_id": None}).json()["project_id"] is None
+    assert client.put(f"/boards/{board['id']}", json={"project_id": "gone"}).status_code == 404
+
+
+# ---- 16. Recap ----------------------------------------------------------------------------------------------------
+def test_recap_runs_without_a_key_and_marks_google_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def fake(cfg: dict[str, Any], model: str, facts: dict[str, Any]) -> str:
+        seen.append(facts)
+        return "recap"
+
+    monkeypatch.setattr(appmod, "generate_recap", fake)
+    monkeypatch.setattr(appmod.google, "status", lambda: {"connected": False})
+    appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
+    assert client.get("/recap?force=true").json()["content"] == "recap"
+    assert "not connected" in seen[0]["calendar_next_3_days"] and "not connected" in seen[0]["unread_mail"]

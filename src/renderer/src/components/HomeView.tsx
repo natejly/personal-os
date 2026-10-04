@@ -226,7 +226,10 @@ export default function HomeView(): JSX.Element {
 
   const brief = async (): Promise<void> => {
     newChat(null)
-    await send('Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.')
+    // Without Google there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
+    await send(google?.connected
+      ? 'Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.'
+      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting Google in Settings adds them. Be concise and use headers.')
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
   const quickAdd = async (): Promise<void> => {
@@ -278,7 +281,7 @@ export default function HomeView(): JSX.Element {
               </>
             )}
           </div>
-          <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
+          <button className="primary-btn" onClick={() => void brief()} title={google?.connected ? undefined : 'Todos only. Connect Google in Settings to add mail and calendar.'}><Sparkles size={14} /> Brief me</button>
         </div>
         <AppSwitcher />
       </header>

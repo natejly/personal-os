@@ -23,11 +23,29 @@ import sys
 import threading
 from pathlib import Path
 
+from . import logs
+
 log = logging.getLogger("personal_os.secrets")
 
 SERVICE = os.environ.get("GRAIN_KEYCHAIN_SERVICE", "Grain")
 FILE_NAME = ".secrets.json"
 _NOT_FOUND = 44  # `security` exit status for "item could not be found"
+
+
+def _teach_logs(value: str | None) -> None:
+    """Every secret this store hands out or saves is redacted from the log by its exact value, from now on,
+    not only from the next start. A JSON blob (Google token, MCP server keys) teaches its string leaves too."""
+    if not value:
+        return
+    logs.register_secret(value)
+    try:
+        blob = json.loads(value)
+    except ValueError:
+        return
+    if isinstance(blob, dict):
+        for v in blob.values():
+            if isinstance(v, str) and not v.startswith("http"):  # token_uri and the like are not secrets
+                logs.register_secret(v)
 
 
 class SecretStore:
@@ -48,6 +66,7 @@ class SecretStore:
             if value is None and self.use_keychain:
                 value = self._kc_get(name)
             self._cache[name] = value
+            _teach_logs(value)
             return value
 
     def set(self, name: str, value: str) -> None:
@@ -62,6 +81,7 @@ class SecretStore:
             else:
                 self._file_put(name, value)
             self._cache[name] = value
+            _teach_logs(value)
 
     def delete(self, name: str) -> None:
         with self._lock:

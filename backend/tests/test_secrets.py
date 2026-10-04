@@ -42,6 +42,16 @@ class FileBackendTests(unittest.TestCase):
         s.delete("a")
         self.assertIsNone(SecretStore(d, backend="file").get("a"))
 
+    def test_a_key_saved_after_startup_is_redacted_from_logs(self) -> None:
+        from personal_os import logs
+        s = SecretStore(Path(tempfile.mkdtemp()), backend="file")
+        s.set("apiKey", "fw_LATERKEY0123")
+        s.set("googleToken", json.dumps({"refresh_token": "1//0LATERREFRESH", "token_uri": "https://oauth2.example/token"}))
+        out = logs.redact("echo fw_LATERKEY0123 and 1//0LATERREFRESH via https://oauth2.example/token")
+        self.assertNotIn("LATERKEY", out)
+        self.assertNotIn("LATERREFRESH", out)
+        self.assertIn("https://oauth2.example/token", out)
+
     def test_empty_value_deletes(self) -> None:
         d = Path(tempfile.mkdtemp())
         s = SecretStore(d, backend="file")

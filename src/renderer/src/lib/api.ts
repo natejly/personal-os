@@ -174,9 +174,9 @@ export const api = {
   jobs: {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
+    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once' | 'mail'; cron?: string; run_at?: number | null; mail_query?: string; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */

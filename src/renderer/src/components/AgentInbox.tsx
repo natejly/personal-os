@@ -248,7 +248,9 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       )}
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
-        : <code className="muted small">{job.cron}</code>}
+        : job.kind === 'mail'
+          ? <code className="muted small" title="Runs when matching mail arrives">{job.mail_query}</code>
+          : <code className="muted small">{job.cron}</code>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
@@ -296,15 +298,16 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', cron: '', query: '', mode: 'once' as 'once' | 'repeat' | 'mail', onlyTools: false }
 
-/** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
+/** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat, or a Gmail
+ * search when it should run as matching mail arrives. */
 function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
   const createJob = useStore((s) => s.createJob)
   const [f, setF] = useState(BLANK)
   const [busy, setBusy] = useState(false)
   const [picked, setPicked] = useState<string[]>(['current_time'])
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && !!{ once: f.when, repeat: f.cron.trim(), mail: f.query.trim() }[f.mode]
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -312,9 +315,11 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
     setBusy(true)
     const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
-    const ok = await createJob(f.repeat
+    const ok = await createJob(f.mode === 'repeat'
       ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
-      : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
+      : f.mode === 'mail'
+        ? { ...common, kind: 'mail' as const, mail_query: f.query.trim() }
+        : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
     setBusy(false)
     if (ok) {
       setF(BLANK)
@@ -329,15 +334,20 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
       <textarea rows={2} placeholder="What should it do? It runs in a fresh chat, so write it so it stands alone."
         value={f.prompt} maxLength={8000} onChange={(e) => setF({ ...f, prompt: e.target.value })} />
       <div className="new-task-when">
-        <label className="chip-check-row">
-          <input type="checkbox" checked={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.checked })} />
-          <span>Repeat</span>
-        </label>
-        {f.repeat
+        <select value={f.mode} aria-label="When it runs" onChange={(e) => setF({ ...f, mode: e.target.value as typeof f.mode })}>
+          <option value="once">Once</option>
+          <option value="repeat">Repeat</option>
+          <option value="mail">When matching mail arrives</option>
+        </select>
+        {f.mode === 'repeat'
           ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
               onChange={(e) => setF({ ...f, cron: e.target.value })} />
-          : <input type="datetime-local" value={f.when} aria-label="When it should run"
-              onChange={(e) => setF({ ...f, when: e.target.value })} />}
+          : f.mode === 'mail'
+            ? <input type="text" placeholder="Gmail search, e.g. from:landlord" value={f.query} maxLength={500}
+                aria-label="Gmail search" title="Checked every five minutes; mail already there when you save does not count"
+                onChange={(e) => setF({ ...f, query: e.target.value })} />
+            : <input type="datetime-local" value={f.when} aria-label="When it should run"
+                onChange={(e) => setF({ ...f, when: e.target.value })} />}
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
       </div>
       <label className="chip-check-row small">

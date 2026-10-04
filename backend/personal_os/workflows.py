@@ -913,8 +913,7 @@ class Engine:
             if not ch.finished.is_set():
                 self.subagents.stop_tree(ch.id)
         ctx["tainted"] = True
-        if "workflow:agent" not in ctx["taint_sources"]:
-            ctx["taint_sources"].append("workflow:agent")
+        ctx["taint_sources"].append("workflow:agent")  # appended every time: the chat loop's fence reads growth
         if ch.state == "error" or ch.exit_reason in ("interrupted", "stale"):
             raise _StepFailed(f"the {ch.role.name} subagent ended: {ch.exit_reason or ch.error}")
         return ch.text

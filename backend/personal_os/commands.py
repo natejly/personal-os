@@ -181,6 +181,7 @@ def register(tb: Any) -> None:
             return tool_error("Subagents are not available, so this command cannot run as a subtask.")
         out = await sub.spawn_tool(ctx, task=prompt, role=cmd["role"] or "researcher")
         ctx["tainted"] = True  # a child's report is untrusted text
+        ctx.setdefault("taint_sources", []).append("command_run")  # appended every time: the fence reads growth
         return out
 
     tb.specs["command_run"] = ToolSpec(

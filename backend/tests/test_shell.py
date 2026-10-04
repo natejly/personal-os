@@ -678,7 +678,8 @@ def test_contacted_hosts_taint_the_reply_like_open_network(box: Box) -> None:
     ctx: dict[str, Any] = {"tainted": False, "taint_sources": []}
     shell.taint(ctx, "shell_run:network")
     shell.taint(ctx, "shell_run:network")
-    assert ctx["tainted"] is True and ctx["taint_sources"] == ["shell_run:network"]
+    # Listed every time: the chat loop fences a result when the list grew during that call.
+    assert ctx["tainted"] is True and ctx["taint_sources"] == ["shell_run:network", "shell_run:network"]
     assert "Settings" in shell.net_blocked_note(["a.com"]) and "desk_ask" in shell.net_blocked_note(["a.com"])
 
 

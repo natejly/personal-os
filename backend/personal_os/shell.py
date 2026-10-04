@@ -58,8 +58,8 @@ class ShellError(Exception):
 def taint(ctx: dict[str, Any], src: str) -> None:
     """Mark the reply as having read untrusted text, with the source named so an approved plan can predict it."""
     ctx["tainted"] = True
-    if src not in ctx.setdefault("taint_sources", []):
-        ctx["taint_sources"].append(src)
+    # Appended even when already listed: the chat loop fences a result when this list grew during the call.
+    ctx.setdefault("taint_sources", []).append(src)
 
 
 def net_blocked_note(hosts: list[str]) -> str:

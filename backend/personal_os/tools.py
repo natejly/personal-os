@@ -2334,6 +2334,7 @@ def _register_docs(self: Toolbox) -> None:
         hits = self.docs.search(query, ctx.get("project_id"), limit=max(1, min(int(limit), 20)))
         if any(h.get("via") == "recording" for h in hits):
             ctx["tainted"] = True  # spoken words are third-party content, same rule as meeting_search
+            ctx.setdefault("taint_sources", []).append("doc_search")  # appended every time: the fence reads growth
         return {"results": hits, "count": len(hits)}
     R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
@@ -3070,9 +3071,7 @@ def _register_cowork(self: Toolbox) -> None:
         if not fetched:
             return
         ctx["tainted"] = True
-        sources = ctx.setdefault("taint_sources", [])
-        if "desk_read_file" not in sources:
-            sources.append("desk_read_file")
+        ctx.setdefault("taint_sources", []).append("desk_read_file")  # appended every time: the fence reads growth
 
     async def desk_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
         desk_id = _id(ctx, "desk_read_file")
@@ -3299,9 +3298,7 @@ def _register_cowork(self: Toolbox) -> None:
         untrusted = bool(cid) and (sb.networked(cid) or sb.holds_import(cid))
         if untrusted:
             ctx["tainted"] = True
-            sources = ctx.setdefault("taint_sources", [])
-            if "desk_import_sandbox" not in sources:
-                sources.append("desk_import_sandbox")
+            ctx.setdefault("taint_sources", []).append("desk_import_sandbox")  # appended every time: the fence reads growth
         try:
             res = ws.write(desk_id, path, text, "overwrite")
         except WorkspaceError as e:

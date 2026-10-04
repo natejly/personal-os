@@ -1203,8 +1203,10 @@ class Toolbox:
         def _row(j: dict[str, Any]) -> dict[str, Any]:
             """One scheduled task as the model should see it: when it runs, not how the row is stored."""
             return {"id": j["id"], "name": j["name"],
-                    "schedule": j["cron"] if j["kind"] == "cron" else f"once at {_iso(j['run_at'])}",
-                    "repeats": j["kind"] == "cron", "timezone": j["timezone"], "enabled": j["enabled"],
+                    "schedule": {"cron": j["cron"], "mail": f"when mail matching '{j.get('mail_query')}' arrives",
+                                 "watch": f"when files change in {j.get('watch_dir')}"
+                                          + (f", and on cron {j['cron']}" if j["cron"] else "")}.get(j["kind"], f"once at {_iso(j['run_at'])}"),
+                    "repeats": j["kind"] != "once", "timezone": j["timezone"], "enabled": j["enabled"],
                     "next_run": _iso(j["next_due_at"]), "last_run": _iso(j["last_fired_at"]),
                     "last_error": j["last_error"]}
 

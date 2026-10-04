@@ -13,7 +13,7 @@ import { BrowserWindow, nativeImage, type WebContents } from 'electron'
 import { randomBytes } from 'crypto'
 import { existsSync, mkdirSync } from 'fs'
 import { basename, extname, isAbsolute, join } from 'path'
-import { hostBlocked, isPrivateHost } from './pageGuard'
+import { hostBlocked, isPrivateHost, sessionResolver } from './pageGuard'
 import { handle } from './ipc'
 import { buildSnapshot, hintsFromDomSnapshot, riskOf, type NodeHint, type RefEntry } from './axSnapshot'
 
@@ -663,7 +663,7 @@ async function validateUrl(raw: string): Promise<string> {
   }
   if (!isHttp(u)) throw new BrowserError('bad_request', `only http(s) pages can be opened, got ${u.protocol}`)
   if (u.username || u.password) throw new BrowserError('bad_request', 'credentials in the URL are not allowed')
-  if (await hostBlocked(u.hostname)) throw new BrowserError('blocked_host', `${u.hostname} is not a public address`)
+  if (await hostBlocked(u.hostname, sessionResolver(getSession()))) throw new BrowserError('blocked_host', `${u.hostname} is not a public address`)
   return u.toString()
 }
 

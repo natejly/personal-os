@@ -56,6 +56,8 @@ test('a widget document cannot spend the app token', () => {
 test('a subframe may load a widget or a source, and nothing else on the sidecar', () => {
   assert.equal(frameNavigationAllowed(`${BACKEND}/widgets/abc/render`, BACKEND, RENDERER), true)
   assert.equal(frameNavigationAllowed(`${BACKEND}/sources/abc/fetch?wt=1`, BACKEND, RENDERER), true)
+  assert.equal(frameNavigationAllowed(`${BACKEND}/artifacts/a1/render?rt=t&re=1&v=1`, BACKEND, RENDERER), true)
+  assert.equal(frameNavigationAllowed(`${BACKEND}/artifacts/a1`, BACKEND, RENDERER), false)
   assert.equal(frameNavigationAllowed(`${RENDERER}/src/renderer/index.html`, BACKEND, RENDERER), true)
   assert.equal(frameNavigationAllowed('about:blank', BACKEND, RENDERER), true)
   assert.equal(frameNavigationAllowed(`${BACKEND}/settings`, BACKEND, RENDERER), false)

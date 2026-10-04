@@ -129,6 +129,8 @@ export default function SettingsModal(): JSX.Element {
     const accel = draft.gatherShortcut.trim()
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
+    // A rejected accelerator is never saved; the old one stays bound and the reason shows under the field.
+    if (applied && !applied.ok) return setTab('behavior')
     const capAccel = (draft.quickCaptureShortcut ?? '').trim()
     const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
     if (capApplied && !capApplied.ok) return toast(capApplied.message ?? `${capApplied.accelerator} could not be registered.`, 'error')
@@ -149,8 +151,6 @@ export default function SettingsModal(): JSX.Element {
     }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
     if ((draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)) setView('home')
-    // The reason is printed under the shortcut field, so show that tab.
-    if (applied && !applied.ok) return setTab('behavior')
     setSettingsOpen(false)
   }
 

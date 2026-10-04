@@ -167,6 +167,13 @@ async function resolveHost(host: string): Promise<string[]> {
   return rows.map((row) => row.address)
 }
 
+/**
+ * Resolve through a Chromium session's own host resolver, so the check and the connect that follows
+ * share one host cache entry. A separate Node lookup lets a TTL-0 name answer public here and private there.
+ */
+export const sessionResolver = (ses: { resolveHost(host: string): Promise<{ endpoints: { address: string }[] }> }) =>
+  async (host: string): Promise<string[]> => (await ses.resolveHost(host)).endpoints.map((e) => e.address)
+
 /** True when this host must not be connected to. DNS failures are refused. */
 export async function hostBlocked(host: string, resolve: (host: string) => Promise<string[]> = resolveHost): Promise<boolean> {
   const h = host.replace(/^\[|\]$/g, '')

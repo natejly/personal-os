@@ -6,6 +6,8 @@ import { isLoopbackHost } from './pageGuard'
 
 const WIDGET_RENDER = /^\/widgets\/[^/]+\/render$/
 const SOURCE_FETCH = /^\/sources\/[^/]+\/fetch$/
+// Signed per artifact (rt/re in the query) and sandboxed, so the frame needs no app token.
+const ARTIFACT_RENDER = /^\/artifacts\/[^/]+\/render$/
 
 function originOf(url: string): string | null {
   try {
@@ -69,7 +71,7 @@ export function shouldAttachWidgetToken(args: {
 }
 
 /**
- * Subframes may load the widget document and its data sources. The rest of the API stays in the app,
+ * Subframes may load the widget document, its data sources and saved artifacts. The rest of the API stays in the app,
  * and so does the disk: every frame the renderer makes is a sidecar URL or srcdoc, so a file dropped
  * on a preview frame has no business loading in it.
  */
@@ -85,7 +87,7 @@ export function frameNavigationAllowed(url: string, backendUrl: string, renderer
     return false
   }
   if (request.origin !== backend) return false
-  return WIDGET_RENDER.test(request.pathname) || SOURCE_FETCH.test(request.pathname)
+  return WIDGET_RENDER.test(request.pathname) || SOURCE_FETCH.test(request.pathname) || ARTIFACT_RENDER.test(request.pathname)
 }
 
 /** A loopback URL aimed at one local service (the sidecar, or the page loader), whatever spelling it uses. */

@@ -455,3 +455,6 @@ export default function SettingsModal(): JSX.Element {
     </div>
   )
 }
+
+/** The tab list, for the command palette. */
+export { TABS as SETTINGS_TABS }

@@ -802,6 +802,9 @@ class Subagents:
             bad = perm.refusal or self._confine(ch, name, args)
             if bad:
                 result = denied(name, bad)
+            elif mode == "ask" and (ch.ctx.get("proposal_only") or (ch.ctx.get("run") is not None and not ch.ctx["run"].live)):
+                # A background run, or a parent whose reply already ended: nobody is there to answer a card.
+                decision, result = "deny", denied(name, "not available here: it needs an approval and nobody is watching")
             elif mode == "ask":
                 decision = await self._ask(ch, uid, name, args, forced, spec.danger)
                 if decision != "allow":
@@ -872,14 +875,15 @@ class Subagents:
                                      forced=forced, desk_id=ch.desk_id, danger=danger)
             self.store.update(ch.id, status="awaiting_approval")
         if run is not None:
-            run.set_status("awaiting_approval")
+            if run.live:  # an ended parent's row is final
+                run.set_status("awaiting_approval")
             run.publish("tool_call", {"message_id": ch.message_id, "id": uid, "name": name, "arguments": args, "needs_approval": True,
                                       "forced": forced, "plan": None, "agent": ch.label})
         t0 = time.time()
         stop = ch.ctx.get("stop")
         try:
             while not fut.done():
-                if ch.halt_reason or (stop is not None and stop.is_set()):
+                if ch.halt_reason or (stop is not None and stop.is_set()) or (run is not None and not run.live):
                     fut.set_result("deny")
                     if self.store is not None:
                         self.store.decide(uid, "deny", by="stop")
@@ -902,7 +906,8 @@ class Subagents:
         if self.store is not None:
             self.store.update(ch.id, status="running")
         if run is not None:
-            run.set_status("running")
+            if run.live:  # an ended parent's row is final
+                run.set_status("running")
             run.publish("tool_result", {"message_id": ch.message_id, "id": uid, "name": name, "arguments": args,
                                         "result_preview": "", "duration_ms": int(waited * 1000),
                                         "error": None if decision != "deny" else "declined", "approval": decision,

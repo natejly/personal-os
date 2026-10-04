@@ -447,6 +447,8 @@ class ErrorKinds(unittest.TestCase):
             (429, err_body("x", "insufficient_quota"), "quota"),
             (401, "no", "auth"),
             (403, "no", "auth"),
+            (400, err_body("No connected db.", "400", "no_db_connection"), "auth"),
+            (400, err_body("Invalid API key provided"), "auth"),
             (404, "no", "not_found"),
             (400, err_body("Unsupported parameter: reasoning_effort"), "unsupported_param"),
             (422, err_body("x", "unknown_parameter"), "unsupported_param"),
@@ -491,6 +493,14 @@ class ErrorKinds(unittest.TestCase):
                 with self.assertRaises(llm.LLMError) as cm:
                     run(collect())
             self.assertEqual((p.calls, cm.exception.kind), (1, kind))
+
+    def test_proxy_key_error_says_check_the_key(self) -> None:
+        body = err_body("No connected db.", "400", "no_db_connection")
+        with Provider(lambda req: httpx.Response(400, text=body)) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual((p.calls, cm.exception.kind), (1, "auth"))
+        self.assertIn("Check the API key in Settings", str(cm.exception))
 
     def test_overflow_carries_the_parsed_limit(self) -> None:
         body = err_body("This model's maximum context length is 128000 tokens. However, you requested 140000 tokens.")

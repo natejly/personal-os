@@ -4294,6 +4294,8 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
                                                  _execute, call_id=pid)
     err = result.get("error") if isinstance(result, dict) else None
     row = proposals.record(pid, result, err)
+    if err and "verification" not in result:
+        row = proposals.reopen(pid)  # nothing was written (an unverified write might have been): it can be accepted again
     return {"ok": not err, "proposal": row, "replayed": replayed, "result": summarize_result(result, 2000)}
 
 

@@ -298,3 +298,42 @@ def test_inbox_shows_expired_pause() -> None:
     mine = [p for p in client.get("/inbox").json()["needs_you"]["paused_jobs"] if p["id"] == jb["id"]]
     assert mine and mine[0]["reason"] == "expired"
     appmod.jobs.delete(jb["id"])
+
+
+def test_a_failed_one_off_is_retried_and_a_good_one_retires() -> None:
+    """A one-off is disabled the moment it fires; its retry budget still holds, and a success stays retired."""
+    for outcome, want in (("error", 2), ("done", 1)):
+        r = Rig()
+        jb = r.jobs.create("once", "", "p", kind="once", run_at=T0 + 60, timezone="UTC", enabled=True, at=T0, max_retries=1)
+
+        def flip(s: float, r: Rig = r, outcome: str = outcome) -> None:
+            if s < 120:
+                for i in range(len(r.launched)):
+                    if r.store.get(f"run{i}")["status"] == "running":
+                        r.finish(f"run{i}", outcome, "boom" if outcome == "error" else None)
+
+        r.on_sleep = flip
+
+        async def go(r: Rig = r) -> None:
+            await r.fire(T0 + 120)
+            await r.policy.drain()
+            assert await r.fire(T0 + 7200) == []  # retired: never fires again
+
+        asyncio.run(go())
+        assert len(r.launched) == want, (outcome, len(r.launched))
+        got = r.jobs.get(jb["id"])
+        assert not got["enabled"] and got["next_due_at"] is None
+
+    # boot_retry: an interrupted one-off is relaunched once, too
+    r = Rig()
+    r.jobs.create("once", "", "p", kind="once", run_at=T0 + 60, timezone="UTC", enabled=True, at=T0, max_retries=1)
+    asyncio.run(r.fire(T0 + 120))
+    r.finish("run0", "interrupted", "Interrupted")
+
+    async def boot() -> list[str]:
+        out = await r.policy.boot_retry()
+        for t in list(r.policy._tasks):  # noqa: SLF001
+            t.cancel()
+        return out
+
+    assert len(asyncio.run(boot())) == 1 and r.launched[1]["retry_of"] == "run0"

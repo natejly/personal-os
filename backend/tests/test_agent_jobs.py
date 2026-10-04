@@ -442,6 +442,22 @@ def test_accepting_a_proposal_executes_it_once_and_re_accepting_does_not_double_
     j("POST", "/proposals/nope/accept", expect=404)
 
 
+def test_an_accept_that_fails_before_writing_goes_back_to_pending() -> None:
+    p = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
+
+    def expired(*args: Any, **kw: Any) -> Any:
+        raise RuntimeError("token expired")
+
+    appmod.google.calendar_create = expired
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is False and res["proposal"]["status"] == "pending", "nothing was written, so it can be accepted again"
+    assert any(x["id"] == p["id"] for x in proposals.list("pending"))
+    appmod.google.calendar_create = _recorder("calendar_create")
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is True and res["proposal"]["status"] == "accepted"
+    assert [n for n, _ in SENT] == ["calendar_create"]
+
+
 def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> None:
     p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Draft", "body": "Too blunt."})
     edited = {"to": "a@example.com", "subject": "Draft", "body": "Warmer, and shorter."}

@@ -551,6 +551,12 @@ class Proposals:
                           (at if at is not None else now(), id)).rowcount
         return self.get(id) if n else None
 
+    def reopen(self, id: str) -> dict[str, Any] | None:
+        """Put an accepted proposal back to 'pending', for an accept whose call failed before writing anything."""
+        with self.db.tx() as c:
+            c.execute("UPDATE proposals SET status='pending', decided_at=NULL WHERE id=? AND status='accepted'", (id,))
+        return self.get(id)
+
     def record(self, id: str, result: Any, error: str | None = None) -> dict[str, Any] | None:
         with self.db.tx() as c:
             c.execute("UPDATE proposals SET result=?, error=? WHERE id=?",

@@ -87,6 +87,10 @@ DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on",
 # 'schedules' is here for a different reason than 'external': a job that can create jobs is a loop, and the one
 # thing this feature must not grow into is an agent that keeps itself running.
 PROPOSAL_ONLY_DANGER = ("external", "schedules")
+# Danger levels whose mode tops out at 'ask': no Settings, Project or Chat map can switch them to 'on'. Actions
+# outside the app (mail, calendar, Tasks) and booking unattended work always show a card. 'off' is still honoured,
+# and a patterned allow rule (permrules) is the one way a specific call can skip the card.
+ASK_LOCKED_DANGER = ("external", "schedules")
 # Lasting text, and destructive edits to the user's lists. Untrusted content must not plant or
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
@@ -797,14 +801,20 @@ class Toolbox:
         return v if v in ("on", "ask", "off") else None
 
     def effective(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None) -> dict[str, str]:
-        """Resolve chat override → project override → global setting → tool default."""
+        """Resolve chat override → project override → global setting → tool default, external and schedules capped at ask."""
         out: dict[str, str] = {}
         for name, spec in self.specs.items():
             v = self._norm(global_tools.get(name)) or spec.default_mode
             v = self._norm((project_tools or {}).get(name)) or v
             v = self._norm((chat_tools or {}).get(name)) or v
-            out[name] = v
+            out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER else v
         return out
+
+    def cap_modes(self, tools: dict[str, Any]) -> dict[str, Any]:
+        """A tool map as it may be stored: an ask-locked tool saved as 'on' becomes 'ask'. Names that are not built-in
+        tools (connector slugs, unknown keys) pass through unchanged."""
+        return {k: "ask" if self._norm(v) == "on" and (s := self.specs.get(k)) and s.danger in ASK_LOCKED_DANGER else v
+                for k, v in tools.items()}
 
     def schemas(self, modes: dict[str, str]) -> list[dict[str, Any]]:
         gok = self._google_ok()

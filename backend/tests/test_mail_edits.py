@@ -72,6 +72,18 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertEqual(appmod.run_store.approval(f"m1{self.u}:call_0")["status"], "pending")
 
+    def test_edit_to_a_denied_recipient_is_403_and_leaves_the_card_pending(self) -> None:
+        self.client.put("/settings", headers=self.h, json={"permissionRules": {"allow": [], "ask": [], "deny": ["gmail_send(*@blocked.example)"]}})
+        try:
+            self._open("gmail_send", f"m5{self.u}:call_0", GOOD)
+            r = self.client.post(f"/approvals/m5{self.u}:call_0", headers=self.h,
+                                 json={"decision": "allow", "arguments": {**GOOD, "to": "eve@blocked.example"}})
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("gmail_send(*@blocked.example)", r.json()["detail"])
+            self.assertEqual(appmod.run_store.approval(f"m5{self.u}:call_0")["status"], "pending")
+        finally:
+            self.client.put("/settings", headers=self.h, json={"permissionRules": {"allow": [], "ask": [], "deny": []}})
+
     def test_non_editable_tool_rejects_arguments(self) -> None:
         self._open("web_search", f"m2{self.u}:call_0", {"query": "x"})
         r = self.client.post(f"/approvals/m2{self.u}:call_0", headers=self.h, json={"decision": "allow", "arguments": {"query": "y"}})

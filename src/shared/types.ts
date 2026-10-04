@@ -158,6 +158,8 @@ export interface PageContext {
 
 export type ToolMode = 'on' | 'ask' | 'off'
 export type ToolOverride = 'inherit' | ToolMode
+/** Danger tiers whose mode tops out at 'ask' (tools.ASK_LOCKED_DANGER): no map can switch them on, and no card grants them whole-tool. */
+export const askLocked = (danger: string | undefined): boolean => danger === 'external' || danger === 'schedules'
 
 export interface ToolInfo {
   name: string
@@ -267,7 +269,7 @@ export interface PermissionCard {
   suggestions: string[]
   /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
   session: boolean
-  /** The tool's danger tier; an 'external' write offers no whole-tool standing grant. */
+  /** The tool's danger tier; an 'external' or 'schedules' call offers no whole-tool standing grant. */
   danger?: string
 }
 
@@ -2113,6 +2115,8 @@ export interface AgentProposal {
   error: string | null
   /** The user changed the arguments before accepting. */
   edited: boolean
+  /** Accept takes edited arguments for this tool (approval_edits.EDITABLE_TOOLS); otherwise it runs as proposed. */
+  editable?: boolean
   created_at: number
   decided_at: number | null
   /** The job's name, on inbox rows only (null once the job is gone). */

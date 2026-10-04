@@ -113,7 +113,9 @@ def resume_it(rid: str) -> Any:
 
 
 def setup() -> None:
-    client.put("/settings", json={"autoLearn": False, "baseUrl": "", "tools": {"gmail_send": "on"}})
+    # gmail_send always asks (Toolbox.effective caps it); a patterned allow rule is the one way past the card.
+    client.put("/settings", json={"autoLearn": False, "baseUrl": "",
+                                  "permissionRules": {"allow": [f"gmail_send({SEND['to']})"], "ask": [], "deny": []}})
     llm.stream_chat = _scripted_stream
     appmod.toolbox.call = _counting_call  # type: ignore[method-assign]
 

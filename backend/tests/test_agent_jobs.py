@@ -442,6 +442,39 @@ def test_accepting_a_proposal_executes_it_once_and_re_accepting_does_not_double_
     j("POST", "/proposals/nope/accept", expect=404)
 
 
+def _refused_edit_leaves_it_pending(pid: str, args: dict[str, Any], expect: int) -> str:
+    detail = j("POST", f"/proposals/{pid}/accept", {"args": args}, expect=expect)["detail"]
+    row = proposals.get(pid)
+    assert row["status"] == "pending" and row["edited"] is False, "a refused edit decides nothing"
+    assert SENT == []
+    return detail
+
+
+def test_an_edited_proposal_faces_the_same_checks_as_an_edited_card() -> None:
+    p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "Body."})
+    assert p["editable"] is True
+    _refused_edit_leaves_it_pending(p["id"], {"to": "not an address", "subject": "Hi", "body": "Body."}, 400)
+    _refused_edit_leaves_it_pending(p["id"], {"to": "a@example.com", "subject": "Hi", "body": "Body.", "bcc_all": True}, 400)
+
+    doc = proposals.create(run_id=None, tool="gdocs_append", args={"document_id": "d1", "content": "notes"})
+    assert doc["editable"] is False, "the inbox offers no edit the accept would refuse"
+    _refused_edit_leaves_it_pending(doc["id"], {"document_id": "d2", "content": "other"}, 400)
+
+
+def test_an_edit_that_adds_a_denied_recipient_is_refused() -> None:
+    j("PUT", "/settings", {"permissionRules": {"allow": [], "ask": [], "deny": ["gmail_send(*@blocked.example)"]}})
+    try:
+        p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "Body."})
+        detail = _refused_edit_leaves_it_pending(
+            p["id"], {"to": "a@example.com, eve@blocked.example", "subject": "Hi", "body": "Body."}, 403)
+        assert "gmail_send(*@blocked.example)" in detail
+        assert j("POST", f"/proposals/{p['id']}/accept")["ok"] is True, "as proposed, it still goes through"
+        _flush_outbox()
+        assert SENT[0][1]["args"][0] == "a@example.com"
+    finally:
+        j("PUT", "/settings", {"permissionRules": {"allow": [], "ask": [], "deny": []}})
+
+
 def test_an_accept_that_fails_before_writing_goes_back_to_pending() -> None:
     p = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
 

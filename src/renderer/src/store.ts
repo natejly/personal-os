@@ -497,7 +497,8 @@ export interface State {
   /** PATCH a job; resolves to the backend's refusal text, or null when it saved. The caller shows the refusal inline. */
   updateJob: (id: string, patch: Parameters<typeof api.jobs.update>[1]) => Promise<string | null>
   runJobNow: (id: string) => Promise<void>
-  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
+  /** Resolves to the refusal message when the server turned the decision down (the proposal stays pending), else null. */
+  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<string | null>
   rejectJobProposals: (jobId: string) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
   approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) => Promise<void>
@@ -3824,14 +3825,15 @@ export const useStore = create<State>((set, get) => {
         if (!accept) {
           await api.proposals.reject(id)
           get().toast('Dropped.', 'info')
-          return
+          return null
         }
         const res = await api.proposals.accept(id, args)
         const t = acceptToast(res)
         get().toast(t.text, t.kind)
         if (res.queued) window.dispatchEvent(new Event('grain-outbox-changed'))
+        return null
       } catch (e) {
-        get().toast((e as Error).message, 'error')
+        return (e as Error).message
       } finally {
         void get().refreshAgentInbox()
       }

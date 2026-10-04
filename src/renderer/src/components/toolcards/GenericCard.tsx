@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolEvent } from '@shared/types'
+import { askLocked, type ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import { ArgList, RawDetails, ResultBlock } from './parts'
 import './toolcards.css'
@@ -53,7 +53,7 @@ export function GenericApproval({ event, decide, grant }: {
       <div className="approval-actions">
         <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
         <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
-        {!event.forced && event.permission?.danger !== 'external' && (
+        {!event.forced && !askLocked(event.permission?.danger) && (
           <>
             <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(() => grant('always_chat'))()}>Always in this chat</button>
             <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(() => grant('always_global'))()}>Always</button>

@@ -91,7 +91,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, page_title, summarize_result, times_body
+from .tools import ASK_LOCKED_DANGER, Toolbox, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -815,6 +815,9 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "permissionRules":
             clean[k] = _check_permission_rules(v)
+        elif k == "tools":
+            # Coerced, not refused: a legacy stored 'on' comes back in every later save of the whole map.
+            clean[k] = toolbox.cap_modes(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
         elif k in HOST_LIST_SETTINGS:
@@ -1147,7 +1150,10 @@ def create_project(body: ProjectIn) -> dict[str, Any]:
 
 @app.put("/projects/{id}")
 def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
-    s = projects.update(id, body.model_dump())
+    patch = body.model_dump()
+    if patch.get("tools") is not None:
+        patch["tools"] = toolbox.cap_modes(patch["tools"])  # external and schedules tools top out at ask
+    s = projects.update(id, patch)
     if not s:
         raise HTTPException(404)
     return s
@@ -1243,6 +1249,8 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
                 raise HTTPException(409, "A desk or job transcript cannot be moved")
             patch["project_id"] = wsid(body.project_id)
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
+    if isinstance(settings_patch.get("tools"), dict):
+        settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
     # Clearing the banner has to drop library text that was copied into the sandbox, or the next
     # command can print it back as if the chat were trusted again.
     if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
@@ -2668,15 +2676,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         mode, forced = "ask", True
                 # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
+                # External and schedules tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on'
+                # into a forced card for them: a tainted run forces it here, so the card buys no grant or allow rule.
+                # That alone does not stop an approved plan step from standing in for the card: taint the plan did
+                # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
+                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
+                forced = forced or taint_only
                 perm = permrules.Resolution(mode, forced)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
-                        c["name"], args, mode, forced or (danger == "external" and bool(tool_ctx["tainted"])),
+                        c["name"], args, mode, forced,
                         rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode
                     if perm.kind == "doom_loop":
-                        forced = True
+                        forced, taint_only = True, False
                 elif mcp_is(c["name"]) and mode != "off":
                     # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
                     perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
@@ -2729,8 +2743,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # In a chat a plan exists to stand in for the modal, so it is only consulted when
                     # there would have been one. A desk's plan is also its record of progress - what
                     # `_should_chain` reads - so an approved step is claimed there even for a call that
-                    # was going to run anyway. A forced approval never consults a plan either way.
-                    if not forced and (mode == "ask" or (active_plan is not None and mode == "on")):
+                    # was going to run anyway. A forced approval never consults a plan either way, except the
+                    # external/schedules taint lock when that taint is one the plan card already showed.
+                    if (not forced or taint_only) and (mode == "ask" or (active_plan is not None and mode == "on")):
                         claimed = plans.claim(run.run_id if run else None, c["name"], args, uid,
                                               desk_id=run.desk_id if run else None)
                         # Progress, for a supervisor deciding whether another turn is worth it: a
@@ -2923,8 +2938,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
-                    # An external write is never granted whole-tool: only a patterned rule (always_rule) can stand.
-                    standing = granted and not forced and c["name"] != PLAN_TOOL and (danger != "external" or mcp_is(c["name"]))
+                    # An external write, or booking unattended work, is never granted whole-tool: only a patterned rule
+                    # (always_rule) can stand. Toolbox.effective would cap such a grant back to ask anyway.
+                    standing = granted and not forced and c["name"] != PLAN_TOOL and (
+                        danger not in ASK_LOCKED_DANGER or mcp_is(c["name"]))
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
@@ -4102,11 +4119,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             # No run is waiting on a parked card and nothing reads its edit back, so "approved with edits" would be a
             # lie: the resumed desk would not run these arguments. Decide it as it is, or deny it.
             raise HTTPException(400, "This approval is parked and cannot take edits; approve it as proposed or deny it")
-        spec = toolbox.specs.get(pending["tool"])
-        try:
-            edited = approval_edits.validate(pending["tool"], body.arguments, spec.parameters if spec else None)
-        except approval_edits.EditError as e:
-            raise HTTPException(400, str(e)) from e
+        edited = _checked_edit(pending["tool"], body.arguments, pending.get("desk_id"))
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
@@ -4699,6 +4712,22 @@ async def dry_run_job(id: str) -> dict[str, Any]:
     return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
 
 
+def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:
+    """A user's rewrite of a pending call, as it may run: it passes the tool's schema and validators (400) and no deny
+    rule matches the new arguments (403), e.g. a recipient a rule blocks. Raised before anything is decided."""
+    spec = toolbox.specs.get(tool)
+    try:
+        edited = approval_edits.validate(tool, args, spec.parameters if spec else None)
+    except approval_edits.EditError as e:
+        raise HTTPException(400, str(e)) from e
+    cfg = settings()
+    perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(cfg.get("permissionRules")),
+                             roots=_perm_roots(cfg, desk_id))
+    if perm.refusal:
+        raise HTTPException(403, f"{tool}: {perm.refusal}")
+    return edited
+
+
 class ProposalIn(BaseModel):
     args: dict[str, Any] | None = None  # the user's edit, accept only
 
@@ -4720,7 +4749,8 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
         raise HTTPException(404, "No such proposal")
     if p["status"] != "pending":
         raise HTTPException(409, f"That proposal was already {p['status']}")
-    args = (body.args if body and body.args is not None else None)
+    # An edit faces the same checks as one made on a chat card; a refused edit leaves the row pending.
+    args = _checked_edit(p["tool"], body.args) if body and body.args is not None else None
     claimed = proposals.claim(pid, args)
     if claimed is None:  # lost the race with another accept or a reject
         raise HTTPException(409, "That proposal was just decided somewhere else")

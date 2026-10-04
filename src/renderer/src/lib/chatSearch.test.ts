@@ -21,4 +21,5 @@ test('snippetParts strips markdown, also across the match markers', () => {
     { text: 'Python is ', hit: false }, { text: '3.14', hit: true }, { text: ', see docs py', hit: false }
   ])
   assert.deepEqual(snippetParts('# Title'), [{ text: 'Title', hit: false }])
+  assert.deepEqual(snippetParts('2*3 = 6, *really*'), [{ text: '2*3 = 6, really', hit: false }])
 })

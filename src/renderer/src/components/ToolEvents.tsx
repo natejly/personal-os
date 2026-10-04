@@ -321,6 +321,8 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  // The context panel only ever shows the main view's chat, so "See why" is offered there alone.
+  const inMainChat = useStore((s) => s.view === 'chat' && s.focusedConversationId === conversationId)
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
 
@@ -364,7 +366,8 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
         )}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
           <>
-            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
+            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)}
+              onWhy={inMainChat ? () => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() } : undefined} />
             <ApprovalRules event={t} conversationId={conversationId} />
           </>
         )}

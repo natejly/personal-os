@@ -2212,11 +2212,15 @@ export const useStore = create<State>((set, get) => {
       }
       if (Object.keys(settings).length) {
         const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
-        if (fromUpload && !patched?.settings?.tainted) {
+        // Parked guards (plan mode, skip permissions, context toggles) must not quietly fall back to
+        // defaults, so a failed write refuses the run and keeps them on the draft for the retry.
+        const refused = fromUpload && !patched?.settings?.tainted ? 'Could not mark this chat untrusted after the upload'
+          : !patched && Object.keys(draftChatSettings).length ? "Could not apply this chat's settings" : ''
+        if (refused) {
           draftCreate = null
           created(null)
           set({ draftPendingSend: null })
-          get().toast('Could not mark this chat untrusted after the upload', 'error')
+          get().toast(refused, 'error')
           return false
         }
         if (patched) c = patched

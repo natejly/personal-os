@@ -378,6 +378,28 @@ def test_an_unanswered_card_parks_rather_than_auto_denying() -> None:
         settings_patch(parkAfterSeconds=0)
 
 
+def test_a_turn_that_parks_after_reading_untrusted_content_leaves_the_chat_tainted() -> None:
+    """The park returns before the normal end; taint must still reach the conversation, or the next turn starts clean."""
+    from personal_os.app import convos
+    spec = toolbox.specs["desk_list_files"]
+    settings_patch(parkAfterSeconds=1)
+    spec.taints = True  # stand-in for any third-party read (mail, a web page)
+    try:
+        script({"calls": [call("desk_list_files")]},
+               {"calls": [propose("Needs a decision", step("desk_write_file", WRITE["arguments"]))]},
+               {"text": "Done."})
+        made = make_desk("Read then park")
+        did = made["desk"]["id"]
+        card(did, PLAN_TOOL)
+        wait_until(lambda: desk(did)["status"] == "blocked", "the unwatched desk to park")
+        quiet(did)
+        conv = convos.get(made["conversation_id"], with_messages=False)
+        check(conv["settings"].get("tainted") is True, f"the parked turn persisted its taint, got {conv['settings']}")
+    finally:
+        spec.taints = False
+        settings_patch(parkAfterSeconds=0)
+
+
 def test_deciding_a_parked_card_resumes_the_desk() -> None:
     settings_patch(parkAfterSeconds=1)
     try:
@@ -718,6 +740,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_the_live_desk_cap_409s,
          test_a_double_start_makes_one_run,
          test_an_unanswered_card_parks_rather_than_auto_denying,
+         test_a_turn_that_parks_after_reading_untrusted_content_leaves_the_chat_tainted,
          test_deciding_a_parked_card_resumes_the_desk,
          test_a_wake_that_lost_the_race_with_its_own_run_is_retried,
          test_a_watched_card_never_parks,

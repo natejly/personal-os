@@ -236,6 +236,24 @@ def test_type_text_and_password(env) -> None:
     assert env.run("browser_type", ref="e4", text="hunter2")["error"] and env.fake.routes() == ["preview"]
 
 
+def test_tainted_run_asks_before_putting_text_into_a_page(env) -> None:
+    env.fake.replies["preview"] = preview("none")
+    t = env.ctx(tainted=True)
+    env.run("browser_type", ctx=t, ref="e3", text="secret mail body")
+    assert env.cards[-1]["text"] == "secret mail body"
+    env.run("browser_select", ctx=t, ref="e2", values=["Large"])
+    env.run("browser_press", ctx=t, key="a")
+    assert len(env.cards) == 3
+    env.run("browser_press", ctx=t, key="Tab")  # not a printable key: no card
+    assert len(env.cards) == 3
+    env.fake.calls.clear()
+    env.answers.append(False)
+    assert "did not allow" in env.run("browser_type", ctx=t, ref="e3", text="x")["error"] and env.fake.routes() == ["preview"]
+    env.settings["browserAllowlist"] = ["example.com"]  # a site the user trusts is not asked about
+    env.run("browser_type", ctx=t, ref="e3", text="hello")
+    assert len(env.cards) == 4
+
+
 def test_upload_containment_and_ask(env, tmp_path: Path) -> None:
     root = env.ws.ensure("d1")
     (root / "outputs" / "r.txt").write_text("x")

@@ -791,7 +791,7 @@ class Subagents:
             fs_ask = self.toolbox.fs_needs_ask(name, args, ch.ctx)
             if fs_ask and mode == "on":
                 mode = "ask"
-            forced = mode != raw_mode or (mode == "ask" and self.toolbox.forces_ask(name, args))
+            forced = mode != raw_mode or (mode == "ask" and self.toolbox.forces_ask(name, args, ch.ctx))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced

@@ -218,10 +218,14 @@ def register(tb: Any) -> None:
         if risk == "upload":
             return tool_error(f"{name}: this element opens a file chooser", alternative="browser_manage(action='upload', ref=..., paths=[...]) with files from the workspace")
         allow_dl = False
-        if risk != "none" or force:
+        # After reading a page, text the model puts into one can be what the page asked it to leak (the page's own
+        # script reads the input). So a tainted run asks before typing, selecting or pressing a printable key there.
+        writes = action in ("type", "select") or (action == "press" and len(str(preview.get("key") or "")) == 1)
+        leak = bool(ctx.get("tainted")) and writes and not host_allowed(str(pv.get("url") or ""))
+        if risk != "none" or force or leak:
             extra = {} if text is None else {"text": "<hidden>" if secret else text}
             if not await ask(ctx, card(action, pv, extra)):
-                return tool_error(f"{name}: {DECLINED}" if risk != "none" else f"{name}: could not ask the user; {DECLINED}",
+                return tool_error(f"{name}: {DECLINED}" if ctx.get("approve") is not None else f"{name}: could not ask the user; {DECLINED}",
                                   alternative="desk_ask to put the question to the user, or browser_manage(action='handoff')")
             allow_dl = risk == "download"
         payload = {"action": action, **act, **({"allowDownload": True} if allow_dl else {})}
@@ -250,9 +254,10 @@ def register(tb: Any) -> None:
         if not key:
             return tool_error("browser_press: key is required (Enter, Tab, Escape, ArrowDown, Control+a ...)", field="key", example={"key": "Enter"})
         extra = {"ref": ref} if ref else {}
-        return await guarded("browser_press", "press", ctx, {"key": key, **extra}, {"key": key, **extra}, text=None)
+        return await guarded("browser_press", "press", ctx, {"key": key, **extra}, {"key": key, **extra}, text=str(key))
 
-    exec_note = (" It asks the user first when the action submits a form, types into a password or payment field, or starts a download. "
+    exec_note = (" It asks the user first when the action submits a form, types into a password or payment field, or starts a download, and before any typing "
+                 "or selecting once this chat has read untrusted content (unless the site is on the browser allowlist). "
                  "The result is a fresh snapshot; refs from before are then invalid.")
     R("browser_click", ToolSpec("browser_click", "Click the element with this ref from the last snapshot." + exec_note,
         _obj({"ref": {"type": "string"}, "double": {"type": "boolean", "default": False}}, ["ref"]), browser_click, "browser", "executes",

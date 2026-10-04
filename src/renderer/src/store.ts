@@ -382,6 +382,8 @@ export interface State {
   /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
   editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
   activateVariant: (conversationId: string, messageId: string) => Promise<void>
+  /** Branch into a new chat holding the transcript up to `messageId`, and focus it. The source is untouched. */
+  forkChat: (conversationId: string, messageId: string) => Promise<Conversation | null>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -2355,6 +2357,22 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
+    },
+    forkChat: async (conversationId, messageId) => {
+      let c: Conversation
+      try {
+        c = await api.conversations.fork(conversationId, messageId)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return null
+      }
+      putSession(c)
+      // A fresh copy has no run to attach to, so it is focused directly rather than refetched through selectChat.
+      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', settingsOpen: false,
+                     traceMessageId: null, focusedConversationId: c.id, draftProjectId: c.project_id }))
+      const from = get().sessions[conversationId]?.conversation.title ?? get().conversations.find((x) => x.id === conversationId)?.title
+      get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })
+      return c
     },
     resumeRun: async (conversationId, runId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return

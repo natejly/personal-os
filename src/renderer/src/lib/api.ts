@@ -432,6 +432,9 @@ export const api = {
     listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
+    /** A new chat holding this chat's live transcript up to and including `messageId`; the source is untouched. */
+    fork: (id: string, messageId: string) =>
+      req<Conversation>(`/conversations/${id}/fork`, { method: 'POST', body: json({ message_id: messageId }) }, CONTROL_TIMEOUT_MS),
     search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`)
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */

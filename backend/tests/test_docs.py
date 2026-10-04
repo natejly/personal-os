@@ -62,6 +62,7 @@ check(len(rows) == 1, "the doc is listed")
 check("content" not in rows[0], "list rows carry a preview, not the whole body")
 check(rows[0]["preview"].startswith("# Paper"), "list rows carry a preview")
 check(rows[0]["pending"] == 0, "list rows carry a pending count")
+check([h["doc_id"] for h in j("GET", "/docs/search?q=intr")] == [did], "search matches a word as it is still being typed")
 
 # ---- autosave records revisions, and a burst of typing coalesces into one ----
 j("PUT", f"/docs/{did}", {"content": "# Paper\n\nA better intro with $\\beta$.\n", "summary": "Rewrite intro"})

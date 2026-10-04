@@ -82,11 +82,12 @@ j("PATCH", "/docs/folders", {"path": "Archive", "new_path": "Archive/Work/Inner"
 check(folder_of(deep) == "Archive/Work/Research/2026", "a move into itself is refused, changing nothing")
 j("PATCH", "/docs/folders", {"path": "Archive/Work", "new_path": "Archive"}, expect=400)
 
-# ---- delete promotes the docs rather than dropping them ----
+# ---- delete promotes the docs and subfolders rather than dropping them ----
 tree = j("DELETE", "/docs/folders?path=Archive/Work/Research")
-check("Archive/Work/Research" not in paths(tree) and "Archive/Work/Research/2026" not in paths(tree),
-      f"the folder and its children are gone: {paths(tree)}")
-check(folder_of(deep) == "Archive/Work", "its docs moved up to the parent, not into the void")
+check("Archive/Work/Research" not in paths(tree), f"the folder is gone: {paths(tree)}")
+check("Archive/Work/2026" in paths(tree), f"its subfolder moved up a level, not dissolved: {paths(tree)}")
+check(folder_of(deep) == "Archive/Work/2026", "a doc filed deeper keeps its own folder")
+check(folder_of(loose) == "Archive/Work", "a doc filed in the folder itself moves up to the parent")
 check(docs.get(deep) is not None, "and still exist")
 
 j("POST", "/docs/folders", {"path": "Scratch"})
@@ -106,7 +107,7 @@ for d in j("GET", "/docs"):
     j("DELETE", f"/docs/{d['id']}")
 for f in j("GET", "/docs/folders"):
     if "/" not in f["path"]:
-        j("DELETE", f"/docs/folders?path={f['path']}")
+        j("DELETE", f"/docs/folders?path={f['path']}&delete_docs=true")
 check(j("GET", "/docs") == [] and j("GET", "/docs/folders") == [], "cleans up after itself")
 
 print(f"test_doc_folders: {passed} checks passed")

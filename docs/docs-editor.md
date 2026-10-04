@@ -27,9 +27,10 @@ font metrics and padding and scroll together — the `--ed-*` custom properties 
 The highlighter is line-oriented on purpose: every input line produces exactly
 one output line, so the two layers cannot drift no matter what is typed.
 
-Keys: `⌘B` bold, `⌘I` italic, `⌘K` link, `⇧⌘M` maths, `⇧⌘E` code, `Tab` /
-`⇧Tab` indent, `⌘S` save now. `Enter` continues the list you are in and a second
-`Enter` on an empty item ends it.
+Keys: `⇧⌘B` bold, `⇧⌘I` italic, `⌘K` link, `⌃⌘M` maths, `⇧⌘E` code, `Tab` /
+`⇧Tab` indent, `⌘S` save now. These avoid the menu's own chords (`⌘B` sidebar,
+`⌘I` page agent, `⇧⌘M` Meetings), which never reach the page. `Enter` continues
+the list you are in and a second `Enter` on an empty item ends it with a blank line.
 
 Editing autosaves 1.2 s after you stop typing. Consecutive saves by the same
 author within three minutes fold into one revision, so the history reads as

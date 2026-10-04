@@ -26,7 +26,7 @@ export default function FormatBar({ editor }: { editor: React.RefObject<Markdown
   )
   return (
     <div className="fmt-bar" role="toolbar" aria-label="Formatting">
-      {btn('Bold (⌘B)', wrap('**'), <Bold size={14} />)}
+      {btn('Bold (⇧⌘B)', wrap('**'), <Bold size={14} />)}
       {btn('Italic (⇧⌘I)', wrap('*'), <Italic size={14} />)}
       {btn('Code (⇧⌘E)', wrap('`'), <Code size={14} />)}
       {btn('Link (⌘K)', link, <Link size={14} />)}

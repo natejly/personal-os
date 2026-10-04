@@ -232,6 +232,14 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     setSel((s) => (s.start === start && s.end === end ? s : { start, end }))
   }, [])
 
+  // A value swapped in from outside (another doc opened) moves the real caret; re-read it so the
+  // status bar, gutter and outline do not keep the last doc's line.
+  const emitted = useRef(value)
+  useLayoutEffect(() => {
+    if (value !== emitted.current) trackCaret()
+    emitted.current = value
+  }, [value, trackCaret])
+
   // After the mirror repaints: put the caret line at ~45% of the height. The mirror follows via syncScroll.
   useLayoutEffect(() => {
     const el = ta.current
@@ -461,12 +469,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
         return
       }
     }
-    if (mod && !e.shiftKey && e.key.toLowerCase() === 'b') {
+    // Every chord here avoids the app menu's accelerators (src/main/index.ts): a menu accelerator never
+    // reaches the page. So ⇧⌘B (⌘B toggles the sidebar), ⇧⌘I (⌘I asks about the page; ⌥⌘I is dev
+    // tools) and ⌃⌘M (⇧⌘M opens Meetings).
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'b') {
       e.preventDefault()
       return apply(wrapSelection(el, '**'))
     }
-    // ⇧⌘I, not ⌘I: the app menu owns ⌘I (Ask About This Page) and a menu accelerator never
-    // reaches the page, so the plain chord here could not fire. ⌥⌘I is Electron's dev tools.
     if (mod && e.shiftKey && e.key.toLowerCase() === 'i') {
       e.preventDefault()
       return apply(wrapSelection(el, '*'))
@@ -475,7 +484,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       e.preventDefault()
       return apply(wrapSelection(el, '`'))
     }
-    if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
+    if (e.metaKey && e.ctrlKey && e.key.toLowerCase() === 'm') {
       e.preventDefault()
       return apply(wrapSelection(el, '$'))
     }
@@ -504,7 +513,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       const [, indent, marker, num, gap, task, body] = m
       if (!body.trim()) {
         e.preventDefault()
-        return apply({ value: v.slice(0, from) + v.slice(s), start: from, end: from })
+        // At the top level leave a blank line, or the next paragraph renders as part of the last item.
+        const gap = indent ? '' : '\n'
+        return apply({ value: v.slice(0, from) + gap + v.slice(s), start: from + gap.length, end: from + gap.length })
       }
       e.preventDefault()
       const nextMarker = num ? `${Number(num) + 1}${marker.slice(String(num).length)}` : marker
@@ -530,7 +541,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           readOnly={readOnly}
           spellCheck
           wrap={wrap ? 'soft' : 'off'}
-          onChange={(e) => { clicked.current = false; onChange(e.target.value); trackCaret() }}
+          onChange={(e) => { clicked.current = false; emitted.current = e.target.value; onChange(e.target.value); trackCaret() }}
           onMouseDown={() => { clicked.current = true }}
           onKeyDown={(e) => { clicked.current = false; onKeyDown(e) }}
           onKeyUp={trackCaret}
@@ -565,7 +576,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           </span>
         )}
         {notice && <span className="md-sel">{notice}</span>}
-        <span className="md-hints">⌘B bold · ⇧⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
+        <span className="md-hints">⇧⌘B bold · ⇧⌘I italic · ⌘K link · ⌃⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>
   )

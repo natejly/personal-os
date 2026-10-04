@@ -56,6 +56,14 @@ interface Props {
  * any depth, the whole thing expandable and rearranged by dragging — a doc onto a folder files it
  * there, a doc onto another group's row moves it into that project, a folder onto a folder nests it.
  */
+/** The snippet with each word that starts like a query word in <mark>, the way the search matched it. */
+function markWords(text: string, query: string): React.ReactNode {
+  const words = query.match(/\w+/g)
+  if (!words) return text
+  const re = new RegExp(`(\\b(?:${words.join('|')})\\w*)`, 'gi') // \w+ words need no escaping
+  return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))
+}
+
 export default function DocTree({ hits, docs, activeId, query, onQuery }: Props): JSX.Element {
   const folders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
@@ -66,6 +74,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const createDocFolder = useStore((s) => s.createDocFolder)
   const renameDocFolder = useStore((s) => s.renameDocFolder)
   const deleteDocFolder = useStore((s) => s.deleteDocFolder)
+  const openSettings = useStore((s) => s.openSettings)
   const moveDoc = useStore((s) => s.moveDoc)
   const createDoc = useStore((s) => s.createDoc)
   const recordingDocId = useStore((s) => liveDoc(s.meetingStatus)?.docId ?? '')
@@ -212,7 +221,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const removeFolder = (scope: string, path: string, deep: number): void => {
     setMenu(null)
     const msg = deep
-      ? `Delete “${nameOf(path)}”? Its ${deep} doc${deep === 1 ? '' : 's'} move up to the folder above — nothing is lost.`
+      ? `Delete “${nameOf(path)}”? Its ${deep} doc${deep === 1 ? '' : 's'} and any subfolders move up one level — nothing is lost.`
       : `Delete “${nameOf(path)}”?`
     if (confirm(msg)) void deleteDocFolder(path, false, scope)
   }
@@ -443,7 +452,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             <FileText size={13} className="doc-row-icon" />
             <span className="doc-row-main">
               <span className="doc-row-title">{h.title || 'Untitled'}{h.via === 'recording' && <span className="doc-row-meta"> · heard in a recording</span>}</span>
-              <span className="doc-row-meta">{h.snippet}</span>
+              <span className="doc-row-meta doc-hit-snippet">{markWords(h.snippet, query)}</span>
             </span>
           </div>
         )))
@@ -456,6 +465,13 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         </>}
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}
+      {!searching && (
+        <div className="doc-row" role="button" tabIndex={0} onClick={() => openSettings('trash')}
+          onKeyDown={(e) => { if (e.key === 'Enter') openSettings('trash') }}>
+          <Trash2 size={13} className="doc-row-icon" />
+          <span className="doc-row-main"><span className="doc-row-title">Trash</span></span>
+        </div>
+      )}
     </div>
   )
 }

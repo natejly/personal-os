@@ -55,6 +55,7 @@ export default function DocsView(): JSX.Element {
   const docRevisions = useStore((s) => s.docRevisions)
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
+  const docFocusId = useStore((s) => s.docFocusId)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
@@ -95,8 +96,19 @@ export default function DocsView(): JSX.Element {
   const [folderDraft, setFolderDraft] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  useEffect(() => { void refreshDocs() }, [refreshDocs])
   useEffect(() => { void restoreDocTabs() }, [])
+  // The narrowed list lives here, not in the store: tabs, folders, links and templates read the full `docs`.
+  const [matches, setMatches] = useState<Doc[] | null>(null)
+  // Re-asked when `docs` changes too, so a doc deleted or renamed mid-search leaves the list. The last
+  // answer stays up while the next loads, rather than flashing "No matches." on every keystroke.
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) return setMatches(null)
+    let stale = false
+    api.docs.list('all', q).then((d) => { if (!stale) setMatches(d) }).catch(() => { /* keep the last answer */ })
+    return () => { stale = true }
+  }, [query, docs])
   // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
   const [hits, setHits] = useState<DocHit[] | null>(null)
   useEffect(() => {
@@ -141,6 +153,13 @@ export default function DocsView(): JSX.Element {
     if (activeDoc?.folder) set.add(activeDoc.folder)
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   }, [docFolders, docs, activeDoc, scope])
+
+  // A doc just made by New or Today's note gets the caret, at its end, so typing can start at once.
+  useEffect(() => {
+    if (!docFocusId || docFocusId !== activeDoc?.id) return
+    if (docMode !== 'preview') editor.current?.jumpToLine(Number.MAX_SAFE_INTEGER)
+    useStore.setState({ docFocusId: null })
+  }, [docFocusId, activeDoc?.id, docMode])
 
   // Linked scrolling: the preview follows the editor's fraction of the way down.
   useEffect(() => {
@@ -300,7 +319,7 @@ export default function DocsView(): JSX.Element {
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree hits={hits} docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>

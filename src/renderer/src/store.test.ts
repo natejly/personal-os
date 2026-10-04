@@ -225,6 +225,32 @@ test('text typed while a save is in flight is sent by the next flush, not marked
   }
 })
 
+test('an untitled doc takes its title from the first heading, and keeps following it until renamed by hand', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const titles: unknown[] = []
+  docs.save = async (_id, p) => {
+    const { content, title } = p as { content: string; title?: string }
+    titles.push(title)
+    return docFull({ content, title: title ?? useStore.getState().activeDoc?.title })
+  }
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({ title: 'Untitled', content: '' }) as never, docDraft: '# Proj', docTitleDraft: null })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Project Alpha\n\nbody' })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Project Alpha\n\nbody', docTitleDraft: 'Mine' })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Other\n\nbody' })
+    await useStore.getState().flushDoc()
+    assert.deepEqual(titles, ['Proj', 'Project Alpha', 'Mine', undefined])
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
 test('closing the last tab or re-opening the active doc saves the buffered draft first', async () => {
   const docs = api.docs as unknown as Stubs
   const orig = { ...docs }

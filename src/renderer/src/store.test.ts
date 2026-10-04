@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
@@ -734,4 +734,27 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   for (const ev of clears) assert.equal(applyEvent(held, ev, true).conversation?.messages?.[0].status ?? null, null, ev.event)
   const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
   assert.equal(other.conversation?.messages?.[0].status, undefined)
+})
+
+test('a held toast keeps its remaining time and expires only after it is released', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  useStore.setState({ toasts: [] })
+  const s = useStore.getState()
+  s.toast('Deleted chat', 'info', { label: 'Undo', run: () => undefined })
+  const live = (): number => useStore.getState().toasts.length
+  t.mock.timers.tick(5000)
+  s.holdToasts(true)
+  t.mock.timers.tick(60000)
+  assert.equal(live(), 1, 'hovered or focused, the Undo stays')
+  s.holdToasts(false)
+  t.mock.timers.tick(2999)
+  assert.equal(live(), 1, 'released, it gets back only what was left')
+  t.mock.timers.tick(1)
+  assert.equal(live(), 0)
+})
+
+test('learnedText leaves out zero counts and says nothing when nothing changed', () => {
+  assert.equal(learnedText({ memories: [1], nodes: [], edges: [] }), 'Learned 1 memory')
+  assert.equal(learnedText({ memories: [], nodes: [1, 2], edges: [1], removed: [1] }), 'Forgot 1, 2 entities, 1 relation')
+  assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
 })

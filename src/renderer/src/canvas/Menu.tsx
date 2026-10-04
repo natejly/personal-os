@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronRight } from 'lucide-react'
 import type { Point } from './snapping'
@@ -25,6 +25,45 @@ export type MenuEntry =
   | { kind: 'separator' }
   | { kind: 'header'; label: string }
 
+const ITEM = '[role="menuitem"]:not(:disabled)'
+
+/** Focus a menu's first row, unless focus is already inside it. */
+export function focusFirstItem(menu: HTMLElement | null): void {
+  if (menu && !menu.contains(document.activeElement)) menu.querySelector<HTMLElement>(ITEM)?.focus({ preventScroll: true })
+}
+
+/** On the role="menu" element: arrows, Home and End move between rows, Tab closes. Fields inside keep their keys. */
+export function menuKeyDown(e: ReactKeyboardEvent<HTMLElement>, onClose: () => void): void {
+  if ((e.target as HTMLElement).closest('input, textarea, select')) return
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(ITEM))
+  const at = items.indexOf(document.activeElement as HTMLElement)
+  const go = (i: number): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    items[(i + items.length) % items.length]?.focus()
+  }
+  if (e.key === 'ArrowDown') go(at + 1)
+  else if (e.key === 'ArrowUp') go(at < 0 ? -1 : at - 1)
+  else if (e.key === 'Home') go(0)
+  else if (e.key === 'End') go(-1)
+  else if (e.key === 'Tab') {
+    e.preventDefault()
+    onClose()
+  }
+}
+
+/** A menu took focus when it opened: hand it back to the opener on close, unless something else claimed it. */
+export function useReturnFocus(): void {
+  // Read during the first render, before the menu moves focus into itself.
+  const opener = useRef<Element | null | undefined>(undefined)
+  if (opener.current === undefined) opener.current = document.activeElement
+  useEffect(() => () => {
+    const el = opener.current
+    const lost = !document.activeElement || document.activeElement === document.body
+    if (lost && el instanceof HTMLElement && el.isConnected) el.focus()
+  }, [])
+}
+
 const noop = (): void => undefined
 const LOADING: MenuEntry[] = [{ label: 'Loading…', disabled: true, run: noop }]
 const FAILED: MenuEntry[] = [{ label: "Couldn't load", disabled: true, run: noop }]
@@ -46,13 +85,15 @@ interface LevelProps {
   onClose: () => void
   /** the pointer reached this level: cancel the parent's pending hover switch */
   onEnter?: () => void
+  /** ArrowLeft in a submenu: close it and refocus the row that opened it */
+  onBack?: () => void
   alive: MutableRefObject<boolean>
 }
 
 const isRect = (a: Point | DOMRect): a is DOMRect => 'right' in a
 
 /** One level of the menu. An open child renders as this level's sibling, so it escapes the scroll box. */
-function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.Element {
+function Level({ entries, at, sub, onClose, onEnter, onBack, alive }: LevelProps): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null)
   const start = isRect(at) ? { x: at.right, y: at.top - SUB_INSET } : at
   const [pos, setPos] = useState<Point>(start)
@@ -89,6 +130,12 @@ function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.E
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current)
   }, [])
+
+  // The root takes focus when it opens; a submenu only when its row has focus (keyboard or click, not a
+  // hover). `entries` too: a lazy submenu's rows arrive after it mounts.
+  useEffect(() => {
+    if (!sub || document.activeElement?.getAttribute('aria-expanded') === 'true') focusFirstItem(box.current)
+  }, [entries])
 
   const cancel = (): void => {
     if (timer.current) clearTimeout(timer.current)
@@ -148,6 +195,16 @@ function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.E
         role="menu"
         style={{ left: pos.x, top: pos.y }}
         onMouseEnter={onEnter}
+        onKeyDown={(e) => {
+          const row = document.activeElement as HTMLElement | null
+          if (e.key === 'ArrowRight' && row?.getAttribute('aria-haspopup') === 'menu') {
+            e.preventDefault()
+            row.click()
+          } else if (e.key === 'ArrowLeft' && onBack) {
+            e.preventDefault()
+            onBack()
+          } else menuKeyDown(e, onClose)
+        }}
       >
         {entries.map((it, i) => {
           if (it.kind === 'separator') return <div key={i} className="win-menu-sep" role="separator" />
@@ -160,6 +217,7 @@ function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.E
                 role="menuitem"
                 aria-haspopup="menu"
                 aria-expanded={on}
+                data-i={i}
                 className={on ? 'win-menu-item open' : 'win-menu-item'}
                 onMouseEnter={(e) => hover(i, e.currentTarget)}
                 onClick={(e) => open(i, e.currentTarget)}
@@ -197,6 +255,11 @@ function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.E
           sub
           onClose={onClose}
           onEnter={cancel}
+          onBack={() => {
+            const row = box.current?.querySelector<HTMLElement>(`[data-i="${child.index}"]`)
+            close()
+            row?.focus()
+          }}
           alive={alive}
         />
       )}
@@ -212,6 +275,7 @@ function Level({ entries, at, sub, onClose, onEnter, alive }: LevelProps): JSX.E
 export default function ContextMenu({ at, items, onClose }: { at: Point; items: MenuEntry[]; onClose: () => void }): JSX.Element {
   // A submenu's `items()` may resolve after the menu is gone; its result is then dropped.
   const alive = useRef(true)
+  useReturnFocus()
   useEffect(() => {
     alive.current = true
     return () => {

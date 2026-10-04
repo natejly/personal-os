@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X } from 'lucide-react'
+import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X, ChevronDown } from 'lucide-react'
 import type { TodoFilter, TodoRepeat } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
@@ -110,7 +110,10 @@ export default function TodosView(): JSX.Element {
             </button>
           )}
           <SendToSpace items={[{ kind: 'todos' }]} />
-          <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')} title="Urgency scores due date, priority and age"><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
+          <label className="model-picker" title="Urgency scores due date, priority and age">
+            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
+            <ChevronDown size={14} />
+          </label>
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>

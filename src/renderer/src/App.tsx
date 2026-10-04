@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { X } from 'lucide-react'
 import { useStore } from './store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
@@ -130,14 +131,29 @@ function JobNotifier(): null {
 
 function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
+  const hold = useStore((s) => s.holdToasts)
+  const dismiss = useStore((s) => s.dismissToast)
+  // Hovered or focused, the stack keeps still; it resumes only once neither holds it.
+  const release = (el: HTMLElement): void => {
+    if (!el.matches(':hover') && !el.contains(document.activeElement)) hold(false)
+  }
   return (
-    <div className="toasts">
+    <div
+      className="toasts"
+      role="status"
+      aria-live="polite"
+      onMouseEnter={() => hold(true)}
+      onMouseLeave={(e) => release(e.currentTarget)}
+      onFocus={() => hold(true)}
+      onBlur={(e) => { const el = e.currentTarget; if (!el.contains(e.relatedTarget as Node | null)) setTimeout(() => release(el)) }}
+    >
       {/* Global, not per-view: a send the assistant queued has to be undoable from wherever you are. */}
       <PendingSends />
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}${t.action ? ' with-action' : ''}`}>
+        <div key={t.id} className={`toast ${t.kind}${t.action ? ' with-action' : ''}`} role={t.kind === 'error' ? 'alert' : undefined}>
           <span>{t.text}</span>
-          {t.action && <button className="toast-action" onClick={() => { t.action?.run(); useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) })) }}>{t.action.label}</button>}
+          {t.action && <button className="toast-action" onClick={() => { t.action?.run(); dismiss(t.id) }}>{t.action.label}</button>}
+          <button className="toast-close" aria-label="Dismiss" onClick={() => dismiss(t.id)}><X size={12} /></button>
         </div>
       ))}
     </div>

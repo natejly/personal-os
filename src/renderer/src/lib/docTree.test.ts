@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Doc, DocFolder } from '@shared/types'
 import {
-  buildGroups, canDropDoc, canDropFolder, chainTo, flattenGroups, folderKey, groupShutKey, isInside,
+  buildGroups, canDropDoc, canDropFolder, chainTo, flattenGroups, folderKey, groupShutKey, isInside, renameKeys,
   joinPath, nameOf, parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group
 } from './docTree'
 
@@ -196,4 +196,10 @@ test('recentDocs is newest first, limited, and empty-safe', () => {
 test('starredDocs keeps only starred docs in order', () => {
   const ds = [{ ...doc('a'), starred: 1 }, doc('b'), { ...doc('c'), starred: 1 }]
   assert.deepEqual(starredDocs(ds).map((d) => d.title), ['a', 'c'])
+})
+
+test('renameKeys moves a renamed folder\'s open subfolders, and nothing in other scopes', () => {
+  const keys = [folderKey('', 'Work'), folderKey('', 'Work/Meetings'), folderKey('', 'Workshop'), folderKey('p1', 'Work/Meetings')]
+  assert.deepEqual(renameKeys(keys, '', 'Work', 'Job'),
+    [folderKey('', 'Job'), folderKey('', 'Job/Meetings'), folderKey('', 'Workshop'), folderKey('p1', 'Work/Meetings')])
 })

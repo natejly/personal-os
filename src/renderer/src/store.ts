@@ -14,7 +14,7 @@ import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './moduleToggles'
-import { chainTo, folderKey, groupShutKey } from './lib/docTree'
+import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { UploadResult } from '@shared/types'
@@ -328,6 +328,9 @@ export interface State {
   setKnowledgeTab: (t: KnowledgeTab) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
+  dismissToast: (id: number) => void
+  /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
+  holdToasts: (on: boolean) => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
   offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
@@ -585,6 +588,22 @@ export interface State {
 }
 
 let toastSeq = 0
+
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+/** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
+export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: unknown[]; updated?: unknown[]; removed?: unknown[] }): string {
+  const parts: string[] = []
+  if (d.memories.length) parts.push(`Learned ${count(d.memories.length, 'memory', 'memories')}`)
+  if (d.updated?.length) parts.push(`updated ${d.updated.length}`)
+  if (d.removed?.length) parts.push(`forgot ${d.removed.length}`)
+  if (d.nodes.length) parts.push(count(d.nodes.length, 'entity', 'entities'))
+  if (d.edges.length) parts.push(count(d.edges.length, 'relation', 'relations'))
+  const text = parts.join(', ')
+  return text && text[0].toUpperCase() + text.slice(1)
+}
+/** Each live toast's remaining time; `at` is when its running timer started (unset while held). */
+const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnType<typeof setTimeout> }>()
+let toastsHeld = false
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -1128,7 +1147,8 @@ export const useStore = create<State>((set, get) => {
           backoff = 1000
           if (ev.event === 'learned') {
             const { memories, nodes, edges } = ev.data
-            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
+            const text = learnedText(ev.data)
+            if (text) get().toast(text, 'learned')
             if (memories.length + nodes.length + edges.length) refreshAll()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
@@ -1359,11 +1379,8 @@ export const useStore = create<State>((set, get) => {
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {
             const { memories, nodes, edges, updated = [], removed = [] } = ev.data
-            const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
-            if (updated.length) parts.push(`updated ${updated.length}`)
-            if (removed.length) parts.push(`forgot ${removed.length}`)
-            parts.push(`${nodes.length} entities, ${edges.length} relations`)
-            get().toast(parts.join(', '), 'learned')
+            const text = learnedText(ev.data)
+            if (text) get().toast(text, 'learned')
             if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
             break
           }
@@ -1818,7 +1835,29 @@ export const useStore = create<State>((set, get) => {
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
-      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? UNDO_MS : kind === 'error' ? 6000 : 3500)
+      toastClocks.set(id, { left: action ? UNDO_MS : kind === 'error' ? 6000 : 3500 })
+      if (!toastsHeld) get().holdToasts(false)
+    },
+    dismissToast: (id) => {
+      clearTimeout(toastClocks.get(id)?.timer)
+      toastClocks.delete(id)
+      // A removed toast takes the focus with it and may never send focusout; an empty stack holds nothing.
+      if (!toastClocks.size) toastsHeld = false
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+    },
+    holdToasts: (on) => {
+      toastsHeld = on
+      const now = Date.now()
+      for (const [id, c] of toastClocks) {
+        if (on) {
+          clearTimeout(c.timer)
+          if (c.at !== undefined) c.left -= now - c.at
+          c.at = c.timer = undefined
+        } else if (c.at === undefined) {
+          c.at = now
+          c.timer = setTimeout(() => get().dismissToast(id), Math.max(c.left, 0))
+        }
+      }
     },
     offerUndo: (what, items, note) => {
       get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
@@ -2506,6 +2545,7 @@ export const useStore = create<State>((set, get) => {
         await get().refreshDocs()
         const open = get().activeDoc
         if (open) void get().openDoc(open.id)
+        set((st) => ({ expandedFolders: writeExpanded(renameKeys(st.expandedFolders, scope, path, newPath)) }))
         get().expandTo(scope, newPath)
       } catch (e) {
         get().toast((e as Error).message, 'error')

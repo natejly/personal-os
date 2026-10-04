@@ -173,10 +173,11 @@ export const api = {
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   jobs: {
     list: () => req<Job[]>('/jobs'),
-    /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
+    /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
+     *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why). */
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */

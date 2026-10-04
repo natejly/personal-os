@@ -1944,9 +1944,10 @@ export interface RunInfo {
 export interface Job {
   id: string
   name: string
-  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off. */
-  kind: 'cron' | 'once'
-  /** Empty for a one-off. */
+  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off; 'watch' fires when
+   *  files appear or change in `watch_dir` (and on `cron` too, when it has one). */
+  kind: 'cron' | 'once' | 'watch'
+  /** Empty for a one-off, and for a folder job with no clock. */
   cron: string
   /** The single instant a one-off runs at; null for a repeating job. */
   run_at: number | null
@@ -1975,6 +1976,8 @@ export interface Job {
   allowed_tools: string[] | null
   /** When a run is worth an OS notification: failures, pauses and proposals ('problems'), also plain successes, or never. */
   notify: JobNotifyMode
+  /** The folder a 'watch' job watches; null for the others. */
+  watch_dir: string | null
 }
 
 export type JobNotifyMode = 'problems' | 'always' | 'never'
@@ -2006,7 +2009,7 @@ export interface JobRunSummary {
   status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   job_id: string | null
   job: string
-  kind: 'cron' | 'once'
+  kind: 'cron' | 'once' | 'watch'
   due_at: number | null
   fired_at: number
   late: boolean

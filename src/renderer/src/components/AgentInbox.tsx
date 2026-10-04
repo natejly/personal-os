@@ -258,11 +258,13 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       )}
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
-        : <code className="muted small">{job.cron}</code>}
+        : job.kind === 'watch'
+          ? <span className="muted small" title={job.watch_dir ?? ''}>watching {tildePath(job.watch_dir ?? '')}{job.cron && <> · <code>{job.cron}</code></>}</span>
+          : <code className="muted small">{job.cron}</code>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
-          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
+          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'off'}
       </span>
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
@@ -320,7 +322,12 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', repeat: false, onlyTools: false }
+const BLANK = { name: '', prompt: '', when: '', dir: '', mode: 'once' as 'once' | 'repeat' | 'folder', onlyTools: false }
+
+/** `/Users/me/Downloads` -> `~/Downloads`, for display. */
+function tildePath(p: string): string {
+  return p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+}
 
 /** Hourly / daily / weekdays / weekly presets that compile to cron, with Custom for the raw field, and the next fires. */
 function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChange: (s: Schedule) => void; timezone?: string }): JSX.Element {
@@ -365,20 +372,21 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
   )
 }
 
-/** Schedule a task by hand (a one-off instant by default, a repeating schedule if it should repeat), or, given `job`,
- * edit that one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
+/** Schedule a task by hand (a one-off instant by default, a repeating schedule if it should repeat, or a folder to
+ * watch: a typed path the backend refuses outside home or hidden, and the toast says why), or, given `job`, edit that
+ * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
 function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
   const { createJob, updateJob } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
-    ? { ...BLANK, name: job.name, prompt: job.prompt, repeat: job.kind === 'cron', when: job.run_at && !spent ? toLocalInput(job.run_at) : '' }
+    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '' }
     : BLANK)
   const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [picked, setPicked] = useState<string[]>(['current_time'])
   const cron = presetCron(sched)
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!cron : !!f.when)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -387,10 +395,12 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
     setErr(null)
     const common = { name: f.name.trim(), prompt: f.prompt.trim() }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
-    const schedule = f.repeat
+    const schedule = f.mode === 'repeat'
       ? { kind: 'cron' as const, cron }
-      // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
-      : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
+      : f.mode === 'folder'
+        ? { kind: 'watch' as const, watch_dir: f.dir.trim() }
+        // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
+        : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
     let ok: boolean
     if (job) {
       const patch = diffJob<Job>(job, { ...common, ...schedule })
@@ -416,17 +426,21 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       <textarea rows={2} placeholder="What should it do? It runs in a fresh chat, so write it so it stands alone."
         value={f.prompt} maxLength={8000} onChange={(e) => setF({ ...f, prompt: e.target.value })} />
       <div className="new-task-when">
-        <label className="chip-check-row">
-          <input type="checkbox" checked={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.checked })} />
-          <span>Repeat</span>
-        </label>
-        {f.repeat
+        <select value={f.mode} aria-label="When it runs" onChange={(e) => setF({ ...f, mode: e.target.value as typeof f.mode })}>
+          <option value="once">Once</option>
+          <option value="repeat">Repeat</option>
+          {!job && <option value="folder">When files appear in a folder</option>}
+        </select>
+        {f.mode === 'repeat'
           ? <SchedulePicker value={sched} onChange={setSched} timezone={job?.timezone} />
-          : <>
-              {spent && <span className="muted small">Run again at…</span>}
-              <input type="datetime-local" value={f.when} aria-label={spent ? 'Run again at' : 'When it should run'}
-                onChange={(e) => setF({ ...f, when: e.target.value })} />
-            </>}
+          : f.mode === 'folder'
+            ? <input type="text" placeholder="Folder, e.g. ~/Downloads" value={f.dir} aria-label="Folder to watch"
+                onChange={(e) => setF({ ...f, dir: e.target.value })} />
+            : <>
+                {spent && <span className="muted small">Run again at…</span>}
+                <input type="datetime-local" value={f.when} aria-label={spent ? 'Run again at' : 'When it should run'}
+                  onChange={(e) => setF({ ...f, when: e.target.value })} />
+              </>}
         {job && <button className="ghost-btn sm" type="button" onClick={onDone}>Cancel</button>}
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>{job ? 'Save' : 'Schedule'}</button>
       </div>

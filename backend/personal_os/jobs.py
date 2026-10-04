@@ -295,7 +295,7 @@ class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
-              "allowed_tools", "watch_dir", "notify")
+              "allowed_tools", "watch_dir", "notify", "model", "budget")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
@@ -316,6 +316,11 @@ class Jobs:
                 d["allowed_tools"] = json.loads(raw) if raw else None
             except ValueError:
                 d["allowed_tools"] = None
+            # NULL = JOB_BUDGET as is; otherwise a JSON object of the caps this job tightens.
+            try:
+                d["budget"] = json.loads(d["budget"]) if d.get("budget") else None
+            except ValueError:
+                d["budget"] = None
         return d
 
     def list(self) -> list[dict[str, Any]]:
@@ -330,7 +335,8 @@ class Jobs:
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
-               watch_dir: str | None = None, notify: str = "problems") -> dict[str, Any]:
+               watch_dir: str | None = None, notify: str = "problems", model: str | None = None,
+               budget: dict[str, Any] | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -340,11 +346,12 @@ class Jobs:
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify) "
-                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
-                       json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify))
+                       json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
+                       json.dumps(budget) if budget else None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -359,6 +366,10 @@ class Jobs:
             cols["cron"] = ""
         if "allowed_tools" in cols:
             cols["allowed_tools"] = None if cols["allowed_tools"] is None else json.dumps(list(cols["allowed_tools"]))
+        if "budget" in cols:
+            cols["budget"] = json.dumps(cols["budget"]) if cols["budget"] else None
+        if "model" in cols:
+            cols["model"] = cols["model"] or None
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None

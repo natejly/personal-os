@@ -1337,6 +1337,8 @@ FINAL_ROUND_SECONDS = 90.0
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
 JOB_HARD_SECONDS = 1800.0
 JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
+# What one job may tighten for itself. Never maxToolRounds: the round cap stays fixed for every unattended run.
+JOB_BUDGET_KEYS = ("maxRunTokens", "maxRunSeconds", "maxRunCost")
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
             "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
@@ -1375,6 +1377,16 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
 def _caps(cfg: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
     """`cfg` with each cap applied downward: a stricter user setting wins, and 0 (unlimited) loses to the cap."""
     return {**cfg, **{k: (cap if not (cur := _num(cfg, k)) else min(cur, cap)) for k, cap in caps.items()}}
+
+
+def _job_caps(cfg: dict[str, Any], job_budget: Any) -> dict[str, Any]:
+    """The caps of one job run: JOB_BUDGET, then the job's own budget, both only downward. Re-clamped at use, so a
+    row edited behind the API's back still cannot loosen anything; a key outside JOB_BUDGET_KEYS or a value that is
+    not a positive number is ignored (0 would read as "unlimited" to _caps)."""
+    own = job_budget if isinstance(job_budget, dict) else {}
+    tight = {k: min(float(v), JOB_BUDGET[k]) for k, v in own.items() if k in JOB_BUDGET_KEYS
+             and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0}
+    return _caps(_caps(cfg, JOB_BUDGET), tight)
 
 
 def proposal_only(run: Run | None) -> bool:
@@ -2011,7 +2023,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if compact_span:
             yield "span", {"message_id": am["id"], "span": compact_span}
 
-        budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
+        budget = Budget(_job_caps(cfg, conv["settings"].get("job_budget")) if proposal_only(run) else cfg)
         tool_ctx["budget"] = budget  # children are charged to it
         partial: str | None = None
         last_sig: str | None = None
@@ -4082,9 +4094,12 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
         log.warning("job %s skipped: its previous run %s is still live", job["name"], prev)
         return prev  # handed back so the scheduler's mark_launched keeps pointing at the live run, not at nothing
     cfg = settings()
-    conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}", cfg.get("defaultModel") or "")
+    conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}",
+                         job.get("model") or cfg.get("defaultModel") or "")
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
     conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
+    if job.get("budget"):
+        conv_settings["job_budget"] = job["budget"]  # read by the runner, which clamps it again (_job_caps)
     # Narrowing only: tools outside the job's allowlist (and, for a preview, everything that is not read-only) are
     # switched off for this conversation. Tools left out of the map keep the user's own modes.
     if fire.get("dry_run"):
@@ -4125,6 +4140,9 @@ class JobIn(BaseModel):
     watch_dir: str | None = Field(default=None, max_length=1000)
     # When a run is worth an OS notification (job_history.notify_events).
     notify: Literal["problems", "always", "never"] = "problems"
+    # None = the default model / JOB_BUDGET as is. budget can only tighten JOB_BUDGET (_check_job_budget).
+    model: str | None = Field(default=None, max_length=200)
+    budget: dict[str, Any] | None = None
 
 
 class JobPatch(BaseModel):
@@ -4140,6 +4158,8 @@ class JobPatch(BaseModel):
     allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
     watch_dir: str | None = Field(default=None, max_length=1000)
     notify: Literal["problems", "always", "never"] | None = None
+    model: str | None = Field(default=None, max_length=200)  # an explicit null resets to the default model
+    budget: dict[str, Any] | None = None  # an explicit null resets to JOB_BUDGET
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -4192,6 +4212,30 @@ def _check_allowed_tools(allowed: list[str] | None) -> None:
         raise HTTPException(400, ", ".join(banned) + " books future unattended work, which a scheduled run may not do")
 
 
+async def _check_job_model(model: str | None) -> None:
+    """A job's model must be one the composer could pick: the configured defaults, or a chat model the proxy lists."""
+    if not model:
+        return
+    cfg = settings()
+    if model in (cfg.get("defaultModel"), cfg.get("extractionModel")):
+        return
+    try:
+        listed = await llm.list_models(cfg)
+    except Exception as e:  # noqa: BLE001 - no listing, no way to tell a typo from a model
+        raise HTTPException(422, f"Could not check the model '{model}' against the model list: {e}") from e
+    if not any(m["id"] == model and m.get("mode", "chat") == "chat" for m in listed):
+        raise HTTPException(422, f"Unknown model: {model}")
+
+
+def _check_job_budget(budget: dict[str, Any] | None) -> None:
+    """Tighten-only: each key one of JOB_BUDGET_KEYS, each value above 0 and no more than JOB_BUDGET's."""
+    for k, v in (budget or {}).items():
+        if k not in JOB_BUDGET_KEYS:
+            raise HTTPException(422, f"'{k}' is not a job budget setting (only {', '.join(JOB_BUDGET_KEYS)})")
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= JOB_BUDGET[k]:
+            raise HTTPException(422, f"{k} must be a number above 0 and at most {JOB_BUDGET[k]:g}")
+
+
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
@@ -4216,17 +4260,20 @@ def preview_schedule(cron: str = "", timezone: str | None = None, n: int = 5) ->
 
 
 @app.post("/jobs")
-def create_job(body: JobIn) -> dict[str, Any]:
+async def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir)
     _check_allowed_tools(body.allowed_tools)
+    _check_job_budget(body.budget)
+    await _check_job_model(body.model)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
+                       model=body.model or None, budget=body.budget or None,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None)
 
 
 @app.patch("/jobs/{id}")
-def update_job(id: str, body: JobPatch) -> dict[str, Any]:
+async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
     if "project_id" in patch:
         patch["project_id"] = wsid(patch["project_id"])
@@ -4237,6 +4284,8 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
         raise HTTPException(404, "No such job")
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
+    _check_job_budget(patch.get("budget"))
+    await _check_job_model(patch.get("model"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                     fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,

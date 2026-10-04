@@ -1978,6 +1978,16 @@ export interface Job {
   notify: JobNotifyMode
   /** The folder a 'watch' job watches; null for the others. */
   watch_dir: string | null
+  /** The model this job's runs use. null = the default model. */
+  model: string | null
+  /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
+  budget: JobBudget | null
+}
+
+export interface JobBudget {
+  maxRunTokens?: number
+  maxRunSeconds?: number
+  maxRunCost?: number
 }
 
 export type JobNotifyMode = 'problems' | 'always' | 'never'

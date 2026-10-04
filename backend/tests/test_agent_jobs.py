@@ -811,3 +811,58 @@ def test_a_scheduled_run_cannot_schedule_more_work_and_proposes_instead() -> Non
     assert booked["kind"] == "once" and booked["enabled"] is True and booked["next_due_at"] is not None
     j("POST", f"/proposals/{pending[0]['id']}/accept", expect=409)
 
+
+# ---------------- per-job model and budget ----------------
+async def _listing(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"id": "cheap-model"}, {"id": "embedder", "mode": "embedding"}]
+
+
+def _run_by_hand(job_id: str) -> dict[str, Any]:
+    ROUNDS.append(["done"])
+    return wait_done(j("POST", f"/jobs/{job_id}/run")["run_id"])
+
+
+def test_a_job_runs_on_its_own_model_and_an_unknown_one_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(llm, "list_models", _listing)
+    base = {"name": "Triage", "cron": "0 6 * * *", "prompt": "triage", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "model": "no-such-model"}, expect=422)
+    j("POST", "/jobs", {**base, "model": "embedder"}, expect=422)
+    made = j("POST", "/jobs", {**base, "model": "cheap-model"})
+    assert made["model"] == "cheap-model"
+    row = _run_by_hand(made["id"])
+    assert j("GET", f"/conversations/{row['conversation_id']}")["model"] == "cheap-model"
+
+    j("PATCH", f"/jobs/{made['id']}", {"model": "nope"}, expect=422)
+    assert j("PATCH", f"/jobs/{made['id']}", {"model": None})["model"] is None, "null resets to the default"
+    row = _run_by_hand(made["id"])
+    assert j("GET", f"/conversations/{row['conversation_id']}")["model"] == (appmod.settings().get("defaultModel") or "")
+
+
+def test_a_job_budget_only_tightens_the_job_caps() -> None:
+    base = {"name": "Cheap", "cron": "0 6 * * *", "prompt": "x", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 5}}, expect=422)  # above JOB_BUDGET
+    j("POST", "/jobs", {**base, "budget": {"maxToolRounds": 3}}, expect=422)  # the round cap is not the job's to set
+    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0}}, expect=422)  # 0 would mean unlimited
+    j("POST", "/jobs", {**base, "budget": {"maxRunSeconds": "60"}}, expect=422)
+    made = j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0.05, "maxRunSeconds": 60}})
+    assert made["budget"] == {"maxRunCost": 0.05, "maxRunSeconds": 60}
+    b = _run_by_hand(made["id"])["budget"]
+    assert b["max_cost"] == 0.05 and b["max_seconds"] == 60
+    assert b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
+    j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunCost": 1}}, expect=422)
+    assert j("PATCH", f"/jobs/{made['id']}", {"budget": None})["budget"] is None
+
+    # A row written behind the API's back still cannot loosen the job caps: the runner clamps again.
+    with appmod.db.tx() as c:
+        c.execute("UPDATE jobs SET budget=? WHERE id=?",
+                  (json.dumps({"maxRunCost": 50, "maxRunTokens": 0, "maxToolRounds": 99}), made["id"]))
+    b = _run_by_hand(made["id"])["budget"]
+    assert b["max_cost"] == appmod.JOB_BUDGET["maxRunCost"] and b["max_rounds"] <= appmod.JOB_BUDGET["maxToolRounds"]
+    assert 0 < b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
+
+
+def test_a_job_budget_never_loosens_the_users_own_stricter_setting() -> None:
+    caps = appmod._job_caps({"maxRunCost": 0.01, "maxRunSeconds": 0}, {"maxRunCost": 0.1, "maxRunSeconds": 0})  # noqa: SLF001
+    assert caps["maxRunCost"] == 0.01, "the user's stricter cap wins"
+    assert caps["maxRunSeconds"] == appmod.JOB_BUDGET["maxRunSeconds"], "a 0 in the job budget is not 'unlimited'"
+

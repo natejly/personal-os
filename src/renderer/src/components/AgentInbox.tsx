@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
+import type { AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
@@ -232,6 +232,14 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       toast(`Jobs: ${(e as Error).message}`, 'error')
     }
   }
+  const saveNotify = async (notify: JobNotifyMode): Promise<void> => {
+    try {
+      await api.jobs.update(job.id, { notify })
+      await refreshJobs()
+    } catch (e) {
+      toast(`Jobs: ${(e as Error).message}`, 'error')
+    }
+  }
   const once = job.kind === 'once'
   // A one-off that has already fired has no slot left to wait for, so it is shown as what it did rather than
   // as a switch: the backend refuses to re-arm it, and a toggle that does nothing is worse than no toggle.
@@ -265,6 +273,13 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           <Pencil size={12} />
         </button>
       )}
+      <select className="small" value={job.notify ?? 'problems'} aria-label={`Notifications for ${job.name}`}
+        title="When a run of this job sends a system notification"
+        onChange={(e) => void saveNotify(e.target.value as JobNotifyMode)}>
+        <option value="problems">Notify on problems</option>
+        <option value="always">Notify every run</option>
+        <option value="never">Never notify</option>
+      </select>
       <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
         aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
         <Wrench size={12} />
@@ -475,6 +490,7 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
         <span style={{ flex: 1 }} />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
+        {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job; a slot missed while asleep runs as soon as it wakes">Jobs run while the Mac is awake and Grain is open</span>}
         <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled tasks" aria-label="Scheduled tasks" onClick={toggleJobs}>
           <Clock size={13} />
         </button>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, powerMonitor, shell } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
@@ -85,6 +85,16 @@ function showMain(): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+}
+
+/** The Mac woke or unlocked: have the job scheduler run its pass now, so a slot missed asleep fires at once. */
+function nudgeScheduler(): void {
+  const base = backendUrl()
+  if (!base) return
+  const token = backendToken()
+  fetch(`${base}/jobs/wake`, { method: 'POST', headers: token ? { 'X-Personal-OS-Token': token } : {} }).catch(() => {
+    // The backend is down or restarting; its own loop catches up within a minute anyway.
+  })
 }
 
 /** The stored accelerators, so a gather or capture shortcut the user chose is still registered after a relaunch. */
@@ -352,6 +362,8 @@ if (gotLock) app.whenReady().then(async () => {
   createWindow()
   void restorePopouts()
   startUpdater()
+  powerMonitor.on('resume', nudgeScheduler)
+  powerMonitor.on('unlock-screen', nudgeScheduler)
   app.on('activate', showMain)
 })
 

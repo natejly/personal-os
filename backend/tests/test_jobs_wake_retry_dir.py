@@ -305,3 +305,59 @@ def test_a_directory_outside_home_or_hidden_is_refused() -> None:
     for bad in ("/etc", os.path.join(os.path.expanduser("~"), ".ssh")):
         r = client.post("/jobs", json={"name": "w", "prompt": "p", "kind": "watch", "watch_dir": bad})
         assert r.status_code == 400, bad
+
+
+def test_nudge_cuts_the_nap_short() -> None:
+    s = Scheduler(jobs, appmod._launch_job)  # noqa: SLF001 - real asyncio nap, no injected sleep
+
+    async def go() -> float:
+        start = time.monotonic()
+        nap = asyncio.create_task(s._nap(60.0))  # noqa: SLF001
+        await asyncio.sleep(0.05)
+        s.nudge()
+        await asyncio.wait_for(nap, 2.0)
+        return time.monotonic() - start
+
+    assert asyncio.run(go()) < 2.0
+    assert not s._poke.is_set(), "the poke is spent by the nap it ended"  # noqa: SLF001
+
+
+def test_a_refused_power_wake_marks_it_unavailable_once() -> None:
+    from personal_os.jobs import PowerWake
+
+    calls: list[list[str]] = []
+
+    class Done:
+        returncode = 1
+
+    def runner(argv: list[str], **kw: Any) -> Done:
+        calls.append(argv)
+        return Done()
+
+    w = PowerWake(runner)
+    s = Scheduler(jobs, appmod._launch_job, clock=lambda: T0, wake=w)  # noqa: SLF001
+    assert s.wake_unavailable is False
+    w.schedule(T0 + 60)
+    assert w.unavailable and s.wake_unavailable and len(calls) == 1
+    w.schedule(T0 + 120)
+    w.cancel(T0 + 60)
+    assert len(calls) == 1, "nothing is asked again after the first refusal"
+
+    def missing(argv: list[str], **kw: Any) -> Done:
+        raise FileNotFoundError("no such tool")
+
+    w2 = PowerWake(missing)
+    w2.schedule(T0)
+    assert w2.unavailable
+
+
+def test_wake_route_nudges_and_inbox_reports_wake_status() -> None:
+    poked: list[bool] = []
+    real = appmod.scheduler.nudge
+    appmod.scheduler.nudge = lambda: poked.append(True)  # type: ignore[method-assign]
+    try:
+        assert client.post("/jobs/wake").json() == {"ok": True}
+    finally:
+        appmod.scheduler.nudge = real  # type: ignore[method-assign]
+    assert poked == [True]
+    assert "wake_unavailable" in client.get("/inbox").json()["scheduler"]

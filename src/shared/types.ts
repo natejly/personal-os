@@ -1973,7 +1973,11 @@ export interface Job {
   last_skip_reason: string | null
   /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
   allowed_tools: string[] | null
+  /** When a run is worth an OS notification: failures, pauses and proposals ('problems'), also plain successes, or never. */
+  notify: JobNotifyMode
 }
+
+export type JobNotifyMode = 'problems' | 'always' | 'never'
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
 export interface AgentProposal {
@@ -2056,10 +2060,12 @@ export interface JobStats {
 /** One OS-notification-worthy job event (GET /inbox/notify). Names and counts only, never reply text. */
 export interface JobNotifyEvent {
   id: string
-  kind: 'job_failed' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
+  kind: 'job_failed' | 'job_done' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
   title: string
   body: string
   at: number
+  /** Where a click goes: 'inbox' (Today's Agent Inbox) or 'run:<conversation_id>' (that run's transcript). */
+  target: string
 }
 
 export type InboxQueueKey = 'doc_edits' | 'meetings' | 'skills' | 'workflows' | 'memory' | 'suggestions'
@@ -2076,7 +2082,8 @@ export interface AgentInbox {
   }
   while_you_were_away: JobRunSummary[]
   counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }
-  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
+  /** wake_unavailable: the OS refused to book a wake, so jobs only run while the Mac is awake and the app is open. */
+  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string; wake_unavailable?: boolean }
 }
 
 /** A tool call waiting on the user (`approvals` table). */

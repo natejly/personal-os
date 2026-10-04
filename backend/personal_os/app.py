@@ -5385,7 +5385,10 @@ def get_board(id: str) -> dict[str, Any]:
 
 @app.put("/boards/{id}")
 def update_board(id: str, body: BoardPatch) -> dict[str, Any]:
-    b = boards.update(id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_unset=True)  # an explicit null project_id moves the board back to No project
+    if "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    b = boards.update(id, patch)
     if not b:
         raise HTTPException(404)
     return b
@@ -5556,6 +5559,7 @@ async def _internal_data() -> dict[str, Any]:
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "boards": [{**b, **{"cards": (boards.get(b["id"]) or {}).get("cards", [])}} for b in boards.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
+        "google_connected": bool(st["connected"]),
     }
     if st["connected"]:
         try:
@@ -5792,7 +5796,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
         if cached:
             return {**cached, "cached": True}
     cfg = settings()
-    if not cfg.get("apiKey"):
+    if not cfg.get("defaultModel"):  # keyless providers (a local server, a proxy with no key) still recap
         return {"day": day, "content": "", "cached": False}
     since = time.time() - 36 * 3600
     recent_convs = [c for c in convos.list(ALL) if c["updated_at"] >= since][:10]
@@ -5804,8 +5808,13 @@ async def recap(force: bool = False) -> dict[str, Any]:
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
     internal = await _internal_data()
-    facts["calendar_next_3_days"] = internal.get("calendar")
-    facts["unread_mail"] = [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10]
+    # An empty list reads as "nothing on" to the model; a source Grain cannot see must say so instead.
+    unseen = "not connected (unknown; Google is not connected in Settings)"
+    facts["calendar_next_3_days"] = (unseen if not internal["google_connected"] else
+                                     f"unavailable: {internal['calendar_error']}" if internal.get("calendar_error") else internal.get("calendar"))
+    facts["unread_mail"] = (unseen if not internal["google_connected"] else
+                            f"unavailable: {internal['gmail_error']}" if internal.get("gmail_error") else
+                            [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10])
     try:
         content = await generate_recap(cfg, cfg.get("extractionModel") or cfg["defaultModel"], facts)
     except Exception as e:  # noqa: BLE001
@@ -8254,9 +8263,10 @@ def get_action_plan(plan_id: str) -> dict[str, Any]:
     return plan
 
 
-@app.get("/conversations/{id}/plan")
+@app.get("/conversations/{id}/action-plan")
 def conversation_plan(id: str) -> dict[str, Any] | None:
-    """The newest plan of this conversation, so a reloaded chat still shows its card."""
+    """The newest propose_plan of this conversation, so a reloaded chat can still show its card.
+    (/conversations/{id}/plan is the todo_write working plan.)"""
     rows = plans.for_conversation(id, limit=1)
     return rows[0] if rows else None
 

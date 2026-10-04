@@ -195,7 +195,16 @@ class BackupTests(unittest.TestCase):
         backups.delete(self.d, m["name"])
         self.assertIsNone(backups.apply_pending_restore(self.d))
         self.assertIsNone(backups.pending_restore(self.d))
+        self.assertIn("no longer exists", backups.restore_failed(self.d)["error"])  # Settings → Data can say so
         Database(self.d)  # still opens
+
+    def test_staged_backup_outlives_rotation_and_its_own_prerestore(self) -> None:
+        pre = [backups.create(self.d, "prerestore", now=1000 + i)["name"] for i in range(backups.SAFETY_KEEP)]
+        backups.stage_restore(self.d, pre[0])  # the oldest kept prerestore: "undo an earlier restore"
+        backups.create(self.d, "prerestore", now=2000)  # rotation would drop it
+        self.assertIn(pre[0], [b["name"] for b in backups.list_backups(self.d)])
+        self.assertEqual(backups.apply_pending_restore(self.d), pre[0])
+        self.assertIsNone(backups.restore_failed(self.d))
 
     def test_failed_export_leaves_no_part_file_or_dest(self) -> None:
         dest = self.d / "out.zip"

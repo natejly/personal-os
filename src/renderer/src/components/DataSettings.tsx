@@ -78,6 +78,13 @@ export default function DataSettings(): JSX.Element {
         </p>
       )}
 
+      {info?.restore_failed && !info.pending_restore && (
+        <p className="muted" role="alert">
+          The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.{' '}
+          <button className="ghost-btn" onClick={() => void cancelRestore()}>Dismiss</button>
+        </p>
+      )}
+
       {info && info.backups.length > 0 && (
         <ul className="data-list" aria-label="Backups">
           {info.backups.map((b) => {

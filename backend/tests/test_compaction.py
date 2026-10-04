@@ -129,6 +129,21 @@ check(stored == f"the key is {pat}", "the transcript still has the token")
 bad = make_conv(40)
 hb, infob = run(compaction.prepare_history(compactor, convos, CFG, "m", bad, 100, complete=boom))
 check(hb == convos.history(bad) and not infob["compacted"] and compactor.get(bad) is None, "failure falls back to full history")
+# a failure with a summary already on file keeps that summary + the recent tail, not the raw transcript
+prior = make_conv(40)
+run(compaction.prepare_history(compactor, convos, CFG, "m", prior, 100, complete=stub))
+for i in range(40, 60):
+    convos.add_message(prior, "user" if i % 2 == 0 else "assistant", f"msg{i} " + "x" * 2000)
+hp, infop = run(compaction.prepare_history(compactor, convos, CFG, "m", prior, 100, complete=boom))
+check(not infop["compacted"] and len(infop["row_ids"]) == 60, "failure still reports the rows")
+check(hp[1]["content"].startswith(compaction.SUMMARY_PREFIX) and len(hp) < 60, "failure keeps the prior summary instead of the raw history")
+
+# a huge first message is clipped where it is replayed ahead of the summary
+huge = convos.create(None, "t", "m")["id"]
+for i in range(40):
+    convos.add_message(huge, "user" if i % 2 == 0 else "assistant", ("first " + "y" * 50000) if i == 0 else f"msg{i} " + "x" * 2000)
+hh, _ = run(compaction.prepare_history(compactor, convos, CFG, "m", huge, 100, complete=stub))
+check(hh[0]["content"].startswith("first") and len(hh[0]["content"]) <= compaction.MAX_ROW_CHARS, "the replayed first message is clipped")
 
 # (f) microcompact
 big_inline = json.dumps({"rows": ["y" * 900]})

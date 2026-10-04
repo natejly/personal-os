@@ -276,7 +276,7 @@ class Compactor:
                 if m["content"] or m["role"] == "tool" or m.get("tool_calls")]
         if not summary:
             return tail
-        head = [{"role": "user", "content": _public(rows[0]["content"])}] if rows and rows[0]["role"] == "user" and start > 0 else []
+        head = [{"role": "user", "content": _public(rows[0]["content"])[:MAX_ROW_CHARS]}] if rows and rows[0]["role"] == "user" and start > 0 else []
         return head + [{"role": "user", "content": SUMMARY_PREFIX + _fence(_public(summary["summary"]))}] + tail
 
     async def compact(self, cfg: dict[str, Any], model: str, conv_id: str, history_rows: list[dict[str, Any]],
@@ -361,6 +361,7 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
     `info["row_ids"]` lists the stored rows the history was built from, on every path."""
     info: dict[str, Any] = {"compacted": False}
     rows: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] | None = None
     try:
         rows = convos.history_rows(conv_id)
         info["row_ids"] = [r["id"] for r in rows]
@@ -377,9 +378,12 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
     except llm.LLMError:
         if cancel is not None and cancel.is_set():
             raise
-        log.warning("history compaction failed; sending the full history", exc_info=True)
+        log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
     except Exception:  # noqa: BLE001 - a summarizer failure must never fail the reply
-        log.warning("history compaction failed; sending the full history", exc_info=True)
+        log.warning("history compaction failed; sending the history uncompacted", exc_info=True)
+    # The summary + recent tail built before the summarizer ran is still good; raw rows only when nothing was built.
+    if history is not None:
+        return history, {"compacted": False, "row_ids": [r["id"] for r in rows]}
     return ([{"role": r["role"], "content": r["content"]} for r in rows if r["content"]] or convos.history(conv_id),
             {"compacted": False, "row_ids": [r["id"] for r in rows]})
 

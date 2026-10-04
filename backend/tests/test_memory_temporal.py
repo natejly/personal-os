@@ -167,3 +167,27 @@ def test_prompt_carries_todays_date(stores, monkeypatch) -> None:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_neighborhood_matches_whole_words_and_keeps_seeds(stores) -> None:
+    _, _, graph = stores
+    ai = graph.upsert_node(None, "AI", "topic")
+    assert graph.neighborhood(None, "check my email")["nodes"] == []          # "ai" inside "email" is not a mention
+    assert [n["id"] for n in graph.neighborhood(None, "what about AI?")["nodes"]] == [ai["id"]]
+    # 40 neighbours older than the second seed: the 30-node cap still keeps both seeds
+    hub = graph.upsert_node(None, "Hub")
+    for i in range(40):
+        graph.upsert_edge(None, hub["id"], graph.upsert_node(None, f"Leaf{i}")["id"], "links")
+    seed = graph.upsert_node(None, "Zephyr")
+    graph.upsert_edge(None, seed["id"], hub["id"], "near")
+    ids = [n["id"] for n in graph.neighborhood(None, "tell me about Zephyr and Hub")["nodes"]]
+    assert len(ids) == 30 and ids[:2] == [hub["id"], seed["id"]]
+
+
+def test_pins_lead_the_keyword_fallback(stores) -> None:
+    _, memories, _ = stores
+    pin = memories.create(None, "Always answer in metric units", pinned=True)
+    for i in range(30):
+        memories.create(None, f"note {i} about coffee")
+    got = memories.for_context(None, "coffee", limit=10)
+    assert got[0]["id"] == pin["id"] and len(got) == 10

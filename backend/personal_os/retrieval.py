@@ -270,7 +270,7 @@ class Retriever:
             bm25_lists.append(keys)
         hybrid = (settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
                   and bool(query.strip()) and self._has_vectors(stores, self.embedder.model(settings)))
-        qv = await self.embedder.embed(settings, [query]) if hybrid else None
+        qv = await self.embedder.embed(settings, [query[:2000]]) if hybrid else None  # a long paste would 400 the embed route
         vec_lists: list[list[str]] = []
         sims: dict[str, float] = {}
         if qv:

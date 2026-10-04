@@ -1068,8 +1068,13 @@ class Insights:
 
             created_mem = ""
             if auto_memory and conf >= min_conf:
-                if mem_id and self.memories.get(mem_id):
-                    self.memories.update(mem_id, {"content": statement, "kind": kind})
+                if mem_id:
+                    # Trashed rows included: once the user trashed, forgot, pinned or edited the memory, it is theirs.
+                    with self.db.tx() as c:
+                        mem = row_to_dict(c.execute("SELECT * FROM memories WHERE id=?", (mem_id,)).fetchone())
+                    if (mem and not mem["deleted_at"] and mem["invalid_at"] is None and not mem["pinned"]
+                            and mem["content"] == prev["statement"]):
+                        self.memories.update(mem_id, {"content": statement, "kind": kind})
                 else:
                     mem_id = created_mem = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)["id"]
             elif mem_id and not auto_memory:

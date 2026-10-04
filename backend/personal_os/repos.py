@@ -608,7 +608,8 @@ class Memories:
             d = row_to_dict(r)
             if d:
                 out.setdefault(d["id"], d)
-        return list(out.values())[:limit]
+        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a budget trim drops one.
+        return sorted(out.values(), key=lambda d: not d.get("pinned"))[:limit]
 
 
 # ---------------- Knowledge graph ----------------
@@ -724,13 +725,13 @@ class Graph:
             c.execute("DELETE FROM kg_edges WHERE id=?", (id,))
 
     def neighborhood(self, project_id: str | None, query: str, max_nodes: int = 30) -> dict[str, list[dict[str, Any]]]:
-        """Nodes whose label appears in the query (or vice-versa), plus 1-hop neighbours."""
+        """Nodes whose label appears in the query as whole words (or vice-versa), plus 1-hop neighbours."""
         g = self.get(project_id)
         q = query.lower()
         words = set(re.findall(r"[a-z0-9][a-z0-9'-]{2,}", q))
         seeds = [
             n for n in g["nodes"]
-            if n["label"].lower() in q or (len(n["label"]) > 3 and any(w == n["label"].lower() or w in n["label"].lower().split() for w in words))
+            if re.search(rf"(?<!\w){re.escape(n['label'].lower())}(?!\w)", q) or (len(n["label"]) > 3 and any(w == n["label"].lower() or w in n["label"].lower().split() for w in words))
         ]
         if not seeds:
             return {"nodes": [], "edges": []}
@@ -740,7 +741,8 @@ class Graph:
         for e in edges:
             keep.add(e["source_id"])
             keep.add(e["target_id"])
-        nodes = [n for n in g["nodes"] if n["id"] in keep][:max_nodes]
+        # Seeds first, so the cap trims neighbours rather than the entities the query named.
+        nodes = (seeds + [n for n in g["nodes"] if n["id"] in keep and n["id"] not in seed_ids])[:max_nodes]
         kept_ids = {n["id"] for n in nodes}
         edges = [e for e in edges if e["source_id"] in kept_ids and e["target_id"] in kept_ids]
         return {"nodes": nodes, "edges": edges}

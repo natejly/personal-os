@@ -51,6 +51,7 @@ Rules:
 - Never create an entity for the user themselves ("User", "me", their name); facts about the user belong in memories instead.
 - Convert relative dates (tomorrow, next month, this Friday) to absolute dates using today's date, which is given below. Keep the original wording only when no date can be inferred.
 - When the user says a relationship has ended or changed (left a job, moved, broke up), list it in "ended"; when a new relation replaces an old one (works at Beta instead of Acme), set "replaces" on the new relation. Ended relations are kept as history, just no longer current.
+- Never store credentials: passwords, PINs, passcodes, API keys, tokens, recovery codes or card numbers, even when the user states them.
 - Return empty arrays when nothing durable was said. Never invent facts.
 """
 
@@ -160,7 +161,7 @@ async def learn_from_exchange(
         if not isinstance(u, dict):
             continue
         target = tagged.get(_s(u.get("id")))
-        content = _s(u.get("content"))
+        content = redact.scrub_secrets(_s(u.get("content")))
         if not target or len(content) < 6 or content == target["content"]:
             continue
         # The snapshot predates the model call: re-read so a memory the user pinned or reworded
@@ -193,7 +194,8 @@ async def learn_from_exchange(
 
     added_memories = []
     for m in _list(data.get("memories")):
-        content = _s(m.get("content")) if isinstance(m, dict) else _s(m)
+        # A credential the user typed in chat must never become a memory, whatever the model returned.
+        content = redact.scrub_secrets(_s(m.get("content")) if isinstance(m, dict) else _s(m))
         content = absolutize(content, today) or ""  # a relative date the store cannot resolve is dropped, not kept to rot
         if len(content) < 6:
             continue

@@ -181,11 +181,15 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           )}
         </div>
       </div>
-      {/* Always rendered: the plan-mode toggle belongs to every composer, and it binds ⌘⇧P itself —
-          only for the focused conversation, so several mounted chat widgets do not all cycle at once. */}
+      {/* The plan-mode toggle binds ⌘⇧P itself, only for the focused conversation, so several mounted
+          chat widgets do not all cycle at once. An empty page-agent panel has no chat for either to set. */}
       <div className="composer-footer">
-        <PlanModeToggle conversationId={conversationId} />
-        <SkipPermissionsToggle conversationId={conversationId} />
+        {conversationId !== '\u0000page-agent' && (
+          <>
+            <PlanModeToggle conversationId={conversationId} />
+            <SkipPermissionsToggle conversationId={conversationId} />
+          </>
+        )}
         {footer}
       </div>
     </div>

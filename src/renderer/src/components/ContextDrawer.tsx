@@ -3,17 +3,19 @@ import { X, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, A
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
+import { viewHidden } from '../moduleToggles'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
 import { fmtCost, usageLine } from '../lib/chatMeta'
 
-function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
+/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. */
+function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
   return (
     <label className="toggle-row">
       <span className="toggle-icon">{icon}</span>
-      <span className="toggle-text"><b>{label}</b><small>{hint}</small></span>
-      <input type="checkbox" aria-label={label} checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <span className="toggle-text"><b>{label}</b><small>{hint}</small>{fix && <button className="link small" onClick={(e) => { e.preventDefault(); fix.open() }}>{fix.label}</button>}</span>
+      <input type="checkbox" aria-label={label} checked={value} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
   )
@@ -162,6 +164,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const project = useProject(projectId)
   const toggleContext = useStore((s) => s.toggleContext)
   const setChatSettings = useStore((s) => s.setChatSettings)
+  const openSettings = useStore((s) => s.openSettings)
+  const draftChatSettings = useStore((s) => s.draftChatSettings)
   const openProject = useStore((s) => s.openProject)
   const induceSkill = useStore((s) => s.induceSkill)
   const setTab = useStore((s) => s.setContextTab)
@@ -173,8 +177,9 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
 
   const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
+  const fixModules = { label: 'Turn on in Settings → Modules', open: () => openSettings('modules') }
   const meetingCount = useStore((s) => s.meetings.length)
-  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {} }
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -226,12 +231,11 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
         <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
         <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
-        <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
-        <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
-        <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
-        <Toggle icon={<PenLine size={14} />} label="Draft mode" hint="Use your voice for this chat's drafts. Off for ordinary replies; ignored once the chat has read untrusted content" value={cs.draftMode === true} onChange={(v) => void setChatSettings({ draftMode: v }, conversationId)} />
-        <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
+        <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts from your notes and uploads" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
+        <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} fix={viewHidden(settings, 'activity') ? fixModules : undefined} />
+        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Drafts sound like you, not like the assistant. Ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} />
+        <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} fix={viewHidden(settings, 'meetings') ? fixModules : undefined} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
@@ -255,7 +259,6 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
             </span>
           </div>
         )}
-        {!convo && <p className="muted small">Toggles apply per chat once it exists.</p>}
       </section>
 
       <div className="ctx-tabs">

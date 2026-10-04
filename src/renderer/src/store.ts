@@ -175,6 +175,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** Every other per-chat setting picked on a draft (plan mode, skip permissions, context toggles). `send` applies it. */
+  draftChatSettings: Partial<ConversationSettings>
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -1566,11 +1568,13 @@ export const useStore = create<State>((set, get) => {
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
     if (!id) {
-      // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
-      // so park them and let `send` apply them to the conversation it is about to create.
+      // No conversation to PATCH yet: park the patch and let `send` apply it to the conversation it is
+      // about to create. Never the global settings: a draft's toggle is about that one chat.
+      const { effort, fast, ...rest } = patch
       set((s) => ({
-        draftEffort: patch.effort ?? s.draftEffort,
-        draftFast: patch.fast ?? s.draftFast
+        draftEffort: effort ?? s.draftEffort,
+        draftFast: fast ?? s.draftFast,
+        draftChatSettings: { ...s.draftChatSettings, ...rest }
       }))
       return
     }
@@ -1604,6 +1608,7 @@ export const useStore = create<State>((set, get) => {
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    draftChatSettings: {},
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -1915,7 +1920,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2193,9 +2198,9 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
         return false
       }
-      // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
-      const { draftEffort: effort, draftFast: fast, uploadTaintTarget, uploadTaintSource } = get()
-      const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+      // Settings chosen on the draft land before the first run, so they apply to this reply.
+      const { draftEffort: effort, draftFast: fast, draftChatSettings, uploadTaintTarget, uploadTaintSource } = get()
+      const settings: Partial<ConversationSettings> = { ...draftChatSettings }
       // Low is already what a new row hydrates to. Anything else, including the omit-the-field
       // choice, has to be written or the server would fill low back in.
       if (effort !== DEFAULT_EFFORT) settings.effort = effort
@@ -2205,7 +2210,7 @@ export const useStore = create<State>((set, get) => {
         settings.tainted = true
         settings.taint_sources = [uploadTaintSource || 'upload']
       }
-      if (effort !== DEFAULT_EFFORT || fast || fromUpload) {
+      if (Object.keys(settings).length) {
         const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
         if (fromUpload && !patched?.settings?.tainted) {
           draftCreate = null
@@ -2223,7 +2228,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]

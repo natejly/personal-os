@@ -21,7 +21,7 @@ export default function Backlinks({ docId, onOpen }: { docId: string; onOpen: (i
       <h4 className="backlinks-head">Linked from{rows && rows.length > 0 ? ` (${rows.length})` : ''}</h4>
       {failed && <div className="backlinks-empty">Could not load links.</div>}
       {!failed && rows === null && <div className="backlinks-empty">Loading</div>}
-      {rows && rows.length === 0 && <div className="backlinks-empty">No doc links here yet. Write [[this doc's title]] in another doc.</div>}
+      {rows && rows.length === 0 && <div className="backlinks-empty">No file links here yet. Write [[this file's title]] in another file.</div>}
       {rows && rows.map((r) => (
         <button key={r.id} className="backlink" onClick={() => onOpen(r.id)}>
           <span className="backlink-title">{r.title || 'Untitled'}</span>

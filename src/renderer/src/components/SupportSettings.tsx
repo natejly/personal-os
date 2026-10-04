@@ -73,7 +73,7 @@ export default function SupportSettings({ draft, patch }: { draft: Settings; pat
     <div className="support-settings">
       <h4>Support</h4>
       <p className="muted small">
-        Diagnostics bundle versions, settings with keys masked, the last 300 log lines (secrets redacted) and the backend's restart history. Your messages and documents are not included.
+        Diagnostics bundle versions, settings with keys masked, the last 300 log lines (secrets redacted) and the backend's restart history. Your messages and files are not included.
       </p>
       <div className="button-row">
         <button type="button" disabled={busy} onClick={() => void copy()}><Copy size={14} /> Copy diagnostics</button>
@@ -87,7 +87,7 @@ export default function SupportSettings({ draft, patch }: { draft: Settings; pat
       <Num label="Stream idle timeout (seconds)" hint="a reply that goes silent this long is abandoned" value={draft.llmIdleSeconds ?? 90} min={10} max={3600} onChange={(v) => patch({ llmIdleSeconds: v })} />
 
       <h4>History kept</h4>
-      <p className="muted small">A daily sweep trims bookkeeping only. Your messages, memories, documents and notes are never deleted.</p>
+      <p className="muted small">A daily sweep trims bookkeeping only. Your messages, memories and files are never deleted.</p>
       <Num label="Usage log (days)" value={draft.retainUsageDays ?? 365} min={7} max={3650} onChange={(v) => patch({ retainUsageDays: v })} />
       <Num label="Run traces on old replies (days)" value={draft.retainTraceDays ?? 60} min={1} max={3650} onChange={(v) => patch({ retainTraceDays: v })} />
       <Num label="Stored tool results (days)" value={draft.retainToolResultDays ?? 30} min={1} max={3650} onChange={(v) => patch({ retainToolResultDays: v })} />

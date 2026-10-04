@@ -64,7 +64,7 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
       {menu && (
         <div className="dr-menu" role="menu">
           <button role="menuitem" onClick={() => start('record')}><Mic size={13} /> Record and summarize</button>
-          <button role="menuitem" title={`Hold ${chord} to dictate while held; tap it to latch`} onClick={() => start('dictate')}><AudioLines size={13} /> Dictate into note</button>
+          <button role="menuitem" title={`Hold ${chord} to dictate while held; tap it to latch`} onClick={() => start('dictate')}><AudioLines size={13} /> Dictate into file</button>
           <label className="dr-keep" title="Keep this recording's audio so a timestamp can play it back. Off by default: the audio stays on this Mac until you delete it.">
             <input type="checkbox" checked={keepAudio} onChange={(e) => setKeepAudio(e.target.checked)} /> Keep audio for playback
           </label>

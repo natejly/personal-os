@@ -43,7 +43,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
       {documents.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
-          <h2>No documents yet</h2>
+          <h2>No uploaded files yet</h2>
           <p>Drop files here, or upload them.</p>
           <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
@@ -68,7 +68,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
         <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null) }}
           onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null) } }}>
           <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close document" onClick={() => setOpen(null)}><X size={16} /></button></header>
+            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close file" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <pre className="doc-text">{open.text}</pre>
           </div>
         </div>
@@ -77,12 +77,12 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   )
   usePageContext(() => (embedded ? undefined : {
     view: 'documents',
-    label: open ? `Document “${open.name}”` : 'Documents',
+    label: open ? `Uploaded file “${open.name}”` : 'Uploaded files',
     detail: open
-      ? `The user has this uploaded document open — id \`${open.id}\`.\n\n${fenced(open.text ?? '')}`
-      : `Uploaded documents, all searchable from any chat:\n${lines(documents, (d) => `${d.name} (\`${d.id}\`, ${d.chunk_count ?? 0} chunks)`)}`,
+      ? `The user has this uploaded file open — id \`${open.id}\`.\n\n${fenced(open.text ?? '')}`
+      : `Uploaded files, all searchable from any chat:\n${lines(documents, (d) => `${d.name} (\`${d.id}\`, ${d.chunk_count ?? 0} chunks)`)}`,
     refs: open ? [{ kind: 'document', id: open.id, name: open.name }] : documents.slice(0, 40).map((d) => ({ kind: 'document', id: d.id, name: d.name })),
-    hints: open ? ['Summarise this document', 'What does it say about…'] : ['What is in my library?']
+    hints: open ? ['Summarise this file', 'What does it say about…'] : ['What is in my library?']
   }), [documents, open, embedded])
 
   if (embedded) return body
@@ -91,7 +91,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
     <main className="page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><FileText size={16} /> Documents</h2>
+        <h2><FileText size={16} /> Uploaded files</h2>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'documents' }]} />
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />

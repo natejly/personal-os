@@ -884,7 +884,7 @@ class Toolbox:
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
                      "page": h.get("page"), "text": h["text"]} for h in hits]
             return page(_scrub_public_text(rows), offset=off, limit=lim, key="results")
-        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
+        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND the files they write in the Files editor (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (an editor file; read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files; scope narrows it to uploaded 'files' or editor 'docs'.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
                   "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"},
                   "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4, "description": "For a compound question, up to 4 sub-queries (one per fact needed) instead of query; results are fused into one ranking"}}, []), search_documents, "knowledge",
@@ -893,21 +893,21 @@ class Toolbox:
         async def read_document(ctx: dict[str, Any], document_id: str, offset: int = 0, length: int = 6000) -> Any:
             d = self.documents.get(document_id)
             if not d:
-                return tool_error(f"No document with id '{document_id}'.", field="document_id",
+                return tool_error(f"No uploaded file with id '{document_id}'.", field="document_id",
                                   expected="an id returned by search_documents or list_documents",
                                   example={"document_id": "doc_3f2a91", "offset": 0}, alternative=ALTERNATIVE["read_document"])
             text = d["text"]
             off = max(0, int(offset))
             return _scrub_public_text({"name": d["name"], "total_chars": len(text), "offset": off,
                                         "text": text[off: off + min(int(length), 20000)]})
-        R("read_document", ToolSpec("read_document", "Read a slice of a document's full text by id (ids come from search_documents or the document list). Page through long documents with offset.",
+        R("read_document", ToolSpec("read_document", "Read a slice of an uploaded file's full text by id (ids come from search_documents or list_documents). Page through long files with offset.",
             _obj({"document_id": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["document_id"]), read_document, "knowledge",
             examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "offset": 6000}, {"document_id": "doc_3f2a91", "offset": 0, "length": 2000}], taints=True))
 
         async def list_documents(ctx: dict[str, Any], offset: int = 0) -> Any:
             rows = [{"document_id": d["id"], "name": d["name"], "chunks": d["chunk_count"], "scope": "project" if d["project_id"] else "personal"} for d in self.documents.list(ctx["project_id"])]
             return page(rows, offset=offset, limit=50, key="documents")
-        R("list_documents", ToolSpec("list_documents", "List the documents available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
+        R("list_documents", ToolSpec("list_documents", "List the uploaded files available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
             examples=[{}, {"offset": 50}]))
 
         async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0) -> Any:
@@ -1883,7 +1883,7 @@ def _register_sandbox(self: Toolbox) -> None:
     async def sandbox_put_document(ctx: dict[str, Any], document_id: str, path: str | None = None) -> Any:
         d = self.documents.get(document_id)
         if not d:
-            return tool_error(f"No document with id '{document_id}'.", field="document_id",
+            return tool_error(f"No uploaded file with id '{document_id}'.", field="document_id",
                               expected="an id from search_documents or list_documents",
                               example={"document_id": "doc_3f2a91"}, alternative=ALTERNATIVE["sandbox_put_document"])
         dest = path or (d["name"] + ("" if d["name"].lower().endswith((".txt", ".md", ".csv", ".json")) else ".txt"))
@@ -1894,8 +1894,8 @@ def _register_sandbox(self: Toolbox) -> None:
         ctx["tainted"] = True
         ctx.setdefault("taint_sources", []).append("sandbox_put_document")
         return {**out, "document": d["name"]}
-    R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded document's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
-        _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the document's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
+    R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded file's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
+        _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the file's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
         examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
 
     async def sandbox_export_file(ctx: dict[str, Any], path: str, dest: str | None = None) -> Any:
@@ -2043,7 +2043,7 @@ Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]
 
 
 def _register_docs(self: Toolbox) -> None:
-    """Tools over the docs the user writes. Every edit is a proposal — see `doc_edit`."""
+    """Tools over the files the user writes in the editor. Every edit is a proposal — see `doc_edit`."""
     R = self.specs.__setitem__
 
     def _numbered(text: str, start: int = 1, end: int | None = None) -> str:
@@ -2053,15 +2053,15 @@ def _register_docs(self: Toolbox) -> None:
         return "\n".join(f"{i:>4}| {lines[i - 1]}" for i in range(lo, hi + 1))
 
     def _missing(key: str) -> dict[str, Any]:
-        return {"error": f"No doc matching '{key}'", "docs": [d["title"] for d in self.docs.list()][:10],
-                "hint": "pass a doc id or exact title from doc_list, or use doc_create to start one"}
+        return {"error": f"No file matching '{key}'", "docs": [d["title"] for d in self.docs.list()][:10],
+                "hint": "pass a file id or exact title from doc_list, or use doc_create to start one"}
 
     async def doc_list(ctx: dict[str, Any], query: str = "") -> Any:
         return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
                 for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
-    R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the app's Files view (its markdown editor) — their notes, drafts and documents. Uploads (PDFs and other files added under Settings → Knowledge base or a project's Knowledge tab) are a different store: use search_documents for those. Start here when they mention 'my notes', 'my files', 'my essay' or 'the doc' and you need its id.",
+    R("doc_list", ToolSpec("doc_list", "List the files the user writes in the app's Files view (its markdown editor) — their notes, drafts and documents are all just files. Uploads (PDFs and other files added under Settings → Knowledge base or a project's Uploads tab) are a different store: use search_documents for those. Start here when they mention 'my notes', 'my files', 'my essay' or 'the file' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
@@ -2069,7 +2069,7 @@ def _register_docs(self: Toolbox) -> None:
         if any(h.get("via") == "recording" for h in hits):
             ctx["tainted"] = True  # spoken words are third-party content, same rule as meeting_search
         return {"results": hits, "count": len(hits)}
-    R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
+    R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's editor files, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
 
     async def doc_read(ctx: dict[str, Any], doc: str, from_line: int = 1, to_line: int | None = None) -> Any:
@@ -2086,8 +2086,8 @@ def _register_docs(self: Toolbox) -> None:
             if links:
                 out["linked_from"] = links
         return _scrub_public_text(out)
-    R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers; the first page also carries linked_from, the titles of docs that link here (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
-        _obj({"doc": {"type": "string", "description": "Doc id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
+    R("doc_read", ToolSpec("doc_read", "Read an editor file's markdown with line numbers; the first page also carries linked_from, the titles of files that link here (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long file with from_line/to_line.",
+        _obj({"doc": {"type": "string", "description": "File id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
 
     async def doc_create(ctx: dict[str, Any], title: str, content: str = "", folder: str = "") -> Any:
         # The chat's own project decides which tree it lands in, so a doc written inside a project is
@@ -2095,8 +2095,8 @@ def _register_docs(self: Toolbox) -> None:
         d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
         return {"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
-                "note": "Created in Files. The user can undo it from the doc's revision history."}
-    R("doc_create", ToolSpec("doc_create", "Create a new doc for the user, optionally with a starting markdown body. Use it when they ask you to draft, write up or outline something they will keep and edit. Markdown and LaTeX ($x^2$, $$\\int f\\,dx$$) both render in the editor. It is filed under the project this chat belongs to, or Personal; pass `folder` to put it in a folder of that project's tree, using a path doc_list has already shown.",
+                "note": "Created in Files. The user can undo it from the file's revision history."}
+    R("doc_create", ToolSpec("doc_create", "Create a new file for the user in Files, optionally with a starting markdown body. Use it when they ask you to draft, write up or outline something they will keep and edit. Markdown and LaTeX ($x^2$, $$\\int f\\,dx$$) both render in the editor. It is filed under the project this chat belongs to, or Personal; pass `folder` to put it in a folder of that project's tree, using a path doc_list has already shown.",
         _obj({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown body"},
               "folder": {"type": "string", "description": "Folder path within this project's tree, e.g. 'Research/2026'. Omit for its root."}},
              ["title"]), doc_create, "docs", "writes"))
@@ -2149,22 +2149,22 @@ def _register_docs(self: Toolbox) -> None:
             rev = self.docs.revision(rev["id"]) or rev
             return {"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
-                    "note": "Written into the doc. The user sees the diff in the chat and can undo it from the doc's "
-                            "history. Tell them what you changed. Do not paste the document back."}
+                    "note": "Written into the file. The user sees the diff in the chat and can undo it from the file's "
+                            "history. Tell them what you changed. Do not paste the file back."}
         return {"doc_id": d["id"], "title": d["title"], "revision_id": rev["id"], "status": "pending_review",
                 "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                 "note": "Not applied yet. The user sees the diff in the chat and accepts or rejects it. "
-                        "Tell them what you changed and that it is waiting. Do not paste the document back."}
+                        "Tell them what you changed and that it is waiting. Do not paste the file back."}
     R("doc_edit", ToolSpec("doc_edit", (
-        "Revise one of the user's docs. The change is always shown to them as a diff. When document edits are set "
+        "Revise one of the user's editor files. The change is always shown to them as a diff. When file edits are set "
         "to ask, it stays pending until they accept or reject it. When they are set to accept all, it is written "
-        "immediately. The result's status says which happened — do not claim the doc was updated unless status is "
+        "immediately. The result's status says which happened — do not claim the file was updated unless status is "
         "'applied'.\n"
         "Pick one form. 'edits' — targeted find/replace, preferred: each 'find' must be copied exactly from doc_read "
         "and must occur exactly once. 'append' — add markdown at the end. 'content' — replace the whole body (use "
         "sparingly; it makes a large diff). 'title' — rename. Always pass a short 'summary' naming what you changed: "
         "the user reads it next to the diff."),
-        _obj({"doc": {"type": "string", "description": "Doc id or title"},
+        _obj({"doc": {"type": "string", "description": "File id or title"},
               "edits": {"type": "array", "description": "Targeted replacements, applied in order",
                         "items": _obj({"find": {"type": "string"}, "replace": {"type": "string"}}, ["find", "replace"])},
               "append": {"type": "string", "description": "Markdown to add at the end"},
@@ -2911,7 +2911,7 @@ def _register_cowork(self: Toolbox) -> None:
             out["warning"] = ("The file still contains placeholder text: " + ", ".join(marks)
                               + ". If these are unfinished, fix them and deliver again.")
         return out
-    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a doc, a document or a download.",
+    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a file or a download.",
         _obj({"path": {"type": "string", "description": "A path under outputs/"},
               "title": {"type": "string", "description": "What the user will see this called"},
               "summary": {"type": "string", "description": "One or two lines: what it is and what you would do with it"}},

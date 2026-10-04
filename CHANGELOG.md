@@ -22,6 +22,10 @@ This section also catches up on work merged between 2026-10-01 and 2026-10-03 th
 - **Files.** The docs view is now Files, with nested folders that each project owns.
 - **Chat hardening.** Regenerate variants, edit-and-resend, pin and archive, full-text chat search, auto-titles, stop and delete while a reply runs, and retries.
 
+### Changed
+
+- **One name: Files.** What the UI, the assistant's tool descriptions and its prompt called Docs, Documents or Notes is now "file": the files you write in the editor and the files you upload alike (uploads show as "Uploads" where a short label is needed). Sticky notes on the canvas keep their name. Routes, tables and tool names are unchanged. A project's "View all" tab and the Today project card now count editor files as well as uploads.
+
 ### Security
 
 - Besides `/health`, sidecar auth skips only the OAuth callbacks (`/integrations/google/callback`, `/mcp/oauth/callback`) and artifact render paths.

@@ -48,22 +48,22 @@ export function summaryCopy(
   hasSummary: boolean
 ): SummaryCopy {
   if (error) return { text: `The summary could not be written: ${error}`, tone: 'bad' }
-  if (mode === 'dictate') return { text: 'Dictation is typed into the note as you speak. It has no summary.', tone: 'neutral' }
-  if (state === 'pending') return { text: 'Proposed in the note. It stays there until you accept or reject it.', tone: 'wait' }
-  if (state === 'applied') return { text: 'Accepted into the note.', tone: 'ok' }
-  if (state === 'rejected') return { text: 'You rejected this summary, so it was not added to the note.', tone: 'neutral' }
+  if (mode === 'dictate') return { text: 'Dictation is typed into the file as you speak. It has no summary.', tone: 'neutral' }
+  if (state === 'pending') return { text: 'Proposed in the file. It stays there until you accept or reject it.', tone: 'wait' }
+  if (state === 'applied') return { text: 'Accepted into the file.', tone: 'ok' }
+  if (state === 'rejected') return { text: 'You rejected this summary, so it was not added to the file.', tone: 'neutral' }
   if (status === 'recording') return { text: 'The summary is written when you stop.', tone: 'neutral' }
   if (status === 'transcribing' || status === 'enhancing' || status === 'stopped') return { text: 'Writing the summary.', tone: 'wait' }
-  return { text: hasSummary ? 'Not proposed in the note.' : 'No summary yet.', tone: 'neutral' }
+  return { text: hasSummary ? 'Not proposed in the file.' : 'No summary yet.', tone: 'neutral' }
 }
 
 /** What the panel's empty state says Record does. Factual about what is and is not changed. */
 export const EMPTY_COPY =
-  'Press Record to keep a transcript of what is said while you type. When you stop, a summary is proposed in this note for you to review. Your own text is never changed by it.'
+  'Press Record to keep a transcript of what is said while you type. When you stop, a summary is proposed in this file for you to review. Your own text is never changed by it.'
 
 /** The trust line under a summary. */
 export const SUMMARY_TRUST =
-  'A summary is a proposal. It goes into the note only when you accept it, and what you typed is never changed.'
+  'A summary is a proposal. It goes into the file only when you accept it, and what you typed is never changed.'
 
 /** A doc nobody has titled yet: blank, or the placeholder a new doc starts with. */
 export const isUntitled = (title: string | null | undefined): boolean => {

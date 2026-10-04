@@ -221,7 +221,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const removeFolder = (scope: string, path: string, deep: number): void => {
     setMenu(null)
     const msg = deep
-      ? `Delete “${nameOf(path)}”? Its ${deep} doc${deep === 1 ? '' : 's'} and any subfolders move up one level — nothing is lost.`
+      ? `Delete “${nameOf(path)}”? Its ${deep} file${deep === 1 ? '' : 's'} and any subfolders move up one level — nothing is lost.`
       : `Delete “${nameOf(path)}”?`
     if (confirm(msg)) void deleteDocFolder(path, false, scope)
   }
@@ -311,11 +311,11 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             ? <span className="project-dot" style={g.color ? { background: g.color } : undefined} />
             : <User size={12} />}
         </button>
-        <button className="doc-group-name" onClick={() => toggleFolder(shut)} title={g.orphan ? 'This project no longer exists; its docs are personal now' : g.name}>
+        <button className="doc-group-name" onClick={() => toggleFolder(shut)} title={g.orphan ? 'This project no longer exists; its files are personal now' : g.name}>
           {g.name}
         </button>
         <span className="count">{g.deep || ''}</span>
-        <button className="icon-btn ghost xs" title={`New doc in ${g.name}`} aria-label={`New doc in ${g.name}`}
+        <button className="icon-btn ghost xs" title={`New file in ${g.name}`} aria-label={`New file in ${g.name}`}
           onClick={(e) => { e.stopPropagation(); void createDoc({ project_id: g.scope || null }) }}>
           <Plus size={13} />
         </button>
@@ -325,7 +325,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         </button>
         {menu === menuKey && (
           <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
-            <button onClick={() => { setMenu(null); void createDoc({ project_id: g.scope || null }) }}>New doc here</button>
+            <button onClick={() => { setMenu(null); void createDoc({ project_id: g.scope || null }) }}>New file here</button>
             <button onClick={() => newFolder(g.scope, '')}>New folder…</button>
           </div>
         )}
@@ -380,7 +380,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         </button>
         {menu === key && (
           <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
-            <button onClick={() => { setMenu(null); void createDoc({ project_id: f.scope || null, folder: f.path }) }}>New doc here</button>
+            <button onClick={() => { setMenu(null); void createDoc({ project_id: f.scope || null, folder: f.path }) }}>New file here</button>
             <button onClick={() => newFolder(f.scope, f.path)}>New subfolder…</button>
             <button onClick={() => { setMenu(null); setRenaming({ scope: f.scope, path: f.path, name: f.name }) }}>Rename</button>
             <button className="danger" onClick={() => removeFolder(f.scope, f.path, f.deep)}>Delete folder</button>

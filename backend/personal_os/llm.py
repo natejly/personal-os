@@ -82,7 +82,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "onboardedAt": None,
     "systemPrompt": (
         "You are the assistant inside the user's personal AI OS. Be direct, concise, and useful. "
-        "Use markdown when it helps. You may be given memories, a knowledge graph, and document "
+        "Use markdown when it helps. You may be given memories, a knowledge graph, and file "
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
@@ -114,7 +114,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
-    # Hold this in the Docs editor to dictate while held; a quick tap latches it on.
+    # Hold this in the Files editor to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
@@ -282,7 +282,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "contextualChunks": False,
     "retrievalRerank": False,
     "retrievalRerankModel": "",
-    # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
+    # Also retrieve from the user's own editor files (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"enabled": True, "awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,

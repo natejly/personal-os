@@ -258,21 +258,21 @@ export default function SettingsModal(): JSX.Element {
                 <div className="knowledge-controls modal-free">
                   <div className="seg" role="group" aria-label="Knowledge base section">
                     <button className={knowledgeTab === 'memory' ? 'active' : ''} aria-pressed={knowledgeTab === 'memory'} onClick={() => setKnowledgeTab('memory')}><Brain size={13} /><span>Memory</span></button>
-                    <button className={knowledgeTab === 'documents' ? 'active' : ''} aria-pressed={knowledgeTab === 'documents'} onClick={() => setKnowledgeTab('documents')}><FileText size={13} /><span>Documents</span></button>
+                    <button className={knowledgeTab === 'documents' ? 'active' : ''} aria-pressed={knowledgeTab === 'documents'} onClick={() => setKnowledgeTab('documents')}><FileText size={13} /><span>Uploads</span></button>
                   </div>
                   <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
                 </div>
               </div>
-              <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
+              <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and files whose best excerpts are pulled into replies. Changes here apply immediately.</p>
               {knowledgeTab === 'memory' && <p className="muted small">Auto-learn, the extraction model and the embedding model are under <button type="button" className="link-btn" onClick={() => setTab('memory')}>Memory &amp; learning</button>.</p>}
               {/* Saved on change like the rest of this tab, so Re-embed now sees it before Save. */}
               {knowledgeTab === 'documents' && <>
                 <label className="toggle-row plain modal-free">
-                  <span className="toggle-text"><b>Contextual chunks</b><small>On Re-embed now, ask the model to write one sentence situating each chunk in its document, and index it with the chunk (up to 64 chunks per press). Costs one model call per chunk. Off by default.</small></span>
+                  <span className="toggle-text"><b>Contextual chunks</b><small>On Re-embed now, ask the model to write one sentence situating each chunk in its file, and index it with the chunk (up to 64 chunks per press). Costs one model call per chunk. Off by default.</small></span>
                   <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => applyNow({ contextualChunks: e.target.checked })} /><span className="switch" />
                 </label>
                 <label className="toggle-row plain modal-free">
-                  <span className="toggle-text"><b>Use Docs in chat context</b><small>Search your Docs notes for excerpts to add to replies. Uploaded files are switched per chat.</small></span>
+                  <span className="toggle-text"><b>Use Files in chat context</b><small>Search the files you write in Files for excerpts to add to replies. Uploaded files are switched per chat.</small></span>
                   <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => applyNow({ useDocsInContext: e.target.checked })} /><span className="switch" />
                 </label>
                 <label className="toggle-row plain modal-free">
@@ -300,13 +300,13 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
+                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and files you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
-              <label><span>Embedding model <small className="muted">(shared with document search; after changing it, Save, then press Re-embed now under Knowledge base → Documents. Memories re-embed as they are searched)</small></span>
+              <label><span>Embedding model <small className="muted">(shared with file search; after changing it, Save, then press Re-embed now under Knowledge base → Uploads. Memories re-embed as they are searched)</small></span>
                 <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
               </label>
               <label className="toggle-row plain">
@@ -355,12 +355,12 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
               <div className="send-hold">
-                <span className="toggle-text"><b>Document edits</b><small>Every change the assistant makes to a doc shows as a diff in the chat.</small></span>
-                <div className="seg" role="group" aria-label="Document edits">
+                <span className="toggle-text"><b>File edits</b><small>Every change the assistant makes to a file shows as a diff in the chat.</small></span>
+                <div className="seg" role="group" aria-label="File edits">
                   <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} onClick={() => patch({ docEditMode: 'review' })}>Ask</button>
                   <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
                 </div>
-                <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the doc's history.</p>
+                <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the file's history.</p>
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
@@ -496,7 +496,7 @@ export default function SettingsModal(): JSX.Element {
                 <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
                   placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
               </label>
-              <label><span>Dictation chord <small className="muted">(in a doc: hold to dictate, tap to latch)</small></span>
+              <label><span>Dictation chord <small className="muted">(in a file: hold to dictate, tap to latch)</small></span>
                 <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
                   placeholder="Control+Alt+D" spellCheck={false} />
               </label>

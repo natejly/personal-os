@@ -1,18 +1,21 @@
-# Docs
+# Files
 
 Writing of your own, kept in the app: markdown with LaTeX, an editor beside a
-live preview, a revision history, and an assistant that may revise a doc only by
+live preview, a revision history, and an assistant that may revise a file only by
 *proposing* a diff you accept or reject.
 
-## Three things that sound alike
+## One name, three stores
+
+The user-facing word is **file** for both the files you write and the files you
+upload. The internal names below are unchanged.
 
 | | what it is | where it lives |
 | --- | --- | --- |
-| **Documents** | files you upload, chunked and indexed so replies can quote them | `repos.Documents`, `/documents` |
-| **Docs** | prose you write and keep editing | `docs.Docs`, `/docs` |
-| **Notes** | canvas mode's sticky notes: a body and a colour, no history | `notes.Notes`, `/notes`; "Save to Files" on the widget copies one into Files |
+| **Uploaded files** | files you upload, chunked and indexed so replies can quote them | `repos.Documents`, `/documents` |
+| **Editor files** | prose you write and keep editing | `docs.Docs`, `/docs` |
+| **Sticky notes** | canvas mode's sticky notes: a body and a colour, no history | `notes.Notes`, `/notes`; "Save to Files" on the widget copies one into Files |
 
-Docs took the `/docs` prefix, so FastAPI's own Swagger UI moved to `/api-docs`
+The editor files took the `/docs` prefix, so FastAPI's own Swagger UI moved to `/api-docs`
 (`docs_url` in `app.py`). Its OAuth redirect, which also defaults to a path
 under `/docs`, is switched off.
 
@@ -61,7 +64,7 @@ closes it for that `/` only. The built-ins are Heading 1-3, Bullet list,
 Numbered list, To-do, Quote, Code block, Table, Divider, Math block, Today's date
 and Current time. A block command opens with a line break when text already
 precedes the caret on its line, so it never lands mid-sentence. Three more are
-added by the Docs view because they need app state: **Record and summarize**,
+added by the Files view because they need app state: **Record and summarize**,
 **Dictate into note** and **Daily note**.
 
 **Wikilinks.** `[[Title]]` and `[[Title|alias]]` link to another doc by title.
@@ -264,7 +267,7 @@ also lower-case names), and a clip that is exactly "new line" or "new paragraph"
 becomes that break. Those words inside a sentence are words you said. Clips are
 typed once each and in order, never past one that is still transcribing. What has
 been typed is tracked per recording, outside the view, and a clip counts as typed
-only once the insert ran: switch to another doc or leave the Docs view and the
+only once the insert ran: switch to another doc or leave the Files view and the
 clips spoken meanwhile are held, then typed in order when that doc's editor is
 back. A dictation only ever types into its own doc. Clips arriving up to two
 minutes after Stop are still typed. A preview-only view has nowhere to put words,

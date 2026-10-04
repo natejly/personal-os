@@ -86,7 +86,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
-      {!has && <p className="muted">Nothing from memory, graph, or documents was relevant.</p>}
+      {!has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
       {ctx.page && (
         <section>
           <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
@@ -146,7 +146,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
+          <h5><FileText size={12} /> Files ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
           <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><button className="link" title="Open the passage in its source" onClick={() => setViewing(c)}><b>{c.name}</b> · chunk {c.idx + 1}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
           {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>
@@ -227,7 +227,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
         <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
         <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
-        <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
+        <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
         <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
         <Toggle icon={<PenLine size={14} />} label="Draft mode" hint="Use your voice for this chat's drafts. Off for ordinary replies; ignored once the chat has read untrusted content" value={cs.draftMode === true} onChange={(v) => void setChatSettings({ draftMode: v }, conversationId)} />

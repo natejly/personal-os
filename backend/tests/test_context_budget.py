@@ -85,7 +85,7 @@ check(documents.list(proj["id"])[0]["pinned"] == 0, "unpinned by default")
 for d in (mine, theirs):
     documents.set_pinned(d["id"], True)
 sys_, used = build(project_id=proj["id"])
-check("## Pinned documents" in sys_ and "pinned body" in sys_, "pinned text in prompt")
+check("## Pinned files" in sys_ and "pinned body" in sys_, "pinned text in prompt")
 check([p["document_id"] for p in used["pinned"]] == [mine["id"]], "used['pinned'] lists the doc")
 check("SECRET" not in sys_, "other project's pin out of scope")
 check("…(truncated)" in sys_ and "w" * (PINNED_LIMIT + 50) not in sys_, "clipped to the limit")
@@ -93,7 +93,7 @@ documents.set_pinned(glob["id"], True)
 sys_, _ = build(project_id=proj["id"])
 check("global pinned text" in sys_, "global pin visible in a project")
 sys_, _ = build(project_id=proj["id"], conv={"useDocuments": False})
-check("Pinned documents" not in sys_, "useDocuments off drops pins")
+check("Pinned files" not in sys_, "useDocuments off drops pins")
 # a retrieval hit for a pinned document is not repeated
 dup = [{"chunk_id": "k", "document_id": mine["id"], "name": "mine.txt", "idx": 0, "text": "DUPLICATE", "source": "file"}]
 sys_, used = build(project_id=proj["id"], doc_hits=dup)
@@ -101,7 +101,7 @@ check("DUPLICATE" not in sys_ and used["chunks"] == [], "pinned doc not retrieve
 documents.set_pinned(mine["id"], False)
 documents.set_pinned(glob["id"], False)
 sys_, used = build(project_id=proj["id"])
-check("Pinned documents" not in sys_ and used["pinned"] == [], "unpin removes it")
+check("Pinned files" not in sys_ and used["pinned"] == [], "unpin removes it")
 
 # ---- hidden views are named, so the model does not send the user to a page they cannot see
 sys_, _ = build(settings={"hiddenViews": ["library", "activity", "docs"]})

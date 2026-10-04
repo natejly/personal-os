@@ -559,7 +559,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
             active={active}
             anchor={anchor.rect}
             bounds={{ w: anchor.w, h: anchor.h }}
-            label={trigger.kind === 'slash' ? 'Commands' : 'Link to a doc'}
+            label={trigger.kind === 'slash' ? 'Commands' : 'Link to a file'}
             onPick={pick}
             onHover={(i) => setAct({ key: queryKey, i })}
           />

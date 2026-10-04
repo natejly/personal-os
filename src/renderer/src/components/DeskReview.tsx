@@ -13,9 +13,9 @@ import InlineNote from './InlineNote'
  */
 
 const DESTINATIONS: { value: PromotionKind; label: string; hint: string }[] = [
-  { value: 'doc', label: 'New doc', hint: 'Creates a new doc, searchable immediately' },
-  { value: 'doc_append', label: 'Append to a doc', hint: 'Proposes an edit to an existing doc; you accept it in Docs' },
-  { value: 'document', label: 'Add to knowledge base', hint: 'Ingests it as an uploaded document' },
+  { value: 'doc', label: 'New file', hint: 'Creates a new file, searchable immediately' },
+  { value: 'doc_append', label: 'Append to a file', hint: 'Proposes an edit to an existing file; you accept it in Files' },
+  { value: 'document', label: 'Add to knowledge base', hint: 'Ingests it as an uploaded file' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
 
@@ -119,7 +119,7 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
           {destination === 'doc_append' && (
             <label className="model-picker">
               <select value={docId} onChange={(e) => onDocId(e.target.value)}>
-                <option value="">Pick a doc…</option>
+                <option value="">Pick a file…</option>
                 {docs.map((d) => <option key={d.id} value={d.id}>{d.title || 'Untitled'}</option>)}
               </select>
             </label>
@@ -230,7 +230,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
       )}
       {undecided.length > 0 && <footer className="desk-review-foot">
-        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
+        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a file to append to' : undefined} onClick={() => void accept()}>
           <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
         </button>
         <button className="ghost-btn" aria-expanded={noting === 'back'} onClick={() => setNoting(noting === 'back' ? null : 'back')}>Send back</button>

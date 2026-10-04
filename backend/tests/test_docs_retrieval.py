@@ -143,10 +143,10 @@ def ctx(conv_settings: dict[str, Any], cfg_: dict[str, Any], hits: Any) -> tuple
 
 hits = run(retriever.search(pa, "zeppelin", cfg, sources=("files", "docs")))
 sysm, used = ctx({**conv, "useDocuments": True}, cfg, hits)
-check("(your doc)" in sysm and "Zeppelin diary" in sysm, "context labels the user's doc")
+check("(your file)" in sysm and "Zeppelin diary" in sysm, "context labels the user's doc")
 check(any(c["source"] == "doc" and c["doc_id"] == d2["id"] for c in used["chunks"]), "used chunks carry source and doc_id")
 sysm, used = ctx({**conv, "useDocuments": True}, {**cfg, "useDocsInContext": False}, hits)
-check("(your doc)" not in sysm and any(c["source"] == "file" for c in used["chunks"]), "useDocsInContext off drops docs, keeps files")
+check("(your file)" not in sysm and any(c["source"] == "file" for c in used["chunks"]), "useDocsInContext off drops docs, keeps files")
 sysm, used = ctx({**conv, "useDocuments": False}, cfg, hits)
 check(used["chunks"] == [], "per-chat useDocuments off drops both")
 pv = j("POST", "/context/preview", {"project_id": pa, "query": "wombat axolotl gearbox"})

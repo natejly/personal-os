@@ -64,7 +64,7 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
   }
 
   const remove = (r: DocRecording): void => {
-    if (window.confirm(`Delete "${r.title}"? Its transcript is deleted with it. A summary already accepted into the note stays in the note.`)) {
+    if (window.confirm(`Delete "${r.title}"? Its transcript is deleted with it. A summary already accepted into the file stays in the file.`)) {
       void useDocRec.getState().remove(r.id)
     }
   }

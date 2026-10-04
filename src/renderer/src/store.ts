@@ -99,7 +99,7 @@ export interface ChatSession {
 
 /** Where an accepted desk output went, for the toast. */
 const PROMOTED_TO: Record<string, string> = {
-  doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'the knowledge base', download: 'your Mac'
+  doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'uploaded files', download: 'your Mac'
 }
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
@@ -2605,7 +2605,7 @@ export const useStore = create<State>((set, get) => {
         set({ docSaving: false })
         // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
         if ((e as { status?: number }).status === 409) {
-          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+          get().toast('This file changed elsewhere. Your edits are kept here and not saved.', 'error',
             { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
         } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
@@ -2673,7 +2673,7 @@ export const useStore = create<State>((set, get) => {
           ? get().docs.filter((d) => (d.project_id ?? '') === scope && (d.folder === path || d.folder.startsWith(path + '/')))
           : []
         set({ docFolders: await api.docs.deleteFolder(path, deleteDocs, scope) })
-        if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
+        if (doomed.length) get().offerUndo(`${doomed.length} file${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
         if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) await get().closeDocTab(open.id)
@@ -2703,7 +2703,7 @@ export const useStore = create<State>((set, get) => {
       await api.docs.delete(id)
       await get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
-      get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
+      get().offerUndo(title ? `“${title}”` : 'file', [{ type: 'doc', id }])
     },
     setDocMode: (docMode) => {
       try { localStorage.setItem(DOC_MODE_KEY, docMode) } catch { /* private window */ }
@@ -2747,7 +2747,7 @@ export const useStore = create<State>((set, get) => {
         const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.restore(revId)
         set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
-        get().toast('Document restored')
+        get().toast('File restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -3724,7 +3724,7 @@ export const useStore = create<State>((set, get) => {
       await api.documents.delete(id)
       set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(name ? `“${name}”` : 'document', [{ type: 'document', id }])
+      get().offerUndo(name ? `“${name}”` : 'file', [{ type: 'document', id }])
     },
 
     refreshDashboard: async () => {

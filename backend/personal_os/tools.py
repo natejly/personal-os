@@ -610,11 +610,12 @@ class Toolbox:
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None, artifacts: Any = None,
-                 conversations: Any = None):
+                 conversations: Any = None, extundo: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
         self.google, self.boards, self.sandboxes, self.docs, self.activity = google, boards, sandboxes, docs, activity
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
+        self.extundo = extundo  # undo rows for calendar / Google Tasks writes (extundo.py); None skips them
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
         self.work_plans, self.results, self.skills = work_plans, results, skills
@@ -1426,6 +1427,13 @@ def _register_google(self: Toolbox) -> None:
     g = self.google
     run = asyncio.to_thread
 
+    async def _undoable(tool: str, ctx: dict[str, Any], where: dict[str, Any], fn: Callable[..., Any], *a: Any) -> Any:
+        """Run one write; a verified one gets an `undo` handle the user (never the model) can apply (extundo.py)."""
+        ex = self.extundo
+        pre = await run(ex.before, tool, where) if ex is not None else None
+        res = await run(fn, *a)
+        return await run(ex.after, tool, where, pre, res, ctx) if ex is not None else res
+
     def _event_fields(kw: dict[str, Any]) -> dict[str, Any]:
         """Shared flat-args -> event dict for calendar_create/calendar_update."""
         f = {k: v for k, v in kw.items() if v is not None}
@@ -1514,7 +1522,8 @@ def _register_google(self: Toolbox) -> None:
         f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet})
-        return await run(g.calendar_create, f, calendar_id, send_updates)
+        return await _undoable("calendar_create", ctx, {"calendar_id": calendar_id, "send_updates": send_updates},
+                               g.calendar_create, f, calendar_id, send_updates)
     R("calendar_create", ToolSpec("calendar_create", "Create ONE Google Calendar event. To schedule or rearrange anything with guests or more than one event, use calendar_find_time then calendar_propose instead: the user reviews the whole change on a calendar. ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day. Supports recurrence (RRULE), reminders, guests, Meet links, color and busy/free. send_updates='all' emails the guests their invites.",
         _obj(dict(_EVENT_PROPS), ["summary", "start"]), calendar_create, "google", "external",
         examples=[{"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00", "reminder_minutes": [30]},
@@ -1529,7 +1538,8 @@ def _register_google(self: Toolbox) -> None:
         f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
-        return await run(g.calendar_update, event_id, f, calendar_id, send_updates)
+        return await _undoable("calendar_update", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
+                               g.calendar_update, event_id, f, calendar_id, send_updates)
     R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id; for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
         _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
         examples=[{"event_id": "7abc123def", "start": "2026-10-07T16:00", "end": "2026-10-07T17:00"},
@@ -1537,13 +1547,15 @@ def _register_google(self: Toolbox) -> None:
                   {"event_id": "7abc123def", "recurrence": []}]))
 
     async def calendar_delete(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
-        return await run(g.calendar_delete, event_id, calendar_id, send_updates)
+        return await _undoable("calendar_delete", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": send_updates},
+                               g.calendar_delete, event_id, calendar_id, send_updates)
     R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id. For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}, "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, ["event_id"]), calendar_delete, "google", "external",
         examples=[{"event_id": "7abc123def"}, {"event_id": "7abc123def", "send_updates": "all"}]))
 
     async def calendar_respond(ctx: dict[str, Any], event_id: str, response: str, calendar_id: str = "primary") -> Any:
-        return await run(g.calendar_respond, event_id, response, calendar_id, "all")
+        return await _undoable("calendar_respond", ctx, {"event_id": event_id, "calendar_id": calendar_id, "send_updates": "all"},
+                               g.calendar_respond, event_id, response, calendar_id, "all")
     R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to: accepted, declined or tentative.",
         _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
         examples=[{"event_id": "7abc123def", "response": "accepted"}]))
@@ -1788,13 +1800,13 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"show_completed": True}, {"offset": 50}], taints=True))
 
     async def gtasks_add(ctx: dict[str, Any], title: str, notes: str = "", due: str | None = None) -> Any:
-        return await run(g.tasks_add, title, notes, due)
+        return await _undoable("google_tasks_add", ctx, {}, g.tasks_add, title, notes, due)
     R("google_tasks_add", ToolSpec("google_tasks_add", "Add a task to Google Tasks (due as YYYY-MM-DD).",
         _obj({"title": {"type": "string"}, "notes": {"type": "string"}, "due": {"type": "string"}}, ["title"]), gtasks_add, "google", "external",
         examples=[{"title": "File the tax return", "due": "2026-10-31"}, {"title": "Call the landlord", "notes": "about the boiler"}]))
 
     async def gtasks_complete(ctx: dict[str, Any], task_id: str) -> Any:
-        return await run(g.tasks_complete, task_id)
+        return await _undoable("google_tasks_complete", ctx, {"task_id": task_id}, g.tasks_complete, task_id)
     R("google_tasks_complete", ToolSpec("google_tasks_complete", "Mark a Google Task complete.",
         _obj({"task_id": {"type": "string"}}, ["task_id"]), gtasks_complete, "google", "external", examples=[{"task_id": "MTIzNDU2Nzg5"}]))
 

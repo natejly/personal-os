@@ -104,7 +104,7 @@ test('only plain finished rows are foldable', () => {
   const flips: Record<string, unknown>[] = [
     { pending: true }, { error: 'x' }, { needs_approval: true }, { approval: 'allow' }, { plan: { plan_id: 'p', idx: 0, title: '' } },
     { proposal: 'pr' }, { agent: 'x' }, { blocked: 'web_search' }, { breaker: 'loop' }, { images: [{ name: 'a', data: 'd' }] },
-    { undo: { snapshot_id: 's' } }, { result_preview: '{"verification":{"status":"verified"}}' },
+    { undo: { snapshot_id: 's' } }, { undo: { external_id: 'x' } }, { result_preview: '{"verification":{"status":"verified"}}' },
     { name: 'doc_edit' }, { name: 'agent_spawn' }, { name: 'propose_plan' }, { name: 'desk_ask' }
   ]
   for (const f of flips) assert.equal(isFoldable(ev('a', f), noCard), false, JSON.stringify(f))

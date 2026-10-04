@@ -271,7 +271,7 @@ const OWN_BODY = new Set(['propose_plan', 'desk_ask', 'doc_edit'])
  */
 export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): boolean {
   return !hasCard(t.name) && !t.pending && !t.error && !t.needs_approval && !t.approval && !t.plan && !t.proposal
-    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id
+    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id && !t.undo?.external_id
     && readVerdict(t.result_preview) === null && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_')
 }
 

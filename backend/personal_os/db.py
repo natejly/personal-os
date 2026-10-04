@@ -324,6 +324,22 @@ CREATE TABLE IF NOT EXISTS file_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_filesnap_conv ON file_snapshots(conversation_id, created_at);
 
+-- Undo for the agent's Google Calendar / Tasks writes (extundo.py): the created id or the pre-image, and the
+-- etag (or task `updated`) the object had right after the write, so an undo refuses once someone edited it.
+CREATE TABLE IF NOT EXISTS external_undo (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
+  message_id TEXT,
+  conversation_id TEXT,
+  tool TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  after_etag TEXT,
+  status TEXT NOT NULL DEFAULT 'live',
+  created_at REAL NOT NULL,
+  undone_at REAL
+);
+
 -- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
 -- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
 -- so last_fired_at - last_due_at is how late that fire was (the machine was asleep, or the backend was down).

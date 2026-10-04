@@ -68,6 +68,7 @@ from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .filesnap import FileSnapshots, router as filesnap_router
+from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
 from .setup import router as setup_router
@@ -465,6 +466,9 @@ app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
 app.include_router(filesnap_router(filesnap))
+# Undo for the agent's calendar and Google Tasks writes; same rule: a user route, never a tool (extundo.py).
+extundo = ExternalUndo(db, google)
+app.include_router(extundo_router(extundo))
 # Whole-folder snapshots per reply, so Undo can take back shell effects too (snapshots.py); user-only routes.
 snaps = Snapshots(db, db.data_dir / "snapshots", settings, workspace.desk_root)
 app.include_router(snapshots_router(snaps, lambda rid: run_store.get(rid) is not None))
@@ -510,7 +514,7 @@ docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
-                  conversations=convos)
+                  conversations=convos, extundo=extundo)
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -7413,6 +7417,8 @@ async def _outbox_startup() -> None:
     app.state.outbox_task = asyncio.create_task(outbox.loop())
     with contextlib.suppress(Exception):
         await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(extundo.prune)  # calendar / Tasks undo rows past their 7 days
     with contextlib.suppress(Exception):
         await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
 

@@ -24,6 +24,8 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
   const [elapsed, setElapsed] = useState(0)
   const rec = useRef<WavRecording | null>(null)
   const startedAt = useRef(0)
+  // Bumped by cancel and unmount: a start still waiting on mic access or the stream sees it changed and backs out.
+  const gen = useRef(0)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
   const onTextRef = useRef(onText)
@@ -34,25 +36,31 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
     if (phaseRef.current !== 'idle') return
     setPhase('starting')
     phaseRef.current = 'starting'
+    const id = ++gen.current
     const toast = useStore.getState().toast
     try {
       const access = (await window.os?.micAccess?.()) ?? 'granted'
+      if (id !== gen.current) return
       if (access !== 'granted') {
         toast('Grain has no microphone access.', 'error', { label: 'Grant in System Settings', run: () => void api.activity.openPermissionSettings('microphone') })
         setPhase('idle')
         return
       }
-      rec.current = await startWavRecording()
+      const r = await startWavRecording()
+      if (id !== gen.current) { r.cancel(); return }
+      rec.current = r
       startedAt.current = Date.now()
       setElapsed(0)
       setPhase('recording')
     } catch (e) {
+      if (id !== gen.current) return
       toast(`Could not open the microphone: ${(e as Error).message}`, 'error')
       setPhase('idle')
     }
   }
 
   const cancel = (): void => {
+    gen.current++
     rec.current?.cancel()
     rec.current = null
     setPhase('idle')
@@ -96,7 +104,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
   }, [phase])
 
   // A recording never outlives the composer.
-  useEffect(() => () => rec.current?.cancel(), [])
+  useEffect(() => () => { gen.current++; rec.current?.cancel() }, [])
 
   // Listened for on the composer itself, not the window, and stopped there: the Docs view's
   // window-level chord would otherwise start a doc dictation from the same keys.
@@ -114,7 +122,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
       return action !== null || next.held
     }
     const down = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && phaseRef.current === 'recording') { e.preventDefault(); e.stopPropagation(); live.current.cancel(); return }
+      if (e.key === 'Escape' && (phaseRef.current === 'recording' || phaseRef.current === 'starting')) { e.preventDefault(); e.stopPropagation(); live.current.cancel(); return }
       if (chord && chordDown(e, chord)) { e.stopPropagation(); if (feed('down')) e.preventDefault() }
     }
     const up = (e: KeyboardEvent): void => { if (chord && chordUp(e, chord)) { e.stopPropagation(); feed('up') } }

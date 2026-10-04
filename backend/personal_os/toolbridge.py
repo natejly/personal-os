@@ -189,7 +189,7 @@ class Bridge:
             if self.approve is None or self.ctx.get("proposal_only"):
                 return self._refuse(name, f"{name} needs the user's approval and there is nobody to ask in this run.")
             # An ask rule's card is never lifted by skip-permissions, the same as in the reply loop.
-            forced = perm.forced or perm.kind == "rule" or raw != "ask"
+            forced = perm.forced or perm.kind == "rule"
             self._pending += 1
             if self._pending == 1:
                 self._since = time.monotonic()

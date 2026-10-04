@@ -35,7 +35,7 @@ export function GenericApproval({ event, conversationId, decide }: {
       className="approval tc-approval"
       role="group"
       aria-label={`Approval needed: ${d.verb}`}
-      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void decide(true) } }}
+      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !(e.target as HTMLElement).closest('form, input, textarea')) { e.preventDefault(); void decide(true) } }}
     >
       <div className="approval-text">
         <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 
-from personal_os.context import cite_check
+from personal_os.context import cite_check, cite_slim
 from personal_os.db import Database
 from personal_os.repos import Conversations
 
@@ -57,3 +57,17 @@ def test_quote_past_400_chars_and_saved_trimmed() -> None:
     chunk = saved["chunks"][0]
     assert chunk["quote"] == "The boiler is serviced every October by the landlord." and chunk["support"] == "ok"
     assert len(chunk["text"]) == 400 and len(used["chunks"][0]["text"]) == 400  # the 'done' event sees the same ledger
+
+
+def test_marker_before_the_claim_scores_the_whole_sentence() -> None:
+    for reply in ("As stated in [1] the tenant must give thirty days written notice.",
+                  "[1] says the tenant must give thirty days written notice."):
+        refs = [ref(1, LEASE)]
+        assert cite_check(reply, refs)[1]["support"] == "ok", reply
+
+
+def test_event_copy_is_trimmed_and_live_ledger_is_not() -> None:
+    used = {"chunks": [ref(1, "x" * 900)]}
+    slim = cite_slim(used)
+    assert len(slim["chunks"][0]["text"]) == 400 and len(used["chunks"][0]["text"]) == 900
+    assert cite_slim(None) is None

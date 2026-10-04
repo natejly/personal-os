@@ -94,11 +94,19 @@ def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
 
 
 CITE_TEXT_KEEP = 400  # what a saved citation keeps of its chunk (repos.finish_message trims to this)
+
+
+def cite_slim(used: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The copy a streamed event carries (and the run tape journals): excerpts trimmed as the saved row will be.
+    The live dict keeps the full text until finish_message has run cite_check on it."""
+    if not used or not used.get("chunks"):
+        return used
+    return {**used, "chunks": [{**r, "text": str(r.get("text") or "")[:CITE_TEXT_KEEP]} for r in used["chunks"]]}
 _STOP = frozenset("a an and are as at be been but by can did do does for from had has have he her his i if in into is it its "
                   "me my no not of on or our she so than that the their them then there these they this to was we were what "
                   "when which who will with would you your".split())
 _CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.S)
-_SENTS = re.compile(r"(?<=[.!?\]])\s+|\n+")
+_SENTS = re.compile(r"(?<=[.!?])\s+|\n+")  # not on "]": "As noted in [2] the ..." is one sentence
 _MARK = re.compile(r"\[(\d{1,3})\]")
 
 

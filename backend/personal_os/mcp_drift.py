@@ -59,17 +59,20 @@ def _findings(shape: dict[str, Any], tool: dict[str, Any], others: list[dict[str
 
 
 def review_change(store: McpServers, slug: str, other_tools: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
-    """Compare a tool's two latest shapes. None when there is no prior shape to compare against."""
+    """Compare a tool's two latest shapes. A first-seen tool is compared against an empty shape,
+    so every finding in it is new: a server cannot dodge the review by adding a name instead of
+    rewriting one."""
     tool = store.tool(slug)
     versions = store.versions(slug, 2)
-    if not tool or len(versions) < 2:
+    if not tool or not versions:
         return None
-    new, old = versions[0], versions[1]
+    new = versions[0]
+    old = versions[1] if len(versions) > 1 else {"description": "", "parameters": {}, "schema_hash": "", "seen_at": None}
     other_tools = _with_server(store, store.tools() if other_tools is None else other_tools)
     srv = next((s["slug"] for s in store.servers() if s["id"] == tool["server_id"]), "")
     tool = {**tool, "server_slug": srv}
     others = [t for t in other_tools if t.get("server_id") != tool["server_id"]]
-    old_keys = {_key(f) for f in _findings(old, tool, others)}
+    old_keys = {_key(f) for f in _findings(old, tool, others)} if old["schema_hash"] else set()
     new_findings = [f for f in _findings(new, tool, others) if _key(f) not in old_keys]
     return {"previous": {"description": old["description"], "parameters": old["parameters"], "schema_hash": old["schema_hash"],
                          "seen_at": old["seen_at"]},
@@ -82,16 +85,19 @@ def review_change(store: McpServers, slug: str, other_tools: list[dict[str, Any]
 
 
 def apply_review(store: McpServers, slug: str) -> dict[str, Any] | None:
-    """Run after a sync reported `slug` as changed: quarantine on a new fail, and file the report."""
+    """Run after a sync reported `slug` as added or changed: quarantine on a new fail, and file the report."""
     review = review_change(store, slug)
     tool = store.tool(slug)
     if not review or not tool:
         return review
+    first = not review["previous"]["schema_hash"]
+    if first and not review["new_findings"]:
+        return review  # a clean new tool: nothing to file
     if review["quarantine"]:
         store.set_quarantine(slug, True)
     findings = [{**f, "origin": "drift"} for f in review["new_findings"]]
     status = mcp_eval.status_for(findings)
-    summary = ("drift: definition changed" + (" and withheld until you accept it" if review["quarantine"] else "")
+    summary = (("new tool" if first else "drift: definition changed") + (" and withheld until you accept it" if review["quarantine"] else "")
                + (f"; {len(findings)} new finding{'s' if len(findings) != 1 else ''}" if findings else "; nothing new flagged"))
     # server_id stays unset: latest_eval(server) is the server's own report, and a tool's drift note must not replace it
     store.record_eval(None, status, summary, findings, tool_slug=tool["slug"], model=mcp_eval.EVAL_MODEL)
@@ -113,7 +119,8 @@ def offerable(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def view(store: McpServers, tool: dict[str, Any], all_tools: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     """What the UI shows for a tool whose shape changed since the user last saw it, else None."""
-    if not tool.get("schema_changed_at") or tool.get("reviewed_hash") == tool.get("schema_hash"):
+    reviewed = not tool.get("schema_changed_at") or tool.get("reviewed_hash") == tool.get("schema_hash")
+    if reviewed and not tool.get("quarantined_at"):  # a first-seen tool shows only when it was withheld
         return None
     review = review_change(store, tool["slug"], all_tools)
     if review is None:

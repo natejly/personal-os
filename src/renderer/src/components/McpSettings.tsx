@@ -122,7 +122,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
   return (
     <details className={`mcp-drift ${d.quarantined ? 'quarantined' : ''}`} open={d.quarantined}>
       <summary>
-        <b>{d.quarantined ? 'Quarantined: definition changed' : 'Definition changed'}</b>
+        <b>{d.quarantined ? `Quarantined: ${d.previous.schema_hash ? 'definition changed' : 'new tool'}` : 'Definition changed'}</b>
         {d.quarantined && <span className="muted"> — withheld from the assistant until you accept it</span>}
       </summary>
       {diff.description.length > 0 && (
@@ -137,7 +137,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
         </ul>
       )}
       <div className="row-actions">
-        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? 'Accept change' : 'Mark as reviewed'}</button>
+        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
         <span className="muted small">Accepting does not turn the tool on: it still asks first.</span>
       </div>
     </details>

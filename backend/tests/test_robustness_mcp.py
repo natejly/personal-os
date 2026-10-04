@@ -132,6 +132,25 @@ class TestCalls(Base):
             await t
         self.assertTrue(sup._queue.get_nowait().future.cancelled())
 
+    async def test_quarantined_tool_is_refused(self) -> None:
+        srv = self.store.create_server("Held", command="x")
+        self.store.sync_tools(srv["id"], [spec("send")])
+        self.store.set_quarantine("mcp__held__send", True)
+        with self.assertRaisesRegex(mcp_client.McpUnavailable, "withheld"):
+            await self.client.call("mcp__held__send", {})
+
+    async def test_attempts_reset_once_a_connection_is_ready(self) -> None:
+        srv = self.add("hostile", "Crashy")
+        with unittest.mock.patch.object(mcp_client, "BACKOFF_BASE", 0.05):
+            await self.client.start()
+            for _ in range(3):
+                self.assertTrue(await self.client.wait_ready(20.0))
+                with self.assertRaises(mcp_client.McpError):
+                    await self.client.call("mcp__crashy__crash", {}, timeout=5.0)
+                await asyncio.sleep(0.3)
+            self.assertTrue(await self.client.wait_ready(20.0))
+        self.assertEqual(self.client.status(srv["id"])[0]["attempts"], 0)
+
     async def test_concurrent_syncs_leave_one_supervisor_per_server(self) -> None:
         srv = self.add("friendly", "Friendly")
         await self.client.sync()

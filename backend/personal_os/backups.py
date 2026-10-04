@@ -112,7 +112,8 @@ def list_backups(data_dir: Path) -> list[dict[str, Any]]:
 
 def delete(data_dir: Path, name: str) -> None:
     d = backup_dir(data_dir)
-    (d / name).unlink(missing_ok=True)
+    for suffix in ("", "-wal", "-shm"):  # a raw prerestore copy carries its sidecars
+        (d / (name + suffix)).unlink(missing_ok=True)
     (d / (name[:-3] + ".json")).unlink(missing_ok=True)
 
 
@@ -177,6 +178,17 @@ def cancel_restore(data_dir: Path) -> None:
     (backup_dir(data_dir) / PENDING).unlink(missing_ok=True)
 
 
+def _copy_aside(data_dir: Path, why: Exception) -> None:
+    """The prerestore fallback when VACUUM cannot read the live file: its raw bytes, WAL and all."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = backup_dir(data_dir) / f"grain-{stamp}-prerestore.db"
+    for suffix in ("", "-wal", "-shm"):
+        src = data_dir / (DB_NAME + suffix)
+        if src.exists():
+            shutil.copy2(src, Path(str(dest) + suffix))
+    log.warning("could not snapshot the live database before restoring (%s); kept a raw copy as %s", why, dest.name)
+
+
 def apply_pending_restore(data_dir: Path) -> str | None:
     """Startup, before the database is opened. Returns the restored backup's name, or None.
 
@@ -196,7 +208,10 @@ def apply_pending_restore(data_dir: Path) -> str | None:
         _check(src)
         live = data_dir / DB_NAME
         if live.exists():
-            create(data_dir, "prerestore")
+            try:
+                create(data_dir, "prerestore")
+            except Exception as e:  # noqa: BLE001 - a corrupt live DB is the usual reason to restore at all
+                _copy_aside(data_dir, e)
         tmp = data_dir / (DB_NAME + ".restoring")
         shutil.copyfile(src, tmp)
         for suffix in ("-wal", "-shm", "-journal"):

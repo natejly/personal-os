@@ -72,6 +72,9 @@ def recording_dir(data_dir: Path, meeting_id: str) -> Path:
 
 # Consecutive empty native reads before the channel reports that nothing is arriving.
 EMPTY_READS_BEFORE_WARNING = 3
+# ...and before it re-opens the device. No frames at all (not silence, which still delivers samples)
+# is what an input that vanished on a route change looks like; re-opening picks up the new default.
+EMPTY_READS_BEFORE_REOPEN = 8
 NO_AUDIO = "no audio is arriving from the capture device"
 
 
@@ -276,9 +279,11 @@ class ChannelCapture(_RecorderThread):
                 if self.stopping or self.halt.is_set() or remaining <= 0.05:
                     break
                 # A device that vanished mid-capture returns empty reads forever with no error.
-                # Say so in the status, but keep reading: tearing the channel down here would also
-                # end a recording whose source simply had nothing to deliver for a while.
+                # Say so in the status and keep reading for a while; past that, raise into the
+                # restart path, which re-opens the input (the new default after a route change).
                 empty_reads += 1
+                if empty_reads >= EMPTY_READS_BEFORE_REOPEN:
+                    raise RuntimeError(NO_AUDIO)
                 if empty_reads >= EMPTY_READS_BEFORE_WARNING and not self.error:
                     self.error = NO_AUDIO
                 continue

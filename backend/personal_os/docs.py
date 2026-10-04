@@ -515,7 +515,9 @@ class Docs:
             last = c.execute(
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='applied' ORDER BY created_at DESC LIMIT 1", (id,)).fetchone()
             fold = (coalesce and last is not None and last["author"] == author
-                    and t - last["created_at"] < COALESCE_SECONDS and not last["summary"].startswith("Restored"))
+                    and t - last["created_at"] < COALESCE_SECONDS and not last["summary"].startswith("Restored")
+                    # A big cut gets its own entry, so the text before it stays one restore away.
+                    and len(new_content) >= 0.7 * len(last["after"]))
             if fold:
                 c.execute("UPDATE doc_revisions SET after=?, title_after=?, created_at=?, resolved_at=?, summary=? WHERE id=?",
                           (new_content, new_title, t, t, summary or last["summary"], last["id"]))

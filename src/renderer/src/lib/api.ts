@@ -127,6 +127,16 @@ async function proven<T extends Verified>(p: Promise<T>): Promise<T> {
 
 /** Skips the backend's short-lived Google read cache; for user-initiated reloads only. */
 const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
+
+/**
+ * An autosave PUT that outlives the page: the pagehide flush on quit would otherwise be dropped with the
+ * document, losing the last debounce window of typing. keepalive bodies are capped at 64KB in flight, so a
+ * bigger one goes as an ordinary request.
+ */
+const autosave = (body: unknown): RequestInit => {
+  const s = json(body)
+  return { method: 'PUT', body: s, keepalive: new Blob([s]).size < 60_000 }
+}
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
@@ -698,7 +708,7 @@ export const api = {
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
-    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, autosave(patch)),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
     patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
@@ -729,7 +739,7 @@ export const api = {
       req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
     /** PUT, not PATCH — notes autosave through here, and `status` is the service's to write, not a body's. */
     patch: (id: string, patch: { title?: string; notes?: string; enhanced?: string; summary?: string; template?: string; keep_audio?: boolean; conversation_id?: string | null; project_id?: string | null; clear_project?: boolean }) =>
-      req<FullMeeting>(`/meetings/${id}`, { method: 'PUT', body: json(patch) }),
+      req<FullMeeting>(`/meetings/${id}`, autosave(patch)),
     del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
     status: () => req<MeetingStatusInfo>('/meetings/status'),
     /** Registered under both verbs; a GET keeps the ten-minute cache honest in the devtools network log. */

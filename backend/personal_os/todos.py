@@ -89,21 +89,75 @@ def clean_due(due: Any) -> str | None:
         raise ValueError(f"due must be a date as YYYY-MM-DD, got {text[:40]!r}") from None
 
 
+# Board columns are statuses now. A todo's `status` is a free column name, NULL meaning "derive it":
+# Done for a finished todo, To do otherwise. Moving to a done-like status completes the todo.
+DEFAULT_STATUSES = ["Backlog", "To do", "In progress", "Done"]
+_DONE_WORDS = ("done", "complete", "completed", "finished", "shipped")
+
+
+def is_done_status(status: Any) -> bool:
+    return str(status or "").strip().lower() in _DONE_WORDS
+
+
+def ensure_schema(c: Any) -> None:
+    """The todos tables and every post-release column. Used by Todos and by the migration that moves boards in
+    (which can run before any Todos exists); statements are run one by one because executescript commits."""
+    for stmt in SCHEMA.split(";"):
+        if stmt.strip():
+            c.execute(stmt)
+    # Columns arrived after the first release; CREATE TABLE IF NOT EXISTS won't add them.
+    have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
+    for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
+                     "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
+                     "repeat": "TEXT", "estimate_min": "INTEGER",
+                     "deleted_at": "REAL", "deleted_with": "TEXT",  # the last two: trash.py
+                     "parent_id": "TEXT", "tags": "TEXT",  # local-only: Tasks sync never reads these
+                     "list_name": "TEXT", "status": "TEXT", "position": "REAL NOT NULL DEFAULT 0"}.items():  # board view
+        if col not in have:
+            c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
+
+
+def import_boards(c: Any) -> int:
+    """Move every kanban card into todos once. A board becomes a list (`list_name`), its column the card's `status`,
+    a card in a done-like column a completed todo. The old tables are renamed to legacy_* (card history included),
+    which is also what makes the move run only once. Returns how many cards moved."""
+    tables = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "cards" not in tables:
+        return 0
+    ensure_schema(c)
+    rows = c.execute(
+        "SELECT cd.*, b.name AS board_name, b.project_id AS board_project, col.name AS col_name "
+        "FROM cards cd JOIN boards b ON b.id=cd.board_id JOIN board_columns col ON col.id=cd.column_id").fetchall()
+    for r in rows:
+        done = is_done_status(r["col_name"])
+        try:
+            labels = json.loads(r["labels"] or "[]")
+        except ValueError:
+            labels = []
+        c.execute(
+            "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,created_at,updated_at,completed_at,tags,list_name,status,position)"
+            " VALUES(?,?,?,?,?,?,?,'local',?,?,?,?,?,?,?)",
+            (new_id(), r["board_project"], r["title"], r["description"] or "", r["due"] or None, r["priority"], int(done),
+             r["created_at"], r["updated_at"], r["updated_at"] if done else None,
+             json.dumps(Todos.clean_tags(labels)), r["board_name"], r["col_name"], r["position"]))
+    if "canvas_windows" in tables:  # a board window becomes a todos window in board view, on that board's list
+        for w in c.execute("SELECT w.id, b.name FROM canvas_windows w JOIN boards b ON b.id=w.ref_id WHERE w.kind='board'").fetchall():
+            c.execute("UPDATE canvas_windows SET kind='todos', ref_id=NULL, config=? WHERE id=?",
+                      (json.dumps({"view": "board", "list": w["name"], "includeDone": True}), w["id"]))
+        c.execute("DELETE FROM canvas_windows WHERE kind='board'")  # one whose board is gone
+    for old, new in (("cards", "legacy_cards"), ("boards", "legacy_boards"), ("board_columns", "legacy_board_columns"),
+                     ("card_events", "legacy_card_events")):
+        if old in tables:
+            c.execute(f"ALTER TABLE {old} RENAME TO {new}")
+    return len(rows)
+
+
 class Todos:
     def __init__(self, db: Database):
         self.db = db
         self.on_change: Callable[[], None] | None = None
         with db.tx() as c:
-            c.executescript(SCHEMA)
-            # Columns arrived after the first release; CREATE TABLE IF NOT EXISTS won't add them.
-            have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
-            for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
-                             "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
-                             "repeat": "TEXT", "estimate_min": "INTEGER",
-                             "deleted_at": "REAL", "deleted_with": "TEXT",  # the last two: trash.py
-                             "parent_id": "TEXT", "tags": "TEXT"}.items():  # local-only: Tasks sync never reads these
-                if col not in have:
-                    c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
+            ensure_schema(c)
 
     @staticmethod
     def _out(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -114,6 +168,7 @@ class Todos:
             except ValueError:
                 row["repeat"] = None
         if row:
+            row["status"] = row.get("status") or ("Done" if row.get("done") else "To do")
             try:
                 row["tags"] = json.loads(row["tags"]) if row.get("tags") else []
             except ValueError:
@@ -225,8 +280,11 @@ class Todos:
             except Exception:  # noqa: BLE001 - a sync hiccup must never break a todo write
                 pass
 
-    def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "", tag: str = "") -> list[dict[str, Any]]:
+    def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "", tag: str = "", list_name: str = "") -> list[dict[str, Any]]:
         where, args = ["deleted_at IS NULL"], []
+        if list_name.strip():
+            where.append("list_name = ?")
+            args.append(list_name.strip())
         if project_id != "__all__":
             if project_id is None:
                 where.append("project_id IS NULL")
@@ -251,17 +309,19 @@ class Todos:
             row = self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone()))
         return self._attach([row])[0] if row else None
 
-    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None, tags: Any = None, parent_id: str | None = None) -> dict[str, Any]:
+    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None, tags: Any = None, parent_id: str | None = None, list_name: str | None = None, status: str | None = None) -> dict[str, Any]:
         rep = todo_rules.parse_repeat(repeat)
         tid = new_id()
         t = now()
         due = clean_due(due)
+        is_done = is_done_status(status)
         self._check_parent(tid, parent_id)
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min,tags,parent_id) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)",
-                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None,
-                 json.dumps(self.clean_tags(tags)), parent_id or None),
+                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min,tags,parent_id,list_name,status,position,completed_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (tid, project_id, title.strip(), notes, due or None, int(priority), int(is_done), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None,
+                 json.dumps(self.clean_tags(tags)), parent_id or None, (list_name or "").strip() or None, (status or "").strip() or None, t, t if is_done else None),
             )
         if notify:
             self._changed()
@@ -271,12 +331,20 @@ class Todos:
         """Apply a patch. Completing an open repeating todo spawns its next instance (_spawn_next); Tasks-sync
         completions come through here too, so they recur as well. The completed row has its repeat cleared,
         so reopening and completing it again never spawns a second copy."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min", "tags", "parent_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min", "tags", "parent_id", "list_name", "status", "position"}}
         deps = patch.get("depends_on")
         if not fields and deps is None:
             return self.get(id)
         if "tags" in fields:
             fields["tags"] = json.dumps(self.clean_tags(fields["tags"]))
+        if "list_name" in fields:
+            fields["list_name"] = (fields["list_name"] or "").strip() or None
+        if "status" in fields:
+            fields["status"] = (fields["status"] or "").strip() or None
+            if fields["status"] is not None and "done" not in fields:
+                fields["done"] = is_done_status(fields["status"])  # a column named Done completes the todo
+        elif "done" in fields:
+            fields["status"] = None  # ticking it off or reopening it puts it back in Done / To do
         if "parent_id" in fields:
             fields["parent_id"] = fields["parent_id"] or None
             self._check_parent(id, fields["parent_id"])
@@ -313,6 +381,22 @@ class Todos:
             self._changed()
         return self.get(id)
 
+    def move(self, id: str, status: str, before_id: str | None = None) -> dict[str, Any] | None:
+        """Board drag: set the status and slot the todo before `before_id` (or last). Positions are floats, so a slot
+        is the midpoint between the neighbours."""
+        with self.db.tx() as c:
+            if before_id and (b := c.execute("SELECT position FROM todos WHERE id=?", (before_id,)).fetchone()):
+                prev = c.execute("SELECT MAX(position) FROM todos WHERE position < ? AND id != ?", (b["position"], id)).fetchone()[0]
+                pos = ((prev if prev is not None else b["position"] - 1) + b["position"]) / 2
+            else:
+                pos = c.execute("SELECT COALESCE(MAX(position),0)+1 FROM todos").fetchone()[0]
+        return self.update(id, {"status": status, "position": pos})
+
+    def lists(self) -> list[str]:
+        """The list names in use, for the board's list picker."""
+        with self.db.tx() as c:
+            return [r[0] for r in c.execute("SELECT DISTINCT list_name FROM todos WHERE list_name IS NOT NULL AND deleted_at IS NULL ORDER BY list_name")]
+
     def _spawn_next(self, row: dict[str, Any], completed_on: date) -> dict[str, Any]:
         """Next instance of a just-completed repeating todo. source='local' so Tasks sync makes it a fresh
         remote task instead of treating it as the completed one."""
@@ -320,7 +404,7 @@ class Todos:
         nxt = todo_rules.next_due(due, row["repeat"], completed_on)
         return self.create(row["title"], row.get("project_id"), row.get("notes") or "", nxt.isoformat(), row["priority"],
                            source="local", notify=False, repeat=row["repeat"], estimate_min=row.get("estimate_min"),
-                           tags=row.get("tags"), parent_id=row.get("parent_id"))
+                           tags=row.get("tags"), parent_id=row.get("parent_id"), list_name=row.get("list_name"))
 
     @staticmethod
     def _tombstone(c: Any, t: dict[str, Any]) -> None:

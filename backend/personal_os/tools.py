@@ -92,7 +92,6 @@ PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
     "doc_create", "doc_edit",
     "todo_add", "todo_delete", "todo_update",
-    "board_add_card", "board_create", "board_move_card", "board_claim", "board_release", "board_comment",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
     "artifact_create", "artifact_update", "artifact_edit",
@@ -195,7 +194,6 @@ ALTERNATIVE = {
     "skill_from_run": "skill_draft with the steps written out, so the user can save it in Library → Skills",
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
-    "board_add_card": "todo_add",
     "find_files": "search_documents for files the user uploaded, or ask the user where the file is",
     "read_local_file": "ask the user to upload the file or paste the text",
     "write_local_file": "put the text in your reply so the user can save it themselves",
@@ -592,14 +590,14 @@ class Toolbox:
     workflow_engine: Any = None
     commands: Any = None
 
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None, artifacts: Any = None,
                  conversations: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
-        self.google, self.boards, self.sandboxes, self.docs, self.activity = google, boards, sandboxes, docs, activity
+        self.google, self.sandboxes, self.docs, self.activity = google, sandboxes, docs, activity
         self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
@@ -625,8 +623,6 @@ class Toolbox:
         self._register_working()
         for m in self.modules:
             m.register_tools(self)
-        if boards is not None:
-            self._register_boards()
         if docs is not None:
             self._register_docs()
         if artifacts is not None:
@@ -1839,102 +1835,6 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"title": "Job applications", "values": [["Company", "Role", "Status"]]}]))
 
 
-def _register_boards(self: Toolbox) -> None:
-    R = self.specs.__setitem__
-
-    async def board_list(ctx: dict[str, Any], board: str | None = None, offset: int = 0) -> Any:
-        names = [x["name"] for x in self.boards.list()]
-        if board:
-            b = self.boards.find_board(board)
-            if not b:
-                return tool_error(f"No board named '{board}'.", field="board", expected="a board name or id from board_list",
-                                  example={"board": names[0]} if names else {"board": "Work"},
-                                  alternative="board_list with no arguments to see the boards, or board_create")
-            cols = {c["id"]: c["name"] for c in b["columns"]}
-            cards = [{"id": c["id"], "title": c["title"], "column": cols.get(c["column_id"]), "due": c["due"], "priority": c["priority"]} for c in b["cards"]]
-            return page(cards, offset=offset, limit=50, key="cards", board=b["name"], id=b["id"],
-                        columns=[{"id": c["id"], "name": c["name"]} for c in b["columns"]])
-        return page([{"id": b["id"], "name": b["name"], "cards": b["card_count"]} for b in self.boards.list()], offset=offset, limit=50, key="boards")
-    R("board_list", ToolSpec("board_list", "List kanban boards, or the columns and cards of one board (by name or id).",
-        _obj({"board": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), board_list, "boards",
-        examples=[{}, {"board": "Work"}, {"board": "Work", "offset": 50}]))
-
-    async def board_add_card(ctx: dict[str, Any], board: str, title: str, column: str | None = None, description: str = "", due: str | None = None, priority: int = 2) -> Any:
-        b = self.boards.find_board(board)
-        if not b:
-            return tool_error(f"No board named '{board}'.", field="board", expected="a board name or id from board_list",
-                              example={"board": "Work", "title": "Fix the login bug"}, alternative="board_list to see the boards")
-        col = next((c for c in b["columns"] if column and c["name"].lower() == column.lower()), None)
-        card = self.boards.add_card(b["id"], col["id"] if col else None, title, description, due, priority)
-        return {"added": card["title"], "id": card["id"], "column": (col or b["columns"][0])["name"]}
-    R("board_add_card", ToolSpec("board_add_card", "Add a card to a kanban board (optionally into a named column). Boards are work queues; a personal "
-        "task or reminder with a due date goes in todo_add, because only todos reach Today, Calendar and Google Tasks.",
-        _obj({"board": {"type": "string"}, "title": {"type": "string"}, "column": {"type": "string"}, "description": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer", "default": 2}}, ["board", "title"]), board_add_card, "boards", "writes",
-        examples=[{"board": "Work", "title": "Fix the login bug", "column": "To do", "priority": 1},
-                  {"board": "Q4 launch", "title": "Draft the release notes", "due": "2026-10-10"}]))
-
-    async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str, token: str | None = None) -> Any:
-        b = self.boards.find_board(board)
-        if not b:
-            return tool_error(f"No board named '{board}'.", field="board", expected="a board name or id from board_list",
-                              example={"board": "Work", "card": "Fix the login bug", "column": "Done"}, alternative="board_list to see the boards")
-        c = next((x for x in b["cards"] if x["id"] == card or x["title"].lower() == card.lower()), None)
-        col = next((x for x in b["columns"] if x["id"] == column or x["name"].lower() == column.lower()), None)
-        if not c or not col:
-            return tool_error(f"{'Card' if not c else 'Column'} not found on board '{b['name']}'.", field="card" if not c else "column",
-                              expected="a card title/id and a column name from board_list(board=...)",
-                              example={"board": b["name"], "card": card, "column": b["columns"][0]["name"] if b["columns"] else "Done"},
-                              alternative=f"board_list(board='{b['name']}') to see the exact titles and columns")
-        if token:
-            if not self.boards.agent_move(c["id"], token, col["id"]):
-                return tool_error("That claim token is wrong or its lease ran out; the card was not moved.", field="token",
-                                  expected="the token board_claim returned, still within its lease", alternative="board_claim again")
-        elif c.get("claim_token") and (c.get("lease_expires_at") or 0) > time.time():
-            return tool_error(f"'{c['title']}' is claimed by {c.get('claimed_by')}.", field="token",
-                              expected="the token board_claim returned", alternative="leave the card alone")
-        else:
-            self.boards.move_card(c["id"], col["id"])
-        return {"moved": c["title"], "to": col["name"]}
-    R("board_move_card", ToolSpec("board_move_card", "Move a card (by title or id) to another column on a board. Pass the claim token for a card you hold.",
-        _obj({"board": {"type": "string"}, "card": {"type": "string"}, "column": {"type": "string"}, "token": {"type": "string"}}, ["board", "card", "column"]), board_move_card, "boards", "writes",
-        examples=[{"board": "Work", "card": "Fix the login bug", "column": "In progress"}, {"board": "Work", "card": "cd_7a1b90", "column": "Done"}]))
-
-    async def board_claim(ctx: dict[str, Any], card: str, ttl_s: float = 600) -> Any:
-        token = self.boards.claim(card, "agent", ttl_s)
-        if token is None:
-            return tool_error("That card is already claimed (or does not exist).", field="card", expected="a free card id",
-                              alternative="board_list to pick another card")
-        return {"claimed": card, "token": token, "ttl_s": ttl_s}
-    R("board_claim", ToolSpec("board_claim", "Claim a card for a lease (default 10 minutes). Returns a token that later board writes need. Moving the card by hand clears the claim.",
-        _obj({"card": {"type": "string"}, "ttl_s": {"type": "number", "default": 600}}, ["card"]), board_claim, "boards", "writes",
-        examples=[{"card": "cd_7a1b90"}]))
-
-    async def board_release(ctx: dict[str, Any], card: str, token: str, reason: str = "finished") -> Any:
-        try:
-            ok = self.boards.release(card, token, reason)
-        except ValueError as e:
-            return tool_error(str(e), field="reason", expected="finished | expired | preempted | cancelled", alternative="reason=finished")
-        return {"released": ok}
-    R("board_release", ToolSpec("board_release", "Release a card you claimed.",
-        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "reason": {"type": "string", "default": "finished"}}, ["card", "token"]), board_release, "boards", "writes",
-        examples=[{"card": "cd_7a1b90", "token": "abc123"}]))
-
-    async def board_comment(ctx: dict[str, Any], card: str, token: str, text: str) -> Any:
-        ok = self.boards.event(card, token, "comment", {"text": text})
-        return {"commented": True} if ok else tool_error("That claim token is wrong or its lease ran out.", field="token",
-                                                         expected="the token board_claim returned", alternative="board_claim again")
-    R("board_comment", ToolSpec("board_comment", "Add a progress note to a card you hold. This cannot mark the card completed.",
-        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "text": {"type": "string"}}, ["card", "token", "text"]), board_comment, "boards", "writes",
-        examples=[{"card": "cd_7a1b90", "token": "abc123", "text": "Drafted the outline"}]))
-
-    async def board_create(ctx: dict[str, Any], name: str, columns: list[str] | None = None) -> Any:
-        b = self.boards.create(name, ctx.get("project_id"), columns)
-        return {"created": b["name"], "id": b["id"], "columns": [c["name"] for c in b["columns"]]}
-    R("board_create", ToolSpec("board_create", "Create a new kanban board (default columns: Backlog, To do, In progress, Done).",
-        _obj({"name": {"type": "string"}, "columns": {"type": "array", "items": {"type": "string"}}}, ["name"]), board_create, "boards", "writes",
-        examples=[{"name": "Home renovation"}, {"name": "Q4 launch", "columns": ["Ideas", "Doing", "Shipped"]}]))
-
-
 def _register_sandbox(self: Toolbox) -> None:
     """Persistent microVM sandbox per conversation (see microvm.py for the isolation story)."""
     R = self.specs.__setitem__
@@ -2137,7 +2037,6 @@ def _register_style(self: Toolbox) -> None:
         examples=[{"text": "Hey — quick one. We pushed the launch to Tuesday…", "personal": True}]))
 
 
-Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
 Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]

@@ -34,7 +34,6 @@ const VERBS: Record<string, string> = {
   trash_local_file: 'Move file to Trash', list_shortcuts: 'List Shortcuts', run_shortcut: 'Run shortcut',
   todo_write: 'Update plan', todo_add: 'Add to-do', schedule_task: 'Schedule a task', cancel_scheduled_task: 'Cancel scheduled task',
   scheduled_tasks: 'List scheduled tasks', propose_plan: 'Propose a plan', read_tool_result: 'Read earlier result',
-  board_list: 'List boards', board_create: 'Create board', board_add_card: 'Add board card', board_move_card: 'Move board card',
   meeting_list: 'List meetings', meeting_read: 'Read meeting', meeting_search: 'Search meetings',
   activity_recent: 'Recent activity', activity_insights: 'Activity insights', activity_pause: 'Pause activity monitor',
   activity_access: 'Check activity access',

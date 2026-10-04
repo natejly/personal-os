@@ -79,7 +79,7 @@ def full_toolbox(meetings: Any = None, google: Any = None, activity: Any = None)
     """
     return Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
                    modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
-                            stub_module(PlannerModule)], google=google or Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
+                            stub_module(PlannerModule)], google=google or Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
                    docs=Stub(), activity=activity or Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                    skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
                    desks=Stub(), workspace=Stub())
@@ -174,8 +174,6 @@ def test_meeting_list_arms_the_external_gate() -> None:
     assert tb.gate("todo_add", "on", ctx) == "ask"
     assert tb.gate("todo_delete", "on", ctx) == "ask"
     assert tb.gate("todo_update", "on", ctx) == "ask"
-    assert tb.gate("board_add_card", "on", ctx) == "ask"
-    assert tb.gate("board_create", "on", ctx) == "ask"
     assert tb.gate("skill_draft", "on", ctx) == "ask"
     assert tb.gate("skill_from_run", "on", ctx) == "ask"
     assert tb.gate("save_memory", "on", {"project_id": "p1"}) == "on"

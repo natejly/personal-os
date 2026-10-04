@@ -1329,6 +1329,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .add-row input[type=date], .add-row .date-input { flex: 0 0 150px; width: 150px; }
 .date-input { padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; outline: 0; color-scheme: inherit; }
 .date-input:focus { border-color: var(--accent); }
+.add-row .list-input { flex: 0 0 120px; width: 120px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; outline: 0; color: inherit; font: inherit; }
 input[type=date] { appearance: none; font: inherit; }
 input[type=date]::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
 input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
@@ -1662,6 +1663,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcard:active { cursor: grabbing; }
 .kcard.p1 { border-left: 3px solid var(--danger); }
 .kcard.p3 { opacity: 0.85; }
+.kcard.done { opacity: 0.6; }
+.kcard.done .kcard-title { text-decoration: line-through; }
 .kcard-title { line-height: 1.4; }
 .kcard-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .kcard-add textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 8px; padding: 8px; outline: 0; font: inherit; resize: none; }

@@ -37,16 +37,12 @@ def _route_set() -> set[tuple[str, str]]:
 
 
 class ToolTests(unittest.TestCase):
-    def test_todo_tools_sit_between_working_and_boards(self) -> None:
+    def test_todo_tools_follow_working_memory(self) -> None:
         names = list(toolbox.specs)
         i = names.index("todo_list")
         self.assertEqual(names[i:i + 4], TODO_TOOLS)
         self.assertEqual(names[i - 2:i], ["read_tool_result", "search_tool_results"])  # last of the working-memory block
-        # Other modules (mailwatch, planner, health) register right after todos; the shell's own tools
-        # resume with boards.
-        rest = [n for n in names[i + 4:]
-                if toolbox.specs[n].group != "health" and n not in ("mail_followups", "schedule_suggest")]
-        self.assertEqual(rest[0], "board_list")
+        self.assertFalse([n for n in names if n.startswith("board_")])  # boards are todos now
 
     def test_tool_metadata_unchanged(self) -> None:
         for n in TODO_TOOLS:

@@ -1,11 +1,11 @@
-import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
+import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
 import { useState } from 'react'
 import { useStore } from '../store'
 import type { ToolMode, ToolOverride } from '@shared/types'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
   knowledge: <FileSearch size={13} />, memory: <Brain size={13} />, graph: <Share2 size={13} />, web: <Globe size={13} />, code: <Terminal size={13} />,
-  utility: <Clock size={13} />, todos: <CheckSquare size={13} />, boards: <KanbanSquare size={13} />, google: <Mail size={13} />,
+  utility: <Clock size={13} />, todos: <CheckSquare size={13} />, google: <Mail size={13} />,
   mac: <Laptop size={13} />, files: <FolderOpen size={13} />,
   plan: <ListChecks size={13} />, context: <Layers size={13} />, skills: <GraduationCap size={13} />,
   style: <PenLine size={13} />, health: <HeartPulse size={13} />

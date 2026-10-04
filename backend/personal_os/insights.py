@@ -681,12 +681,12 @@ def digest(pat: dict[str, Any]) -> str:
 SURFACE = """\
 - Chat with tools: the assistant can search and write memories and the knowledge graph, search
   documents, read and propose edits to docs, search the web and read pages, run Python, manage
-  todos and kanban boards, and (when Google is connected) read the calendar, triage Gmail, draft
+  todos (also shown as a kanban board), and (when Google is connected) read the calendar, triage Gmail, draft
   mail and manage Google Tasks. Tools are per-tool on / ask / off.
 - Projects: a group of chats with their own instructions, knowledge files and memories.
 - Documents and docs: uploads that get indexed, and docs the user writes that the assistant can
   propose diffs against.
-- Todos, a week calendar, kanban boards, notes.
+- Todos, a week calendar, notes.
 - Dashboards: register a data source (HTTP API, RSS, or the app's own todos/calendar/mail) and
   describe a widget in plain English; the model writes the widget. "AI summary" widgets turn any
   source into a short briefing.

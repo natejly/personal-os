@@ -9,7 +9,6 @@ import MeetingsView from './components/MeetingsView'
 import ActivityView from './components/ActivityView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
-import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import DashboardsView from './components/DashboardsView'
@@ -226,7 +225,6 @@ export default function App(): JSX.Element {
           {ModView && <ModView />}
           {view === 'calendar' && <CalendarView />}
           {view === 'mail' && <MailView />}
-          {view === 'boards' && <BoardsView />}
           {view === 'dashboards' && <DashboardsView />}
           {view === 'docs' && <DocsView />}
           {view === 'meetings' && <MeetingsView />}

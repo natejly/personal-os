@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
+import { BookOpen, FileText, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
 import { api } from '../lib/api'
-import type { Artifact, Board, Dashboard } from '@shared/types'
+import type { Artifact, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
@@ -24,14 +24,14 @@ const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }
 /** One row of the Made tab: anything with a name, a kind and a view that can open it. */
 interface Made {
   id: string
-  kind: 'doc' | 'dashboard' | 'board' | 'artifact'
+  kind: 'doc' | 'dashboard' | 'artifact'
   name: string
   meta: string
   at: number
 }
 
 const KIND_ICON: Record<Made['kind'], JSX.Element> = {
-  doc: <FileText size={14} />, artifact: <Package size={14} />, dashboard: <LayoutDashboard size={14} />, board: <KanbanSquare size={14} />
+  doc: <FileText size={14} />, artifact: <Package size={14} />, dashboard: <LayoutDashboard size={14} />
 }
 
 function MadePanel(): JSX.Element {
@@ -42,16 +42,15 @@ function MadePanel(): JSX.Element {
   const [q, setQ] = useState('')
   const [viewing, setViewing] = useState<string | null>(null)
 
-  // Boards and dashboards live in their own views, so the Library fetches them rather than holding them.
+  // Dashboards live in their own view, so the Library fetches them rather than holding them.
   useEffect(() => {
     let live = true
-    void Promise.all([api.dashboards.list().catch(() => [] as Dashboard[]), api.boards.list().catch(() => [] as Board[]), api.artifacts.list().catch(() => [] as Artifact[])])
-      .then(([dashboards, boards, arts]) => {
+    void Promise.all([api.dashboards.list().catch(() => [] as Dashboard[]), api.artifacts.list().catch(() => [] as Artifact[])])
+      .then(([dashboards, arts]) => {
         if (!live) return
         setExtra([
           ...arts.map((a) => ({ id: a.id, kind: 'artifact' as const, name: a.title || 'Untitled', meta: `artifact · v${a.version}`, at: a.updated_at })),
-          ...dashboards.map((d) => ({ id: d.id, kind: 'dashboard' as const, name: d.name, meta: d.description || 'dashboard', at: d.created_at })),
-          ...boards.map((b) => ({ id: b.id, kind: 'board' as const, name: b.name, meta: `${b.card_count ?? b.cards?.length ?? 0} cards`, at: b.created_at }))
+          ...dashboards.map((d) => ({ id: d.id, kind: 'dashboard' as const, name: d.name, meta: d.description || 'dashboard', at: d.created_at }))
         ])
       })
     return () => { live = false }
@@ -67,21 +66,21 @@ function MadePanel(): JSX.Element {
   const open = (r: Made): void => {
     if (r.kind === 'doc') void openDoc(r.id)
     else if (r.kind === 'artifact') setViewing(r.id)
-    else setView(r.kind === 'board' ? 'boards' : 'dashboards')
+    else setView('dashboards')
   }
 
   return (
     <div className="library-panel">
       <div className="add-row">
         <div className="seg">
-          {(['all', 'doc', 'artifact', 'dashboard', 'board'] as const).map((k) => (
+          {(['all', 'doc', 'artifact', 'dashboard'] as const).map((k) => (
             <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{k === 'all' ? 'everything' : `${k}s`}</button>
           ))}
         </div>
         <input className="search" value={q} placeholder="Search by name" onChange={(e) => setQ(e.target.value)} />
       </div>
       {rows.length === 0 ? (
-        <div className="empty-hint big"><p>Nothing here yet.</p><p className="muted small">Docs, dashboards and boards you or the assistant create show up here.</p></div>
+        <div className="empty-hint big"><p>Nothing here yet.</p><p className="muted small">Docs, dashboards and artifacts you or the assistant create show up here.</p></div>
       ) : (
         <div className="made-grid">
           {rows.map((r) => (

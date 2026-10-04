@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -191,21 +191,6 @@ export const api = {
       req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }),
     reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
   },
-  boards: {
-    list: () => req<Board[]>('/boards'),
-    get: (id: string) => req<Board>(`/boards/${id}`),
-    create: (b: { name: string; project_id?: string | null; columns?: string[] }) => req<Board>('/boards', { method: 'POST', body: json(b) }),
-    update: (id: string, patch: { name?: string; project_id?: string | null }) => req<Board>(`/boards/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/boards/${id}`, { method: 'DELETE' }),
-    addColumn: (id: string, name: string) => req<BoardColumn>(`/boards/${id}/columns`, { method: 'POST', body: json({ name }) }),
-    updateColumn: (cid: string, patch: { name?: string; position?: number; wip_limit?: number | null }) => req(`/boards/columns/${cid}`, { method: 'PUT', body: json(patch) }),
-    deleteColumn: (cid: string) => req(`/boards/columns/${cid}`, { method: 'DELETE' }),
-    addCard: (id: string, c: { title: string; column_id?: string | null; description?: string; due?: string | null; priority?: number; labels?: string[] }) => req<BoardCard>(`/boards/${id}/cards`, { method: 'POST', body: json(c) }),
-    updateCard: (cid: string, patch: { title?: string; description?: string; due?: string; priority?: number; labels?: string[]; clear_due?: boolean }) => req<BoardCard>(`/boards/cards/${cid}`, { method: 'PUT', body: json(patch) }),
-    cardEvents: (bid: string, cid: string) => req<CardEvent[]>(`/boards/${bid}/cards/${cid}/events`),
-    moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
-    deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' })
-  },
   sources: {
     list: () => req<{ sources: DataSource[]; internal: string[] }>('/sources'),
     create: (s: { name: string; kind: string; config: Record<string, unknown>; secret?: string; description?: string }) => req<DataSource>('/sources', { method: 'POST', body: json(s) }),
@@ -252,12 +237,14 @@ export const api = {
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
-    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}`),
+    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '', list = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}&list_name=${encodeURIComponent(list)}`),
+    lists: () => req<string[]>('/todo-lists'),
+    move: (id: string, status: string, before_id: string | null = null) => req<Todo>(`/todos/${id}/move`, { method: 'POST', body: json({ status, before_id }) }),
     filters: () => req<TodoFilter[]>('/todo-filters'),
     saveFilter: (f: { name: string; tag?: string; q?: string; project_id?: string | null }) => req<TodoFilter>('/todo-filters', { method: 'POST', body: json(f) }),
     deleteFilter: (id: string) => req(`/todo-filters/${id}`, { method: 'DELETE' }),
-    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[] }) =>
+    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null; list_name?: string | null; status?: string }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[]; list_name?: string | null; clear_list?: boolean; status?: string }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },

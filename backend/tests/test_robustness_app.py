@@ -258,18 +258,16 @@ def _windows(kind: str, ref: str) -> int:
         return c.execute("SELECT COUNT(*) FROM canvas_windows WHERE kind=? AND ref_id=?", (kind, ref)).fetchone()[0]
 
 
-def test_deleting_a_chat_board_widget_and_project_sweeps_windows() -> None:
+def test_deleting_a_chat_and_project_sweeps_windows() -> None:
     cv = appmod.canvases.list()[0]["id"] if appmod.canvases.list() else appmod.canvases.create("c")["id"]
     conv = appmod.convos.create(None, "t", "m")["id"]
-    board = appmod.boards.create("b")["id"]
     proj = appmod.projects.create("p")["id"]
-    for kind, ref in (("chat", conv), ("board", board), ("project", proj)):
+    for kind, ref in (("chat", conv), ("project", proj)):
         appmod.canvases.add_window(cv, kind, ref)
         assert _windows(kind, ref) == 1
     client.delete(f"/conversations/{conv}")
-    client.delete(f"/boards/{board}")
     client.delete(f"/projects/{proj}")
-    assert (_windows("chat", conv), _windows("board", board), _windows("project", proj)) == (0, 0, 0)
+    assert (_windows("chat", conv), _windows("project", proj)) == (0, 0)
 
 
 # ---- 12. Docs writers: stale project is a 404 -----------------------------------------------------------------
@@ -293,21 +291,6 @@ def test_negative_limits_are_clamped() -> None:
     assert appmod._clamp(-1) == 1 and appmod._clamp(10**9) == 500 and appmod._clamp(7) == 7
     assert client.get("/runs?status=all&limit=-1").status_code == 200
     assert len(client.get("/runs?status=all&limit=-1").json()) <= 1
-
-
-# ---- 15. Boards ---------------------------------------------------------------------------------------------------
-def test_board_routes_do_not_500_on_bad_ids() -> None:
-    assert client.post("/boards/nope/cards", json={"title": "x", "column_id": "nope"}).status_code in (400, 404)
-    assert client.post("/boards/nope/columns", json={"name": "x"}).status_code in (400, 404)
-
-
-def test_a_board_can_move_back_to_no_project() -> None:
-    proj = appmod.projects.create("p")["id"]
-    board = client.post("/boards", json={"name": "b", "project_id": proj}).json()
-    assert board["project_id"] == proj
-    assert client.put(f"/boards/{board['id']}", json={"name": "b2"}).json()["project_id"] == proj  # untouched
-    assert client.put(f"/boards/{board['id']}", json={"project_id": None}).json()["project_id"] is None
-    assert client.put(f"/boards/{board['id']}", json={"project_id": "gone"}).status_code == 404
 
 
 # ---- 16. Recap ----------------------------------------------------------------------------------------------------

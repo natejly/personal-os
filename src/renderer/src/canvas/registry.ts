@@ -3,7 +3,6 @@ import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import { setDefaultConfigs, setDefaultSizes } from './store'
 import { def as activity } from './widgets/activity'
 import { def as artifact } from './widgets/artifact'
-import { def as board } from './widgets/board'
 import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
 import { def as dashboardWidget } from './widgets/dashboardWidget'
@@ -65,7 +64,6 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   chat,
   todos,
   calendar,
-  board,
   note,
   'dashboard-widget': dashboardWidget,
   memory,

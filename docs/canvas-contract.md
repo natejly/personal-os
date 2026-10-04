@@ -196,7 +196,7 @@ export interface WindowLayout { id: string; x?: number; y?: number; w?: number; 
 
 export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
 
-export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file' | 'nav'
 
 export interface DragPayload {
   kind: DragKind
@@ -374,8 +374,7 @@ Read-only callers. Nobody changes these.
 `GET /todos?project_id=all&include_done=true&q=` · `PUT /todos/{id}` · `POST /todos` ·
 `GET /memories?project_id=all&include_global=false&q=` · `PUT /memories/{id} { pinned: true }` ·
 `GET /documents?project_id=all&include_global=false` · `GET /documents/{id}` · `POST /documents` (FormData) ·
-`GET /graph?project_id=<scope>&include_global=false` · `GET /boards/{id}` · `POST /boards/{id}/cards` ·
-`POST /boards/cards/{cid}/move` · `GET /integrations/google/calendar?days=&start=` ·
+`GET /graph?project_id=<scope>&include_global=false` · `POST /todos` · `POST /todos/{id}/move` · `GET /integrations/google/calendar?days=&start=` ·
 `GET /dashboards/{id}` · `POST /widgets/{id}/refresh?regenerate=false` · `GET /widgets/{id}/render` ·
 `GET /recap?force=` · `GET /usage?days=` · `PUT /projects/{id} { system_prompt }` · `GET /settings` · `PUT /settings`.
 
@@ -576,9 +575,8 @@ Catalog, with the per-kind decisions already taken:
 | kind | default | min | chrome | statusful | heavy | needsRef | config |
 |---|---|---|---|---|---|---|---|
 | `chat` | 520×640 | 360×320 | full | ✓ | | ✓ | — |
-| `todos` | 380×520 | 280×240 | full | | | | `{ scope, includeDone, q }` |
+| `todos` | 380×520 | 280×240 | full | | | | `{ scope, includeDone, q, view, list, groupBy }` |
 | `calendar` | 640×520 | 320×280 | full | | ✓ | | `{ mode: 'agenda' \| 'day' \| 'week', days }`, default `'agenda'` |
-| `board` | 760×560 | 420×320 | full | | | ✓ | `{ column_id? }` |
 | `note` | 300×300 | 200×160 | minimal | | | ✓ | — |
 | `dashboard-widget` | 420×340 | 280×200 | full | | ✓ | ✓ | `{ dashboard_id }` |
 | `memory` | 400×520 | 280×240 | full | | | | `{ scope }` |
@@ -620,10 +618,9 @@ unparseable payloads are ignored silently — never thrown.
 |---|---|---|
 | `conversation` | opens a `chat` window | — |
 | `nav` (`id` is a `WidgetKind`) | opens that widget | — |
-| `todo` | opens a `todos` window | `board` → `POST /boards/{id}/cards`; `chat` → quoted into that chat's composer draft |
+| `todo` | opens a `todos` window | `chat` → quoted into that chat's composer draft |
 | `document` | opens a `documents` window | `chat` → appends a `read_document` instruction to that chat's composer draft |
 | `memory` | opens a `memory` window | `chat` → `PUT /memories/{id} { pinned: true }` |
-| `board-card` | opens a `note` with its text (`POST /notes`) | `todos` → `POST /todos { title }` |
 | `project` | opens a `project` window | a `SpacesBar` tab → `bindSpace(canvasId, projectId)` |
 | `file` | uploads via `uploadDocuments` + opens `documents` | `chat` → uploads and appends to the draft; `documents` → uploads |
 | `widget` | opens a `dashboard-widget` with `config.dashboard_id = payload.dashboardId` | — |
@@ -898,7 +895,7 @@ during the wave that hits it.
    stated default was the sidebar.
 
 9. **`notes.project_id` uses `ON DELETE SET NULL`, not the plan's `CASCADE`.** Deleting a project
-   demotes its notes to personal scope instead of shredding them, matching `todos` and `boards`.
+   demotes its notes to personal scope instead of shredding them, matching `todos`.
    Flagged because it contradicts plan §6.1 as written.
 
 10. **`db.py` is not edited, contrary to plan §6.1.** Every feature table since the first release

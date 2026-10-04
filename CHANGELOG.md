@@ -6,6 +6,10 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 This section also catches up on work merged between 2026-10-01 and 2026-10-03 that the entries below left out.
 
+### Changed
+
+- **Boards are now todos.** Todos has a board view (columns by status or by list) next to the list view; the Boards page, the `board_*` tools and the board canvas window are gone, and `todo_add`, `todo_update` and `todo_list` take `list_name` and `status`. A migration turns each existing board into a list and each card into a todo (title, notes, due date, priority, labels as tags, project, order and done state kept). The old tables are kept as `legacy_*`. Per-card agent claims and leases were dropped.
+
 ### Added
 
 - **Onboarding.** A first-run wizard that picks a model provider, plus an "about you" step that seeds a pinned memory. The first suggested prompts match what is connected.

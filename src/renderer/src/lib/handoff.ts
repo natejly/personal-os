@@ -1,8 +1,8 @@
-type Key = 'board' | 'dashboard'
+type Key = 'todos-view' | 'dashboard'
 
 /**
- * One-shot selection passed to a classic view whose selection is component state (BoardsView,
- * DashboardsView), so a canvas window's Expand can land on the right board or dashboard. The view
+ * One-shot selection passed to a classic view whose selection is component state (TodosView,
+ * DashboardsView), so a canvas window's Expand can land on the right view or dashboard. The view
  * peeks it in its `useState` initialiser and clears it in a mount effect, which is StrictMode-safe:
  * a double-invoked initialiser still sees the value.
  */

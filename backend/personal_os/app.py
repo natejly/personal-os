@@ -4576,6 +4576,34 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
     return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
 
 
+@app.get("/memories/export")
+def export_memories(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
+    """The live memories of one scope as a portable file (content, kind, pinned). Ids and project links stay behind."""
+    rows = memories.list(sid(project_id), "", include_global)
+    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"])} for m in rows]}
+
+
+class MemoryImportIn(BaseModel):
+    file: dict[str, Any]
+    project_id: str | None = None
+
+
+@app.post("/memories/import")
+def import_memories(body: MemoryImportIn) -> dict[str, int]:
+    """Add each memory of an export file to one scope. A memory already there (same text) is skipped by `create`."""
+    items = body.file.get("memories")
+    if body.file.get("grain_memories") != 1 or not isinstance(items, list):
+        raise HTTPException(400, "Not a memory export file")
+    pid = wsid(body.project_id)
+    before = len(memories.list(pid, "", False))
+    for m in items:
+        if isinstance(m, dict) and isinstance(m.get("content"), str) and m["content"].strip():
+            kind = m.get("kind") if m.get("kind") in ("fact", "preference", "goal", "note") else "fact"
+            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")))
+    added = len(memories.list(pid, "", False)) - before
+    return {"added": added, "skipped": len(items) - added}
+
+
 @app.post("/memories/reindex")
 async def reindex_memories() -> dict[str, Any]:
     """Embed every live memory that has no current vector (200 per call; call again while `pending` > 0)."""

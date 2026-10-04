@@ -46,7 +46,9 @@ their own instructions, knowledge files, memories and graph.
   or the voice profile on its own:
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
-    project scope, forget.
+    project scope, forget, see a memory's past versions, and export or import
+    a scope as a JSON file. It lives in Settings → Memory & learning, next to
+    the auto-learn switches.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
     into chats.

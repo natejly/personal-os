@@ -73,8 +73,7 @@ test('a view action routes, and view:graph opens memory on the graph', () => {
   fire('view:graph')
   assert.equal(useStore.getState().view, 'todos')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'knowledge')
-  assert.equal(useStore.getState().knowledgeTab, 'memory')
+  assert.equal(useStore.getState().settingsTab, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
   useStore.getState().setSettingsOpen(false)
 })
@@ -82,7 +81,6 @@ test('a view action routes, and view:graph opens memory on the graph', () => {
 test('view:documents and upload open Settings on the document library', () => {
   fire('view:documents')
   assert.equal(useStore.getState().settingsTab, 'knowledge')
-  assert.equal(useStore.getState().knowledgeTab, 'documents')
   useStore.getState().setSettingsOpen(false)
   // ⌘, after that still opens on Provider.
   fire('settings')

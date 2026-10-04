@@ -392,6 +392,7 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
               <SandboxSettings draft={draft} patch={patch} />
+              <label><span>Load built-in tools on demand above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.toolDeferAbove ?? 40} onChange={(e) => patch({ toolDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>

@@ -21,6 +21,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import llm  # noqa: E402
 from personal_os.tools import ToolSpec  # noqa: E402
 from personal_os.toolcalls import parse_arguments, resolve_name  # noqa: E402

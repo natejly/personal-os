@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import permrules  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402

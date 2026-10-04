@@ -48,6 +48,8 @@ from personal_os.cowork import LIVE, NEEDS_YOU  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 
+db.set_settings({"toolDeferAbove": 0})  # desks drive their own tools; deferral is test_tool_search.py
+
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 passed = 0
 

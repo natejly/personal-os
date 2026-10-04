@@ -144,6 +144,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
     # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
     "mcpDeferAbove": 12,
+    # Past this many built-in tools, offer the core set plus tool_search instead of every schema (0 = send them all).
+    "toolDeferAbove": 40,
     # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
     "skillsInlineBudget": 6000,
     # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the

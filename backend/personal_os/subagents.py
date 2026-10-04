@@ -50,7 +50,7 @@ GROUP = "agents"
 CHILD_BLOCK = frozenset({
     "save_memory", "graph_add", "save_writing_sample", "todo_write", "todo_add", "todo_update", "todo_delete",
     "propose_plan", "desk_ask", "ask_user", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
-    "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search",
+    "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify",
 })
 # Danger tiers a child never gets. `external` is dropped except for the file and shell tools below,

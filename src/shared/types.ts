@@ -62,6 +62,8 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** Items dropped per section because it hit its token budget (contextBudget). */
   trimmed?: Record<string, number>
+  /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
+  tools_deferred?: number
   system_prompt: string
   tokens_estimate: number
 }
@@ -1251,6 +1253,8 @@ export interface Settings {
   maxToolRounds: number
   /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
   mcpDeferAbove?: number
+  /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
+  toolDeferAbove?: number
   /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
   skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */

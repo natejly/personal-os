@@ -266,6 +266,10 @@ _active: dict[str, asyncio.Event | Run] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
+# Tools a search (tool_search / mcp_tool_search) loaded, per conversation, so they stay offered in later replies.
+# Only a cache: on first use after a restart it is re-seeded from the tools the conversation's history called.
+# ponytail: never evicted; a set of names per conversation touched since start, an LRU if that ever matters.
+_tool_loaded: dict[str, set[str]] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
@@ -1969,7 +1973,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
         # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
         mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
-        tool_ctx["mcp_loaded"] = set()
+        loaded = _tool_loaded.get(conv_id)
+        if loaded is None:
+            loaded = _tool_loaded[conv_id] = {str(e["name"]) for r in convos.history_rows(conv_id)
+                                              for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("name")}
+        # One set for both searches: MCP slugs and built-in names cannot collide (reserved prefix).
+        tool_ctx["mcp_loaded"] = tool_ctx["tool_loaded"] = loaded
+        tool_ctx["deferred"] = set()  # built-ins held back this round (_schemas); a call to one is "not loaded"
+        # What tool_search searches: exactly the held-back tools, tagged with their group so a group name matches.
+        tool_ctx["tool_catalog"] = lambda: [{"slug": n, "description": sp.description, "parameters": sp.parameters, "server": sp.group}
+                                            for n in sorted(tool_ctx["deferred"]) if (sp := toolbox.specs.get(n))]
         tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
         bridge_n = 0
 
@@ -2026,6 +2039,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                                for t in mcp_store.tools() if t["slug"] in mcp_modes]
             if use_tools:
                 modes["mcp_tool_search"] = "on"
+            for _slug in loaded & mcp_modes.keys():  # found by a search in an earlier reply
+                modes.setdefault(_slug, mcp_modes[_slug])
         else:
             modes.pop("mcp_tool_search", None)
             modes.update(mcp_modes)
@@ -2095,7 +2110,22 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if desk_id:
                 m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
                 m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
-            return toolbox.schemas(m) + offer
+            # Past toolDeferAbove the model gets the core tools, what earlier searches loaded and tool_search; the
+            # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
+            # the run_python bridge, agent_spawn and a plan's step check read every enabled tool from it.
+            search_on = m.pop("tool_search", "off") in ("on", "ask")
+            built = toolbox.schemas(m)
+            if withheld or not search_on or not mcp_search.should_defer(len(built), int(cfg.get("toolDeferAbove", 40) or 0)):
+                if not withheld:
+                    tool_ctx["deferred"] = set()
+                return built + offer
+            keep = [s for s in built if s["function"]["name"] in loaded or tools.is_core(toolbox.specs[s["function"]["name"]])]
+            tool_ctx["deferred"] = {s["function"]["name"] for s in built} - {s["function"]["name"] for s in keep}
+            return keep + [toolbox.specs["tool_search"].schema()] + offer
+
+        def _load_groups(names: Any) -> None:
+            groups = {toolbox.specs[n].group for n in names if n in toolbox.specs}
+            loaded.update(n for n, sp in toolbox.specs.items() if sp.group in groups)
 
         tool_schemas = _schemas()
 
@@ -2120,6 +2150,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     _n = _mcp_names.get(t["server_id"], "MCP")
                     _counts[_n] = _counts.get(_n, 0) + 1
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
+        if tool_ctx["deferred"]:
+            _groups: dict[str, int] = {}
+            for _n in tool_ctx["deferred"]:
+                _g = toolbox.specs[_n].group
+                _groups[_g] = _groups.get(_g, 0) + 1
+            tools_hint = "\n".join(p for p in (tools_hint, mcp_search.group_hint(sorted(_groups.items()))) if p)
+        used["tools_deferred"] = len(tool_ctx["deferred"])  # the Context drawer's "N tools loaded on demand"
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
@@ -2226,7 +2263,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for c in calls[start:]:
                 name, args = c["name"], c["_args"] or {}
                 spec, raw = toolbox.specs.get(name), modes.get(name, "off")
-                if c["_invalid"] or name in blocked or not parallel_safe(spec, name, raw):
+                if c["_invalid"] or name in blocked or name in tool_ctx["deferred"] or not parallel_safe(spec, name, raw):
                     break
                 if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
                     break
@@ -2667,6 +2704,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                      "content": tool_results.for_model(conv_id, am["id"], c["name"], bad, untrusted=False)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
+                not_loaded = False
+                if raw_mode != "off" and c["name"] in tool_ctx["deferred"]:
+                    if proposal_only(run) or active_plan is not None or plan_seen or body.resume_of:
+                        # A plan step, a resumed run or a scheduled run names a tool it already settled on:
+                        # load its group rather than send it searching. Its gate below is unchanged.
+                        _load_groups([c["name"]])
+                        tool_schemas = _schemas()
+                    else:
+                        not_loaded, raw_mode = True, "off"
                 spec = toolbox.specs.get(c["name"])
                 # Connector tools are not in toolbox.specs but are external by construction; "safe" here would
                 # let them through plan mode, propose-only desks and the unexpected-taint rule.
@@ -3054,6 +3100,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif mode == "off":
                     result = tools.denied(c["name"], "not loaded; call mcp_tool_search first"
                                           if mcp_defer and mcp_is(c["name"]) and c["name"] in mcp_modes
+                                          else "not loaded; call tool_search first" if not_loaded
                                           else "turned off for this chat")
                 elif plan is not None:
                     result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised
@@ -3191,6 +3238,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     for _slug in tool_ctx["mcp_loaded"]:
                         if _slug in mcp_modes:
                             modes.setdefault(_slug, mcp_modes[_slug])
+                    tool_schemas = _schemas()
+                elif c["name"] == "tool_search" or (c["name"] == "skill_view" and tool_ctx["deferred"] and ran):
+                    if c["name"] == "skill_view":
+                        # A skill's steps name the tools it uses: load their groups along with it.
+                        _load_groups(set(re.findall(r"[a-z][a-z0-9_]+", json.dumps(result, default=str))) & tool_ctx["deferred"])
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}

@@ -135,3 +135,16 @@ def test_runtime_taint_already_listed_is_still_fenced() -> None:
     assert "shell_run:network" in (appmod.convos.get(cid)["settings"].get("taint_sources") or [])
     _, later = run([c("1", "sp_net")], conv=cid)
     nonce_of(later["1"])
+
+
+def test_doc_search_recording_hit_is_fenced() -> None:
+    # doc_search has no static taint: a recording hit sets only ctx["tainted"] at runtime, and is still fenced.
+    docs = appmod.toolbox.docs
+    prev = docs.search
+    docs.search = lambda q, pid, limit=8: [{"doc_id": "d", "title": "Call", "snippet": EVIL, "via": "recording"}]
+    try:
+        _, msgs = run([c("1", "doc_search", query="pricing"), c("2", "sp_safe")])
+    finally:
+        docs.search = prev
+    nonce_of(msgs["1"])
+    assert msgs["2"] == json.dumps({"todos": ["buy milk"]})

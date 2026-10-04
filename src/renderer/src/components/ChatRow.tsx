@@ -52,6 +52,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
     <>
       <div
         className={`convo-item${sub ? ' sub' : ''} ${active ? 'active' : ''}`}
+        aria-current={active ? 'page' : undefined}
         role="button"
         tabIndex={0}
         onClick={() => void selectChat(conv.id)}

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -884,4 +884,27 @@ test("a slot chip inserts into the draft of the chat the card is in; the open âŒ
   assert.equal(getDraft('page')?.text, 'Tue 3pm')
   assert.equal(getDraft('c:c8')?.text, 'Wed 4pm')
   assert.equal(getDraft('c:other'), undefined)
+})
+
+test('a held toast keeps its remaining time and expires only after it is released', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  useStore.setState({ toasts: [] })
+  const s = useStore.getState()
+  s.toast('Deleted chat', 'info', { label: 'Undo', run: () => undefined })
+  const live = (): number => useStore.getState().toasts.length
+  t.mock.timers.tick(5000)
+  s.holdToasts(true)
+  t.mock.timers.tick(60000)
+  assert.equal(live(), 1, 'hovered or focused, the Undo stays')
+  s.holdToasts(false)
+  t.mock.timers.tick(2999)
+  assert.equal(live(), 1, 'released, it gets back only what was left')
+  t.mock.timers.tick(1)
+  assert.equal(live(), 0)
+})
+
+test('learnedText leaves out zero counts and says nothing when nothing changed', () => {
+  assert.equal(learnedText({ memories: [1], nodes: [], edges: [] }), 'Learned 1 memory')
+  assert.equal(learnedText({ memories: [], nodes: [1, 2], edges: [1], removed: [1] }), 'Forgot 1, 2 entities, 1 relation')
+  assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
 })

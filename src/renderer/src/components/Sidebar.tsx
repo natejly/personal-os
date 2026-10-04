@@ -209,7 +209,7 @@ export default function Sidebar(): JSX.Element {
 
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
   const navItem = (n: NavEntry): JSX.Element => (
-    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`}
+    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
       onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>
@@ -245,7 +245,7 @@ export default function Sidebar(): JSX.Element {
       <SidebarSpaces />
 
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setProjectsOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={projectsOpen} onClick={() => setProjectsOpen((o) => !o)}>
           <ChevronRight size={12} className={projectsOpen ? 'rot90' : ''} /><FolderKanban size={13} /> Projects
         </button>
         <button className="icon-btn ghost sm" aria-label="New project" title="New project" onClick={() => setProjectModal({ mode: 'create' })}><Plus size={14} /></button>
@@ -257,7 +257,7 @@ export default function Sidebar(): JSX.Element {
             const rows = rowsByProject[p.id] ?? []
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} aria-current={view === 'project' && projectViewId === p.id ? 'page' : undefined} onClick={() => openProject(p.id)} role="button" tabIndex={0}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   <Folder size={13} style={{ color: p.color }} />
                   <span className="project-name">{p.name}</span>
@@ -281,7 +281,7 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setRecentsOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={recentsOpen} onClick={() => setRecentsOpen((o) => !o)}>
           <ChevronRight size={12} className={recentsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Recents
         </button>
         <button
@@ -347,7 +347,7 @@ export default function Sidebar(): JSX.Element {
           <section>
             <h4>In messages</h4>
             {inMessages.map((h) => (
-              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} aria-current={h.id === focusedId && view === 'chat' ? 'page' : undefined} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openConversation(h.id) } }}>
                 <span className="convo-title">
                   {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}

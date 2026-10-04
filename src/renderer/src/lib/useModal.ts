@@ -27,9 +27,12 @@ export function useModal(close: () => void): Modal {
   const onClose = useRef(close)
   onClose.current = close
   const titleId = useId()
+  // Read during the first render: by the time effects run, a child's autoFocus has already moved focus inside.
+  const openerRef = useRef<HTMLElement | null | undefined>(undefined)
+  if (openerRef.current === undefined) openerRef.current = document.activeElement as HTMLElement | null
 
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
+    const opener = openerRef.current
     if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus()
 
     const onKey = (e: KeyboardEvent): void => {

@@ -7,6 +7,7 @@ import { useCanvas } from '../canvas/store'
 import { useDropTarget } from '../canvas/dnd'
 import { openPayload } from '../canvas/drops'
 import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
+import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
 const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'board-card', 'project', 'widget', 'note', 'file', 'nav']
@@ -22,6 +23,8 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(at)
   const [saving, setSaving] = useState(false)
+  useReturnFocus()
+  useEffect(() => focusFirstItem(ref.current), [])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -75,7 +78,7 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
           onClose()
         }}
       />
-      <div ref={ref} className="project-menu space-menu" style={{ position: 'fixed', left: pos.x, top: pos.y }} role="menu">
+      <div ref={ref} className="project-menu space-menu" style={{ position: 'fixed', left: pos.x, top: pos.y }} role="menu" onKeyDown={(e) => menuKeyDown(e, onClose)}>
         {saving ? <SavePresetForm canvasId={canvasId} onDone={onClose} /> : items.map((it) => (
           <button key={it.label} className={`project-item${it.danger ? ' danger' : ''}`} role="menuitem" onClick={it.keep ? it.run : run(it.run)}>
             {it.label}
@@ -158,6 +161,9 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         <button
           className="icon-btn ghost xs"
           title="Space actions"
+          aria-label="Space actions"
+          aria-haspopup="menu"
+          aria-expanded={!!menu}
           onClick={(e) => {
             e.stopPropagation()
             const r = e.currentTarget.getBoundingClientRect()
@@ -189,7 +195,7 @@ export default function SidebarSpaces(): JSX.Element {
   return (
     <>
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Spaces
         </button>
         <span className="section-actions">

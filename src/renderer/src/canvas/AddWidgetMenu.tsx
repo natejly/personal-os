@@ -182,6 +182,8 @@ export function AddWidgetButton(): JSX.Element {
         className="icon-btn ghost sm"
         title={locked ? 'Space locked (⌃⌘L to unlock)' : 'Add widget'}
         disabled={!activeId || locked}
+        aria-haspopup="menu"
+        aria-expanded={!!at}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           if (activeId) setOpened({ at: { x: r.left, y: r.bottom + 4 }, canvasId: activeId })

@@ -47,7 +47,7 @@ const RANGES = [
 export default function MailView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
-  const { toggleSidebar, setSettingsOpen, toast, askAboutEmail } = useStore()
+  const { toggleSidebar, openSettings, toast, askAboutEmail } = useStore()
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
   const [loading, setLoading] = useState(false)
@@ -273,7 +273,7 @@ export default function MailView(): JSX.Element {
           <MailIcon size={28} />
           <h2>Connect your inbox</h2>
           <p>Grain reads and triages Gmail once Google is connected. Nothing is sent without asking you first.</p>
-          <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
+          <button className="primary-btn" onClick={() => openSettings('integrations')}>Connect Google</button>
         </div>
       )}
       {error && <div className="notice-bar error">{error}</div>}

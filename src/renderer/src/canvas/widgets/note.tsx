@@ -33,6 +33,8 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [body, setBody] = useState('')
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
+  // A pop-out never loads the canvas store, so it cannot see the space lock: deleting lives on the canvas.
+  const onCanvas = useCanvas((s) => !!s.canvases[win.canvas_id]?.windows.some((x) => x.id === win.id))
   /** Unsaved body, or null when the note on the server matches what is on screen. */
   const pending = useRef<string | null>(null)
   /** The last window title this widget derived, so a hand-renamed window is never overwritten. */
@@ -100,7 +102,7 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
 
   const remove = async (): Promise<void> => {
-    if (!confirm('Delete this sticky note?')) return
+    if (!onCanvas || !confirm('Delete this sticky note?')) return
     await useCanvas.getState().closeWindow(win.id)
     // A locked space or a refused close keeps the window, so the note stays with it.
     if (useCanvas.getState().canvases[win.canvas_id]?.windows.some((x) => x.id === win.id)) return
@@ -120,7 +122,7 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
         ))}
         <span className="spacer" />
         <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null ? 'saved' : 'saving…'}</span>
-        <button className="icon-btn ghost sm" title="Delete sticky note" aria-label="Delete sticky note" style={{ color: 'inherit' }} onClick={() => void remove()}><Trash2 size={12} /></button>
+        {onCanvas && <button className="icon-btn ghost sm" title="Delete sticky note" aria-label="Delete sticky note" style={{ color: 'inherit' }} onClick={() => void remove()}><Trash2 size={12} /></button>}
       </div>
 
       {editing ? (

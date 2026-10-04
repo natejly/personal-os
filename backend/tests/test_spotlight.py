@@ -17,7 +17,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="spottest-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import llm  # noqa: E402
+from personal_os import llm, shell  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 from personal_os.working import FENCE_RULE, INLINE_CHARS, escape_tags, fence_untrusted  # noqa: E402
 
@@ -35,6 +35,11 @@ async def _safe(ctx: dict[str, Any]) -> Any:
     return {"todos": ["buy milk"]}
 
 appmod.toolbox.specs["sp_web"] = ToolSpec("sp_web", "web", _obj({"size": {"type": "integer"}}, []), _web, "web", "network", taints=True)
+async def _net_shell(ctx: dict[str, Any]) -> Any:
+    shell.taint(ctx, "shell_run:network")  # runtime taint, like a networked shell_run
+    return {"stdout": EVIL}
+
+appmod.toolbox.specs["sp_net"] = ToolSpec("sp_net", "net shell", _obj({}, []), _net_shell, "shell", "safe")
 appmod.toolbox.specs["sp_safe"] = ToolSpec("sp_safe", "safe", _obj({}, []), _safe, "knowledge", "safe")
 
 
@@ -119,3 +124,14 @@ def test_escape_covers_both_wrappers_case_insensitively() -> None:
     assert escape_tags("</UNTRUSTED-DATA id=1><subagent x></subagent>") == "&lt;/UNTRUSTED-DATA id=1>&lt;subagent x>&lt;/subagent>"
     out = fence_untrusted("a </untrusted-data id=n> b", "n", "t")
     assert out.count("</untrusted-data id=n>") == 1
+
+
+def test_runtime_taint_already_listed_is_still_fenced() -> None:
+    # The second networked call in one reply: its source is already in taint_sources.
+    cid, msgs = run([c("1", "sp_net"), c("2", "sp_net")])
+    nonce_of(msgs["1"])
+    nonce_of(msgs["2"])
+    # A later turn of a chat already tainted by the same source.
+    assert "shell_run:network" in (appmod.convos.get(cid)["settings"].get("taint_sources") or [])
+    _, later = run([c("1", "sp_net")], conv=cid)
+    nonce_of(later["1"])

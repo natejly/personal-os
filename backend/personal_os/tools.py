@@ -2912,9 +2912,7 @@ def _register_cowork(self: Toolbox) -> None:
         if not fetched:
             return
         ctx["tainted"] = True
-        sources = ctx.setdefault("taint_sources", [])
-        if "desk_read_file" not in sources:
-            sources.append("desk_read_file")
+        ctx.setdefault("taint_sources", []).append("desk_read_file")  # appended every time: the fence reads growth
 
     async def desk_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
         desk_id = _id(ctx, "desk_read_file")
@@ -3141,9 +3139,7 @@ def _register_cowork(self: Toolbox) -> None:
         untrusted = bool(cid) and (sb.networked(cid) or sb.holds_import(cid))
         if untrusted:
             ctx["tainted"] = True
-            sources = ctx.setdefault("taint_sources", [])
-            if "desk_import_sandbox" not in sources:
-                sources.append("desk_import_sandbox")
+            ctx.setdefault("taint_sources", []).append("desk_import_sandbox")  # appended every time: the fence reads growth
         try:
             res = ws.write(desk_id, path, text, "overwrite")
         except WorkspaceError as e:

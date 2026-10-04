@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, resultView, wasEdited } from './toolDisplay'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -145,4 +145,13 @@ test('browser calls name the page or the ref, and never echo typed text', () => 
   assert.equal(fullTitle('browser_type', { ref: 'e5', text: 'hunter2hunter2' }), 'Type in browser 14 characters into e5')
   assert.equal(fullTitle('browser_manage', { action: 'wait', ms: 1500 }), 'Manage browser Wait 1500 ms')
   assert.equal(fullTitle('browser_scroll', { direction: 'down', amount: 2 }), 'Scroll browser down 2 screens')
+})
+
+test('recalled chats from search_memory become links, even from a cut-short preview', () => {
+  const full = JSON.stringify({ memories: [], total: 0, conversations: [{ conversation_id: 'a1b2c3d4e5f60718', title: 'Pricing', date: '2026-10-01', excerpts: [] }, { conversation_id: 'ffff0000aaaa1111', title: '' }] })
+  assert.deepEqual(recalledChats(full), [{ id: 'a1b2c3d4e5f60718', title: 'Pricing' }, { id: 'ffff0000aaaa1111', title: 'Untitled chat' }])
+  const cut = JSON.stringify({ truncated: true, preview: full.slice(0, 80) })
+  assert.deepEqual(recalledChats(cut), [{ id: 'a1b2c3d4e5f60718', title: 'Past chat' }])
+  assert.deepEqual(recalledChats(JSON.stringify({ memories: [], conversations: { skipped: 'x' } })), [])
+  assert.deepEqual(recalledChats(null), [])
 })

@@ -128,18 +128,32 @@ class Conversations:
             out = [c for c in out if not c["settings"].get("deskId")]
         return out if include_jobs else [c for c in out if not c["settings"].get("job_id")]
 
-    def search(self, q: str, limit: int = 20, per_conv: int = 3) -> list[dict[str, Any]]:
+    def search(self, q: str, limit: int = 20, per_conv: int = 3, project_id: str | None = ALL,
+               exclude_ids: list[str] | None = None) -> list[dict[str, Any]]:
         """Conversations whose messages match `q`, best first, each with up to `per_conv` excerpts. Matched
         words are wrapped in \\x02 / \\x03. FTS (AND of the words, prefix on the last) for ASCII queries;
         a LIKE scan otherwise, because the tokenizer does not segment CJK. Trashed chats, superseded
-        replies, desk and job transcripts are left out, as `list` leaves them out."""
+        replies, desk and job transcripts are left out, as `list` leaves them out.
+
+        A `project_id` other than ALL is the agent's recall (search_memory include_chats): that project's chats
+        plus personal ones (None = personal only), minus `exclude_ids` and chats with memory off. Filtered in
+        SQL, so the 300-row cap cannot be spent on another project's matches."""
         tokens = re.findall(r"\w+", q)
         if not tokens:
             return []
+        scope, sargs = "", []
+        if project_id != ALL:
+            where, sargs = _scope_clause(project_id, include_global=True)
+            scope = " AND " + where.replace("project_id", "c.project_id") + " AND COALESCE(json_extract(c.settings,'$.useMemory'),1) != 0"
+            ex = [str(i) for i in exclude_ids or []]
+            if ex:
+                scope += f" AND c.id NOT IN ({','.join('?' * len(ex))})"
+                sargs = [*sargs, *ex]
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
                 "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL "
-                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')=''")
-        cols = "m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at"
+                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')=''" + scope)
+        cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
+                "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted")
         rows: list[Any] = []
         fts_ok = q.isascii() and any(len(t) >= 2 for t in tokens)
         with self.db.tx() as c:
@@ -149,7 +163,7 @@ class Conversations:
                     rows = c.execute(
                         f"SELECT {cols}, snippet(messages_fts,0,char(2),char(3),' … ',12) AS snip, bm25(messages_fts) AS score "
                         + base.format(src="messages_fts f JOIN messages m ON m.rowid = f.rowid", cond="messages_fts MATCH ?")
-                        + " ORDER BY score LIMIT 300", (match,)).fetchall()
+                        + " ORDER BY score LIMIT 300", (match, *sargs)).fetchall()
                 except Exception:
                     rows = []
                     fts_ok = False
@@ -158,7 +172,7 @@ class Conversations:
                 rows = c.execute(
                     f"SELECT {cols}, m.content AS snip, 0 AS score "
                     + base.format(src="messages m", cond="m.content LIKE ? ESCAPE '\\'")
-                    + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%",)).fetchall()
+                    + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%", *sargs)).fetchall()
         # Located by a case-insensitive regex, not by lowercasing: lower() can change a string's length
         # (a dotted capital I becomes two characters) and shift every offset.
         needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
@@ -178,7 +192,7 @@ class Conversations:
                 if len(out) >= limit:
                     continue
                 item = out[r["conversation_id"]] = {"id": r["conversation_id"], "title": r["title"], "project_id": r["project_id"],
-                                                    "updated_at": r["updated_at"], "hits": 0, "snippets": []}
+                                                    "updated_at": r["updated_at"], "tainted": bool(r["tainted"]), "hits": 0, "snippets": []}
             item["hits"] += 1
             if len(item["snippets"]) < per_conv:
                 item["snippets"].append({"message_id": r["id"], "role": r["role"], "created_at": r["created_at"], "text": snip})

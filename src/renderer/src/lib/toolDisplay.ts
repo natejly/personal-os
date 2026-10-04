@@ -323,3 +323,19 @@ export function displayFullOutput(text: string, complete: boolean): string {
   if (!complete) return text
   try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
 }
+
+/** Past chats search_memory(include_chats) recalled, so the card can open each one. Titles come from the parsed
+ *  JSON; a preview cut short (or nested as a string) still yields the ids, labelled generically. */
+export function recalledChats(preview: string | null | undefined): { id: string; title: string }[] {
+  const raw = preview ?? ''
+  try {
+    const convs = (JSON.parse(raw) as { conversations?: unknown }).conversations
+    if (Array.isArray(convs)) {
+      return convs.filter((c): c is { conversation_id: string; title?: unknown } => typeof c?.conversation_id === 'string')
+        .map((c) => ({ id: c.conversation_id, title: typeof c.title === 'string' && c.title ? c.title : 'Untitled chat' }))
+    }
+  } catch { /* cut short: fall through to the ids */ }
+  const out: { id: string; title: string }[] = []
+  for (const m of raw.matchAll(/conversation_id\\?"\s*:\s*\\?"([0-9a-f]{8,})/g)) if (!out.some((c) => c.id === m[1])) out.push({ id: m[1], title: 'Past chat' })
+  return out
+}

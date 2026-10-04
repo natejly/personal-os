@@ -933,7 +933,29 @@ class Toolbox:
         R("list_documents", ToolSpec("list_documents", "List the documents available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
             examples=[{}, {"offset": 50}]))
 
-        async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0) -> Any:
+        async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0, include_chats: bool = False) -> Any:
+            out = await _memories(ctx, query, offset)
+            if include_chats:
+                out["conversations"] = _recall_chats(ctx, query)
+            return out
+
+        def _recall_chats(ctx: dict[str, Any], query: str) -> Any:
+            cs = ctx.get("conv_settings")
+            # Only the user's own chat turn reads other chats: a job, desk, subagent or workflow run would carry
+            # them into a context nobody is watching. A chat with memory off reads none, as it writes none.
+            if (cs is None or self.conversations is None or cs.get("job_id") or cs.get("deskId") or ctx.get("desk_id")
+                    or ctx.get("proposal_only") or ctx.get("agent_run_id") or not cs.get("useMemory", True)):
+                return {"skipped": "past chats are only searched from an interactive chat with memory on"}
+            hits = self.conversations.search(query, limit=8, project_id=ctx.get("project_id"),
+                                             exclude_ids=[ctx["conversation_id"]] if ctx.get("conversation_id") else [])
+            if any(h["tainted"] for h in hits):
+                # A tainted chat's text may carry injected instructions; recalling it must not launder them.
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("search_memory:chats")
+            return [{"conversation_id": h["id"], "title": h["title"], "date": time.strftime("%Y-%m-%d", time.localtime(h["updated_at"])),
+                     "excerpts": [s["text"].replace("\x02", "").replace("\x03", "") for s in h["snippets"]]} for h in hits]
+
+        async def _memories(ctx: dict[str, Any], query: str, offset: int) -> Any:
             found = None
             if self.memory_index is not None:
                 cfg = self.settings()
@@ -944,9 +966,15 @@ class Toolbox:
                 found = self.memories.list(ctx["project_id"], query)
             rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in found]
             return page(rows, offset=offset, limit=20, key="memories")
-        R("search_memory", ToolSpec("search_memory", "Search what you remember about the user (long-term memory) for a topic.",
-            _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_memory, "memory",
-            examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20}]))
+        R("search_memory", ToolSpec("search_memory", (
+            "Search what you remember about the user (long-term memory) for a topic. Set include_chats for 'what did we "
+            "discuss / decide about X' questions: it also returns matching past conversations in this scope as "
+            "{conversation_id, title, date, excerpts} under `conversations`."),
+            _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0},
+                  "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations (this project's and personal ones)"}}, ["query"]),
+            search_memory, "memory",
+            examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20},
+                      {"query": "pricing decision", "include_chats": True}]))
 
         async def save_memory(ctx: dict[str, Any], content: str, kind: str = "fact", personal: bool = False) -> Any:
             m = self.memories.create(None if personal else ctx["project_id"], content, kind=kind, source="auto")

@@ -1,4 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Command } from '@shared/types'
+import { api } from '../lib/api'
+import CaretMenu from '../features/notes/CaretMenu'
+import { composerSlash, slashMenuKey } from '../features/notes/slash'
 import { ArrowUp, Square, Paperclip, Loader2 } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
@@ -47,6 +51,16 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+
+  // Saved commands for the '/' menu, read once per mount. Picking one types `/name `; the backend fills the
+  // template when the turn goes to the model (commands.expand), so nothing runs until the user sends.
+  const [commands, setCommands] = useState<Command[]>([])
+  useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
+  const [slashActive, setSlashActive] = useState(0)
+  const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
+  const found = slashClosedAt === text ? null : composerSlash(text, commands)
+  const slash = found?.length ? found : null
+  useEffect(() => setSlashActive(0), [text])
 
   /** Stop, then hand the keyboard back: the button that was pressed is about to be replaced or disabled. */
   const halt = (): void => {
@@ -177,12 +191,25 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           onChange={setText}
           onPaste={onPaste}
           placeholder={streaming ? 'Steer the reply…' : placeholder}
+          noGhost={!!slash}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
+            const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
+            if (act) {
+              e.preventDefault()
+              if (act.kind === 'move') setSlashActive(act.active)
+              else if (act.kind === 'pick') setText(`/${slash![slashActive].name} `)
+              else setSlashClosedAt(text)
+            }
+            else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
             // Escape ends the reply; while an input method is composing it belongs to the method.
             else if (e.key === 'Escape' && streaming && !e.nativeEvent.isComposing) { e.preventDefault(); halt() }
           }}
         />
+        {slash && (
+          <CaretMenu label="Saved commands" active={slashActive} onHover={setSlashActive}
+            onPick={(i) => setText(`/${slash[i].name} `)}
+            items={slash.map((c) => ({ key: c.id, label: `/${c.name}`, hint: ((c.subtask ? 'subtask · ' : '') + c.description).slice(0, 48) }))} />
+        )}
         <div className="composer-actions">
           <MicButton scope={box} onText={dictate} />
           {streaming && (

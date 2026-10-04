@@ -675,6 +675,9 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .composer .smart-ta { min-width: 0; min-height: 24px; }
+/* The saved-command menu a leading '/' opens (CaretMenu without an anchor) hangs above the text box. */
+.composer { position: relative; }
+.composer > .caret-menu { bottom: calc(100% + 4px); left: 8px; }
 .composer .smart-ta textarea,
 .composer .smart-ta-mirror { padding: 4px 0; max-height: 240px; }
 .composer textarea {

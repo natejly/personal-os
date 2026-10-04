@@ -81,6 +81,31 @@ def fill(body: str, arguments: str = "") -> str:
     return out
 
 
+_SLASH = re.compile(r"^/([a-z0-9][a-z0-9_-]{0,39})(?:\s+([\s\S]*))?$")
+
+
+def expand(text: str, store: "Commands | None") -> str:
+    """A user turn typed as `/name args` gains the filled command under it; the stored row keeps what was typed.
+    Unknown names, and text that is not a leading slash command, pass through unchanged. A subtask command is
+    not filled here: the model is told to run it with command_run, so the child agent, its approval and its
+    taint go through the ordinary tool path."""
+    m = _SLASH.match((text or "").strip()) if store is not None and isinstance(text, str) and text.startswith("/") else None
+    cmd = store.get(m.group(1)) if m else None
+    if not m or not cmd or cmd["name"] != m.group(1):
+        return text
+    args = (m.group(2) or "").strip()
+    if cmd["subtask"]:
+        return (f"{text}\n\n[The user ran their saved command /{cmd['name']}, which runs as a subtask. Call command_run "
+                f"with name {cmd['name']!r} and arguments {args!r}, then report its result.]")
+    return f"{text}\n\n[The user ran their saved command /{cmd['name']}. Its filled-in instructions follow; carry them out.]\n{fill(cmd['body'], args)}"
+
+
+def expand_history(history: list[dict[str, Any]], store: "Commands | None") -> list[dict[str, Any]]:
+    """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
+    return [{**m, "content": expand(m["content"], store)} if m.get("role") == "user" and isinstance(m.get("content"), str)
+            and m["content"].startswith("/") else m for m in history]
+
+
 class Commands:
     def __init__(self, db: Any) -> None:
         self.db = db

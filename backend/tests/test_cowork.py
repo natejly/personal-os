@@ -323,6 +323,10 @@ def test_the_live_desk_cap_queues() -> None:
         later = make_desk("Queued for later", start=False)
         started = j("POST", f"/cowork/desks/{later['desk']['id']}/start")
         check(started["queued"] is True and started["position"] == 2, f"Start on a draft queues it behind, got {started}")
+        twice = j("POST", f"/cowork/desks/{later['desk']['id']}/start")
+        check(twice["queued"] is True and twice["position"] == 2, f"a second Start leaves it where it was, got {twice}")
+        check(desks.get(later["desk"]["id"])["queued_message"] == "Queued for later",
+              "…holding the brief once, not twice")
         stopped = j("POST", f"/cowork/desks/{later['desk']['id']}/stop")
         check(stopped["status"] == "stopped", "a queued desk can be stopped")
         check([d["id"] for d in desks.queued()] == [oid], "…which takes it out of the queue")

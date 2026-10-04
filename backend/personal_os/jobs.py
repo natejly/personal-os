@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 
+from .approval_edits import EDITABLE_TOOLS
 from .db import Database, new_id, now, row_to_dict
 from .runs import args_digest
 
@@ -480,6 +481,7 @@ class Proposals:
         d = row_to_dict(r, ("args", "result"))
         if d is not None:
             d["edited"] = bool(d["edited"])
+            d["editable"] = d["tool"] in EDITABLE_TOOLS  # the inbox offers an edit only where accept would take one
         return d
 
     def create(self, *, run_id: str | None, tool: str, args: dict[str, Any], job_id: str | None = None,

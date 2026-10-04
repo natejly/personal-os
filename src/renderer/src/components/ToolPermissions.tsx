@@ -1,6 +1,6 @@
 import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
 import { useStore } from '../store'
-import type { ToolMode, ToolOverride } from '@shared/types'
+import { askLocked, type ToolMode, type ToolOverride } from '@shared/types'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
   knowledge: <FileSearch size={13} />, memory: <Brain size={13} />, graph: <Share2 size={13} />, web: <Globe size={13} />, code: <Terminal size={13} />,
@@ -13,6 +13,9 @@ export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes:
 const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
 
 const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
+const LOCKED_TIP = 'Actions outside the app always ask'
+/** A legacy stored 'on' for an ask-locked tool reads as what the backend runs: ask. */
+const capped = (danger: string, m: ToolMode): ToolMode => (m === 'on' && askLocked(danger) ? 'ask' : m)
 
 /** Tri-state overrides (inherit / on / ask / off) for a project or a chat. `effectiveBase` is what "inherit" resolves to. */
 export function ToolOverrides({ value, onChange, effectiveBase, compact = false }: {
@@ -25,17 +28,19 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   return (
     <div className={`tool-perms ${compact ? 'compact' : ''}`}>
       {tools.map((t) => {
-        const ov = value[t.name] ?? 'inherit'
-        const base = effectiveBase[t.name] ?? t.default_mode
+        const locked = askLocked(t.danger)
+        const raw = value[t.name] ?? 'inherit'
+        const ov: ToolOverride = raw === 'on' && locked ? 'ask' : raw
+        const base = capped(t.danger, effectiveBase[t.name] ?? t.default_mode)
         const eff: ToolMode = ov === 'inherit' ? base : ov
         return (
           <div key={t.name} className={`tool-perm ${eff === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description + (t.available ? '' : ' (integration not connected)')}>
             <span className="tool-icon">{GROUP_ICON[t.group] ?? <Wrench size={13} />}</span>
             <span className="tool-perm-name">{t.name.replace(/_/g, ' ')}<small>{DANGER_LABEL[t.danger]}</small></span>
             {eff === 'ask' && <span className="tag ask">asks</span>}
-            <select aria-label={`Permission for ${t.name.replace(/_/g, ' ')}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
+            <select title={locked ? LOCKED_TIP : undefined} aria-label={`Permission for ${t.name.replace(/_/g, ' ')}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
               <option value="inherit">inherit ({MODE_LABEL[base]})</option>
-              <option value="on">always on</option>
+              {!locked && <option value="on">always on</option>}
               <option value="ask">ask each time</option>
               <option value="off">off</option>
             </select>
@@ -58,12 +63,13 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
         <div key={g} className="tool-group">
           <h5>{GROUP_ICON[g]} {g}</h5>
           {tools.filter((t) => t.group === g).map((t) => {
-            const mode = current(t.name, t.default_mode)
+            const locked = askLocked(t.danger)
+            const mode = capped(t.danger, current(t.name, t.default_mode))
             return (
               <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
                 <span className="toggle-text"><b>{t.name.replace(/_/g, ' ')} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small>{t.description}</small></span>
-                <div className="seg">
-                  {(['on', 'ask', 'off'] as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
+                <div className="seg" title={locked ? LOCKED_TIP : undefined}>
+                  {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
                 </div>
               </div>
             )

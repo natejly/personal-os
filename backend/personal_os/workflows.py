@@ -36,6 +36,7 @@ from typing import Any, Callable
 
 from . import permrules
 from .db import new_id, now
+from .tools import ASK_LOCKED_DANGER
 
 log = logging.getLogger(__name__)
 
@@ -852,6 +853,9 @@ class Engine:
         if fs_ask and mode == "on":
             mode = "ask"
         forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args))
+        # Those tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on' into a forced card for
+        # them: a tainted run forces it here instead, and no allow rule lifts it.
+        forced = forced or (spec.danger in ASK_LOCKED_DANGER and bool(ctx.get("tainted")))
         cfg = self.settings()
         roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
         perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"), roots=roots)

@@ -41,12 +41,14 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const editable = TEXT_KEYS.filter((k) => typeof p.args[k] === 'string')
+  const [err, setErr] = useState<string | null>(null)
+  const editable = p.editable ? TEXT_KEYS.filter((k) => typeof p.args[k] === 'string') : []
 
   const decide = async (accept: boolean): Promise<void> => {
     setBusy(true)
     const args = editing && Object.keys(draft).length ? { ...p.args, ...draft } : undefined
-    await decideProposal(p.id, accept, args)
+    // A refused decision leaves the proposal pending: the message shows here and the draft stays open to fix.
+    setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
   }
 
@@ -56,7 +58,7 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
         <span className="inbox-tool">{p.tool}</span>
         <span className="muted small">proposed {fmtWhen(p.created_at)}</span>
         <span style={{ flex: 1 }} />
-        <button className="icon-btn sm" title={editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
+        <button className="icon-btn sm" title={!editable.length ? 'This one runs as proposed' : editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
           onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
         <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
         <button className="primary-btn sm" disabled={busy} onClick={() => void decide(true)}><Check size={13} /> Accept</button>
@@ -75,6 +77,7 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
       ) : (
         <pre className="inbox-args">{argText(p.args)}</pre>
       )}
+      {err && <p className="error small" role="alert">{err}</p>}
     </li>
   )
 }

@@ -489,7 +489,8 @@ export interface State {
   deleteJob: (id: string) => Promise<void>
   setJobEnabled: (id: string, enabled: boolean) => Promise<void>
   runJobNow: (id: string) => Promise<void>
-  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
+  /** Resolves to the refusal message when the server turned the decision down (the proposal stays pending), else null. */
+  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<string | null>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
   approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) => Promise<void>
   refreshGoogle: () => Promise<void>
@@ -3737,8 +3738,9 @@ export const useStore = create<State>((set, get) => {
           get().toast('Queued — it sends after the undo window.', 'info')
           window.dispatchEvent(new Event('grain-outbox-changed'))
         } else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+        return null
       } catch (e) {
-        get().toast((e as Error).message, 'error')
+        return (e as Error).message
       } finally {
         void get().refreshAgentInbox()
       }

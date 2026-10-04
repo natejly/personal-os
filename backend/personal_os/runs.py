@@ -389,6 +389,12 @@ class RunStore:
                 r["result"] = json.loads(r["result"])
         return rows
 
+    def unsettled_calls(self, desk_id: str) -> list[dict[str, Any]]:
+        """A desk's journal rows, over every run it has had, still `started`: after a restart, calls whose
+        outcome nobody knows. Auto-resume never relaunches a desk that has one."""
+        return self._all("SELECT e.key, e.run_id, e.tool, e.call_id FROM executed_calls e JOIN agent_runs r ON r.run_id=e.run_id "
+                         "WHERE r.desk_id=? AND e.status IN ('started','unknown')", (desk_id,))
+
     # ---- recovery ----
     def transcript(self, run_id: str, message_id: str) -> tuple[str, list[dict[str, Any]]]:
         """The reply text and tool events of one assistant message, rebuilt from the tape. Finished calls come first;

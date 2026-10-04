@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Ban, CircleCheck, CircleDashed, CircleHelp, CircleSlash, FileCheck2,
+  Ban, CircleCheck, CircleDashed, CircleHelp, CircleSlash, Clock, FileCheck2,
   ListChecks, LoaderCircle, Pause, TriangleAlert
 } from 'lucide-react'
 import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
@@ -9,6 +9,7 @@ import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 // imports NEEDS_YOU the same way and says so for the same reason.
 import { NEEDS_YOU } from '../../../shared/types'
 import { useStore } from '../store'
+import { queuePositions } from '../lib/deskFiles'
 import ChatPulse from './ChatPulse'
 
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
@@ -29,7 +30,8 @@ export const STATUS_LABEL: Record<DeskStatus, string> = {
   review: 'Ready to review',
   done: 'Done',
   failed: 'Failed',
-  stopped: 'Stopped'
+  stopped: 'Stopped',
+  queued: 'Queued'
 }
 
 const STATUS_ICON: Record<DeskStatus, JSX.Element> = {
@@ -44,7 +46,8 @@ const STATUS_ICON: Record<DeskStatus, JSX.Element> = {
   review: <FileCheck2 size={13} />,
   done: <CircleCheck size={13} />,
   failed: <Ban size={13} />,
-  stopped: <CircleSlash size={13} />
+  stopped: <CircleSlash size={13} />,
+  queued: <Clock size={13} />
 }
 
 export const fmtDur = (seconds: number): string => {
@@ -86,6 +89,7 @@ interface Section {
 const SECTIONS: Section[] = [
   { key: 'needs', label: 'Needs you', has: (s) => s !== 'review' && NEEDS_YOU.includes(s) },
   { key: 'working', label: 'Working', has: (s) => s === 'draft' || s === 'planning' || s === 'working' || s === 'paused' },
+  { key: 'queued', label: 'Queued', has: (s) => s === 'queued' },
   { key: 'review', label: 'Review', has: (s) => s === 'review' },
   { key: 'done', label: 'Done', has: (s) => s === 'done' || s === 'failed' || s === 'stopped' }
 ]
@@ -97,7 +101,7 @@ export const railOrder = (desks: Desk[]): Desk[] => SECTIONS.flatMap((sec) => de
  * One row. A component rather than JSX inside `.map` so each row subscribes to its own approval
  * count: the whole rail would otherwise re-render whenever any desk's session changes.
  */
-function DeskRow({ desk, active, onOpen }: { desk: Desk; active: boolean; onOpen: () => void }): JSX.Element {
+function DeskRow({ desk, active, position, onOpen }: { desk: Desk; active: boolean; position?: number; onOpen: () => void }): JSX.Element {
   const approvals = useStore((s) => s.sessions[desk.conversation_id]?.pendingApprovals ?? 0)
   const title = desk.title || 'Untitled desk'
   return (
@@ -117,7 +121,7 @@ function DeskRow({ desk, active, onOpen }: { desk: Desk; active: boolean; onOpen
           {desk.live && <ChatPulse conversationId={desk.conversation_id} />}
         </span>
         <span className="desk-row-meta">
-          <span className="desk-row-head">{desk.headline || desk.status_reason || STATUS_LABEL[desk.status]}</span>
+          <span className="desk-row-head">{position ? `#${position} in line` : desk.headline || desk.status_reason || STATUS_LABEL[desk.status]}</span>
           <span className="desk-row-age">{fmtDur(deskElapsed(desk))}</span>
         </span>
       </span>
@@ -133,6 +137,7 @@ export default function DeskRail({ desks, activeId, onOpen }: {
   onOpen: (id: string) => void
 }): JSX.Element {
   useTick(desks.some((d) => d.live))
+  const positions = queuePositions(desks)
   return (
     <div className="desk-rail">
       {desks.length === 0 && <p className="empty-hint">No desks yet.</p>}
@@ -142,7 +147,7 @@ export default function DeskRail({ desks, activeId, onOpen }: {
         return (
           <section key={sec.key} className={`desk-section ${sec.key}`}>
             <h4>{sec.label}<span className="count">{rows.length}</span></h4>
-            {rows.map((d) => <DeskRow key={d.id} desk={d} active={d.id === activeId} onOpen={() => onOpen(d.id)} />)}
+            {rows.map((d) => <DeskRow key={d.id} desk={d} active={d.id === activeId} position={positions.get(d.id)} onOpen={() => onOpen(d.id)} />)}
           </section>
         )
       })}

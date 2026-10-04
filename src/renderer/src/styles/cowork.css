@@ -65,7 +65,7 @@
 .desk-ring-planning, .desk-ring-awaiting_plan { --ring: var(--chart-7, var(--accent)); }
 .desk-ring-working { --ring: var(--accent); }
 .desk-ring-needs_approval, .desk-ring-blocked { --ring: var(--warn); }
-.desk-ring-paused { --ring: var(--text-faint); }
+.desk-ring-paused, .desk-ring-queued { --ring: var(--text-faint); }
 .desk-ring-interrupted, .desk-ring-failed { --ring: var(--danger); }
 .desk-ring-review { --ring: var(--chart-4, var(--accent)); }
 .desk-ring-done { --ring: var(--chart-3, var(--text-muted)); }

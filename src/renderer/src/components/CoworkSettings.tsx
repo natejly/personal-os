@@ -178,7 +178,9 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <NumField title="Spend per desk ($)" settingKey="deskMaxCost" value={draft.deskMaxCost} fallback={2} step={0.5}
         help="A desk stops when its cost passes this. 0 means no limit." onCommit={(n) => patch({ deskMaxCost: n })} />
       <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
-        help="More desks than this wait their turn. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
+        help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
+      <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
+        checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
       <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}
         help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."

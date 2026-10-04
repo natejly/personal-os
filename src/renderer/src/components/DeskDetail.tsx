@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Clock, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
 import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, ToolEvent } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
 import DeskFiles from './DeskFiles'
 import DeskBrowser from './DeskBrowser'
-import { defaultDeskTab, type DeskTab } from '../lib/deskFiles'
+import { defaultDeskTab, queuePositions, type DeskTab } from '../lib/deskFiles'
 import DeskReview from './DeskReview'
 import DeskApprovalCard from './DeskApprovalCard'
 import InlineNote from './InlineNote'
@@ -25,7 +25,7 @@ const defaultTab = defaultDeskTab
 
 /* Wider than DESK_LIVE: a desk parked on a plan, an approval or a question has no live run but is
    still something the user can call off. `review` and the terminal states are not. */
-const STOPPABLE: DeskStatus[] = ['planning', 'awaiting_plan', 'working', 'needs_approval', 'blocked', 'paused']
+const STOPPABLE: DeskStatus[] = ['planning', 'awaiting_plan', 'working', 'needs_approval', 'blocked', 'paused', 'queued']
 const PAUSABLE: DeskStatus[] = ['planning', 'working']
 const ENDED: DeskStatus[] = ['done', 'failed', 'stopped']
 
@@ -53,6 +53,23 @@ function Timeline({ events }: { events: { id: string; kind: string; body: string
         </ol>
       )}
     </section>
+  )
+}
+
+/** A queued desk's place in line, read off the rail's own rows so it moves as they do. */
+function QueuedBanner({ deskId }: { deskId: string }): JSX.Element {
+  const desks = useStore((s) => s.desks)
+  const max = useStore((s) => s.settings.deskMaxLive ?? 4)
+  const running = desks.filter((d) => d.live).length
+  const position = queuePositions(desks).get(deskId)
+  return (
+    <div className="desk-banner">
+      <Clock size={14} />
+      <div>
+        <b>Waiting for a free slot ({running} of {max} running)</b>
+        <p>{position ? `#${position} in line. ` : ''}It starts on its own when another desk finishes.</p>
+      </div>
+    </div>
   )
 }
 
@@ -340,6 +357,7 @@ export default function DeskDetail(): JSX.Element | null {
         </div>
       )}
       <WaitingCards cards={desk.approvals ?? []} conversationId={desk.conversation_id} events={messages.flatMap((m) => m.tool_events ?? [])} />
+      {desk.status === 'queued' && <QueuedBanner deskId={desk.id} />}
       {desk.status === 'interrupted' && (
         <div className="desk-banner warn">
           <TriangleAlert size={14} />

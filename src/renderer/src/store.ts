@@ -994,6 +994,7 @@ export const useStore = create<State>((set, get) => {
         : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
       activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
+  const queuedNote = (position: number): string => `Queued #${position}: it starts when another desk finishes`
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
   const deskConv = (id: string): string | undefined => {
     const st = get()
@@ -2749,7 +2750,8 @@ export const useStore = create<State>((set, get) => {
     createDesk: async (p) => {
       set({ deskBusy: true })
       try {
-        const { desk, conversation_id, run_id, seq } = await api.cowork.desks.create(p)
+        const { desk, conversation_id, run_id, seq, position } = await api.cowork.desks.create(p)
+        if (position) get().toast(queuedNote(position))
         await get().refreshDesks()
         await get().openDesk(desk.id)
         // Start returns the run outright, so the pane paints without waiting for `GET /runs` to
@@ -2766,9 +2768,10 @@ export const useStore = create<State>((set, get) => {
     },
     startDesk: async (id) => {
       try {
-        const { run_id, seq, conversation_id } = await api.cowork.desks.start(id)
+        const out = await api.cowork.desks.start(id)
         await get().openDesk(id)
-        void watchRun(conversation_id, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+        if ('queued' in out) get().toast(queuedNote(out.position))
+        else void watchRun(out.conversation_id, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2776,9 +2779,10 @@ export const useStore = create<State>((set, get) => {
     resumeDesk: async (id, reason) => {
       const convId = deskConv(id)
       try {
-        const { run_id, seq } = await api.cowork.desks.resume(id, reason)
+        const out = await api.cowork.desks.resume(id, reason)
         await get().openDesk(id)
-        if (convId) void watchRun(convId, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+        if ('queued' in out) get().toast(queuedNote(out.position))
+        else if (convId) void watchRun(convId, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2800,7 +2804,8 @@ export const useStore = create<State>((set, get) => {
     messageDesk: async (id, text) => {
       if (!text.trim()) return false
       try {
-        await api.cowork.desks.message(id, text.trim())
+        const out = await api.cowork.desks.message(id, text.trim())
+        if (out.position) get().toast(queuedNote(out.position))
         // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
         // (the question is answered, the status is live again), and `openDesk` re-attaches.
         await get().openDesk(id)

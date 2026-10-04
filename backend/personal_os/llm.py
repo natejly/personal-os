@@ -172,6 +172,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
+    # unknown, or one waiting on an approval or its plan, is never relaunched either way.
+    "deskAutoResume": False,
     # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
     # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
     # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,

@@ -105,13 +105,16 @@ CREATE TABLE IF NOT EXISTS desk_outputs (
 """
 
 STATUSES = ("draft", "planning", "awaiting_plan", "working", "needs_approval", "blocked",
-            "paused", "interrupted", "review", "done", "failed", "stopped")
+            "paused", "interrupted", "review", "done", "failed", "stopped", "queued")
 NEEDS_YOU = ("awaiting_plan", "needs_approval", "blocked", "interrupted", "review")
 LIVE = ("planning", "working", "needs_approval")
 # What a restart has to sweep. `awaiting_plan` is not LIVE, but the card it is waiting on was held
 # open by an in-process run that died with the process, so a boot that left it alone would strand
 # the desk in a state nothing can wake.
 RECOVER_FROM = (*LIVE, "awaiting_plan")
+# What auto-resume (deskAutoResume) may relaunch after a restart. `awaiting_plan` is swept by recover()
+# but never auto-resumed: its next step is the user's plan decision, not another turn.
+AUTO_RESUME_FROM = LIVE
 AUTONOMY = ("plan", "ask", "propose")
 OUTPUT_KINDS = ("doc", "doc_append", "document", "download")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
@@ -312,6 +315,7 @@ _STATUS_BODY = {
     "done": "Done.",
     "failed": "Failed.",
     "stopped": "Stopped.",
+    "queued": "Waiting for a free slot.",
 }
 # A status whose own event kind is more specific than "status".
 _STATUS_KIND = {"awaiting_plan": "plan", "blocked": "blocked", "interrupted": "interrupted",
@@ -362,6 +366,12 @@ class Desks:
             cols = {r[1] for r in c.execute("PRAGMA table_info(desks)")}
             if "origin_conversation_id" not in cols:  # the chat that started it (desk_start); NULL for the Cowork form
                 c.execute("ALTER TABLE desks ADD COLUMN origin_conversation_id TEXT")
+            # A desk waiting for a free slot under deskMaxLive: when it joined, and the content of the turn
+            # it will start with (a resume message, a typed message, background-job results).
+            if "queued_at" not in cols:
+                c.execute("ALTER TABLE desks ADD COLUMN queued_at REAL")
+            if "queued_message" not in cols:
+                c.execute("ALTER TABLE desks ADD COLUMN queued_message TEXT NOT NULL DEFAULT ''")
 
     # ---------------- views ----------------
     @staticmethod
@@ -548,7 +558,8 @@ class Desks:
         with self.db.tx() as c:
             cur = c.execute(
                 "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' THEN 'planning' ELSE 'working' END,"
-                " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, updated_at=?"
+                " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, queued_at=NULL, queued_message='',"
+                " updated_at=?"
                 f" WHERE id=? AND status IN ({marks})",
                 (t, id, *from_statuses),
             )
@@ -608,17 +619,58 @@ class Desks:
             marks = ",".join("?" for _ in LIVE)
             return int(c.execute(f"SELECT COUNT(*) FROM desks WHERE status IN ({marks})", LIVE).fetchone()[0])
 
-    def recover(self) -> int:
+    @_notifies
+    def enqueue(self, id: str, message: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
+        """Wait for a free slot under deskMaxLive instead of being refused. Atomic like claim_run: None
+        means the desk was not in `from_statuses`. A desk already queued keeps its place in line, and
+        the new message is appended to the one it holds, so nothing that woke it is lost."""
+        statuses = tuple(dict.fromkeys((*from_statuses, "queued")))
+        marks = ",".join("?" for _ in statuses)
+        t = now()
+        msg = (message or "").strip()
+        with self.db.tx() as c:
+            prev = c.execute("SELECT status FROM desks WHERE id=?", (id,)).fetchone()
+            cur = c.execute(
+                "UPDATE desks SET"
+                " queued_message = CASE WHEN ?='' THEN queued_message"
+                "   WHEN status='queued' AND queued_message<>'' THEN queued_message || char(10) || char(10) || ?"
+                "   ELSE ? END,"
+                " queued_at = CASE WHEN status='queued' THEN queued_at ELSE ? END,"
+                " status='queued', status_reason='', run_id=NULL, ended_at=NULL, updated_at=?"
+                f" WHERE id=? AND status IN ({marks})",
+                (msg, msg, msg, t, t, id, *statuses),
+            )
+            if not cur.rowcount:
+                return None
+            if prev and prev["status"] != "queued":
+                self._event(c, id, "status", _body("queued", "", None), needs_you=False, run_id=None,
+                            data={"status": "queued", "reason": "", "error": None}, t=t)
+            return self._one(c, id)
+
+    def queued(self) -> list[dict[str, Any]]:
+        """The queue, oldest first: the order desks are launched in as slots free up."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM desks WHERE status='queued' ORDER BY queued_at, rowid").fetchall()
+        return [self._desk_view(r, 0) for r in rows]
+
+    def queue_position(self, id: str) -> int:
+        """1-based place in the queue; 0 when the desk is not queued."""
+        return next((i for i, d in enumerate(self.queued(), 1) if d["id"] == id), 0)
+
+    def recover(self) -> list[tuple[str, str]]:
         """Startup: every row whose status is in RECOVER_FROM becomes 'interrupted' with a needs_you
-        event. No desk is ever auto-resumed at startup, and a desk the user parked (paused, blocked)
-        is left exactly as it is — only a state whose in-process run died is swept."""
+        event. Returns (id, status before the restart) for each desk swept. Nothing is resumed here
+        (the caller relaunches some only when deskAutoResume is on), and a desk the user parked
+        (paused, blocked) or one waiting in the queue is left exactly as it is: only a state whose
+        in-process run died is swept."""
         with self.db.tx() as c:
             marks = ",".join("?" for _ in RECOVER_FROM)
-            ids = [r["id"] for r in
-                   c.execute(f"SELECT id FROM desks WHERE status IN ({marks})", RECOVER_FROM).fetchall()]
-        for did in ids:
+            rows = [(r["id"], r["status"]) for r in
+                    c.execute(f"SELECT id, status FROM desks WHERE status IN ({marks}) ORDER BY created_at, rowid",
+                              RECOVER_FROM).fetchall()]
+        for did, _ in rows:
             self.set_status(did, "interrupted", reason="restart", headline="")
-        return len(ids)
+        return rows
 
     def delete(self, id: str) -> None:
         with self.db.tx() as c:

@@ -1255,6 +1255,8 @@ export interface Settings {
   deskMaxTurns?: number
   deskMaxCost?: number
   deskMaxLive?: number
+  /** Relaunch desks a restart interrupted mid-turn. Never one with an unknown-outcome call or a pending card. Off by default. */
+  deskAutoResume?: boolean
   /** How long a desk waits on a card nobody is watching before the run lets go. 0 = wait forever. */
   parkAfterSeconds?: number
   /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
@@ -1531,7 +1533,7 @@ export interface Recap { day: string; content: string; created_at: number; cache
  */
 
 export type DeskStatus = 'draft' | 'planning' | 'awaiting_plan' | 'working' | 'needs_approval' | 'blocked'
-  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped'
+  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped' | 'queued'
 
 /** Mirrors `cowork.NEEDS_YOU`: the statuses that put a desk in the rail's "Needs you" section. */
 export const NEEDS_YOU: DeskStatus[] = ['awaiting_plan', 'needs_approval', 'blocked', 'interrupted', 'review']
@@ -1577,7 +1579,12 @@ export interface Desk {
   created_at: number
   updated_at: number
   ended_at: number | null
+  /** Set while the desk waits for a free slot under `deskMaxLive` (status `queued`); the queue is oldest first. */
+  queued_at?: number | null
 }
+
+/** What start/resume/message/create answer for a desk that joined the queue instead of starting. */
+export interface DeskQueued { queued: true; position: number; live: number; max: number }
 
 /** GET /cowork/desks/{id}: the desk plus everything the detail pane opens with. */
 export interface FullDesk extends Desk {

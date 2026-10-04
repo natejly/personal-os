@@ -745,7 +745,7 @@ with Pydantic `XIn`/`XPatch` immediately above each handler, `wsid()` (`app.py:2
 | Method / path | Request | Response |
 |---|---|---|
 | `GET /cowork/desks?project_id=all&status=&archived=false` | — | `Desk[]` (each with `live: bool`, `unseen: int`) |
-| `POST /cowork/desks` | `{brief, title?, project_id?, autonomy?, budget?, start?}` | `{desk, run_id?, seq?, conversation_id}` — 409 when `desks.live_count() >= deskMaxLive` |
+| `POST /cowork/desks` | `{brief, title?, project_id?, autonomy?, budget?, start?}` | `{desk, run_id?, seq?, conversation_id}` — over `deskMaxLive` the desk is `queued` instead: `{queued, position, live, max}` |
 | `GET /cowork/desks/{id}` | — | `FullDesk` = desk + `plan` + `outputs` + `events` + `runs` |
 | `PATCH /cowork/desks/{id}` | `DeskPatch{title?, autonomy?, project_id?, archived?, budget?, clear_project}` | `Desk` |
 | `DELETE /cowork/desks/{id}?purge=false` | — | `{ok: true}` |
@@ -839,7 +839,11 @@ else in the tree calls `list()`.
 On boot: every active run becomes `interrupted`; an interrupted run with a `message_id` whose `messages.content`
 is empty gets `run_store.transcript(run_id)` written into it with `error="Interrupted"`, so the user sees the
 partial reply rather than a blank bubble; every desk in `LIVE` becomes `interrupted` with a `needs_you` event.
-**No desk is auto-resumed at startup** — the user presses Resume.
+**No desk is auto-resumed at startup unless `deskAutoResume` is on** — otherwise the user presses Resume. With it
+on, a desk that was planning, working or waiting on a live approval is relaunched with DESK_RESUME, except one
+with a `started`/`unknown` journal row in any of its runs or a pending card: those stay interrupted with an event
+saying why. A desk waiting on its plan is never relaunched. Desks still `queued` from before the restart launch
+first, oldest first, as `deskMaxLive` allows.
 
 The `unknown` rule is the only honest answer for an external write. `call_once` commits `started` *before*
 awaiting the function, so after a crash the row says the call was attempted and nothing says it finished. On

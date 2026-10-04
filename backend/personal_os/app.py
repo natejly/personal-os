@@ -58,7 +58,7 @@ from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthSto
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -3303,6 +3303,10 @@ def _missed_wake(desk_id: str) -> dict[str, Any] | None:
         return None
     if run_store.approvals(status="pending", desk_id=desk_id):
         return None
+    if _over_live_cap():
+        # The retry counts against deskMaxLive like every other way in: wait in line, not over the cap.
+        desks.enqueue(desk_id, _desk_message(desk_id, "continue"), RESUME_FROM)
+        return None
     return desks.claim_run(desk_id, RESUME_FROM)
 
 
@@ -3336,6 +3340,10 @@ async def _desk_supervisor(desk_id: str, run: Run) -> None:
         desks.set_status(desk_id, "failed", reason="supervisor")
     finally:
         _desk_tasks.pop(desk_id, None)
+        try:
+            _drain_queue()  # this chain's slot is free now
+        except Exception:  # noqa: BLE001 - a queued desk failing to launch must not mask how this one ended
+            log.exception("desk queue drain after %s failed", desk_id)
 
 
 # Which statuses each entry point may claim a desk out of. `claim_run`'s rowcount is the lock, so a
@@ -3349,7 +3357,7 @@ MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped")
 # Pause holds a desk that is doing something; pausing one in review or done would make it resumable
 # work it is not. Stop ends anything not already over.
 PAUSE_FROM = (*DESK_LIVE, "awaiting_plan")
-STOP_FROM = ("draft", *DESK_LIVE, "awaiting_plan", "blocked", "paused", "interrupted")
+STOP_FROM = ("draft", *DESK_LIVE, "awaiting_plan", "blocked", "paused", "interrupted", "queued")
 
 
 def _over_live_cap() -> bool:
@@ -3357,16 +3365,23 @@ def _over_live_cap() -> bool:
     return cap > 0 and desks.live_count() >= cap
 
 
-def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...]) -> Run | None:
+def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...]) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
-    the chain to a supervisor task. None means the claim was lost or a run is already live."""
+    the chain to a supervisor task. None means the claim was lost or a run is already live. Over
+    deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
+    'queued'); _drain_queue launches it, with the content it was woken with, when a slot frees."""
     desk = desks.get(desk_id, with_outputs=False)
     if not desk or bus.live(desk["conversation_id"]):
         return None
-    # Every way in counts against the cap - start, resume, a message, a wake from an approval - not
-    # only the two routes that used to check it. The desk is not live yet, so it is not counted.
+    # Every way in counts against the cap - start, resume, a message, a wake from an approval, a
+    # background job's result - so this is the one place it is checked. The desk is not live yet,
+    # so it is not counted.
     if _over_live_cap():
-        return None
+        return desks.enqueue(desk_id, content or "", from_statuses)
+    if desk["status"] == "queued":
+        # Out of the queue: the turn carries everything that woke the desk while it waited.
+        content = "\n\n".join(x for x in (desk.get("queued_message") or "", (content or "").strip()) if x)
+        from_statuses = (*from_statuses, "queued")
     claimed = desks.claim_run(desk_id, from_statuses)
     if not claimed:
         return None
@@ -3377,7 +3392,32 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
     return run
 
 
-def _wake_desk(desk_id: str) -> Run | None:
+def _drain_queue() -> None:
+    """Launch queued desks, oldest first, while deskMaxLive has room. Called when a desk's chain ends
+    and at startup, so it is driven by those events and never by a timer."""
+    for d in desks.queued():
+        if _over_live_cap():
+            return
+        _launch_desk(d["id"], None, ("queued",))
+
+
+def _auto_resume(swept: list[tuple[str, str]]) -> None:
+    """deskAutoResume: relaunch the desks this startup interrupted mid-turn. A desk with a call whose
+    outcome is unknown, or with a card still waiting on the user, stays interrupted and says why; one
+    that was waiting on its plan is the user's move, so it is not relaunched either. Over deskMaxLive
+    the rest wait in the queue like any other wake."""
+    for did, was in swept:
+        if was not in AUTO_RESUME_FROM:
+            continue
+        if run_store.unsettled_calls(did):
+            desks.event(did, "interrupted", "Not resumed: an action's outcome is unknown.", needs_you=True)
+        elif run_store.approvals("pending", desk_id=did):
+            desks.event(did, "interrupted", "Not resumed: waiting on your approval.", needs_you=True)
+        else:
+            _wake_desk(did)
+
+
+def _wake_desk(desk_id: str) -> Run | dict[str, Any] | None:
     """Resume a desk that is not running: used by the resume route, by a decided approval that had
     parked, and by a plan approved after its run had already let go."""
     desk = desks.get(desk_id, with_outputs=False)
@@ -3389,10 +3429,11 @@ def _wake_desk(desk_id: str) -> Run | None:
 def _shell_wake(conversation_id: str | None) -> None:
     """A background shell job finished in a desk that has no run going: wake it so it reads the result."""
     desk = desks.by_conversation(conversation_id) if conversation_id else None
-    if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done"):
+    if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done", "queued"):
         return
     notes = toolbox.shell.drain_notes(conversation_id)
     if notes:
+        # Over the cap this queues the notes as the desk's next turn rather than dropping them.
         _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done"))
 
 
@@ -3892,7 +3933,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             "error": "Not run: the reply was interrupted before this was answered. The decision is recorded; ask again to run it."})
     # A desk's card can outlive the run that raised it (see parking), so answering one is also how a
     # desk is woken. Nothing here resumes a chat: a chat run that died stays dead, as above.
-    resumed = False
+    resumed = queued = False
     desk_id = (row or {}).get("desk_id")
     if desk_id and not live:
         if is_plan and body.decision != "deny":
@@ -3904,8 +3945,9 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             if plan and current and not current.get("plan_id"):
                 desks.set_status(desk_id, current["status"], reason=current["status_reason"],
                                  plan_id=plan["plan_id"], event=False)
-        resumed = _wake_desk(desk_id) is not None
-    return {"ok": True, "live": live, "resumed": resumed,
+        woke = _wake_desk(desk_id)
+        resumed, queued = isinstance(woke, Run), isinstance(woke, dict)
+    return {"ok": True, "live": live, "resumed": resumed, "queued": queued,
             "status": row["status"] if row else ("denied" if body.decision == "deny" else "approved")}
 
 
@@ -7770,10 +7812,6 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None, inputs: dict[
         raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
     pid = wsid(body.project_id)
     cfg = settings()
-    live_cap = int(cfg.get("deskMaxLive") or 0)
-    if body.start and live_cap > 0 and desks.live_count() >= live_cap:
-        raise HTTPException(409, {"message": "Too many desks are running at once",
-                                  "live": desks.live_count(), "max": live_cap})
     conv = convos.create(pid, _title_from(body.title or brief), cfg["defaultModel"])
     try:
         desk = desks.create(conversation_id=conv["id"], brief=brief, title=(body.title or "").strip(),
@@ -7799,8 +7837,10 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None, inputs: dict[
     out: dict[str, Any] = {"desk": desk, "conversation_id": conv["id"]}
     if body.start:
         run = _launch_desk(desk["id"], brief, START_FROM)
-        if run is not None:
+        if isinstance(run, Run):
             out["run_id"], out["seq"] = run.run_id, run.seq
+        elif run is not None:
+            out.update(_queued_view(desk["id"]))
         out["desk"] = desks.get(desk["id"]) or desk
     return out
 
@@ -7836,9 +7876,11 @@ async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: st
     except HTTPException as e:
         detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
         return tools.tool_error(f"The desk was not started: {detail}")
+    queued = (f"The desk is queued (position {out['position']}) until another desk finishes; then it starts planning. "
+              if out.get("queued") else "The desk is planning. ")
     return {"desk_id": out["desk"]["id"], "conversation_id": out["conversation_id"], "run_id": out.get("run_id"), "mode": mode,
-            "inputs": [f"inputs/{n}" for n in inputs],
-            "note": "The desk is planning. It will wait for the user to approve its plan before it does anything. When it "
+            "inputs": [f"inputs/{n}" for n in inputs], **({"queued": True, "position": out["position"]} if out.get("queued") else {}),
+            "note": queued + "It will wait for the user to approve its plan before it does anything. When it "
                     "finishes, its report is posted back into this chat."}
 
 
@@ -7915,14 +7957,18 @@ async def delete_desk(id: str, purge: bool = False) -> dict[str, bool]:
     return {"ok": True}
 
 
+def _queued_view(desk_id: str) -> dict[str, Any]:
+    """What a route answers for a desk that joined the queue instead of starting."""
+    return {"queued": True, "position": desks.queue_position(desk_id),
+            "live": desks.live_count(), "max": int(settings().get("deskMaxLive") or 0)}
+
+
 @app.post("/cowork/desks/{id}/start")
 async def start_desk(id: str) -> dict[str, Any]:
     desk = _desk_or_404(id, False)
-    live_cap = int(settings().get("deskMaxLive") or 0)
-    if live_cap > 0 and desks.live_count() >= live_cap:
-        raise HTTPException(409, {"message": "Too many desks are running at once",
-                                  "live": desks.live_count(), "max": live_cap})
     run = _launch_desk(id, desk["brief"], START_FROM)
+    if isinstance(run, dict):
+        return {**_queued_view(id), "conversation_id": desk["conversation_id"]}
     if run is None:
         raise HTTPException(409, {"message": "That desk is already running, or is not startable",
                                   "status": (desks.get(id, False) or {}).get("status")})
@@ -7933,9 +7979,9 @@ async def start_desk(id: str) -> dict[str, Any]:
 async def resume_desk(id: str, body: DeskResumeIn | None = None) -> dict[str, Any]:
     _desk_or_404(id, False)
     run = _wake_desk(id)
+    if isinstance(run, dict):
+        return _queued_view(id)
     if run is None:
-        if _over_live_cap():
-            raise HTTPException(409, {"message": "Too many desks are running at once; resume this one when another finishes"})
         raise HTTPException(409, {"message": "That desk cannot be resumed from here",
                                   "status": (desks.get(id, False) or {}).get("status")})
     return {"run_id": run.run_id, "seq": run.seq}
@@ -7972,6 +8018,8 @@ async def message_desk(id: str, body: DeskMessageIn) -> dict[str, Any]:
             break
         await asyncio.sleep(0.25)
     started = _launch_desk(id, text, MESSAGE_FROM)
+    if isinstance(started, dict):
+        return {"ok": True, "steered": False, **_queued_view(id)}
     if started is None:
         raise HTTPException(409, {"message": "That desk could not take a message right now",
                                   "status": (desks.get(id, False) or {}).get("status")})
@@ -8345,16 +8393,21 @@ def get_action_plan(plan_id: str) -> dict[str, Any]:
 
 @app.on_event("startup")
 async def _cowork_startup() -> None:
-    """Recovery must never stop the backend from starting. Nothing is resumed here: every active
-    run becomes `interrupted`, every in-flight tool call becomes `unknown`, every live desk lands
-    in Needs you, and the user presses Resume."""
+    """Recovery must never stop the backend from starting. Every active run becomes `interrupted`,
+    every in-flight tool call becomes `unknown`, and every live desk lands in Needs you, where the
+    user presses Resume — unless deskAutoResume is on, when the ones that can safely go on are
+    relaunched (_auto_resume). Desks still queued from before the restart are launched as room allows."""
     global _loop
     _loop = asyncio.get_running_loop()  # where _desk_changed hands writes made in the threadpool
     try:
         # Runs are recovered by _recover_runs above, which owns run_store.recover(). This only has
         # to sweep the desks it left behind: LIVE -> interrupted, plus a needs_you event each.
-        woken = desks.recover()
-        if woken:
-            log.info("cowork recovery: %s desks need you", woken)
+        swept = desks.recover()
+        if swept:
+            log.info("cowork recovery: %s desks need you", len(swept))
+        # Queued before the restart first: they have waited longest.
+        _drain_queue()
+        if settings().get("deskAutoResume"):
+            _auto_resume(swept)
     except Exception:  # noqa: BLE001
         log.warning("cowork recovery failed", exc_info=True)

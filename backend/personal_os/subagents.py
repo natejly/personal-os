@@ -49,7 +49,7 @@ GROUP = "agents"
 # talks to another person, anything that books future work, and anything that asks the user.
 CHILD_BLOCK = frozenset({
     "save_memory", "graph_add", "save_writing_sample", "todo_write", "todo_add", "todo_update", "todo_delete",
-    "propose_plan", "desk_ask", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
+    "propose_plan", "desk_ask", "ask_user", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
     "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search",
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify",
 })

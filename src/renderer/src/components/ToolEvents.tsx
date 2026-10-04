@@ -9,7 +9,8 @@ import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
-import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents } from '../lib/toolDisplay'
+import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS } from '../lib/toolDisplay'
+import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
@@ -26,7 +27,7 @@ const ICONS: Record<string, JSX.Element> = {
   calendar_find_time: <CalendarSearch size={13} />, calendar_propose: <CalendarDays size={13} />, calendar_create: <CalendarPlus size={13} />,
   calendar_update: <CalendarClock size={13} />, calendar_delete: <CalendarX size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
-  desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
+  desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />, ask_user: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
   youtube_video: <Youtube size={13} />, youtube_search: <Youtube size={13} />,
@@ -206,59 +207,6 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
 }
 
 /**
- * `desk_ask`: the agent stopped and wants an answer. The call is gated as a card (plans.decide_call
- * rule 2), so the tool body — the thing that writes `desks.question` and moves the desk to Needs you
- * — has not run yet, and the run is sitting on this approval. The answer therefore has to be the
- * DECISION, not a message: it rides back as the approval's note, which the backend hands to the call
- * as `user_note` (app.py). Posting it as a chat message instead left the approval unanswered and the
- * run waiting here forever, because a run with a viewer attached never parks.
- *
- * The store is read imperatively in the handler, never subscribed to: this mounts inside a streaming
- * message, where any broader subscription re-renders every message on every token (Message.tsx:10).
- */
-function AskAnswer({ callId, question, context, conversationId }: {
-  callId: string
-  question: string
-  context?: string
-  conversationId: string
-}): JSX.Element {
-  const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
-
-  const submit = async (): Promise<void> => {
-    if (!text.trim() || sending) return
-    setSending(true)
-    try {
-      // 'allow' only: a question is never a standing grant, so no always_chat/always_global here.
-      await useStore.getState().approveTool(callId, 'allow', conversationId, { note: text.trim() })
-    } finally {
-      setSending(false)
-    }
-  }
-
-  return (
-    <div className="aplan ask">
-      <header className="aplan-head"><CircleHelp size={14} /><b>The agent has a question</b></header>
-      <p className="aplan-intent">{question}</p>
-      {context && <p className="muted small">{context}</p>}
-      <div className="aplan-foot">
-        <textarea
-          className="aplan-answer"
-          rows={2}
-          placeholder="Answer… (⌘↵ to send)"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() } }}
-        />
-        <div className="aplan-actions">
-          <button className="primary-btn" disabled={!text.trim() || sending} onClick={() => void submit()}>Answer</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/**
  * Undo for a file the agent wrote or moved, or for a calendar / Google Tasks write. A changed file asks before it is
  * overwritten; a changed event or task is never overwritten. This is the user's action, never the model's.
  */
@@ -315,7 +263,7 @@ function ToolFallback({ event, conversationId }: { event: ToolEvent; conversatio
       {asking && (
         <div className="aplan-actions">
           <button className="ghost-btn" onClick={() => decide('deny')}>Deny</button>
-          {event.name !== 'propose_plan' && event.name !== 'desk_ask' && <button className="primary-btn" onClick={() => decide('allow')}>Allow once</button>}
+          {event.name !== 'propose_plan' && !QUESTION_TOOLS.has(event.name) && <button className="primary-btn" onClick={() => decide('allow')}>Allow once</button>}
         </div>
       )}
     </div>
@@ -327,7 +275,7 @@ function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
 
-const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(t.name === 'desk_ask' && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
+const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(QUESTION_TOOLS.has(t.name) && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
 
 /** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
 function ToolEvents({ events, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
@@ -376,13 +324,9 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
         )}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
         {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
-        {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
-        {t.pending && t.needs_approval && t.name === 'desk_ask' && (
-          <AskAnswer callId={t.id} conversationId={conversationId}
-            question={String(((t.arguments ?? {}) as { question?: unknown }).question ?? '')}
-            context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
-        )}
-        {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
+        {/* A question is answered, not permitted: its options and a text box instead of Allow/Deny. */}
+        {t.pending && t.needs_approval && QUESTION_TOOLS.has(t.name) && <AskQuestion event={t} conversationId={conversationId} />}
+        {t.pending && t.needs_approval && t.name !== 'propose_plan' && !QUESTION_TOOLS.has(t.name) && (
           <>
             <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
             <ApprovalRules event={t} conversationId={conversationId} />
@@ -396,7 +340,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   function renderEvent(t: ToolEvent): JSX.Element {
     // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
     // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
-    // A pending desk_ask keeps the answer box below; once it is answered (or running) its card shows the question and choices.
+    // A pending question keeps the answer box below; once it is answered (or running) its card shows the question and choices.
     const Card = hasCard(t) ? TOOL_CARDS[t.name] : undefined
     return (
       <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>

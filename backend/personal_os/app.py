@@ -617,6 +617,8 @@ def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None
 _approval_notes: dict[str, str] = {}
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
+# Tools whose card is a question: answered with a note, never granted, and a message written while one waits answers it.
+QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 
 def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
@@ -1398,13 +1400,14 @@ TOOLS_HINT = ("You have tools. Use them when they would make the answer more acc
 # Only added when todo_write is actually available in this chat (see _chat_stream).
 PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
              "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
-             "earlier rounds — is what keeps a long task on track.")
+             "earlier rounds — is what keeps a long task on track. If a decision is genuinely the user's, call ask_user once "
+             "instead of guessing.")
 # Plan mode in an ordinary chat (conv.settings.planMode, else settings.planMode). 'always' starts every
 # reply drafting; 'auto' starts it the first time the reply reaches for a consequential tool.
 CHAT_PLAN_HINT = ("## Plan mode is on\nBefore anything that changes something (writes, sends, creates, deletes, runs code), "
                   "call propose_plan with the exact calls you intend to make and wait for the user's answer. Reading and "
                   "searching are fine without a plan. Once a plan is approved, make each approved call exactly once with "
-                  "exactly its arguments.")
+                  "exactly its arguments. If a decision is genuinely the user's, call ask_user once instead of guessing.")
 # Groups whose `writes` tools are the assistant's own bookkeeping rather than a change the user would
 # want to approve, so they never trip 'auto' plan mode.
 PLAN_AUTO_EXEMPT_GROUPS = ("plan", "memory", "graph", "style")
@@ -2067,12 +2070,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # round, where one that is offered and refused costs one every time. `withheld=True` asks
                 # for the full set anyway, which is what a plan has to be judged against: its steps name
                 # the tools it will use *after* approval. Connectors are not reading tools, so they stay out.
+                # ask_user is `plan` tier, so it stays: a plan can be clarified before it is proposed.
                 m = {n: v for n, v in m.items() if n == PLAN_TOOL or ((spec := toolbox.specs.get(n)) is not None and spec.danger in PLAN_SAFE_DANGER)}
                 m[PLAN_TOOL] = "ask"
                 if desk_id:
                     m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
             if desk_id:
                 m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
+                m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
             return toolbox.schemas(m) + offer
 
         tool_schemas = _schemas()
@@ -2842,7 +2847,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # desk_ask's card IS the question, so the desk carries it from the moment the
                         # card opens: the rail and the banner show it, and the banner's answer can
                         # settle this card (message_desk) as well as the card's own box can.
-                        q = str(args.get("question") or "").strip() if c["name"] == "desk_ask" else None
+                        q = str(args.get("question") or "").strip() if c["name"] in QUESTION_TOOLS else None
                         desks.set_status(desk_id, "awaiting_plan" if plan is not None else "needs_approval",
                                          run_id=run.run_id if run else None, question=q)
                     # A desk's card may outlive the run that raised it: nobody is at the keyboard, and
@@ -2858,6 +2863,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                     store.decide(uid, "deny", by="stop")
                                 if plan is not None:  # a stop means "stop", not "never": this no does not block later
                                     plans.decide(uid, "deny", by="stop", note="You stopped the reply before answering this plan.")
+                                break
+                            if steers and not desk_id and c["name"] in QUESTION_TOOLS:
+                                # The user wrote while a question waited: that message is the answer. It is taken off
+                                # the steers so the loop top does not hand it to the model a second time as a new turn.
+                                answer = steers.pop()
+                                note = str(answer["content"]).strip()[:500]
+                                fut.set_result("allow")
+                                _approval_notes[uid] = note
+                                if store is not None:
+                                    store.decide(uid, "allow", by="steer", note=note)
+                                # The /steer route already stored it as a user row. The answer lives on the card and the
+                                # approval row, so that row goes: kept, the next turn's history replays it as an unanswered turn.
+                                with db.tx() as tx:
+                                    tx.execute("DELETE FROM messages WHERE id=?", (answer["id"],))
+                                yield "removed_message", {"id": answer["id"]}
                                 break
                             if steers and not desk_id:
                                 # The user wrote instead of answering the card: that is a no, with their words as the
@@ -2905,7 +2925,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         if desk_id:
                             desks.set_status(desk_id, "blocked",
                                              reason="plan" if plan is not None else
-                                             ("question" if c["name"] == "desk_ask" else "approval"),
+                                             ("question" if c["name"] in QUESTION_TOOLS else "approval"),
                                              run_id=None)
                         # The reply ends here, but what it streamed so far is the user's to keep: finish the row
                         # (the card stays on it as pending) and record what this turn spent, as the normal end does.
@@ -2944,7 +2964,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         desks.set_status(desk_id, "working", run_id=run.run_id if run else None,
                                          plan_id=(approved_plan or {}).get("plan_id")
                                          if (approved_plan or {}).get("status") == "approved" else None,
-                                         question="" if c["name"] == "desk_ask" else None)
+                                         question="" if c["name"] in QUESTION_TOOLS else None)
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
                     if decision == "always_session":
@@ -3025,14 +3045,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result = (tools.tool_error(f"{c['name']} was declined by the user, who said: {deny_note}",
                                                alternative="follow what the user said, or ask them what they would like instead")
                               if deny_note else tools.denied(c["name"], "just declined by the user"))
-                elif asks and c["name"] == "desk_ask" and (answer := ((run_store.approval(uid) or {}).get("note") or "").strip()):
+                elif asks and c["name"] in QUESTION_TOOLS and (answer := ((run_store.approval(uid) or {}).get("note")
+                                                                       or deny_note or "").strip()):
                     # The card was answered while this reply was still holding it, so the answer goes
                     # straight back as the result and the turn carries on. Running the tool body here
                     # would block the desk on a question the user has just answered.
-                    result = {"status": "answered", "answer": answer,
-                              "note": "The user answered your question. Carry on with it; do not ask it again."}
-                    if answer in [str(o).strip() for o in (args.get("options") or []) if isinstance(o, str)]:
-                        result["choice"] = answer  # they picked one of the choices the question offered
+                    result = tools.answered(answer, args.get("options"))
                 elif mcp_is(c["name"]):
                     # The branch above only reaches here when the call was allowed. A job has nobody
                     # to allow it, so the connector call is a proposal and the server is not contacted.

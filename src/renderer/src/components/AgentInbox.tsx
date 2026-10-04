@@ -563,7 +563,7 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
 
 /** Cards a bare Allow cannot decide: a plan has steps to read and edit, a question wants an answer. These, and any card
  * of a desk, open where they are decided instead. */
-const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
+const OPEN_ONLY = new Set(['propose_plan', 'desk_ask', 'ask_user'])
 
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)

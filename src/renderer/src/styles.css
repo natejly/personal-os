@@ -1101,7 +1101,7 @@ button.tag:disabled { cursor: default; }
 .add-edge { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--text-faint); }
 .add-edge input { flex: 1; min-width: 0; padding: 5px 8px; font-size: 12px; }
 
-/* ---------- Projects (Claude-style groups of chats) ---------- */
+/* ---------- Projects (groups of chats) ---------- */
 .project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; background: var(--text-faint); }
 .project-dot.sm { width: 8px; height: 8px; border-radius: 2px; }
 .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px 14px; }

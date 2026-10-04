@@ -29,7 +29,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, stt, tools
 from . import compaction, otel_export, titles
 from .fsx import sensitive_reason
-from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages
+from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
@@ -1831,11 +1831,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
-    doc_hits = await _doc_hits(conv["project_id"], user_text, cfg, conv["settings"])
+    # A follow-up is searched with the turn before it in view; the model still sees user_text as typed.
+    # On the new-message path conv["messages"] is the history before this turn; on resume and regenerate it ends
+    # with this turn's user message (and the reply being replaced), so the history is cut before that message.
+    prior = conv["messages"]
+    if body.content is None:
+        last_u = max((i for i, m in enumerate(prior) if m["role"] == "user"), default=len(prior))
+        prior = prior[:last_u]
+    rq = retrieval_query(prior, user_text)
+    doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
-        memory_hits=await _memory_hits(conv["project_id"], user_text, cfg, conv["settings"]),
-        project=project, project_id=conv["project_id"], query=user_text,
+        memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
+        project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,

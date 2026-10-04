@@ -55,6 +55,11 @@ def bypassing() -> bool:
     return bool(getattr(_local, "bypass", False))
 
 
+def dont_cache() -> None:
+    """Called from inside a cached read: this result is incomplete, return it but do not store it."""
+    _local.dont_cache = True
+
+
 class TTLCache:
     """Namespaced TTL cache. Keys are `namespace:fingerprint-of-arguments`."""
 
@@ -62,6 +67,9 @@ class TTLCache:
         self._lock = threading.Lock()
         self._data: dict[str, tuple[float, Any]] = {}
         self._max = max_entries
+        # Bumped by invalidate: a read that started before a write must not store what it saw.
+        self._gens: dict[str, int] = {}
+        self._gen_all = 0
         self.hits = 0
         self.misses = 0
 
@@ -84,10 +92,17 @@ class TTLCache:
             self.hits += 1
         return True, copy.deepcopy(value)
 
-    def put(self, key: str, value: Any, ttl: float) -> None:
+    def generation(self, namespace: str) -> tuple[int, int]:
+        with self._lock:
+            return self._gen_all, self._gens.get(namespace, 0)
+
+    def put(self, key: str, value: Any, ttl: float, gen: tuple[int, int] | None = None) -> None:
+        """Store `value`; with `gen` (from generation() before the read), only if nothing invalidated since."""
         if ttl <= 0:
             return
         with self._lock:
+            if gen is not None and gen != (self._gen_all, self._gens.get(key.split(":", 1)[0], 0)):
+                return
             self._data.pop(key, None)
             self._data[key] = (time.monotonic() + ttl, copy.deepcopy(value))
             while len(self._data) > self._max:
@@ -97,9 +112,12 @@ class TTLCache:
         """Drop every entry in these namespaces; no arguments drops everything."""
         with self._lock:
             if not namespaces:
+                self._gen_all += 1
                 n = len(self._data)
                 self._data.clear()
                 return n
+            for ns in namespaces:
+                self._gens[ns] = self._gens.get(ns, 0) + 1
             prefixes = tuple(f"{ns}:" for ns in namespaces)
             dead = [k for k in self._data if k.startswith(prefixes)]
             for k in dead:
@@ -159,8 +177,15 @@ def cached(namespace: str, ttl: float) -> Callable[[F], F]:
                 hit, value = store.get(key)
                 if hit:
                     return value
-            value = fn(self, *args, **kwargs)
-            store.put(key, value, ttl)
+            gen = store.generation(namespace)
+            outer = getattr(_local, "dont_cache", False)
+            _local.dont_cache = False
+            try:
+                value = fn(self, *args, **kwargs)
+                if not _local.dont_cache:
+                    store.put(key, value, ttl, gen)
+            finally:
+                _local.dont_cache = outer or _local.dont_cache  # an incomplete inner read taints the outer one
             return value
 
         return inner  # type: ignore[return-value]

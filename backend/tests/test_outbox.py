@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_google_api import FakeGoogle, FakeServer  # noqa: E402
 from personal_os import outbox as outbox_mod, verify  # noqa: E402
 from personal_os.db import Database  # noqa: E402
+from personal_os.google import NotSent  # noqa: E402
 from personal_os.outbox import Outbox  # noqa: E402
 
 
@@ -222,6 +223,22 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(after["status"], "failed")
         self.assertIn("network is down", after["error"])
         self.assertEqual(asyncio.run(self.box.run_due()), 0)
+
+    def test_a_send_that_never_reached_gmail_stays_open_for_send_now(self) -> None:
+        real = self.google.gmail_send
+
+        def offline(*a: Any, **kw: Any) -> dict[str, Any]:
+            raise NotSent("TransportError: offline")
+
+        self.google.gmail_send = offline  # type: ignore[method-assign]
+        row = self._queue()
+        self.clock.advance(31)
+        asyncio.run(self.box.run_due())
+        after = self.box.get(row["id"])
+        self.assertEqual(after["status"], "expired")  # not `failed`: nothing went out, and Send now is offered
+        self.assertIn("offline", after["error"])
+        self.google.gmail_send = real  # type: ignore[method-assign]
+        self.assertEqual(asyncio.run(self.box.send_now(row["id"]))["status"], "sent")
 
     # ---- the agent's reach ----
     def test_the_agent_can_cancel_but_not_hurry_a_send(self) -> None:

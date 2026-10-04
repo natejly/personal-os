@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import threading
@@ -272,13 +273,19 @@ class TodoCalendarMirror:
         }
 
     def _create(self, td: dict[str, Any], calendar_id: str) -> None:
+        # The event id is derived from the todo, so an insert whose link was never recorded
+        # comes back as a 409 on the next pass instead of a second event.
+        body = {**self._body(td, None), "id": "todo" + hashlib.sha1(td["id"].encode()).hexdigest()}
         try:
-            ev = self.google.calendar_create(self._body(td, None), calendar_id)
+            ev = self.google.calendar_create(body, calendar_id)
         except Exception as e:  # noqa: BLE001
             # An insert only 404s when the calendar itself is gone.
             if _is_missing(e):
                 raise _TargetGone(calendar_id) from e
-            raise
+            if "409" not in str(e):
+                raise
+            # Already there (or deleted earlier, which Google keeps as cancelled): take it over as is.
+            ev = self.google.calendar_update(body["id"], {**body, "status": "confirmed"}, calendar_id)
         self.todos.set_calendar_state(td["id"], ev["id"], ev.get("link"), calendar_id, _sig(td, None))
 
     def _adopt(self, td: dict[str, Any], event_id: str, calendar_id: str) -> bool:

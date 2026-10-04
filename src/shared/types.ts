@@ -1170,6 +1170,8 @@ export interface Settings {
   maxToolRounds: number
   /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
   mcpDeferAbove?: number
+  /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
+  mcpServerNotes?: boolean
   /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
   skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */

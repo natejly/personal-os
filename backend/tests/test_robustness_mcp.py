@@ -142,5 +142,92 @@ class TestCalls(Base):
         self.assertEqual(len(live), 1, "an overwritten supervisor's child would never be reaped")
 
 
+class TestRichResults(unittest.TestCase):
+    """Images, resources and big text from a tool result reach the model instead of a placeholder."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory(prefix="mcprich-")
+        self.addCleanup(self._dir.cleanup)
+        env = unittest.mock.patch.dict(os.environ, {"PERSONAL_OS_DATA_DIR": self._dir.name})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_an_image_is_saved_where_view_image_may_read_it(self) -> None:
+        import base64
+        from mcp.types import CallToolResult, ImageContent, TextContent
+        from personal_os import vision
+        png = b"\x89PNG\r\n\x1a\n" + b"fake-image-bytes"
+        out = mcp_client._result_dict(CallToolResult(content=[
+            TextContent(type="text", text="chart:"),
+            ImageContent(type="image", data=base64.b64encode(png).decode(), mime_type="image/png")]))
+        item = out["media"][0]
+        p = Path(item["path"])
+        self.assertEqual(p.read_bytes(), png)
+        self.assertEqual(p.suffix, ".png")
+        self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+        self.assertIn("view_image", item["note"])
+        self.assertIn(str(p), out["content"])
+        self.assertEqual(vision.allowed_image_path(str(p)), p.resolve())
+        # ...while the rest of the data folder stays off limits, to view_image and the file tools alike.
+        from personal_os import mac
+        db = Path(self._dir.name) / "personal-os.db"
+        db.write_bytes(b"x")
+        with self.assertRaises(mac.LocalPathError):
+            vision.allowed_image_path(str(db))
+        with self.assertRaises(mac.LocalPathError):
+            mac.allowed_path(str(p))
+
+    def test_resources_are_inlined_or_saved(self) -> None:
+        import base64
+        from mcp.types import BlobResourceContents, CallToolResult, EmbeddedResource, TextResourceContents
+        out = mcp_client._result_dict(CallToolResult(content=[
+            EmbeddedResource(type="resource", resource=TextResourceContents(uri="file:///notes/a.md", mime_type="text/markdown", text="# Hello")),
+            EmbeddedResource(type="resource", resource=BlobResourceContents(uri="file:///x.pdf", mime_type="application/pdf",
+                                                                            blob=base64.b64encode(b"%PDF-1").decode()))]))
+        self.assertIn("[resource file:///notes/a.md]\n# Hello", out["content"])
+        blob = out["media"][0]
+        self.assertEqual((blob["uri"], blob["mime_type"]), ("file:///x.pdf", "application/pdf"))
+        self.assertEqual(Path(blob["path"]).read_bytes(), b"%PDF-1")
+
+    def test_oversized_base64_is_refused_with_a_note(self) -> None:
+        from mcp.types import CallToolResult, ImageContent
+        from personal_os import vision
+        with unittest.mock.patch.object(mcp_client, "MAX_FILE_BYTES", 10):
+            out = mcp_client._result_dict(CallToolResult(content=[ImageContent(type="image", data="QUFB" * 20, mime_type="image/png")]))
+        self.assertNotIn("path", out["media"][0])
+        self.assertIn("larger than", out["media"][0]["error"])
+        self.assertEqual(mcp_client.MAX_FILE_BYTES, vision.MAX_FILE_BYTES)
+        self.assertFalse((Path(self._dir.name) / "mcp_media").exists() and any((Path(self._dir.name) / "mcp_media").iterdir()))
+
+    def test_a_big_text_result_is_paged_not_cut(self) -> None:
+        from mcp.types import CallToolResult, TextContent
+        from personal_os.working import READ_CHARS, ToolResults
+        text = "".join(f"line {i:05d}\n" for i in range(6000))  # ~66k chars
+        out = mcp_client._result_dict(CallToolResult(content=[TextContent(type="text", text=text)]))
+        self.assertEqual(out["content"], text)
+        from personal_os.repos import Conversations
+        db = Database(Path(self._dir.name))
+        tr = ToolResults(db)
+        cid = Conversations(db).create(None, "t", "m")["id"]
+        shown, rid = tr.render(cid, None, "mcp__x__dump", {k: v for k, v in out.items() if k != "is_error"}, untrusted=True)
+        self.assertIsNotNone(rid)
+        self.assertIn(rid, shown)
+        page2 = tr.read(cid, rid, offset=READ_CHARS)
+        self.assertTrue(page2["text"])
+        self.assertTrue(page2["has_more"])
+        self.assertIn("line 05999", tr.read(cid, rid, offset=page2["total_chars"] - 200)["text"], "nothing was cut off the end")
+
+    def test_old_media_is_swept(self) -> None:
+        folder = Path(self._dir.name) / "mcp_media"
+        folder.mkdir()
+        old, new = folder / "old.png", folder / "new.png"
+        old.write_bytes(b"o")
+        new.write_bytes(b"n")
+        os.utime(old, (1, 1))
+        self.assertEqual(mcp_client.sweep_media(), 1)
+        self.assertFalse(old.exists())
+        self.assertTrue(new.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

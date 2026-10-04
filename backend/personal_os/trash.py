@@ -201,7 +201,7 @@ class Trash:
         return n
 
     async def loop(self) -> None:
-        """Purge at startup, then once a day. A failed pass is logged and retried tomorrow."""
+        """Purge at startup, then once a day, and sweep old MCP media with it. A failed pass is logged and retried tomorrow."""
         while True:
             try:
                 n = await asyncio.to_thread(self.purge_old)
@@ -209,6 +209,11 @@ class Trash:
                     log.info("trash: purged %d item(s) older than %d days", n, RETENTION_DAYS)
             except Exception:  # noqa: BLE001 - housekeeping must never take the backend down
                 log.warning("trash purge failed", exc_info=True)
+            try:  # pictures and files MCP tools returned (mcp_client._save_media) are kept a week
+                from .mcp_client import sweep_media
+                await asyncio.to_thread(sweep_media)
+            except Exception:  # noqa: BLE001
+                log.warning("mcp media sweep failed", exc_info=True)
             await asyncio.sleep(DAY)
 
 

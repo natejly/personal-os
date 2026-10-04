@@ -28,7 +28,7 @@ def test_boards_migrate_into_todos_without_loss() -> None:
             c.execute("INSERT INTO cards VALUES('k2','b1','c2','Paint','',1,NULL,2,'[]',11,30)")
             c.execute("PRAGMA user_version = 2")
         with db.connect() as c:
-            assert migrations.run(c) == [3]
+            assert migrations.run(c) == [3, 4]
         todos = Todos(db)
         rows = {t["title"]: t for t in todos.list(include_done=True)}
         tile, paint = rows["Tile"], rows["Paint"]

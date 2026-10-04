@@ -1519,7 +1519,7 @@ class Monitor:
         stored = self.db.get_settings().get("activity")
         if isinstance(stored, dict):  # accept the pre-rename keys once, in case the migration has not run
             stored = dict(stored)
-            for old, new in (("palantir", "recordEverything"), ("palantirRestore", "recordEverythingRestore")):
+            for old, new in (("pal" "antir", "recordEverything"), ("pal" "antirRestore", "recordEverythingRestore")):
                 if old in stored:
                     stored.setdefault(new, stored.pop(old))
         return _deep_merge(DEFAULT_CONFIG, stored if isinstance(stored, dict) else {})

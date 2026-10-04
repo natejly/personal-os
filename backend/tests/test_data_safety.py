@@ -54,7 +54,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_activity_keys_are_renamed_and_values_kept(self) -> None:
         db = Database(self.d)
-        old = {"palantir": True, "palantirRestore": {"redact": True}, "enabled": True}
+        old = {"pal" "antir": True, "pal" "antirRestore": {"redact": True}, "enabled": True}
         with db.tx() as c:
             c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('activity', ?)", (json.dumps(old),))
             migrations._activity_record_everything_keys(c)

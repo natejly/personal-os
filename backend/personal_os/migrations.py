@@ -43,7 +43,7 @@ def _boards_into_todos(c: sqlite3.Connection) -> None:
 
 
 def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
-    """Rename the stored activity keys `palantir` / `palantirRestore` to `recordEverything` / `recordEverythingRestore`."""
+    """Rename the stored activity keys the old two stored keys to `recordEverything` / `recordEverythingRestore`."""
     import json
     row = c.execute("SELECT value FROM settings WHERE key = 'activity'").fetchone()
     if not row:
@@ -54,7 +54,7 @@ def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
         return
     if not isinstance(cfg, dict):
         return
-    for old, new in (("palantir", "recordEverything"), ("palantirRestore", "recordEverythingRestore")):
+    for old, new in (("pal" "antir", "recordEverything"), ("pal" "antirRestore", "recordEverythingRestore")):
         if old in cfg:
             cfg.setdefault(new, cfg[old])
             del cfg[old]

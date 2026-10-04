@@ -17,9 +17,9 @@ import InlineNote from './InlineNote'
 const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: RegExp }[] = [
   { value: 'doc', label: 'New note', hint: 'Creates a new note, searchable immediately' },
   { value: 'doc_append', label: 'Append to note', hint: 'Proposes an edit to an existing note; you accept it in Files' },
-  { value: 'document', label: 'Upload', hint: 'Adds the file to Files → Uploads' },
+  { value: 'document', label: 'Upload', hint: 'Adds the file to your uploads' },
   { value: 'todo', label: 'Todos', hint: 'One todo per checklist or list line' },
-  { value: 'artifact', label: 'Page', hint: 'Opens as a page under Files → Pages', only: /\.(html?|svg)$/i },
+  { value: 'artifact', label: 'Page', hint: 'Saves it as a page you can open from here', only: /\.(html?|svg)$/i },
   { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a Gmail draft, never sends. The file starts with To: and Subject: lines, then a blank line' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
@@ -31,7 +31,7 @@ function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; do
   const go: Record<string, [string, () => void] | undefined> = {
     doc: id ? ['open the note', () => void s().openDoc(id)] : undefined,
     doc_append: docId ? ['open the note', () => void s().openDoc(docId)] : undefined,
-    document: ['open Files', () => s().setView('docs')],
+    document: ['open uploads', () => s().openSettings('knowledge', 'documents')],
     todo: ['open Todos', () => s().setView('todos')],
     mail_draft: ['open Mail', () => s().setView('mail')],
     artifact: id ? ['open the page', () => setPage(true)] : undefined

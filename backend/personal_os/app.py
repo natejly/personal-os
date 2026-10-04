@@ -79,6 +79,7 @@ from . import permrules
 from . import shell as shell_tool
 from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
+from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
@@ -1996,6 +1997,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
+            hist = expand_commands(hist, command_store)  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
             return head + [dict(n) for n in run_notes]

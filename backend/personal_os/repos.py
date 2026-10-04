@@ -122,6 +122,10 @@ class Projects:
 DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
                          "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
+# A private chat neither reads nor writes what carries over to other chats. `private` is set only at
+# creation; _hydrate forces these off on every read, so no later PATCH can turn them back on.
+# Style banking needs no flag of its own: it is gated on the chat's autoLearn.
+PRIVATE_OFF = {"useMemory": False, "useGraph": False, "useStyle": False, "autoLearn": False}
 
 
 class Conversations:
@@ -150,7 +154,7 @@ class Conversations:
         """Conversations whose messages match `q`, best first, each with up to `per_conv` excerpts. Matched
         words are wrapped in \\x02 / \\x03. FTS (AND of the words, prefix on the last) for ASCII queries;
         a LIKE scan otherwise, because the tokenizer does not segment CJK. Trashed chats, superseded
-        replies, desk and job transcripts are left out, as `list` leaves them out.
+        replies, desk and job transcripts are left out, as `list` leaves them out, and so are private chats.
 
         A `project_id` other than ALL is the agent's recall (search_memory include_chats): that project's chats
         plus personal ones (None = personal only), minus `exclude_ids` and chats with memory off. Filtered in
@@ -168,7 +172,8 @@ class Conversations:
                 sargs = [*sargs, *ex]
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
                 "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL "
-                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')=''" + scope)
+                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
+                "AND COALESCE(json_extract(c.settings,'$.private'),0)=0" + scope)
         cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
                 "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted")
         rows: list[Any] = []
@@ -218,6 +223,8 @@ class Conversations:
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}
         d["settings"] = {**DEFAULT_CONV_SETTINGS, **(d.get("settings") or {})}
+        if d["settings"].get("private"):
+            d["settings"].update(PRIVATE_OFF)
         return d
 
     def get(self, id: str, with_messages: bool = True) -> dict[str, Any] | None:
@@ -256,13 +263,13 @@ class Conversations:
             if root in groups and m["id"] in groups[root]:
                 m["variants"] = groups[root]
 
-    def create(self, project_id: str | None, title: str, model: str) -> dict[str, Any]:
+    def create(self, project_id: str | None, title: str, model: str, private: bool = False) -> dict[str, Any]:
         cid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO conversations(id,project_id,title,model,settings,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (cid, project_id, title, model, "{}", t, t),
+                (cid, project_id, title, model, json.dumps({"private": True}) if private else "{}", t, t),
             )
         return self.get(cid)  # type: ignore[return-value]
 
@@ -278,7 +285,8 @@ class Conversations:
                 if not c.in_transaction:
                     c.execute("BEGIN IMMEDIATE")
                 cur = c.execute("SELECT settings FROM conversations WHERE id=?", (id,)).fetchone()
-                merged = {**json.loads(cur["settings"] if cur else "{}"), **patch["settings"]}
+                # `private` is fixed at creation: a PATCH can neither set nor clear it.
+                merged = {**json.loads(cur["settings"] if cur else "{}"), **{k: v for k, v in patch["settings"].items() if k != "private"}}
                 c.execute("UPDATE conversations SET settings=? WHERE id=?", (json.dumps(merged), id))
             # None of these touch updated_at: filing a chat is not activity in it.
             if "pinned" in patch:

@@ -1198,6 +1198,7 @@ class ConvIn(BaseModel):
     project_id: str | None = None
     title: str = "New chat"
     model: str | None = None
+    private: bool = False  # only settable here: memory, graph, voice and auto-learn stay off for the chat's life
 
 
 class ConvPatch(BaseModel):
@@ -1220,7 +1221,7 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
 
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
-    return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"])
+    return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"], private=body.private)
 
 
 @app.get("/conversations/search")
@@ -1404,6 +1405,8 @@ For anything larger or that the user will keep and revise (a calculator, a dashb
 Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
+# Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
+PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
 TOOLS_HINT = ("You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. "
               "After using tools, write the final answer for the user. " + FENCE_RULE)
 # Only added when todo_write is actually available in this chat (see _chat_stream).
@@ -1950,6 +1953,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         }
         use_tools = conv["settings"].get("useTools", True)
         modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
+        if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
+            modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from

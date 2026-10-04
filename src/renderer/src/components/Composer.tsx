@@ -3,7 +3,7 @@ import type { Command } from '@shared/types'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { composerSlash, slashMenuKey } from '../features/notes/slash'
-import { ArrowUp, Square, Paperclip, Loader2 } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, Loader2, EyeOff } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
@@ -60,6 +60,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
+  // Private is fixed when the chat is created, so it is a switch only on a draft and a label after.
+  const chatPrivate = useStore((s) => (activeId ? !!s.sessions[activeId]?.conversation.settings.private : s.draftPrivate))
+  const setChatSettings = useStore((s) => s.setChatSettings)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
@@ -338,6 +341,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       <div className="composer-footer">
         <PlanModeToggle conversationId={conversationId} />
         <SkipPermissionsToggle conversationId={conversationId} />
+        {!onSend && (activeId
+          ? chatPrivate && <span className="ghost-btn private-chat on" title="Nothing in this chat is remembered, learned from, or found by chat search"><EyeOff size={13} /> Private</span>
+          : <button className={`ghost-btn private-chat ${chatPrivate ? 'on' : ''}`} aria-pressed={chatPrivate}
+              title="Private: this chat reads no memories and teaches nothing, and chat search skips it. Fixed once the first message is sent."
+              onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
         {footer}
       </div>
     </div>

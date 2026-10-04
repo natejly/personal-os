@@ -939,3 +939,17 @@ test('learnedText counts updates and forgets as changes', () => {
   assert.equal(r.changed, true)
   assert.equal(r.text, 'Learned 0 memories, forgot 1, 0 entities, 0 relations')
 })
+
+test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.getState().newChat()
+  useStore.setState({ toasts: [], uploadTaintTarget: null })
+  await useStore.getState().setChatSettings({ private: true })
+  assert.equal(useStore.getState().draftPrivate, true)
+  const { calls } = stubFetch(t, () => json({ detail: 'down' }, 500))
+  assert.equal(await useStore.getState().send('hi'), false)
+  const create = calls.find((c) => c.method === 'POST' && c.path.endsWith('/conversations'))
+  assert.equal(create?.body.private, true)
+  useStore.getState().newChat()
+  assert.equal(useStore.getState().draftPrivate, false)
+})

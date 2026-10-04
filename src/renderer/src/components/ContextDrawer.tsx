@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine, Mic } from 'lucide-react'
+import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine, Mic } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import ShellJobs from './ShellJobs'
@@ -11,12 +11,12 @@ import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationS
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 
-function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
+function Toggle({ label, hint, value, onChange, icon, locked = false }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; locked?: boolean }): JSX.Element {
   return (
     <label className="toggle-row">
       <span className="toggle-icon">{icon}</span>
       <span className="toggle-text"><b>{label}</b><small>{hint}</small></span>
-      <input type="checkbox" aria-label={label} checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={label} checked={value} disabled={locked} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
   )
@@ -243,14 +243,15 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
-        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
-        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
+        {cs.private && <p className="private-banner"><EyeOff size={13} /> Private: nothing here is remembered</p>}
+        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} locked={!!cs.private} />
+        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} locked={!!cs.private} />
         <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
-        <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
+        <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} locked={!!cs.private} />
         <Toggle icon={<PenLine size={14} />} label="Always use my voice" hint="Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content" value={cs.draftMode === true} onChange={(v) => void setChatSettings({ draftMode: v }, conversationId)} />
         <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} locked={!!cs.private} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (

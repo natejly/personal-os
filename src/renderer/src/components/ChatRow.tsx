@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { MoreHorizontal, Trash2 } from 'lucide-react'
+import { EyeOff, MoreHorizontal, Trash2 } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useStore } from '../store'
@@ -78,6 +78,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         <span className="convo-title">
           <ChatPulse conversationId={conv.id} />
           {lead}
+          {conv.settings?.private && <EyeOff size={11} className="convo-private" aria-label="Private chat" />}
           {renaming ? (
             <input
               className="convo-rename"

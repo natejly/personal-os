@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import type { PermissionEvaluation, PermissionRules as Rules } from '@shared/types'
 import { api } from '../lib/api'
+import { TESTERS, testBody, type TesterTool } from '../lib/permTester'
 
 const KINDS: { key: keyof Rules; label: string; hint: string }[] = [
   { key: 'deny', label: 'Deny', hint: 'Refused before the tool runs. Beats ask and allow.' },
@@ -9,12 +10,14 @@ const KINDS: { key: keyof Rules; label: string; hint: string }[] = [
   { key: 'allow', label: 'Allow', hint: 'Runs without a card. Never lifts a forced approval.' }
 ]
 
-/** Allow / ask / deny lists of `Tool(pattern)` rules, with a box that says what they decide for a command. */
+/** Allow / ask / deny lists of `Tool(pattern)` rules, with a box that says what they decide for one call. */
 export default function PermissionRules({ value, onChange }: { value: Rules | undefined; onChange: (next: Rules) => void }): JSX.Element {
   const rules: Rules = { allow: value?.allow ?? [], ask: value?.ask ?? [], deny: value?.deny ?? [] }
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [bad, setBad] = useState<string | null>(null)
   const [cmd, setCmd] = useState('')
+  const [tool, setTool] = useState<TesterTool>('shell_run')
+  const tester = TESTERS.find((t) => t.tool === tool) ?? TESTERS[0]
   const [result, setResult] = useState<PermissionEvaluation | null>(null)
 
   const add = async (key: keyof Rules): Promise<void> => {
@@ -28,7 +31,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
   }
   const test = async (): Promise<void> => {
     if (!cmd.trim()) return
-    setResult(await api.evaluatePermission({ command: cmd }).catch(() => null))
+    setResult(await api.evaluatePermission(testBody(tool, cmd)).catch(() => null))
   }
 
   return (
@@ -57,9 +60,12 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
       ))}
       {bad && <p className="error small">{bad}</p>}
       <div className="perm-rule-test">
-        <b>Test a command</b>
+        <b>Test a call</b>
         <form className="perm-rule-add" onSubmit={(e) => { e.preventDefault(); void test() }}>
-          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="git status && rm -rf build" spellCheck={false} aria-label="Command to test" />
+          <select value={tool} onChange={(e) => { setTool(e.target.value as TesterTool); setResult(null) }} aria-label="Tool to test">
+            {TESTERS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
+          </select>
+          <input value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder={tester.placeholder} spellCheck={false} aria-label={`${tester.label}: ${tester.key} to test`} />
           <button type="submit" className="ghost-btn">Test</button>
         </form>
         {result && (
@@ -68,6 +74,7 @@ export default function PermissionRules({ value, onChange }: { value: Rules | un
             {result.hardline ? ' (never allowed)' : result.rule ? <> by <code>{result.rule}</code></> : null}
             {result.reason && !result.hardline ? ` - ${result.reason}` : ''}
             {result.action === 'none' && ' - the tool’s own setting decides.'}
+            {result.subjects.length > 0 && <><br /><small className="muted">Matched on {result.subjects.map((s) => <code key={s}>{s} </code>)}</small></>}
           </p>
         )}
         <small className="muted">The test reads the rules you have saved. Rules are conveniences; the sandbox is the boundary.</small>

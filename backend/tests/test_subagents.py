@@ -604,6 +604,37 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
+def test_tainted_child_external_ask_stays_forced() -> None:
+    """On a tainted child, an allow rule cannot lift the ask on an external tool: the card is still raised."""
+    root = tempfile.mkdtemp()
+    reset(workspaceRoots=[root], permissionRules={"allow": ["write_local_file"], "ask": [], "deny": []})
+    target = os.path.join(root, "note.txt")
+    try:
+        SCRIPTS["taintw"] = [{"text": "", "calls": [call("w1", "write_local_file", {"path": target, "content": "x"})]}, {"text": "done"}]
+        fr = FakeRun()
+        modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "ask"}
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None)
+        ctx["tainted"] = True
+
+        async def go() -> Any:
+            task = asyncio.create_task(appmod.toolbox.call("agent_spawn", {"task": "taintw", "role": "worker", "root": root}, ctx))
+            for _ in range(100):
+                if task.done() or any(k.endswith(":w1") for k in appmod._approvals):
+                    break
+                await asyncio.sleep(0.02)
+            for k in [k for k in appmod._approvals if k.endswith(":w1")]:
+                appmod.run_store.decide(k, "deny")
+                appmod._approvals[k].set_result("deny")
+            return await task
+
+        run(go())
+    finally:
+        appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(len(cards) == 1 and cards[0].get("forced") is True, "the tainted child's external write raised a forced card")
+    check(not os.path.exists(target), "declined, so nothing was written")
+
+
 def test_tainted_parent_taints_child_externals() -> None:
     reset()
     ctx = mkctx(new_conv())

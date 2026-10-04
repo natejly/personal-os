@@ -32,7 +32,7 @@ from typing import Any, Callable
 from . import compaction, llm, permrules
 from .db import new_id, now
 from .toolcalls import parse_arguments
-from .tools import ALTERNATIVE, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
+from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 from .working import escape_tags
 
 log = logging.getLogger(__name__)
@@ -788,6 +788,9 @@ class Subagents:
             if fs_ask and mode == "on":
                 mode = "ask"
             forced = mode != raw_mode or (mode == "ask" and self.toolbox.forces_ask(name, args))
+            # A stored 'on' for an external tool is capped to 'ask' upstream, so mode == raw_mode here; on a
+            # tainted child that ask must stay forced, or an allow rule or a session grant would lift it.
+            forced = forced or (mode == "ask" and spec.danger in ASK_LOCKED_DANGER and bool(ch.ctx.get("tainted")))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced

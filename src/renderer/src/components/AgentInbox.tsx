@@ -1,13 +1,14 @@
 /**
- * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals) and
- * "While you were away" (what the scheduled jobs did, late fires and failures included).
+ * The Agent Inbox on Today. Two tabs. "Inbox" has "Needs you" (pending approvals, proposals and the
+ * Cowork desks waiting on you) and "While you were away" (what the scheduled jobs did, late fires and
+ * failures included). "Scheduled" lists the scheduled tasks and the form to create one.
  *
  * Everything here is rendered from the backend's journal rows — agent_runs, run_events, approvals and
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
@@ -362,38 +363,53 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
   )
 }
 
+const ago = (ts: number): string => {
+  const s = Date.now() / 1000 - ts
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`
+}
+
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
   const { approveTool, refreshJobs, setJobEnabled } = useStore()
-  const [showJobs, setShowJobs] = useState(false)
+  const deskInbox = useStore((s) => s.deskInbox)
+  const { refreshDeskInbox, setView, openDesk, markDeskEventSeen } = useStore()
+  const [tab, setTab] = useState<'inbox' | 'scheduled'>('inbox')
   const [adding, setAdding] = useState(false)
+
+  useEffect(() => { void refreshDeskInbox() }, [refreshDeskInbox])
+  useEffect(() => { if (tab === 'scheduled') void refreshJobs() }, [tab, refreshJobs])
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
   const paused = box.needs_you.paused_jobs ?? []
   const away = box.while_you_were_away
-  const quiet = box.counts.needs_you === 0 && away.length === 0
+  // A desk waiting on an approval is already a row above with Allow/Deny, so its desk event is dropped.
+  const approvalRuns = new Set(approvals.map((a) => a.run_id).filter(Boolean))
+  const desks = deskInbox.filter((e) => !(e.run_id && approvalRuns.has(e.run_id)))
+  const needs = box.counts.needs_you + desks.length
+  const quiet = needs === 0 && away.length === 0
 
-  const toggleJobs = (): void => {
-    setShowJobs((v) => !v)
-    if (!showJobs) void refreshJobs()
-    else setAdding(false)
+  const openDeskRow = (eventId: string, deskId: string): void => {
+    void markDeskEventSeen(eventId)
+    setView('cowork')
+    void openDesk(deskId)
   }
 
   return (
     <section className="agent-inbox">
       <header>
         <Inbox size={14} /> Agent inbox
-        {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
+        {needs > 0 && <span className="chip">{needs} need you</span>}
         <span style={{ flex: 1 }} />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
-        <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled tasks" aria-label="Scheduled tasks" onClick={toggleJobs}>
-          <Clock size={13} />
-        </button>
+        <div className="seg">
+          <button className={tab === 'inbox' ? 'on' : ''} onClick={() => setTab('inbox')}>Inbox</button>
+          <button className={tab === 'scheduled' ? 'on' : ''} onClick={() => setTab('scheduled')}>Scheduled</button>
+        </div>
       </header>
 
-      {showJobs && (
+      {tab === 'scheduled' && (
         <div className="inbox-jobs">
           <h5>
             Scheduled tasks <span className="muted small">{box.scheduler.timezone}</span>
@@ -409,9 +425,9 @@ export default function AgentInbox(): JSX.Element | null {
         </div>
       )}
 
-      {quiet && <p className="muted">Nothing waiting, nothing ran.</p>}
+      {tab === 'inbox' && quiet && <p className="muted">Nothing waiting, nothing ran.</p>}
 
-      {box.counts.needs_you > 0 && (
+      {tab === 'inbox' && needs > 0 && (
         <div className="inbox-group">
           <h5>Needs you</h5>
           <ul className="inbox-list">
@@ -443,11 +459,20 @@ export default function AgentInbox(): JSX.Element | null {
               </li>
             ))}
             {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}
+            {desks.map((e) => (
+              <li className="inbox-item" key={e.id} role="button" tabIndex={0} onClick={() => openDeskRow(e.id, e.desk_id)}
+                onKeyDown={(k) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); openDeskRow(e.id, e.desk_id) } }}>
+                <div className="inbox-item-head">
+                  <Users size={12} /> <span className="inbox-job">{e.desk_title || 'Desk'}</span>
+                  <span className="muted small">{e.body || e.kind} · {ago(e.created_at)}</span>
+                </div>
+              </li>
+            ))}
           </ul>
         </div>
       )}
 
-      {away.length > 0 && (
+      {tab === 'inbox' && away.length > 0 && (
         <div className="inbox-group">
           <h5>While you were away <span className="muted small">
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}

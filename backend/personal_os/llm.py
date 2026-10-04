@@ -118,7 +118,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
-    "homeWidgets": {"cowork": False, "meetings": False},
+    "homeWidgets": {"meetings": False},
     "hiddenViews": ["cowork", "meetings", "activity"],
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 4,

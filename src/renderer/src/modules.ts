@@ -26,7 +26,6 @@ function viewRow(view: View): { view: View; label: string } {
 
 export const HOME_MODULES: HomeModule[] = [
   { key: 'agent', label: 'Agent inbox' },
-  { key: 'cowork', label: 'Cowork desks' },
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
   homeRow('todos'),

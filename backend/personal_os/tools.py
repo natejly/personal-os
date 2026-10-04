@@ -204,7 +204,7 @@ ALTERNATIVE = {
     "open_page": "fetch_url, which reads the page without running its scripts",
     "propose_plan": "make the calls one at a time; each consequential one asks the user on its own",
     "schedule_task": "todo_add with a due date, so the user is reminded and decides when to act",
-    "cancel_scheduled_task": "scheduled_tasks, then tell the user which one to switch off in the Agent inbox",
+    "cancel_scheduled_task": "scheduled_tasks, then tell the user which one to switch off in the Scheduled tab of the Agent inbox",
     "scheduled_tasks": "ask the user what they have scheduled",
     "meeting_list": "ask the user which meeting they mean",
     "meeting_search": "meeting_list for the recent meetings, then meeting_read the likely one",
@@ -1243,7 +1243,7 @@ class Toolbox:
             "todo_add instead — this schedules the assistant, not the person. One-off: `when` as an ISO-8601 local "
             "date and time (call current_time first if you are unsure of today's date), or `in_minutes`. "
             "Repeating: `cron`, five fields.",
-            _obj({"name": {"type": "string", "description": "Short label, shown in the Agent inbox"},
+            _obj({"name": {"type": "string", "description": "Short label, shown in the Agent inbox's Scheduled tab"},
                   "prompt": {"type": "string", "description": "The self-contained instruction to run later"},
                   "when": {"type": "string", "description": "One-off: ISO-8601 local date and time, e.g. 2026-10-01T15:00"},
                   "in_minutes": {"type": "integer", "description": "One-off, relative: run this many minutes from now"},
@@ -1276,7 +1276,7 @@ class Toolbox:
                             "back on or remove it."}
         R("cancel_scheduled_task", ToolSpec("cancel_scheduled_task",
             "Switch off a scheduled task so it stops running. It is kept, not deleted — the user can re-enable or "
-            "remove it in the Agent inbox. Ids come from scheduled_tasks.",
+            "remove it in the Scheduled tab of the Agent inbox. Ids come from scheduled_tasks.",
             _obj({"id": {"type": "string"}}, ["id"]), cancel_scheduled_task, "schedule", "schedules",
             examples=[{"id": "job_8f21ac"}]))
 

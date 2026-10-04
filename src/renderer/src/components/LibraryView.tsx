@@ -8,7 +8,6 @@ import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
 import { AgentsPanel, CommandsPanel } from './DefsPanels'
 import AppSwitcher from './AppSwitcher'
-import ArtifactsView from './ArtifactsView'
 import ArtifactViewer from './ArtifactViewer'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
@@ -17,11 +16,10 @@ const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }
   { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Agent roles you write; they cannot be spawned until you approve them' },
   { key: 'commands', label: 'Commands', icon: <Terminal size={14} />, blurb: 'Saved prompts you reuse, e.g. "summarise this thread for my manager"' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' },
-  { key: 'artifacts', label: 'Artifacts', icon: <Package size={14} />, blurb: 'Interactive pages the assistant built, with version history' },
-  { key: 'made', label: 'Made', icon: <BookOpen size={14} />, blurb: 'Everything built in this app, in one place' }
+  { key: 'artifacts', label: 'Artifacts', icon: <Package size={14} />, blurb: 'Everything built in this app: docs, pages, dashboards and boards' }
 ]
 
-/** One row of the Made tab: anything with a name, a kind and a view that can open it. */
+/** One row of the Artifacts tab: anything with a name, a kind and a view that can open it. */
 interface Made {
   id: string
   kind: 'doc' | 'dashboard' | 'artifact'
@@ -34,13 +32,14 @@ const KIND_ICON: Record<Made['kind'], JSX.Element> = {
   doc: <FileText size={14} />, artifact: <Package size={14} />, dashboard: <LayoutDashboard size={14} />
 }
 
-function MadePanel(): JSX.Element {
+function ArtifactsPanel(): JSX.Element {
   const docs = useStore((s) => s.docs)
   const { setView, openDoc } = useStore()
   const [extra, setExtra] = useState<Made[]>([])
   const [kind, setKind] = useState<'all' | Made['kind']>('all')
   const [q, setQ] = useState('')
   const [viewing, setViewing] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   // Dashboards live in their own view, so the Library fetches them rather than holding them.
   useEffect(() => {
@@ -54,7 +53,7 @@ function MadePanel(): JSX.Element {
         ])
       })
     return () => { live = false }
-  }, [])
+  }, [reload])
 
   const rows: Made[] = [
     ...docs.map((d) => ({ id: d.id, kind: 'doc' as const, name: d.title || 'Untitled', meta: d.folder || 'doc', at: d.updated_at ?? 0 })),
@@ -92,7 +91,7 @@ function MadePanel(): JSX.Element {
           ))}
         </div>
       )}
-      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} />}
+      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} onDeleted={() => { setViewing(null); setReload((n) => n + 1) }} />}
     </div>
   )
 }
@@ -130,8 +129,7 @@ export default function LibraryView(): JSX.Element {
         {tab === 'agents' && <AgentsPanel />}
         {tab === 'commands' && <CommandsPanel />}
         {tab === 'connectors' && <div className="library-panel"><McpSettings /></div>}
-        {tab === 'artifacts' && <ArtifactsView />}
-        {tab === 'made' && <MadePanel />}
+        {tab === 'artifacts' && <ArtifactsPanel />}
       </div>
     </main>
   )

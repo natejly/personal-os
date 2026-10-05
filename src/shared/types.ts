@@ -681,6 +681,9 @@ export interface ConversationSettings {
   job_id?: string
   /** Set when this conversation is a desk's transcript. Desk and job transcripts cannot be branched. */
   deskId?: string
+  /** A folder the user bound this chat to (the Folder control under the composer): granted to the shell, file and
+   *  coding-agent tools for this chat's runs, first in the root list. "" or absent means none. */
+  workingFolder?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
 }
@@ -1628,6 +1631,8 @@ export interface GrainApi {
     chooseExportPath: () => Promise<string | null>
     /** Native open dialog for files to hand a desk as inputs; [] when cancelled. */
     chooseInputFiles: () => Promise<string[]>
+    /** One folder from the system dialog, or null when cancelled. */
+    chooseFolder: () => Promise<string | null>
     reveal: (path: string) => Promise<boolean>
     relaunch: () => Promise<void>
   }

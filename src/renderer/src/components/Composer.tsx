@@ -6,6 +6,7 @@ import { composerSlash, slashMenuKey } from '../features/notes/slash'
 import { ArrowUp, Square, Paperclip, Loader2, EyeOff } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
+import WorkingFolder from './WorkingFolder'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
 import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
@@ -355,6 +356,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <>
             <SkipPermissionsToggle conversationId={conversationId} />
             <PlanModeToggle conversationId={conversationId} />
+            <WorkingFolder conversationId={conversationId} />
           </>
         )}
       </div>

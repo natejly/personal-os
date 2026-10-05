@@ -151,7 +151,7 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
-const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file|desk_import_sandbox)$/
+const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|opencode_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file|desk_import_sandbox)$/
 
 /** "Files changed (n) · Undo" under a reply that changed files in a granted folder. Undo and Redo are the user's clicks. */
 function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null {

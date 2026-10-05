@@ -49,7 +49,7 @@ SKIP_ITEMS_REPORTED = 20
 FILE_TOOLS = frozenset({"write_local_file", "move_local_file", "trash_local_file", "fs_edit", "fs_copy", "fs_mkdir"})
 # run_python and desk_fetch_file can write the workspace too (run_python only inside a desk: roots_for_call needs a desk id).
 DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "desk_import_sandbox", "run_python", "desk_fetch_file", "sandbox_export_file"})
-SHELL_TOOLS = frozenset({"shell_run"})
+SHELL_TOOLS = frozenset({"shell_run", "opencode_run"})
 PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 
 READ_ONLY_COMMANDS = frozenset({
@@ -156,10 +156,11 @@ class Snapshots:
     def enabled(self) -> bool:
         return bool(self.settings().get("snapshotsEnabled", True)) and available()
 
-    def roots(self, desk_id: str | None = None) -> list[Path]:
-        """Granted roots that exist, plus the desk's workspace. Nothing else is ever snapshotted."""
+    def roots(self, desk_id: str | None = None, settings: dict[str, Any] | None = None) -> list[Path]:
+        """Granted roots that exist, plus the desk's workspace. Nothing else is ever snapshotted. `settings` is the
+        run's own when it has one (a chat bound to a working folder lists it there)."""
         out: list[Path] = []
-        for r in self.settings().get("workspaceRoots", []) or []:
+        for r in (settings or self.settings()).get("workspaceRoots", []) or []:
             try:
                 p = Path(str(r)).expanduser().resolve()
             except (OSError, RuntimeError):
@@ -175,15 +176,16 @@ class Snapshots:
                 pass
         return out
 
-    def roots_for_call(self, name: str, args: dict[str, Any], desk_id: str | None) -> list[Path]:
+    def roots_for_call(self, name: str, args: dict[str, Any], desk_id: str | None,
+                       settings: dict[str, Any] | None = None) -> list[Path]:
         """Which roots a call can touch. File tools: the roots containing their path arguments. Desk tools:
         the desk workspace. A shell command that is not read-only: its cwd's root, else every root."""
         if name in DESK_TOOLS:
-            return self.roots(desk_id)[-1:] if desk_id and self.desk_root_fn else []
+            return self.roots(desk_id, settings)[-1:] if desk_id and self.desk_root_fn else []
         if name in SHELL_TOOLS:
             if read_only_shell(str(args.get("command") or args.get("cmd") or "")):
                 return []
-            allr = self.roots(desk_id)
+            allr = self.roots(desk_id, settings)
             cwd = args.get("cwd")
             if cwd:
                 hit = self._containing(allr, str(cwd))
@@ -191,7 +193,7 @@ class Snapshots:
                     return hit
             return allr
         if name in FILE_TOOLS:
-            allr = self.roots(desk_id)
+            allr = self.roots(desk_id, settings)
             hits: list[Path] = []
             for k in PATH_KEYS:
                 v = args.get(k)
@@ -210,9 +212,9 @@ class Snapshots:
             return []
         return [r for r in roots if p == r or r in p.parents]
 
-    def wants(self, name: str, args: dict[str, Any], desk_id: str | None) -> bool:
+    def wants(self, name: str, args: dict[str, Any], desk_id: str | None, settings: dict[str, Any] | None = None) -> bool:
         return (name in FILE_TOOLS or name in DESK_TOOLS or name in SHELL_TOOLS) and self.enabled() \
-            and bool(self.roots_for_call(name, args, desk_id))
+            and bool(self.roots_for_call(name, args, desk_id, settings))
 
     # ---- tracking ----
     def _walk(self, root: Path) -> tuple[list[str], list[str] | None]:

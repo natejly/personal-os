@@ -57,7 +57,7 @@ CHILD_BLOCK = frozenset({
 # which are external only because they act on the user's disk, and which are confined to a root.
 CHILD_DANGER_BLOCK = ("plan", "schedules", "external")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
-SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill")
+SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side

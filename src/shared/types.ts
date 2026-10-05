@@ -1373,6 +1373,8 @@ export interface Settings {
   deskNotify?: boolean
   /** A system notification when a reply finishes, fails or needs approval in a chat that is not in front of you. */
   chatNotify?: boolean
+  /** Spaces: a chat window shows the chat's face instead of the transcript until switched. Off by default. */
+  compactChats?: boolean
   /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
   notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */

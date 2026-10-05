@@ -113,8 +113,10 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
-  // Blob view: the window shows only this chat's creature, posed by this chat's own state.
-  const blob = win.config.blob === true
+  // Blob view: the window shows only this chat's creature, posed by this chat's own state. A window
+  // that has never chosen follows Settings › Behavior › Compact chats; the head's button overrides it.
+  const compactOn = useStore((s) => !!s.settings.compactChats)
+  const blob = typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
   const mood = useStore((s) => sessionMood(s.sessions[convId]))
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
@@ -283,7 +285,6 @@ export const def: WidgetDef = {
   chrome: 'full',
   statusful: true,
   needsRef: true,
-  defaultConfig: { blob: false },
   accepts: ACCEPTS,
   Component: ChatWidget
 }

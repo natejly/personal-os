@@ -12,7 +12,10 @@ Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
 `artifact` or `face` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
-each with a status ring. Sticky notes and the Web browser exist only here.
+each with a status ring. A chat window can also show only its own face: the face button in its head
+switches between the transcript and the creature (click the creature to come back), and
+Settings › Behavior › **Compact chats in Spaces** makes the face the default for windows that have
+not chosen. Sticky notes and the Web browser exist only here.
 
 Windows move, resize, minimize and maximize. The Spaces bar holds the space tabs (drag to reorder),
 the add-widget button, **Tidy up** (⌃⌘T), the snapping picker and the lock. Snapping is per space:

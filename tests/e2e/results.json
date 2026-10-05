@@ -2,14 +2,16 @@
   "config": {
     "argv": [
       "/Users/natejly/.nvm/versions/node/v20.16.0/bin/node",
-      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/node_modules/.bin/playwright",
+      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e/node_modules/.bin/playwright",
       "test",
       "-c",
       "playwright.config.mjs",
-      "smoke"
+      "shell-panels",
+      "-g",
+      "theme"
     ],
-    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/playwright.config.mjs",
-    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e/playwright.config.mjs",
+    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": true,
@@ -25,7 +27,7 @@
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/out/e2e",
+        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/out/e2e",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
@@ -33,7 +35,7 @@
         },
         "id": "",
         "name": "",
-        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e",
         "testIgnore": [],
         "testMatch": [
           "/.*\\.spec\\.mjs/"
@@ -68,13 +70,13 @@
   },
   "suites": [
     {
-      "title": "smoke.spec.mjs",
-      "file": "smoke.spec.mjs",
+      "title": "shell-panels.spec.mjs",
+      "file": "shell-panels.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "app boots, a chat round-trips through the provider",
+          "title": "theme: Settings switches light/dark/system; system follows prefers-color-scheme",
           "ok": true,
           "tags": [],
           "tests": [
@@ -89,12 +91,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4292,
+                  "duration": 23550,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T03:26:47.549Z",
+                  "startTime": "2026-10-05T05:00:04.186Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -102,9 +104,9 @@
               "status": "expected"
             }
           ],
-          "id": "c3460f1d697aa8671d63-277f9579f120ad1c183c",
-          "file": "smoke.spec.mjs",
-          "line": 3,
+          "id": "84ca3fbf9ff554d8dda0-8d240d9d34bc6ee1587a",
+          "file": "shell-panels.spec.mjs",
+          "line": 193,
           "column": 1
         }
       ]
@@ -112,8 +114,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T03:26:47.111Z",
-    "duration": 4779.176,
+    "startTime": "2026-10-05T05:00:00.229Z",
+    "duration": 27907.188000000002,
     "expected": 1,
     "skipped": 0,
     "unexpected": 0,

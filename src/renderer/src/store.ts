@@ -1033,6 +1033,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')
+      else if (action.startsWith('open-chat:')) void s.selectChat(action.slice(10))
       else if (action.startsWith('desk:')) { s.setView('cowork'); void s.openDesk(action.slice(5)) }
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
@@ -1750,7 +1751,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],

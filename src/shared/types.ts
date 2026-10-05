@@ -1251,6 +1251,8 @@ export interface Settings {
   gatherShortcut: string
   /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
   quickCaptureShortcut?: string
+  /** Electron accelerator for the global quick-ask bar (a one-line prompt that starts a new chat). */
+  quickAskShortcut?: string
   /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
   dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
@@ -1608,6 +1610,8 @@ export interface GrainApi {
     setGather: (accelerator: string) => Promise<ShortcutState>
     capture: () => Promise<ShortcutState>
     setCapture: (accelerator: string) => Promise<ShortcutState>
+    ask: () => Promise<ShortcutState>
+    setAsk: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
   }
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
@@ -1621,6 +1625,12 @@ export interface GrainApi {
     relaunch: () => Promise<void>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
+  /** The quick-ask bar's own window only: clipboard text, grow to content height, show a chat in the main window. */
+  quickAsk: {
+    clipboard: () => Promise<string>
+    resize: (height: number) => Promise<void>
+    openChat: (conversationId: string) => Promise<void>
+  }
   closeSelf: () => void
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
@@ -2314,7 +2324,7 @@ export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bo
 
 export interface GatherState { gathered: boolean; popped: string[] }
 
-export interface ShortcutState { accelerator: string; ok: boolean; message: string | null; which?: 'gather' | 'capture' }
+export interface ShortcutState { accelerator: string; ok: boolean; message: string | null; which?: 'gather' | 'capture' | 'ask' }
 
 export type BusKind = 'window-bounds' | 'window-state' | 'window-config' | 'chat-status' | 'todo-changed' | 'note-changed' | 'canvas-invalidate'
 

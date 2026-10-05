@@ -7,7 +7,8 @@
  */
 import { app, Menu, nativeImage, Tray } from 'electron'
 import { gather, gatherState, listPopouts, OPACITY_LEVELS, popoutsInFront, scatter, syncPopoutOpacity, syncPopoutPinned, toggleFront } from './popouts'
-import { gatherShortcut } from './shortcuts'
+import { toggleAsk } from './quickAsk'
+import { askShortcut, gatherShortcut } from './shortcuts'
 
 const ICON_1X =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAxklEQVR4nL2TMQrCQBREX2IEQbG1Fls7PYDWeg0LL2DllQQbwXtYewMJ2KqJ8mEWlrjRrIUDyyT798/Mh134ExKtaKRavlBUs8MA6BKBlngMHIEcOAOjgPgbXHEOXIEnUIo3qmVUP7xmOzgE9kAfeGjPUnVoGH2npru4EM8q54LRbc6bmkolMD4B7U/zZ+K15154KRYh9zQg1BMXqpvwFjjo3/aDSMUTb+YLsAo51yERT4GlLlBd0q8iDo2cqzBHa/zpAUXhBfxFJIMms99SAAAAAElFTkSuQmCC'
@@ -31,6 +32,7 @@ const menu = (open: () => void): Menu => {
   return Menu.buildFromTemplate([
     // A tray menu's accelerator is a label, not a registration: it tells the user what the key is.
     { label: 'Gather Widgets', accelerator: shortcut.ok ? shortcut.accelerator : undefined, click: () => void gather() },
+    { label: 'Quick ask', accelerator: askShortcut().ok ? askShortcut().accelerator : undefined, click: toggleAsk },
     { label: 'Scatter', enabled: gatherState().gathered, click: () => void scatter() },
     {
       label: 'Bring Pop-outs to Front',

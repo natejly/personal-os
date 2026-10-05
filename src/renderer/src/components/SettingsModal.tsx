@@ -152,6 +152,7 @@ export default function SettingsModal(): JSX.Element {
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [capShortcut, setCapShortcut] = useState<ShortcutState | null>(null)
+  const [askShortcut, setAskShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => {
     const t = useStore.getState().settingsTab
     return TABS.some((x) => x.id === t) ? t : 'provider'
@@ -226,7 +227,8 @@ export default function SettingsModal(): JSX.Element {
   useEffect(() => {
     void window.os.shortcuts.gather().then(setShortcut).catch(() => undefined)
     void window.os.shortcuts.capture().then(setCapShortcut).catch(() => undefined)
-    return window.os.shortcuts.onFailure((s) => (s.which === 'capture' ? setCapShortcut : setShortcut)(s))
+    void window.os.shortcuts.ask().then(setAskShortcut).catch(() => undefined)
+    return window.os.shortcuts.onFailure((s) => (s.which === 'ask' ? setAskShortcut : s.which === 'capture' ? setCapShortcut : setShortcut)(s))
   }, [])
 
   // In a narrow window the tabs are a horizontal strip; keep the selected one on screen.
@@ -269,12 +271,16 @@ export default function SettingsModal(): JSX.Element {
       const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
       if (capApplied) setCapShortcut(capApplied)
       if (capApplied && !capApplied.ok) return setTab('behavior')
+      const askAccel = (draft.quickAskShortcut ?? '').trim()
+      const askApplied = askAccel === (settings.quickAskShortcut ?? '').trim() ? null : await window.os.shortcuts.setAsk(askAccel)
+      if (askApplied) setAskShortcut(askApplied)
+      if (askApplied && !askApplied.ok) return setTab('behavior')
       // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
       const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
         ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
       // A cleared context field goes back to the default; out-of-range numbers are refused by the backend (422, toasted).
       const next: Settings = { ...draft, maxToolRounds: rounds,
-        contextWindow: draft.contextWindow ?? CONTEXT_DEFAULTS.contextWindow, compactKeepRecent: draft.compactKeepRecent ?? CONTEXT_DEFAULTS.compactKeepRecent, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+        contextWindow: draft.contextWindow ?? CONTEXT_DEFAULTS.contextWindow, compactKeepRecent: draft.compactKeepRecent ?? CONTEXT_DEFAULTS.compactKeepRecent, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut, quickAskShortcut: askApplied?.accelerator ?? draft.quickAskShortcut }
       // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
       const changed = changedFields(next)
       try {
@@ -672,6 +678,9 @@ export default function SettingsModal(): JSX.Element {
               {capShortcut && !capShortcut.ok && (
                 <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`} Change it under Advanced below.</p>
               )}
+              {askShortcut && !askShortcut.ok && (
+                <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`} Change it under Advanced below.</p>
+              )}
               <label><span className="toggle-text"><b>Dictation chord</b><small>In a file: hold to dictate, tap to latch.</small></span>
                 <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
                   placeholder="Control+Alt+D" spellCheck={false} />
@@ -689,6 +698,10 @@ export default function SettingsModal(): JSX.Element {
                 <label><span className="toggle-text"><b>Quick capture shortcut</b><small>Works anywhere on your Mac: opens a small window that adds a line to today's note.</small></span>
                   <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
                     placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
+                </label>
+                <label><span className="toggle-text"><b>Quick ask shortcut</b><small>Works anywhere on your Mac: opens a small bar that starts a new chat from one line.</small></span>
+                  <input value={draft.quickAskShortcut ?? ''} onChange={(e) => patch({ quickAskShortcut: e.target.value })}
+                    placeholder="Alt+Space" spellCheck={false} />
                 </label>
               </details>
             </section>}

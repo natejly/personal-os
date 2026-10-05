@@ -10,6 +10,7 @@ import { guardNavigation } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
 import { startPageBridge, stopPageBridge } from './pagefetch'
+import { registerQuickAsk, toggleAsk } from './quickAsk'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
@@ -101,15 +102,15 @@ function nudgeScheduler(): void {
 }
 
 /** The stored accelerators, so a gather or capture shortcut the user chose is still registered after a relaunch. */
-async function storedShortcuts(): Promise<{ gather?: string; capture?: string }> {
+async function storedShortcuts(): Promise<{ gather?: string; capture?: string; ask?: string }> {
   const base = backendUrl()
   if (!base) return {}
   try {
     const token = backendToken()
     const r = await fetch(`${base}/settings`, { headers: token ? { 'X-Personal-OS-Token': token } : {} })
     if (!r.ok) return {}
-    const s = (await r.json()) as { gatherShortcut?: string; quickCaptureShortcut?: string }
-    return { gather: s.gatherShortcut?.trim() || undefined, capture: s.quickCaptureShortcut?.trim() || undefined }
+    const s = (await r.json()) as { gatherShortcut?: string; quickCaptureShortcut?: string; quickAskShortcut?: string }
+    return { gather: s.gatherShortcut?.trim() || undefined, capture: s.quickCaptureShortcut?.trim() || undefined, ask: s.quickAskShortcut?.trim() || undefined }
   } catch {
     return {}
   }
@@ -297,6 +298,8 @@ function buildMenu(): void {
         },
         { type: 'separator' },
         { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() },
+        // No accelerator: the global one is the user's to choose (Settings), and a menu key would shadow it in-app.
+        { label: 'Quick Ask', click: toggleAsk },
         {
           id: 'popouts-front',
           label: 'Bring Pop-outs to Front',
@@ -370,6 +373,7 @@ if (gotLock) app.whenReady().then(async () => {
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
+  registerQuickAsk((id) => { showMain(); sendMenu(`open-chat:${id}`) })
   registerBus()
   buildMenu()
   setFrontListener((on) => {
@@ -385,7 +389,7 @@ if (gotLock) app.whenReady().then(async () => {
   await startPageBridge() // open_page's offscreen loader; registers itself with the backend
   // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
   const stored = await storedShortcuts()
-  registerShortcuts(() => win, stored.gather, stored.capture)
+  registerShortcuts(() => win, stored.gather, stored.capture, stored.ask)
   createWindow()
   void restorePopouts()
   startUpdater()

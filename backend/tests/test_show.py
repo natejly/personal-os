@@ -100,3 +100,10 @@ def test_local_raw_serves_a_home_file_with_its_type_and_html_as_text(home: Path,
 
 def test_local_raw_needs_the_app_token() -> None:
     assert TestClient(appmod.app).get("/local/raw", params={"path": "~/Documents/a.pdf"}).status_code == 401
+
+
+def test_pane_rides_on_the_payload_and_a_bad_value_is_a_tool_error() -> None:
+    assert _show(kind="markdown", content="# a", pane="right")["show"]["pane"] == "right"
+    assert "pane" not in _show(kind="markdown", content="# a")["show"]
+    bad = _show(kind="markdown", content="# a", pane="middle")
+    assert bad["error"].startswith("show: pane must be")

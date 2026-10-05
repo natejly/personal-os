@@ -22,6 +22,8 @@ import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
+import * as panes from './lib/panelPanes'
+import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 
@@ -212,9 +214,15 @@ export interface State {
   contextOpen: boolean
   contextTab: ContextTab
   /** The side panel beside each chat (the `show` tool, or "Open in panel" on a fenced block), by conversation id. */
-  shows: Record<string, ShowItem>
+  shows: Record<string, PanelState>
+  /** `item.pane` picks the pane of a split panel. */
   openShow: (conversationId: string, item: ShowItem) => void
+  /** Closes the whole panel. */
   closeShow: (conversationId: string) => void
+  splitShow: (conversationId: string) => void
+  pickShow: (conversationId: string, pane: Pane, id: number) => void
+  /** Closes one pane of a split; the only pane closes the panel. */
+  closeShowPane: (conversationId: string, pane: Pane) => void
   /**
    * The page agent (⌘I): a chat pinned to whatever view is on screen. `pageContext` is republished
    * by the active view on every change; `pageAgentId` is the thread, created on the first send.
@@ -1985,7 +1993,15 @@ export const useStore = create<State>((set, get) => {
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
-    openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: item } })),
+    openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: panes.open(s.shows[conversationId], item, Date.now(), item.pane) } })),
+    splitShow: (conversationId) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.split(s.shows[conversationId]) } } : s)),
+    pickShow: (conversationId, pane, id) => set((s) => (s.shows[conversationId] ? { shows: { ...s.shows, [conversationId]: panes.pick(s.shows[conversationId], pane, id) } } : s)),
+    closeShowPane: (conversationId, pane) => {
+      const cur = get().shows[conversationId]
+      const next = cur && panes.closePane(cur, pane)
+      if (next) set((s) => ({ shows: { ...s.shows, [conversationId]: next } }))
+      else get().closeShow(conversationId)
+    },
     closeShow: (conversationId) => set((s) => {
       if (!(conversationId in s.shows)) return s
       const { [conversationId]: _gone, ...shows } = s.shows

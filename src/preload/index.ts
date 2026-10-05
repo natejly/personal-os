@@ -47,6 +47,7 @@ const api: GrainApi = {
     chooseInputFiles: () => ipcRenderer.invoke('data:choose-input-files'),
     chooseFolder: () => ipcRenderer.invoke('data:choose-folder'),
     reveal: (path: string) => ipcRenderer.invoke('data:reveal', path),
+    fileAction: (path: string, action: 'reveal' | 'open') => ipcRenderer.invoke('data:file-action', path, action),
     relaunch: () => ipcRenderer.invoke('data:relaunch')
   },
   closeSelf: () => ipcRenderer.send('window:close-self'),

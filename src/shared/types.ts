@@ -203,6 +203,8 @@ export interface ShowItem {
   name?: string
   mime?: string
   size?: number
+  /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */
+  pane?: 'left' | 'right'
 }
 
 export interface ToolImage {
@@ -1616,6 +1618,8 @@ export interface GrainApi {
     /** One folder from the system dialog, or null when cancelled. */
     chooseFolder: () => Promise<string | null>
     reveal: (path: string) => Promise<boolean>
+    /** A file the side panel shows: select it in Finder, or open it in its default app (only types that cannot run). */
+    fileAction: (path: string, action: 'reveal' | 'open') => Promise<boolean>
     relaunch: () => Promise<void>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */

@@ -1285,6 +1285,8 @@ export interface Settings {
   skipPermissions?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
+  /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */
+  devTools?: boolean
   otelExport?: OtelExportConfig
   /** Context management (compaction.py): window in tokens, thresholds as fractions of it. */
   contextWindow?: number

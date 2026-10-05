@@ -29,10 +29,6 @@ export default function SandboxSettings({ draft, patch }: { draft: Settings; pat
           : `Unavailable, so the sandbox tools are hidden: ${st.reason}. Install a container runtime (for example colima with the docker CLI) and start it.`}
         {' '}<button className="link small" onClick={load}>Check again</button>
       </p>
-      <label className="toggle-row plain">
-        <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
-        <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
-      </label>
       <label><span>Network in new sandboxes <small className="muted">(applies to containers created or restored after saving)</small></span>
         <select value={sandboxNetMode(draft.sandboxNetwork)} onChange={(e) => patch({ sandboxNetwork: e.target.value as SandboxNetMode })}>
           <option value="off">Off</option>

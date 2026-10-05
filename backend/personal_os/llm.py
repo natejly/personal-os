@@ -132,6 +132,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
     # user message, so the provider's prefix cache survives (context.layout_messages).
     "cacheLayout": True,
+    # Show traces, the context preview, the full system prompt and OTLP export in the UI. Traces are recorded either way.
+    "devTools": False,
     # Context management (compaction.py). Window and thresholds are estimates (len//4), not provider counts.
     "contextWindow": 128000,
     "autoCompact": True,

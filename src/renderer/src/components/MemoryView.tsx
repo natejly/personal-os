@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import type { Memory, MemoryProposal } from '@shared/types'
@@ -100,7 +100,9 @@ function HistoryRow({ m, byId, onRestore }: { m: Memory; byId: Map<string, Memor
  * header of its own.
  */
 export default function MemoryView({ projectId, query = '' }: { projectId?: string; query?: string }): JSX.Element {
-  const memories = useStore((s) => s.memories)
+  const allMemories = useStore((s) => s.memories)
+  const focus = useStore((s) => s.memoryFocus)
+  const memories = useMemo(() => (focus ? allMemories.filter((m) => focus.includes(m.id)) : allMemories), [focus, allMemories])
   const libraryScope = useStore((s) => s.libraryScope)
   const { refreshMemories, addMemory } = useStore()
   const scope: Scope = projectId ?? libraryScope
@@ -197,6 +199,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
         <button className="ghost-btn sm" onClick={() => void exportMemories()} title="Save the memories in this scope to a JSON file"><Download size={13} /> Export</button>
         <button className="ghost-btn sm" onClick={() => void importMemories()} title={`Add memories from an exported JSON file${targetProject ? ' to this project' : ' to your personal memories'}`}><Upload size={13} /> Import</button>
       </div>
+      {focus && <p className="muted small">Showing the {focus.length} memor{focus.length === 1 ? 'y' : 'ies'} from one reply. <button className="link" onClick={() => useStore.setState({ memoryFocus: null })}>Show all</button></p>}
       {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
       {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories yet.'}</p>}
       {memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}

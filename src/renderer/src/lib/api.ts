@@ -434,6 +434,8 @@ export const api = {
     /** A new chat holding this chat's live transcript up to and including `messageId`; the source is untouched. */
     fork: (id: string, messageId: string) =>
       req<Conversation>(`/conversations/${id}/fork`, { method: 'POST', body: json({ message_id: messageId }) }, CONTROL_TIMEOUT_MS),
+    /** Remove what this chat taught: memories (to the trash), candidate skills, graph relations. */
+    forgetLearned: (id: string) => req<{ memories: number; skills: number; edges: number }>(`/conversations/${id}/forget-learned`, { method: 'POST' }, CONTROL_TIMEOUT_MS),
     /** The chat as Markdown: active rows in order, tool calls as one-line summaries. */
     exportMd: (id: string) => req<{ title: string; text: string }>(`/conversations/${id}/export`),
     search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`),

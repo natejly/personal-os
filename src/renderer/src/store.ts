@@ -243,6 +243,10 @@ export interface State {
   focusedConversationId: string | null
 
   memories: Memory[]
+  /** What each reply's auto-learn pass saved, by message id (this session only; the chip's Undo works from it). */
+  learnedByMessage: Record<string, Memory[]>
+  /** Memory ids the Memory panel is narrowed to, set by a reply's memory chip. */
+  memoryFocus: string[] | null
   graph: GraphData
   documents: Document[]
 
@@ -423,6 +427,12 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
+  /** Open Settings → Memory narrowed to these rows. */
+  showMemories: (ids: string[]) => void
+  /** Trash one memory a reply learned, and drop it from that reply's chip. */
+  undoLearned: (messageId: string, memoryId: string) => Promise<void>
+  /** Remove what the chat taught (memories to the trash, candidate skills, graph relations) and say how many. */
+  forgetLearned: (conversationId: string) => Promise<void>
 
   /** The plan of one chat. Cheap, and the `plan` stream event keeps it current after the first read. */
   loadPlan: (conversationId: string) => Promise<void>
@@ -1842,6 +1852,8 @@ export const useStore = create<State>((set, get) => {
     liveRuns: {},
     focusedConversationId: null,
     memories: [],
+    learnedByMessage: {},
+    memoryFocus: null,
     graph: { nodes: [], edges: [] },
     documents: [],
     plans: {},
@@ -1986,7 +1998,7 @@ export const useStore = create<State>((set, get) => {
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
-      if (memoryMode) set({ memoryMode })
+      set(memoryMode ? { memoryMode, memoryFocus: null } : { memoryFocus: null })
       get().openSettings('memory')
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -3242,6 +3254,7 @@ export const useStore = create<State>((set, get) => {
     onLearned: (l) => {
       // Updates and forgets count as changes: they edit open lists too.
       const text = learnedText(l)
+      if (l.message_id && l.memories.length) set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [l.message_id!]: l.memories } }))
       // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
       // merge into existing entities, so removing them could take the user's own relations with them.
       const added = l.memories.map((m) => m.id)
@@ -3645,6 +3658,23 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ memories: s.memories.filter((m) => m.id !== id) }))
       void get().refreshProjects()
       get().offerUndo('memory', [{ type: 'memory', id }])
+    },
+
+    showMemories: (ids) => {
+      set({ memoryFocus: ids, memoryMode: 'list' })
+      get().openSettings('memory')
+    },
+    undoLearned: async (messageId, memoryId) => {
+      await get().deleteMemory(memoryId)
+      set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [messageId]: (s.learnedByMessage[messageId] ?? []).filter((m) => m.id !== memoryId) } }))
+    },
+    forgetLearned: async (conversationId) => {
+      try {
+        const r = await api.conversations.forgetLearned(conversationId)
+        const parts = [count(r.memories, 'memory', 'memories'), count(r.skills, 'draft skill', 'draft skills'), count(r.edges, 'relation', 'relations')]
+        get().toast(`Forgot ${parts.join(', ')} learned in this chat`)
+        void get().refreshMemories()
+      } catch (e) { get().toast(`Could not forget: ${(e as Error).message}`, 'error') }
     },
 
     refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),

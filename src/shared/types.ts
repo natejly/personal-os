@@ -644,6 +644,8 @@ export interface ConversationSettings {
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
   autoLearn: boolean
+  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. Unlike `private`, it can be switched at any time. */
+  learn?: boolean
   /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
   titleSource?: 'auto' | 'user'
   useTools: boolean

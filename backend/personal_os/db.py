@@ -599,6 +599,8 @@ class Database:
             "proposals": {"idem_key": "TEXT"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
+            # agents: JSON list of the subagent run ids an agent / fan_out step spawned, so a run's tree can be drawn.
+            "workflow_steps": {"agents": "TEXT"},
         }
         for table, cols in wanted.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}

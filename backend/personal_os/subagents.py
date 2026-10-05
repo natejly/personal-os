@@ -321,6 +321,7 @@ class Child:
     messages: list[dict[str, Any]] = field(default_factory=list)
     text: str = ""
     state: str = "running"          # running | completed | partial | error
+    now: str = ""                   # the one-line "working on" shown while it runs: a tool call, or thinking
     exit_reason: str = ""
     error: str | None = None
     rounds: int = 0
@@ -365,6 +366,13 @@ def _public_message(message: dict[str, Any]) -> dict[str, Any]:
                 parts.append(part)
         return {**message, "content": parts}
     return message
+
+
+def _now_line(name: str, args: dict[str, Any]) -> str:
+    """`tool_name first-string-argument`, cut short: what a child is doing right now, for a status line."""
+    first = next((v for v in args.values() if isinstance(v, str) and v.strip()), "")
+    first = redact.scrub_command_output(first.strip().splitlines()[0] if first.strip() else "")
+    return (f"{name} {first}" if first else name)[:120]
 
 
 def wrap(ch: Child, text: str, truncated: bool) -> str:
@@ -437,7 +445,7 @@ class Subagents:
     def info(self, c: Child) -> dict[str, Any]:
         return {"id": c.id, "parent_run_id": c.parent_id, "role": c.role.name, "state": c.state, "exit_reason": c.exit_reason or None,
                 "task": c.task[:200], "rounds": c.rounds, "calls": c.calls, "cost": round(c.meter.cost, 6), "depth": c.depth,
-                "background": c.background}
+                "background": c.background, "now": c.now if c.state == "running" else ""}
 
     # ---- roles and tool sets ---------------------------------------------------------------------
     def role_for(self, name: str) -> RoleDef | None:
@@ -700,6 +708,7 @@ class Subagents:
         for rnd in range(1, ch.steps + 1):
             self._check(ch)
             ch.rounds = rnd
+            ch.now = "thinking"
             known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
@@ -804,6 +813,7 @@ class Subagents:
         spec = self.toolbox.specs.get(name)
         raw_mode = ch.modes.get(name, "off")
         t0 = time.time()
+        ch.now = _now_line(name, args)
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
         decision, result = "allow", None
         if spec is None or raw_mode == "off":

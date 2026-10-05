@@ -810,7 +810,13 @@ class Engine:
             ready = [s for s in defn["steps"] if s["id"] not in state and all(d in state for d in deps(s, defn))]
             if not ready:
                 break
-            await asyncio.gather(*(self._one_step(run, ctx, s, params, results, state, stop) for s in ready))
+            # return_exceptions: an unexpected error in one step must not leave its wave-mates running detached
+            # on a run already marked failed; let the wave finish, then surface the first error.
+            outcomes = await asyncio.gather(*(self._one_step(run, ctx, s, params, results, state, stop) for s in ready),
+                                            return_exceptions=True)
+            for o in outcomes:
+                if isinstance(o, BaseException):
+                    raise o
         failed = [k for k, v in state.items() if v in ("failed", "blocked")]
         if stop.is_set():
             self.store.set_run(run_id, status="cancelled", error="Cancelled by the user.", ended_at=now())
@@ -853,7 +859,8 @@ class Engine:
             state[sid] = "failed"
             self.store.set_step(run_id, sid, status="failed", error=f"when: {e}", ended_at=now())
             return
-        sctx = {**ctx, "taint_sources": list(ctx.get("taint_sources") or []), "allowed_urls": set(ctx.get("allowed_urls") or ())}
+        inherited = list(ctx.get("taint_sources") or [])
+        sctx = {**ctx, "taint_sources": list(inherited), "allowed_urls": set(ctx.get("allowed_urls") or ())}
         self.store.set_step(run_id, sid, status="running", started_at=now(), error=None)
         self._emit(run_id, "workflow_step", {"step": sid, "status": "running"})
         try:
@@ -873,7 +880,9 @@ class Engine:
         finally:
             if sctx.get("tainted"):
                 ctx["tainted"] = True
-            ctx["taint_sources"].extend(sctx["taint_sources"][len(ctx.get("taint_sources") or []):])
+            # Siblings in the same wave grow ctx["taint_sources"] while this step runs, so slice from the
+            # length this step inherited, not the parent's current length.
+            ctx["taint_sources"].extend(sctx["taint_sources"][len(inherited):])
         results[sid] = result
         state[sid] = "done"
         self.store.set_step(run_id, sid, status="done", result=result, ended_at=now())

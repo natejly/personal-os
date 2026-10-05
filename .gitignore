@@ -18,3 +18,6 @@ build/backend-bundle
 build/.cache
 tests/e2e/results.json
 tests/e2e/node_modules
+
+# electron-vite bundles the config to a timestamped copy while building
+electron.vite.config.*.mjs

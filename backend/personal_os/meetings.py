@@ -222,6 +222,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,
 # audio_dir, sources, transcript, duration_ms - is deliberately absent: those go through
 # mark_started/finalize so a stray PATCH cannot claim a meeting recorded something it didn't.
+# (key, min, max) for the numeric settings the panel bounds; see MeetingSettings.tsx.
+_CONFIG_LIMITS = (
+    ("segmentSeconds", 5, 120), ("docSegmentSeconds", 3, 120), ("dictationSegmentSeconds", 3, 120),
+    ("maxMeetingSeconds", 300, 28800), ("drainSeconds", 0, 600), ("autoStopGraceSeconds", 0, 3600),
+    ("maxAudioBytes", 0, 1 << 42),
+)
+
 PATCH_FIELDS = {"title", "notes", "enhanced", "summary", "template", "project_id",
                 "keep_audio", "status", "error", "conversation_id", "summary_evidence"}
 
@@ -1415,6 +1422,13 @@ class MeetingService:
             cfg["template"] = "general"
         if str(cfg.get("sttBackend") or "") not in stt.BACKENDS:
             cfg["sttBackend"] = "auto"
+        # The panel's own limits, enforced here too: a 1-second clip would upload a wav a second, and a
+        # negative drain or cap would make Stop or the hard stop fire instantly. The API is not only the panel.
+        for key, lo, hi in _CONFIG_LIMITS:
+            try:
+                cfg[key] = int(min(hi, max(lo, float(cfg[key]))))
+            except (KeyError, TypeError, ValueError):
+                cfg.pop(key, None)  # unreadable: fall back to the shipped default on the next read
         self.db.set_settings({"meetings": cfg})
         self._preflight = None  # the next Start re-probes rather than trusting a stale self-test
         return cfg

@@ -48,7 +48,7 @@ test('plan mode always: a plan card appears, nothing runs before approval, an ap
     llm.push({ calls: [PLAN(ws, 'planned.txt')] })
     await newChat(page)
     await say(page, 'please touch planned.txt')
-    await expect(planCard(page)).toContainText('Touch planned.txt', { timeout: 90_000 })
+    await expect(planCard(page)).toContainText('touch planned.txt', { timeout: 90_000 })
     await expect.poll(async () => (await pending(grain)).length).toBe(1)
     expect(existsSync(join(ws, 'planned.txt'))).toBe(false)
     // after approval the model makes the planned call, then repeats it

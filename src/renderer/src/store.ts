@@ -8,6 +8,7 @@ import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
+import { nowText } from './lib/runStatus'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -4247,6 +4248,13 @@ export const useUnread = (convId?: string): number => useStore((s) => pick(s, co
 const EMPTY_SUBS: Record<string, SubagentInfo> = {}
 /** The current run's subagents, by id (the `subagent` stream event), for the crew ring and the run cards. */
 export const useSubagents = (convId?: string): Record<string, SubagentInfo> => useStore((s) => pick(s, convId)?.subagents ?? EMPTY_SUBS)
+/** One line on what the live reply is doing (see `nowText`); null when nothing is in flight. A string, so only a change re-renders. */
+export const useNowText = (convId?: string): string | null =>
+  useStore((s) => {
+    const sess = pick(s, convId)
+    const id = sess?.streaming?.answering ? sess.streaming.messageId : null
+    return id ? nowText(sess!.conversation.messages?.find((m) => m.id === id), sess!.subagents) : null
+  })
 /** The face a chat wears: its agent's (name and colour) when it was opened on one, else its own id. */
 export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings'> | null | undefined): { name: string; hue?: number } => {
   const agent = conv?.settings?.agent

@@ -801,6 +801,7 @@ class Subagents:
                 ch.cancel.clear()
             ch.rounds = rnd
             ch.now = "thinking"
+            self._publish(ch)  # the parent's crew ring reads `now` live
             known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
@@ -911,6 +912,7 @@ class Subagents:
         raw_mode = ch.modes.get(name, "off")
         t0 = time.time()
         ch.now = _now_line(name, args)
+        self._publish(ch)
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
         decision, result = "allow", None
         if spec is None or raw_mode == "off":

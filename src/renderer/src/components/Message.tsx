@@ -15,7 +15,7 @@ import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import { statusText, statusTicks, waitText } from '../lib/runStatus'
+import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 
@@ -70,10 +70,12 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
   // transcript without opening the fold. Live state comes from the stream while the run is on.
   const subs = useSubagents(conversationId)
   const kids = useMemo(() => events.filter((t) => t.name === 'agent_spawn' && t.result_preview).flatMap((t) => agentIds(t.result_preview!)), [events])
+  // The live segment is what the reply is doing now: the call in flight, its subagents, or its latest thought.
+  const now = streaming && !answering ? nowText({ reasoning, tool_events: events, content: '' }, subs) : null
   const label = [
     reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
     events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
-    streaming && !answering && last ? describeCall(last.name, last.arguments).verb : ''
+    now ?? (streaming && !answering && last ? describeCall(last.name, last.arguments).verb : '')
   ].filter(Boolean).join(' · ')
   return (
     <div className={`reasoning ${streaming && !answering ? 'live' : ''}`}>

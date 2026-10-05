@@ -1,4 +1,3 @@
-import { Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, type View } from '../store'
 import { viewHidden } from '../moduleToggles'
@@ -15,14 +14,12 @@ const navModules = (): typeof MODULES => (mods ??= MODULES.filter((m) => m.nav &
  * The views placed in the title bar (Settings → Modules; Lists, Calendar and Mail by default) as icons
  * at the right end of every title bar, so they sit in the same spot in each view and stay reachable
  * with the sidebar hidden. A click navigates; a drag drops the widget into a space, so the canvas keeps
- * them as drag sources. The last button opens the page agent (⌘I).
+ * them as drag sources.
  */
 export default function AppSwitcher(): JSX.Element {
   const view = useStore((s) => s.view)
   const settings = useStore((s) => s.settings)
   const setView = useStore((s) => s.setView)
-  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
-  const togglePageAgent = useStore((s) => s.togglePageAgent)
   // useShallow compares element-wise, so a fresh array with the same counts does not re-render.
   const modules = navModules()
   const badges = useStore(useShallow((s) => modules.map((m) => m.nav?.badge?.(s) ?? null)))
@@ -42,10 +39,6 @@ export default function AppSwitcher(): JSX.Element {
           </button>
         )
       })}
-      <button className={`icon-btn app-switch ${pageAgentOpen ? 'on' : ''}`} title="Ask about this page (⌘I)"
-        aria-label="Ask about this page" aria-pressed={pageAgentOpen} onClick={togglePageAgent}>
-        <Sparkles size={15} />
-      </button>
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { ROOT } from './harness.mjs'
-import { withGrain, launchSupervised, killBackend, restartBackendOnSamePort, ALL_VIEWS_ON } from './helpers/shell.mjs'
+import { menu, withGrain, launchSupervised, killBackend, restartBackendOnSamePort, ALL_VIEWS_ON } from './helpers/shell.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const kill = (pid) => process.kill(pid, 'SIGKILL')
@@ -151,7 +151,7 @@ for (const [name, go] of VIEWS) {
       await go(g.page, g)
       await g.page.waitForTimeout(1000)
       // with the page agent open too
-      await g.page.getByRole('button', { name: 'Ask about this page' }).click().catch(() => {})
+      await menu(g, 'Page Agent').catch(() => {})
       await g.page.waitForTimeout(19_000)
       expect(g.consoleErrors).toEqual([])
     })

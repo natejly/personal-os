@@ -234,7 +234,7 @@ function buildMenu(): void {
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         // ⌘I asks about what is on screen. The chat's context inspector, which used to own it, moves one
         // modifier over.
-        { label: 'Ask About This Page', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
+        { label: 'Page Agent', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
         { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
         // Shown for discovery only: the composer binds ⇧⌘P itself, so the menu must not swallow it.
         { label: 'Cycle Plan Mode', accelerator: 'CmdOrCtrl+Shift+P', registerAccelerator: false },

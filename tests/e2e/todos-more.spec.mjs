@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { menu } from './helpers/shell.mjs'
 import { openTodos, addBox, seed, dayStr, ignoreErrs, row } from './helpers/todos.mjs'
 
 test('500 todos: toggle, filter and scroll stay responsive', async ({ grain }) => {
@@ -84,7 +85,7 @@ test('chat tool creates a todo and the open view updates without reload; API wri
   await grain.api('/todos', { method: 'POST', body: { title: 'from api while open' } })
   await expect(row(page, 'from api while open')).toBeVisible({ timeout: 15_000 })
   // open a chat in the page agent panel (applies to the current view)
-  await page.getByRole('button', { name: 'Ask about this page' }).click()
+  await menu(grain, 'Page Agent')
   const box = page.getByPlaceholder(/ask|message|follow/i).last()
   await box.fill('!!tool todo_add {"title":"Made by tool","due":"' + dayStr(1) + '"}')
   await box.press('Enter')

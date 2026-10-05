@@ -52,8 +52,10 @@ const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown
  * on a ring, a line to each. Clicking a child opens its transcript; the rest of the blob still opens the chat.
  */
 function CrewRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
-  const kids = Object.values(useSubagents(convId))
-  const face = useChatFace(useConversation(convId))
+  const conv = useConversation(convId)
+  const latest = [...(conv?.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.id // the store keeps older replies' children too
+  const kids = Object.values(useSubagents(convId)).filter((k) => k.message_id === latest)
+  const face = useChatFace(conv)
   const openSubagent = useStore((s) => s.openSubagent)
   if (kids.length === 0) return <Face name={face.name} hue={face.hue} status={status} size="fill" title={title} />
   const R = 38 // ring radius, in % of the frame

@@ -2719,7 +2719,13 @@ select:focus-visible {
 .reasoning { display: flex; flex-wrap: wrap; align-items: center; }
 .reasoning .reasoning-head { flex: 1 1 0; width: auto; }
 .reasoning .reasoning-body, .reasoning .activity-tools { flex-basis: 100%; }
-.reasoning-kids { display: inline-flex; align-items: center; gap: 2px; padding-right: 8px; }
+.subagent-thread { margin: -4px 0 12px 16px; padding-left: 8px; border-left: 1px solid var(--border); font-size: 12px; }
+.subagent-head, .subagent-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26px; padding: 0 6px; border-radius: 6px; color: var(--text-muted); text-align: left; }
+.subagent-head:hover, .subagent-row:hover { background: var(--hover); color: var(--text); }
+.subagent-head > svg { transition: transform 0.15s; flex-shrink: 0; }
+.subagent-head svg.rot90 { transform: rotate(90deg); }
+.subagent-role { font-weight: 600; }
+.subagent-now { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crew-face { display: inline-flex; padding: 1px; border: 0; background: none; border-radius: 50%; cursor: pointer; }
 .crew-face:hover { background: var(--hover); }
 .agent-run-head { display: flex; align-items: center; }

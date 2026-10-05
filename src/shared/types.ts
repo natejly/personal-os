@@ -131,6 +131,8 @@ export interface Skill {
   approved_at: number | null
   use_count?: number
   last_used_at?: number | null
+  /** Why auto-learn suggested it: the friction it would remove, or what went wrong with the skill it revises. */
+  rationale?: string
 }
 
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
@@ -638,6 +640,8 @@ export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 export const DEFAULT_EFFORT: Effort = 'low'
 
 export interface ConversationSettings {
+  /** A chat opened on an agent (Library > Agents > Chat): its prompt leads the system prompt and its tools bound the chat's. */
+  agent?: string
   /** Reasoning effort passed through as `reasoning_effort`. 'default' sends nothing; 'xhigh' and 'max' are the rungs above high. */
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
@@ -1500,6 +1504,9 @@ export interface Learned {
   superseded?: { old_id: string; new_id: string }[]
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** Candidate skills auto-learn drafted: a friction fix, or a revised copy of an approved one that failed. */
+  skill_candidates?: { id: string; name: string; why: string }[]
+  skill_revisions?: { id: string; name: string; why: string; revises: string }[]
   conversation_id?: string
   message_id?: string
 }
@@ -2067,6 +2074,8 @@ export interface SubagentInfo {
   cost: number
   depth: number
   background: boolean
+  /** What it is doing right now (a tool call, or "thinking"); empty once finished. */
+  now?: string
 }
 
 /** One row of a subagent's recorded tape (GET /runs/{id}/events). */
@@ -3117,8 +3126,20 @@ export interface AgentDef {
   model: string | null
   steps: number | null
   tools: string[]
+  /** Approved skill names folded into its prompt. */
+  skills: string[]
+  /** Face colour in degrees; null lets the name pick one. */
+  hue: number | null
   hidden: boolean
   approved: boolean
   body: string
 }
-export interface BuiltinAgent { name: string; description: string; tools: string[] }
+export interface BuiltinAgent { name: string; description: string; tools: string[]; hue: number | null }
+/** The editable fields of a definition: what the editor holds and what a draft returns. */
+export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'steps' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
+/** GET /subagents/{id}: the run row, live state while it runs, and its history (OpenAI-shaped messages). */
+export interface SubagentView {
+  run: { run_id: string; status: string; parent_run_id: string | null; input?: Record<string, unknown>; budget?: Record<string, number> | null }
+  agent: SubagentInfo | null
+  messages: { role: 'system' | 'user' | 'assistant' | 'tool'; content: string | null; tool_calls?: { function: { name: string; arguments: string } }[] }[]
+}

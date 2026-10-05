@@ -179,6 +179,8 @@ CREATE TABLE IF NOT EXISTS agent_defs (
   model TEXT,
   steps INTEGER,
   tools TEXT NOT NULL DEFAULT '[]',
+  skills TEXT NOT NULL DEFAULT '[]',
+  hue INTEGER,
   hidden INTEGER NOT NULL DEFAULT 0,
   approved INTEGER NOT NULL DEFAULT 0,
   created_at REAL NOT NULL,
@@ -564,6 +566,7 @@ class Database:
             # whose deletion took it along, so restoring the project brings back exactly those rows.
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'"},
             "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
+            "agent_defs": {"skills": "TEXT NOT NULL DEFAULT '[]'", "hue": "INTEGER"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
             "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''",

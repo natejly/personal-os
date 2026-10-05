@@ -9,7 +9,7 @@ import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
-import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
+import { retainSession, useChatFace, useConversation, useIsStreaming, useStore, useStreamingMessageId, useSubagents } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas, viewport } from '../store'
@@ -44,6 +44,39 @@ const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown
   st.patchWindow(win.id, { ...size, x: Math.round(x), y: Math.round(y) })
   st.markLayoutDirty([win.id])
   if (config) void st.setWindowConfig(win.id, config)
+}
+
+/**
+ * The blob's face, with the current run's subagents around it: the orchestrator in the middle, a small face per child
+ * on a ring, a line to each. Clicking a child opens its transcript; the rest of the blob still opens the chat.
+ */
+function CrewRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
+  const kids = Object.values(useSubagents(convId))
+  const face = useChatFace(useConversation(convId))
+  const openSubagent = useStore((s) => s.openSubagent)
+  if (kids.length === 0) return <Face name={face.name} hue={face.hue} status={status} size="fill" title={title} />
+  const R = 38 // ring radius, in % of the frame
+  const at = (i: number): { x: number; y: number } => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / kids.length
+    return { x: 50 + R * Math.cos(a), y: 50 + R * Math.sin(a) }
+  }
+  return (
+    <span className="crew-ring">
+      <svg className="crew-lines" viewBox="0 0 100 100" aria-hidden>
+        {kids.map((k, i) => { const p = at(i); return <line key={k.id} x1={50} y1={50} x2={p.x} y2={p.y} /> })}
+      </svg>
+      <span className="crew-center"><Face name={face.name} hue={face.hue} status={status} size="fill" title={title} /></span>
+      {kids.map((k, i) => {
+        const p = at(i)
+        return (
+          <button key={k.id} className="crew-sat" style={{ left: `${p.x}%`, top: `${p.y}%` }} title={`${k.role}: ${k.now || k.state}`}
+            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openSubagent(k.id) }}>
+            <Face name={k.id} status={k.state} size="fill" />
+          </button>
+        )
+      })}
+    </span>
+  )
 }
 
 /** Fold a chat window to its blob, or grow it back to the size it had. */
@@ -143,6 +176,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const [draft, setDraft] = useState('')
   const conversations = useStore((s) => s.conversations)
   const convo = useConversation(convId)
+  const face = useChatFace(convo)
   const loaded = useStore((s) => !!s.sessions[convId])
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
@@ -276,7 +310,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
           const p = pressed.current
           if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
-        <Face name={convId} status={status} size="fill" title={convo?.title || 'Chat'} />
+        <CrewRing convId={convId} status={status} title={convo?.title || 'Chat'} />
       </button>
     )
   }
@@ -311,7 +345,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
       <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
-          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
+          {msgs.map((m) => <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
             browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />)}
           <RegenRow conversationId={convId} last={last} streaming={streaming} />
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}

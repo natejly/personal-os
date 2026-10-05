@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import { AGENT_SKELETON, COMMAND_SKELETON, agentText } from '../lib/defText'
-import type { AgentDef, BuiltinAgent, Command } from '@shared/types'
+import { COMMAND_SKELETON } from '../lib/defText'
+import type { Command } from '@shared/types'
 
 function Editor({ initial, save, onDone }: { initial: string; save: (text: string) => Promise<unknown>; onDone: () => void }): JSX.Element {
   const [text, setText] = useState(initial)
@@ -19,57 +19,6 @@ function Editor({ initial, save, onDone }: { initial: string; save: (text: strin
         <button className="primary-btn small" onClick={() => void go()}>Save</button>
         <button className="small" onClick={onDone}>Cancel</button>
       </div>
-    </div>
-  )
-}
-
-export function AgentsPanel(): JSX.Element {
-  const { toast } = useStore()
-  const [builtin, setBuiltin] = useState<BuiltinAgent[]>([])
-  const [custom, setCustom] = useState<AgentDef[]>([])
-  const [edit, setEdit] = useState<string | null>(null)
-  const load = useCallback(async () => { const r = await api.agentDefs.list(); setBuiltin(r.builtin); setCustom(r.custom) }, [])
-  useEffect(() => { void load().catch(() => undefined) }, [load])
-  const act = async (fn: () => Promise<unknown>): Promise<void> => {
-    try { await fn(); await load() } catch (e) { toast((e as Error).message, 'error') }
-  }
-  const done = (): void => { setEdit(null); void load() }
-  return (
-    <div className="library-panel">
-      <div className="add-row">
-        <p className="muted small">An agent is a role the assistant can hand work to. Yours are inert until you approve them, and editing one withdraws the approval.</p>
-        <button className="primary-btn small" onClick={() => setEdit('new')}><Plus size={13} /> New agent</button>
-      </div>
-      {edit === 'new' && <div className="skill-row"><Editor initial={AGENT_SKELETON} save={api.agentDefs.create} onDone={done} /></div>}
-      <section className="skill-section">
-        <h4>Yours</h4>
-        {custom.length === 0 && <div className="empty-hint"><p className="muted small">None yet.</p></div>}
-        {custom.map((d) => (
-          <div key={d.id} className="skill-row">
-            <div className="skill-head">
-              <span className="skill-name">{d.name}</span>
-              <span className="skill-desc muted">{d.description}</span>
-              {!d.approved && <small className="muted">unapproved, cannot be spawned</small>}
-              <div className="skill-actions no-drag">
-                <button className={d.approved ? 'small' : 'primary-btn small'} onClick={() => void act(() => api.agentDefs.approve(d.id, !d.approved))}>
-                  {d.approved ? 'Unapprove' : <><Check size={13} /> Approve</>}
-                </button>
-                <button className="icon-btn ghost" aria-label={`Edit ${d.name}`} onClick={() => setEdit(edit === d.id ? null : d.id)}><Pencil size={13} /></button>
-                <button className="icon-btn ghost danger" aria-label={`Delete ${d.name}`} onClick={() => void act(() => api.agentDefs.delete(d.id))}><Trash2 size={13} /></button>
-              </div>
-            </div>
-            {edit === d.id && <Editor initial={agentText(d)} save={(t) => api.agentDefs.update(d.id, t)} onDone={done} />}
-          </div>
-        ))}
-      </section>
-      <section className="skill-section">
-        <h4>Built in</h4>
-        {builtin.map((b) => (
-          <div key={b.name} className="skill-row"><div className="skill-head">
-            <span className="skill-name">{b.name}</span><span className="skill-desc muted">{b.description}</span>
-          </div></div>
-        ))}
-      </section>
     </div>
   )
 }

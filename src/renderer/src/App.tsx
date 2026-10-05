@@ -22,6 +22,7 @@ import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
 import CommandPalette from './components/CommandPalette'
 import ProjectModal from './components/ProjectModal'
+import SubagentPanel from './components/SubagentPanel'
 import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
@@ -183,6 +184,7 @@ export default function App(): JSX.Element {
   const settingsOpen = useStore((s) => s.settingsOpen)
   const paletteOpen = useStore((s) => s.paletteOpen)
   const projectModal = useStore((s) => s.projectModal)
+  const openSubagentId = useStore((s) => s.openSubagentId)
   const view = useStore((s) => s.view)
   const ModView = moduleForView(view)?.view?.Component
   const theme = useStore((s) => s.settings.theme)
@@ -273,6 +275,7 @@ export default function App(): JSX.Element {
       {settingsOpen && <SettingsModal />}
       {paletteOpen && <CommandPalette />}
       {projectModal && <ProjectModal />}
+      {openSubagentId && <SubagentPanel id={openSubagentId} />}
       <BackendBanner />
       {wizardOpen && <Onboarding />}
       <DeskNotifier />

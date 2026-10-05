@@ -33,6 +33,7 @@ from .context import build_context, cite_slim, context_taints, estimate_tokens, 
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
+from . import learn
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
@@ -522,6 +523,9 @@ async def _reliability_shutdown() -> None:
 work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
+# Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
+# runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
+learner.skills, learner.known_tools = skills, lambda: _known_tools()
 # The repo first, then the service around it: both routes and the 45s tick read through one
 # instance, so a meeting's rows are never written by two Meetings objects at once.
 meeting_store = Meetings(db)
@@ -564,7 +568,7 @@ toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # same _approvals futures a chat's do.
 agent_defs = AgentDefs(db)
 subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
-                         projects=projects, workspace=workspace, approvals=_approvals)
+                         projects=projects, workspace=workspace, approvals=_approvals, skills=skills)
 toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
 # Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
@@ -1797,6 +1801,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         return
     cfg = settings()
     model = body.model or conv["model"] or cfg["defaultModel"]
+    # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
+    # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.
+    persona = subagent_mgr.role_for(str(conv["settings"].get("agent") or "")) if conv["settings"].get("agent") else None
+    if conv["settings"].get("agent") and persona is None:
+        yield "error", {"message": f"The agent {conv['settings']['agent']!r} is not approved. Approve it in Library > Agents, or clear it from this chat."}
+        return
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
@@ -1908,7 +1918,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
-        settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
+        settings=cfg, conv_settings=conv["settings"],
+        global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
         draft=bool(conv["settings"].get("draftMode")),
@@ -2002,6 +2013,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         }
         use_tools = conv["settings"].get("useTools", True)
         modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
+        if persona is not None:
+            modes = {n: v for n, v in modes.items() if n in persona.tools}
         if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
             modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
@@ -2230,7 +2243,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What each connected server said about its own tools at initialize, for servers with a tool offered this
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
-        hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
+        hints = (RENDER_HINT, tools_hint, _agents_hint(modes), JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
@@ -3440,7 +3453,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
-            spans=list(tracer.spans),
+            spans=list(tracer.spans), tool_events=list(tool_events),
+            skills_in_use=learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
         ))
 
     # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
@@ -3938,6 +3952,27 @@ async def run_events(run_id: str, since: int = 0, limit: int = 500) -> list[dict
     return evs[:max(1, min(limit, 2000))]
 
 
+def _persona_text(role: Any) -> str:
+    """The leading system block of a chat opened on an agent: who it is, then its prompt and skills."""
+    if role is None:
+        return ""
+    from .subagents import persona_block
+    return f"## You are the agent '{role.name}'\n{role.description}\n\n{persona_block(role, skills)}"
+
+
+def _agents_hint(modes: dict[str, str]) -> str:
+    """The user's approved agents, by description, so the reply can delegate to the right one. Stable across turns (it
+    changes only when a definition does), so it sits in the cacheable prefix beside tools_hint."""
+    if modes.get("agent_spawn") not in ("on", "ask"):
+        return ""
+    rows = [d for d in agent_defs.list(approved_only=True) if not d["hidden"]]
+    if not rows:
+        return ""
+    lines = "\n".join(f"- {d['name']}: {' '.join(str(d['description']).split())[:200]}" for d in rows[:40])
+    return ("## Your agents\nBesides researcher, worker and reviewer, these agents exist; hand a task to one with "
+            "agent_spawn role=<name> when its description fits:\n" + lines)
+
+
 # ---------------- the crew tree (Spaces' crew widget) ----------------
 def _agent_node(r: dict[str, Any], roots: set[str]) -> dict[str, Any]:
     """One subagent run as a tree node: the row, with the live child's state and 'now' line laid over it while it runs.
@@ -4159,7 +4194,7 @@ class AgentDefIn(BaseModel):
 async def list_agent_defs() -> dict[str, Any]:
     """The built-in agent roles and the user's own definitions (inert until approved)."""
     from .subagents import BUILTIN_ROLES
-    return {"builtin": [{"name": r.name, "description": r.description, "tools": list(r.tools)} for r in BUILTIN_ROLES.values()],
+    return {"builtin": [{"name": r.name, "description": r.description, "tools": list(r.tools), "hue": r.hue} for r in BUILTIN_ROLES.values()],
             "custom": agent_defs.list()}
 
 
@@ -4192,6 +4227,46 @@ async def approve_agent_def(def_id: str, approved: bool = True) -> dict[str, Any
 @app.delete("/agents/defs/{def_id}")
 async def delete_agent_def(def_id: str) -> dict[str, bool]:
     return {"ok": agent_defs.delete(def_id)}
+
+
+class AgentIntentIn(BaseModel):
+    intent: str
+
+
+@app.post("/agents/draft")
+async def draft_agent_def(body: AgentIntentIn) -> dict[str, Any]:
+    """A model drafts a definition from a line of intent. Nothing is saved: the editor shows the text and the user saves it."""
+    from .subagents import draft_def
+    cfg = settings()
+    try:
+        return await draft_def(cfg, cfg["defaultModel"], body.intent, set(toolbox.specs),
+                               [s["name"] for s in skills.list(status="approved")])
+    except ValueError as e:
+        return {"text": None, "reason": str(e)}
+
+
+@app.get("/subagents/{run_id}")
+async def get_subagent(run_id: str) -> dict[str, Any]:
+    """One subagent for the panel: its run row, live state while it runs, and its history with credentials scrubbed."""
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "subagent":
+        raise HTTPException(404, "No such subagent")
+    live = subagent_mgr.children.get(run_id)
+    return {"run": row, "agent": subagent_mgr.info(live) if live else None, "messages": subagent_mgr.transcript(run_id) or []}
+
+
+@app.post("/subagents/{run_id}/message")
+async def message_subagent(run_id: str, body: SteerIn) -> dict[str, Any]:
+    """Speak to a running subagent: the message lands before its next model turn. A finished one answers 409 with
+    its parent conversation, and the client continues it there (the parent can agent_spawn it with resume_id)."""
+    live = subagent_mgr.children.get(run_id)
+    if live is not None and subagent_mgr.steer(live, body.content):
+        return {"ok": True, "agent": subagent_mgr.info(live)}
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "subagent":
+        raise HTTPException(404, "No such subagent")
+    raise HTTPException(409, {"finished": True, "conversation_id": (row.get("input") or {}).get("conversation_id"),
+                              "role": (row.get("input") or {}).get("role")})
 
 
 @app.get("/runs/{run_id}")

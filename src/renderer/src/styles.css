@@ -2675,6 +2675,32 @@ select:focus-visible {
 .skill-row { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
 .skill-row.approved { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
 .skill-row.rejected { opacity: 0.6; }
+/* Library > Agents: the editor's face row, the hue slider and the tool / skill chip pickers. */
+.agent-editor .agent-face-row { display: flex; align-items: flex-end; gap: 12px; }
+.agent-editor .agent-face-row > .face { flex-shrink: 0; margin-bottom: 2px; }
+.agent-editor .agent-face-row label { flex: 0 1 auto; }
+.agent-editor .agent-face-row label.grow { flex: 1; }
+.agent-editor .hue-pick { display: flex; align-items: center; gap: 6px; }
+.agent-editor .hue-pick input[type=range] { width: 140px; accent-color: var(--accent); }
+.agent-editor .agent-pick summary { cursor: pointer; font-size: 13px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.agent-editor .agent-filter { margin: 8px 0 6px; width: 100%; }
+.agent-editor .agent-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.agent-editor .agent-chips .tag { cursor: pointer; border: 1px solid transparent; }
+.agent-editor .agent-chips .tag.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); border-color: var(--accent); }
+.agent-editor .chip-check-row { align-self: center; }
+/* The subagent panel: a transcript that grows, and a one-line box to talk to it. */
+.subagent-panel { width: 640px; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
+.subagent-panel header h2 { display: flex; align-items: center; gap: 8px; }
+.subagent-panel header .muted.small { margin-left: auto; margin-right: 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-transcript { flex: 1; overflow-y: auto; padding: 12px 20px; display: flex; flex-direction: column; gap: 10px; }
+.sa-msg.user { align-self: flex-end; max-width: 80%; background: var(--bg-input); border-radius: 12px; padding: 6px 12px; }
+.sa-msg.user p { margin: 0; white-space: pre-wrap; }
+.sa-msg.assistant { max-width: 100%; }
+.subagent-compose { display: flex; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--border); }
+.subagent-compose input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; outline: 0; }
+.agent-run-head { display: flex; align-items: center; }
+.agent-run-head .tool-head { flex: 1; }
+.agent-run-head .agent-talk { flex-shrink: 0; margin-right: 4px; }
 .skill-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; cursor: pointer; }
 .skill-head:hover { background: var(--hover); }
 /* A head that opens nothing (a saved workflow: its buttons do the opening) does not act clickable. */

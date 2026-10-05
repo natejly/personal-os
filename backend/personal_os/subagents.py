@@ -108,6 +108,8 @@ class RoleDef:
     hidden: bool = False
     builtin: bool = True
     id: str | None = None
+    hue: int | None = None            # the face colour (0-359); None lets the name pick one
+    skills: tuple[str, ...] = ()      # approved skill names folded into the prompt
 
     @property
     def readonly(self) -> bool:
@@ -133,9 +135,9 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
 def parse_def(text: str) -> dict[str, Any]:
-    """A definition is markdown: `---` frontmatter (name, description, model, steps, tools, hidden), then the prompt.
+    """A definition is markdown: `---` frontmatter (name, description, model, steps, tools, skills, hue, hidden), then the prompt.
 
-    -> {'name', 'description', 'model', 'steps', 'tools', 'hidden', 'body'}; raises ValueError with a readable line.
+    -> {'name', 'description', 'model', 'steps', 'tools', 'skills', 'hue', 'hidden', 'body'}; raises ValueError with a readable line.
     """
     lines = (text or "").replace("\r\n", "\n").lstrip("﻿").split("\n")
     if not lines or lines[0].strip() != "---":
@@ -167,15 +169,96 @@ def parse_def(text: str) -> dict[str, Any]:
             raise ValueError("steps must be a whole number") from e
         if not 1 <= steps <= 60:
             raise ValueError("steps must be between 1 and 60")
-    raw_tools = fm.get("tools", "").strip()
-    if raw_tools.startswith("[") and raw_tools.endswith("]"):
-        raw_tools = raw_tools[1:-1]
-    tools = [t.strip().strip("\"'") for t in raw_tools.split(",") if t.strip()]
+    hue: int | None = None
+    if fm.get("hue"):
+        try:
+            hue = int(fm["hue"]) % 360
+        except ValueError as e:
+            raise ValueError("hue must be a whole number of degrees") from e
     body = "\n".join(lines[end + 1:]).strip()
     if not body:
         raise ValueError("the definition needs a prompt after the frontmatter")
     return {"name": name, "description": fm.get("description", "")[:300], "model": fm.get("model") or None, "steps": steps,
-            "tools": tools, "hidden": fm.get("hidden", "").lower() in ("1", "true", "yes"), "body": body}
+            "tools": _csv(fm.get("tools", "")), "skills": _csv(fm.get("skills", "")), "hue": hue,
+            "hidden": fm.get("hidden", "").lower() in ("1", "true", "yes"), "body": body}
+
+
+def _csv(raw: str) -> list[str]:
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    return [t.strip().strip("\"'") for t in raw.split(",") if t.strip()]
+
+
+def def_text(f: dict[str, Any]) -> str:
+    """The markdown form of a parsed definition (the inverse of parse_def), for drafts."""
+    fm = [f"name: {f['name']}", f"description: {f.get('description') or ''}"]
+    if f.get("model"):
+        fm.append(f"model: {f['model']}")
+    if f.get("steps"):
+        fm.append(f"steps: {f['steps']}")
+    if f.get("hue") is not None:
+        fm.append(f"hue: {int(f['hue']) % 360}")
+    if f.get("tools"):
+        fm.append("tools: " + ", ".join(f["tools"]))
+    if f.get("skills"):
+        fm.append("skills: " + ", ".join(f["skills"]))
+    return "---\n" + "\n".join(fm) + "\n---\n" + str(f.get("body") or "").strip() + "\n"
+
+
+def persona_block(role: RoleDef, skills: Any = None) -> str:
+    """The role's prompt, with the approved skills it names folded in as data. Unapproved or unknown names are skipped:
+    only the user's approval can put a procedure in front of a model."""
+    parts = [role.prompt]
+    if role.skills and skills is not None:
+        from .learn import skill_block
+        want = {n.lower() for n in role.skills}
+        try:
+            rows = [r for r in skills.list(status="approved") if str(r.get("name") or "").lower() in want and (r.get("procedure") or "").strip()]
+        except Exception:  # noqa: BLE001 - a skills store that cannot be read costs the role its skills, not its prompt
+            rows = []
+        if rows:
+            parts.append(skill_block(rows))
+    return "\n\n".join(parts)
+
+
+DRAFT_PROMPT = (
+    "You write agent definitions for a personal assistant. Reply with one JSON object and nothing else: "
+    '{"name": "lowercase-slug", "description": "one line on when to hand work to this agent", "hue": 0-359, '
+    '"tools": ["tool_name", ...], "skills": ["skill name", ...], "prompt": "the agent\'s instructions"}. '
+    "name: letters, digits, - or _, at most 40 characters, not researcher, worker or reviewer. description: under 200 "
+    "characters, written so another agent can tell from it alone when to delegate. hue: a colour that suits the role. "
+    "tools: only names from the list given, the few the role needs. skills: only names from the list given, or []. "
+    "prompt: 3-8 sentences in the second person: what the agent does, what it must not do, how it reports back. "
+    'If the request is too vague to define a role, reply {"skip": true, "reason": "..."}.'
+)
+
+
+async def draft_def(settings: dict[str, Any], model: str, intent: str, tools: set[str], skill_names: list[str]) -> dict[str, Any]:
+    """Draft a definition from a line of intent. Returns {'text': markdown} or {'text': None, 'reason'}; stores nothing."""
+    from .skillbuild import _parse_json
+    intent = str(intent or "").strip()
+    if len(intent) < 4:
+        return {"text": None, "reason": "Say what the agent is for, in a few words."}
+    user = (f"Request:\n{redact.scrub_command_output(intent)[:2000]}\n\nTools available: {', '.join(sorted(tools)[:150]) or '(none)'}"
+            f"\n\nApproved skills available: {', '.join(skill_names[:60]) or '(none)'}")
+    data = _parse_json(await llm.complete(settings, settings.get("extractionModel") or model, [
+        {"role": "system", "content": DRAFT_PROMPT}, {"role": "user", "content": user}]))
+    if not data or data.get("skip"):
+        return {"text": None, "reason": str((data or {}).get("reason") or "").strip() or "That was too vague to turn into an agent."}
+    name = re.sub(r"[^a-z0-9_-]+", "-", str(data.get("name") or "").lower()).strip("-")[:40] or "agent"
+    if name in BUILTIN_ROLES:
+        name += "-2"
+    known_skills = {k.lower(): k for k in skill_names}
+    f = {"name": name, "description": " ".join(str(data.get("description") or "").split())[:300],
+         "hue": int(data["hue"]) % 360 if str(data.get("hue", "")).lstrip("-").isdigit() else None,
+         "tools": [t for t in (data.get("tools") or []) if isinstance(t, str) and t in tools],
+         "skills": [known_skills[s.lower()] for s in (data.get("skills") or []) if isinstance(s, str) and s.lower() in known_skills],
+         "body": str(data.get("prompt") or "").strip()}
+    if len(f["body"]) < 40:
+        return {"text": None, "reason": "The draft came back too thin to be worth reviewing. Try again with more detail."}
+    text = def_text(f)
+    return {"text": text, "def": parse_def(text)}  # a draft the editor cannot save is not a draft
 
 
 class AgentDefs:
@@ -189,6 +272,7 @@ class AgentDefs:
     def _row(r: Any) -> dict[str, Any]:
         d = dict(r)
         d["tools"] = json.loads(d.get("tools") or "[]")
+        d["skills"] = json.loads(d.get("skills") or "[]")
         d["hidden"], d["approved"] = bool(d["hidden"]), bool(d["approved"])
         return d
 
@@ -211,14 +295,17 @@ class AgentDefs:
             if clash and clash["id"] != def_id:
                 raise ValueError(f"an agent named {f['name']!r} already exists")
             if def_id and c.execute("SELECT 1 FROM agent_defs WHERE id=?", (def_id,)).fetchone():
-                c.execute("UPDATE agent_defs SET name=?, description=?, body=?, model=?, steps=?, tools=?, hidden=?, approved=0, updated_at=? WHERE id=?",
-                          (f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), int(f["hidden"]), t, def_id))
+                c.execute("UPDATE agent_defs SET name=?, description=?, body=?, model=?, steps=?, tools=?, skills=?, hue=?, hidden=?, approved=0, "
+                          "updated_at=? WHERE id=?",
+                          (f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
+                           int(f["hidden"]), t, def_id))
                 rid = def_id
             else:
                 rid = "ag_" + new_id()
-                c.execute("INSERT INTO agent_defs(id, name, description, body, model, steps, tools, hidden, approved, created_at, updated_at) "
-                          "VALUES(?,?,?,?,?,?,?,?,0,?,?)",
-                          (rid, f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), int(f["hidden"]), t, t))
+                c.execute("INSERT INTO agent_defs(id, name, description, body, model, steps, tools, skills, hue, hidden, approved, created_at, updated_at) "
+                          "VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)",
+                          (rid, f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
+                           int(f["hidden"]), t, t))
         return self.get(rid) or {}
 
     def approve(self, def_id: str, approved: bool = True) -> dict[str, Any] | None:
@@ -238,7 +325,7 @@ class AgentDefs:
         if not row or not row["approved"]:
             return None
         return RoleDef(row["name"], row["description"], row["body"], tuple(row["tools"]), row["model"], row["steps"],
-                       row["hidden"], builtin=False, id=row["id"])
+                       row["hidden"], builtin=False, id=row["id"], hue=row.get("hue"), skills=tuple(row["skills"]))
 
 
 # ---- accounting ------------------------------------------------------------------------------------
@@ -337,6 +424,7 @@ class Child:
     collected: bool = False
     transcript_id: str | None = None
     started: float = field(default_factory=time.time)
+    steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
 
     @property
     def label(self) -> str:
@@ -385,10 +473,10 @@ class Subagents:
 
     def __init__(self, store: Any, toolbox: Any, settings_fn: Callable[[], dict[str, Any]], *, defs: AgentDefs | None = None,
                  results: Any = None, pricing: Any = None, memories: Any = None, projects: Any = None, workspace: Any = None,
-                 approvals: dict[str, asyncio.Future] | None = None) -> None:
+                 approvals: dict[str, asyncio.Future] | None = None, skills: Any = None) -> None:
         self.store, self.toolbox, self.settings = store, toolbox, settings_fn
         self.defs, self.results, self.pricing, self.memories, self.projects = defs, results, pricing, memories, projects
-        self.workspace = workspace
+        self.workspace, self.skills = workspace, skills
         self.approvals = approvals if approvals is not None else {}
         self.children: dict[str, Child] = {}
         self.locks = RootLocks()
@@ -592,7 +680,7 @@ class Subagents:
         if prior is not None:
             # The stored transcript stays as recorded. This copy is what the resumed child is shown.
             return [*_close_calls([_public_message(m) for m in prior]), {"role": "user", "content": ch.task}]
-        parts = [COMMON_PROMPT, ch.role.prompt]
+        parts = [COMMON_PROMPT, persona_block(ch.role, self.skills)]
         cx = ch.ctx
         project = None
         if self.projects is not None and cx.get("project_id"):
@@ -707,6 +795,10 @@ class Subagents:
         schemas = self.toolbox.schemas(ch.modes)
         for rnd in range(1, ch.steps + 1):
             self._check(ch)
+            if ch.steers:  # the user spoke to this child: their words land before the next model turn
+                ch.messages.extend({"role": "user", "content": t} for t in ch.steers)
+                ch.steers.clear()
+                ch.cancel.clear()
             ch.rounds = rnd
             ch.now = "thinking"
             known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
@@ -719,6 +811,11 @@ class Subagents:
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
             if text:
                 ch.text = text
+            if not calls and ch.steers:
+                # A steer cut this turn short. Keep what was said and go round again: the next round folds the message in.
+                if text:
+                    ch.messages.append({"role": "assistant", "content": text})
+                continue
             if not calls:
                 ch.messages.append({"role": "assistant", "content": text})
                 ch.state, ch.exit_reason = ("error", "error") if end.get("finish_reason") == "error" else ("completed", "completed")
@@ -1012,6 +1109,25 @@ class Subagents:
             out["transcript_id"] = ch.transcript_id
         ch.collected = True
         return out
+
+    # ---- talking to a child ----------------------------------------------------------------------
+    def steer(self, ch: Child, text: str) -> bool:
+        """Queue a user message for a running child and cut its current model read short, so it answers soon.
+        False once the child has finished: a finished child is continued through its parent (agent_spawn resume_id)."""
+        text = str(text or "").strip()
+        if not text or ch.finished.is_set():
+            return False
+        ch.steers.append(text[:MAX_TASK_CHARS])
+        ch.cancel.set()
+        ch.touch()
+        self._emit(ch, "steer", {"text": text[:2000]})
+        return True
+
+    def transcript(self, run_id: str) -> list[dict[str, Any]] | None:
+        """A child's history with credentials scrubbed: live from memory, otherwise from its tape."""
+        ch = self.children.get(run_id)
+        msgs = ch.messages if ch is not None else self._load_transcript(run_id)
+        return None if msgs is None else [_public_message(m) for m in msgs]
 
     # ---- stopping --------------------------------------------------------------------------------
     def halt(self, ch: Child, reason: str = "interrupted") -> None:

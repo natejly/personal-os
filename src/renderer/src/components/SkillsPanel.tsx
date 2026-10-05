@@ -132,6 +132,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
       </div>
       {open && (
         <div className="skill-body">
+          {!!skill.rationale && <p className="muted small">Suggested because: {skill.rationale}</p>}
           <label>Name<input value={edit.name} onChange={(e) => setDraft({ ...edit, name: e.target.value })} /></label>
           <label>When it applies<input value={edit.description} onChange={(e) => setDraft({ ...edit, description: e.target.value })} /></label>
           <label>Steps

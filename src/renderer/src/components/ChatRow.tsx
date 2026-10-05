@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { EyeOff, MoreHorizontal } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
-import { useStore } from '../store'
+import { useChatFace, useStore } from '../store'
 import ChatPulse from './ChatPulse'
 import Face from './Face'
 import { api } from '../lib/api'
@@ -17,6 +17,7 @@ import type { Conversation } from '@shared/types'
  */
 export default function ChatRow({ conv, active, sub = false, lead, trail }: { conv: Conversation; active: boolean; sub?: boolean; lead?: ReactNode; trail?: ReactNode }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
+  const face = useChatFace(conv)
   const deleteChat = useStore((s) => s.deleteChat)
   const renameChat = useStore((s) => s.renameChat)
   const pinChat = useStore((s) => s.pinChat)
@@ -77,7 +78,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         // A text field inside a draggable element cannot select by mouse: the drag wins.
         draggable={!renaming}
       >
-        <Face name={conv.id} size={sub ? 12 : 14} />
+        <Face name={face.name} hue={face.hue} size={sub ? 12 : 14} />
         <span className="convo-title">
           <ChatPulse conversationId={conv.id} />
           {lead}

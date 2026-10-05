@@ -220,7 +220,10 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
  *  `browserSession`: the agent browser this transcript drives, passed only to its latest reply that used the browser. */
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string }): JSX.Element {
+/** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
+export type ChatFace = { name: string; hue?: number }
+
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -240,7 +243,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   return (
     <div className={`msg ${message.role}`}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={message.conversation_id} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (

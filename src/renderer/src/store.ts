@@ -1,7 +1,8 @@
 import { create } from 'zustand'
+import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -38,7 +39,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'automations' | 'connectors'
+export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads' | 'pages' | 'dashboards'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
@@ -102,6 +103,8 @@ export interface ChatSession {
   runError: { message: string; runId: string | null; interrupted: boolean } | null
   /** Sends the run has not echoed back yet (optimistic bubbles); undefined when none. */
   pendingSends?: PendingSend[]
+  /** Subagents of the current run, by id, for the crew ring around the chat's face. Reset when a run starts. */
+  subagents?: Record<string, SubagentInfo>
 }
 
 /** Where an accepted desk output went, for the toast. */
@@ -242,6 +245,10 @@ export interface State {
   plans: Record<string, PlanStep[]>
   /** Procedural memory — candidates and approved skills. Loaded when the review surface opens. */
   skills: Skill[]
+  /** Library > Agents: the user's definitions and the built-in roles, for faces and the Chat button. */
+  agentDefs: { builtin: BuiltinAgent[]; custom: AgentDef[] }
+  /** The subagent panel (transcript + a message box), opened from a run card or a crew face. */
+  openSubagentId: string | null
   /** Writing style for the loaded scope: the profile a chat drafts with, and the samples behind it. */
   style: StyleState | null
   styleSamples: StyleSample[]
@@ -453,6 +460,10 @@ export interface State {
   markDeskSeen: (deskId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
+  refreshAgentDefs: () => Promise<void>
+  openSubagent: (id: string | null) => void
+  /** A new chat that speaks as this agent: the row is created on the first send, with `agent` in its settings. */
+  chatWithAgent: (name: string, model?: string | null) => void
   /** A procedure the user writes by hand. Still stored as a candidate: approval is always its own step. */
   createSkill: (s: { name: string; description?: string; procedure?: string; project_id?: string | null }) => Promise<void>
   /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
@@ -623,13 +634,16 @@ let todosSeq = 0
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 /** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
-export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: unknown[]; updated?: unknown[]; removed?: unknown[] }): string {
+export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: unknown[]; updated?: unknown[]; removed?: unknown[]; skill_candidates?: { name: string }[]; skill_revisions?: { name: string }[] }): string {
   const parts: string[] = []
   if (d.memories.length) parts.push(`Learned ${count(d.memories.length, 'memory', 'memories')}`)
   if (d.updated?.length) parts.push(`updated ${d.updated.length}`)
   if (d.removed?.length) parts.push(`forgot ${d.removed.length}`)
   if (d.nodes.length) parts.push(count(d.nodes.length, 'entity', 'entities'))
   if (d.edges.length) parts.push(count(d.edges.length, 'relation', 'relations'))
+  // A suggested skill is the headline: it is the one thing here that asks the user for a decision.
+  for (const s of d.skill_candidates ?? []) parts.unshift(`suggested a skill “${s.name}”`)
+  for (const s of d.skill_revisions ?? []) parts.unshift(`drafted a revision of “${s.name.replace(/ \(revised\)$/, '')}”`)
   const text = parts.join(', ')
   return text && text[0].toUpperCase() + text.slice(1)
 }
@@ -864,6 +878,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
   const mapMsg = (mid: string, fn: (m: Message) => Message): ChatSession =>
     withMsgs(msgs.map((m) => (m.id === mid ? fn(m) : m)))
   switch (ev.event) {
+    case 'subagent':
+      return { ...s, subagents: { ...s.subagents, [ev.data.id]: ev.data } }
     case 'user_message':
       // Merge by id: a steer is persisted and published by its endpoint, so an attach replay plus the
       // live stream (or a refetch) can both carry it.
@@ -1415,6 +1431,7 @@ export const useStore = create<State>((set, get) => {
         ...s,
         conversation,
         streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false },
+        subagents: undefined,
         status: settleApprovals('working', approvals),
         finishedAt: null,
         pendingApprovals: approvals,
@@ -1810,6 +1827,8 @@ export const useStore = create<State>((set, get) => {
     documents: [],
     plans: {},
     skills: [],
+    agentDefs: { builtin: [], custom: [] },
+    openSubagentId: null,
     style: null,
     styleSamples: [],
     styleLearning: false,
@@ -1869,6 +1888,7 @@ export const useStore = create<State>((set, get) => {
       void get().loadModels()
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+      void get().refreshAgentDefs().catch(() => undefined)
       void get().refreshDashboard()
       void get().refreshTodos()
       // The recap is a model call: only make it for a card that is on (Regenerate and the canvas widget still can).
@@ -2875,7 +2895,8 @@ export const useStore = create<State>((set, get) => {
     // The docs list is already kept live elsewhere; this is for the two things the Library reads
     // that nothing else refreshes on its behalf.
     refreshLibrary: async () => {
-      await Promise.all([get().refreshSkills().catch(() => undefined), get().refreshDocs().catch(() => undefined)])
+      await Promise.all([get().refreshSkills().catch(() => undefined), get().refreshDocs().catch(() => undefined),
+        get().refreshAgentDefs().catch(() => undefined)])
     },
 
     refreshDesks: async () => {
@@ -3113,6 +3134,12 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshSkills: async () => set({ skills: await api.skills.list() }),
+    refreshAgentDefs: async () => set({ agentDefs: await api.agentDefs.list() }),
+    openSubagent: (openSubagentId) => set({ openSubagentId }),
+    chatWithAgent: (name, model = null) => {
+      get().newChat()
+      set({ draftChatSettings: { agent: name }, draftModel: model })
+    },
     createSkill: async (draft) => {
       try {
         const s = await api.skills.create(draft)
@@ -3194,7 +3221,11 @@ export const useStore = create<State>((set, get) => {
         })()
       } : undefined
       if (!text) return
-      get().toast(text, 'learned', undo)
+      // A drafted skill waits in Library → Skills; the toast's one action takes the user there to decide.
+      const skillDrafted = !!(l.skill_candidates?.length || l.skill_revisions?.length)
+      const review = skillDrafted ? { label: 'Review', run: () => { get().setLibraryTab('skills'); get().setView('library') } } : undefined
+      get().toast(text, 'learned', review ?? undo)
+      if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
     refreshMeetingsPending: async () => {
@@ -4088,6 +4119,7 @@ export const useStore = create<State>((set, get) => {
       clearViews()
       void get().refreshDashboard()
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+      void get().refreshAgentDefs().catch(() => undefined)
     },
 
     // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
@@ -4207,3 +4239,14 @@ export const useStreamingMessageId = (convId?: string): string | null =>
   })
 export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.stopping)
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)
+const EMPTY_SUBS: Record<string, SubagentInfo> = {}
+/** The current run's subagents, by id (the `subagent` stream event), for the crew ring and the run cards. */
+export const useSubagents = (convId?: string): Record<string, SubagentInfo> => useStore((s) => pick(s, convId)?.subagents ?? EMPTY_SUBS)
+/** The face a chat wears: its agent's (name and colour) when it was opened on one, else its own id. */
+export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings'> | null | undefined): { name: string; hue?: number } => {
+  const agent = conv?.settings?.agent
+  const hue = useStore((s) => agent ? (s.agentDefs.custom.find((d) => d.name === agent) ?? s.agentDefs.builtin.find((d) => d.name === agent))?.hue : null)
+  const name = agent || (conv?.id ?? '')
+  // One object per (name, hue): MessageView is memo'd on shallow props, so a fresh object each render would undo that.
+  return useMemo(() => (hue != null ? { name, hue } : { name }), [name, hue])
+}

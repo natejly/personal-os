@@ -31,7 +31,7 @@ function dotenv() {
   return out
 }
 
-export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {} }) {
+export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry = ['-m', 'personal_os'] }) {
   const port = await freePort()
   const env = {
     ...process.env,
@@ -49,16 +49,17 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
   }
   delete env.ELECTRON_RUN_AS_NODE
   const py = join(ROOT, 'backend', '.venv', 'bin', 'python')
-  const child = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], { env, cwd: join(ROOT, 'backend'), stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(py, [...entry, '--port', String(port), '--data-dir', dataDir], { env, cwd: join(ROOT, 'backend'), stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''
   child.stdout.on('data', (d) => (log += d))
   child.stderr.on('data', (d) => (log += d))
   const url = `http://127.0.0.1:${port}`
-  for (let i = 0; i < 240; i++) {
+  const tries = Number(process.env.E2E_BACKEND_WAIT_S || 60) * 4
+  for (let i = 0; i < tries; i++) {
     if (child.exitCode !== null) throw new Error('backend exited early:\n' + log.slice(-3000))
     try { if ((await fetch(url + '/health')).ok) break } catch {}
     await sleep(250)
-    if (i === 239) throw new Error('backend never became healthy:\n' + log.slice(-3000))
+    if (i === tries - 1) throw new Error('backend never became healthy:\n' + log.slice(-3000))
   }
   return { url, port, child, log: () => log, stop: () => { try { child.kill('SIGTERM') } catch {} } }
 }
@@ -69,7 +70,7 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
  *  - llm.calls is every chat-completions request body the mock saw (undefined with E2E_LLM=real).
  *  - page is the main window; waits until the shell (sidebar) has rendered.
  */
-export async function launchApp({ settings = {}, name = 'grain', beforeApp, backendEnv = {} } = {}) {
+export async function launchApp({ settings = {}, name = 'grain', beforeApp, backendEnv = {}, backendEntry } = {}) {
   mkdirSync(SCRATCH_ROOT, { recursive: true })
   const scratch = mkdtempSync(join(SCRATCH_ROOT, name + '-'))
   const profile = join(scratch, 'profile')
@@ -88,7 +89,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     llmUrl = llm.url
     llmKey = 'mock-key'
   }
-  const backend = await startBackend({ llmUrl, llmKey, dataDir, token, extraEnv: backendEnv })
+  const backend = await startBackend({ llmUrl, llmKey, dataDir, token, extraEnv: backendEnv, entry: backendEntry })
 
   const api = async (path, { method = 'GET', body, headers = {}, raw = false } = {}) => {
     const r = await fetch(backend.url + path, {

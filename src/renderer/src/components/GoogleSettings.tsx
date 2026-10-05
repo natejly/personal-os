@@ -123,7 +123,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
         <div className="tasks-sync">
           <label className="toggle-row plain">
             <span className="toggle-text"><b>Sync Todos with Google Tasks</b><small>Two-way: a change on either side shows up on the other.</small></span>
-            <input type="checkbox" checked={syncEnabled} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} /><span className="switch" />
+            <input type="checkbox" checked={syncEnabled} disabled={!tasksSync} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} /><span className="switch" />
           </label>
           {syncEnabled && tasksSync && (
             <div className="tasks-sync-row">
@@ -146,7 +146,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
 
           <label className="toggle-row plain">
             <span className="toggle-text"><b>Show Todos on Google Calendar</b><small>Puts each open todo with a due date on a calendar you choose.</small></span>
-            <input type="checkbox" checked={mirrorEnabled} onChange={(e) => void setTodoCalendar({ enabled: e.target.checked })} /><span className="switch" />
+            <input type="checkbox" checked={mirrorEnabled} disabled={!todoCalendar} onChange={(e) => void setTodoCalendar({ enabled: e.target.checked })} /><span className="switch" />
           </label>
           {mirrorEnabled && todoCalendar && (
             <div className="tasks-sync-row">

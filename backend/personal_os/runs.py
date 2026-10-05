@@ -166,6 +166,13 @@ class RunStore:
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self._run_row(self._one("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)))
 
+    def mark_unchanged(self, run_id: str) -> None:
+        """Flag a job run whose result equals the previous run's (input.unchanged): the inbox and notifications skip it."""
+        try:
+            self._exec("UPDATE agent_runs SET input=json_set(input,'$.unchanged',json('true')) WHERE run_id=?", (run_id,))
+        except sqlite3.Error:
+            log.warning("could not flag run %s unchanged", run_id, exc_info=True)
+
     def set_resumed_from(self, run_id: str, prior: str) -> None:
         self.update(run_id, resumed_from=prior)
 

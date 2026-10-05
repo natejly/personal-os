@@ -8,7 +8,9 @@ readable from a locked screen.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import re
 import statistics
 from typing import Any, Iterable
 
@@ -17,6 +19,18 @@ from .jobs import retryable
 FAILED = ("error", "interrupted", "timed_out")
 SUMMARY_CHARS = 400
 NOTIFY_CAP = 20
+
+
+# Tokens that change every run without the result changing: ISO dates and times, clock times, epoch seconds.
+_STAMPS = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+                     r"|\b\d{1,2}:\d{2}(?::\d{2})?\s?(?:[ap]m\b)?|\b\d{10}(?:\d{3})?\b", re.I)
+
+
+def result_digest(text: str) -> str:
+    """A stable fingerprint of a run's result: timestamp-looking tokens dropped, whitespace and case folded.
+    "" for an empty result, which is never compared (nothing to say it did not change)."""
+    body = " ".join(_STAMPS.sub(" ", text or "").lower().split())
+    return hashlib.sha256(body.encode()).hexdigest()[:16] if body else ""
 
 
 def _timed_out(budget: Any, error: str | None) -> bool:
@@ -48,6 +62,8 @@ def summarize_run(run: dict[str, Any], event_counts: dict[str, int] | None = Non
         "due_at": inp.get("due_at"), "late": bool(inp.get("late")), "missed_slots": int(inp.get("missed_slots") or 0),
         "attempt": int(inp.get("attempt") or 1), "retry_of": inp.get("retry_of"),
         "manual": bool(inp.get("manual")), "dry_run": bool(inp.get("dry_run")),
+        # The result matched the previous run's on a job set to notify only on change (see jobs_policy.settle).
+        "unchanged": bool(inp.get("unchanged")),
         "tool_calls": (event_counts or {}).get("tool_result", 0),
         "proposals": {k: int(mine.get(k, 0)) for k in ("pending", "accepted", "rejected")},
         "cost": budget.get("cost") if budget and budget.get("cost") is not None else None,
@@ -129,6 +145,9 @@ def notify_events(runs: Iterable[dict[str, Any]], jobs: dict[str, dict[str, Any]
 
     for r in runs:
         if r.get("dry_run") or r["ended_at"] is None or r["ended_at"] <= since:
+            continue
+        if r.get("unchanged"):
+            covered.add(r["run_id"])
             continue
         job = jobs.get(r.get("job_id") or "") or {}
         want = mode(r.get("job_id"))

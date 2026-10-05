@@ -12,6 +12,9 @@ Three pieces, all of them rows:
                  · `watch` — a folder; new or touched files in it fire a run.
                  · `mail` — a Gmail search; a matching thread that is new or has a new message fires a run.
                    Its `next_due_at` is the next poll (every MAIL_POLL_S), not a slot, and never books an OS wake.
+                 · `calendar` — an event (matched by `calendar_query`) starting in the next 24 h fires one run,
+                   `minutes_before` its start, once per event instance. It reads the Google read cache; its
+                   `next_due_at` is the earlier of the next trigger and the next look (CAL_POLL_S), never an OS wake.
                Separately, `target` says what a fire starts: 'run' (a proposal-only chat run) or 'desk' (a desk with
                the prompt as its brief, in plan or propose autonomy; see app._launch_desk_job).
 - `Proposals` — the `proposals` table: an outward-facing tool call a background run was not allowed to
@@ -65,10 +68,14 @@ MAX_MISSED_COUNTED = 500
 PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "expired")
 # Skipped slots kept per job in job_skips; older ones are dropped as new ones arrive.
 SKIP_KEEP = 200
-KINDS = ("cron", "once", "watch", "mail")
+KINDS = ("cron", "once", "watch", "mail", "calendar")
 # A mail job asks Gmail at most this often, and reads at most this many matching threads per look.
 MAIL_POLL_S = 300.0
 MAIL_MAX_THREADS = 20
+# A calendar job re-reads the (cached) next 24 h of events at most this often, and sooner when its next trigger is nearer.
+CAL_POLL_S = 300.0
+CAL_LOOKAHEAD_S = 24 * 3600.0
+CAL_SEEN_KEEP = 200
 # What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
 # target. A scheduled desk may plan first or propose at the end, never 'ask' (cards each change while nobody watches).
 TARGETS = ("run", "desk")
@@ -225,7 +232,7 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
         return run_at is not None
     if kind == "watch":
         return not cron or valid_cron(cron)  # a directory job may have no clock at all
-    if kind == "mail":
+    if kind in ("mail", "calendar"):
         return not cron  # the search is its only trigger; next_due_at is the poll, not a slot
     return valid_cron(cron or "")
 
@@ -253,6 +260,23 @@ def scan_dir(path: str) -> dict[str, int]:
                     if not e.name.startswith(".")}
     except OSError:
         return {}
+
+
+def event_matches(ev: dict[str, Any], query: str) -> bool:
+    """Every word of `query` appears (any case) in the event's title or attendee addresses."""
+    hay = " ".join([str(ev.get("summary") or ""), *(str(a) for a in ev.get("attendees") or [])]).lower()
+    return all(w in hay for w in query.lower().split())
+
+
+def event_start(ev: dict[str, Any]) -> float | None:
+    """The start instant of a timed event, None for an all-day or unreadable one."""
+    if ev.get("all_day") or not ev.get("start"):
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ev["start"]).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return float(dt.timestamp())  # a naive time is read as this machine's wall clock
 
 
 class PowerWake:
@@ -311,7 +335,7 @@ def next_due_for(job: dict[str, Any], after: float) -> float | None:
         return None if spent(job) or job.get("run_at") is None else float(job["run_at"])
     if job.get("kind") == "watch" and not job.get("cron"):
         return None  # a directory-only job has no clock slot; the folder is its trigger
-    if job.get("kind") == "mail":
+    if job.get("kind") in ("mail", "calendar"):
         return after  # poll as soon as it is armed; that first look only takes the baseline
     return next_fire(job["cron"], job["timezone"], after)
 
@@ -321,13 +345,16 @@ class Jobs:
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
               "allowed_tools", "watch_dir", "notify", "model", "budget", "mail_query", "target", "desk_autonomy",
-              "desk_budget")
+              "desk_budget", "calendar_query", "calendar_id", "minutes_before", "only_on_change")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
-    RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled", "mail_query"})
+    RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled", "mail_query", "calendar_query", "calendar_id",
+                        "minutes_before"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
     WATCH_FIELDS = frozenset({"watch_dir", "enabled", "kind"})
     # Same for a mail search: the next look is a fresh baseline, so mail already there never fires.
     MAIL_FIELDS = frozenset({"mail_query", "enabled", "kind"})
+    # And for a calendar trigger: events already inside their trigger window when it is (re)armed never fire.
+    CAL_FIELDS = frozenset({"calendar_query", "calendar_id", "minutes_before", "enabled", "kind"})
 
     def __init__(self, db: Database):
         self.db = db
@@ -338,7 +365,10 @@ class Jobs:
         if d is not None:
             d.pop("watch_seen", None)  # the folder listing is bookkeeping, not part of the job
             d.pop("mail_seen", None)  # so is the thread baseline
+            d.pop("cal_seen", None)  # and the fired-event keys
+            d.pop("last_digest", None)  # and the last result's fingerprint
             d["enabled"] = bool(d["enabled"])
+            d["only_on_change"] = bool(d.get("only_on_change"))
             # NULL = inherit every tool (what every job did before this column); otherwise a JSON list of names.
             raw = d.get("allowed_tools")
             try:
@@ -370,25 +400,29 @@ class Jobs:
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
                watch_dir: str | None = None, notify: str = "problems", model: str | None = None,
                budget: dict[str, Any] | None = None, mail_query: str | None = None, target: str = "run",
-               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None) -> dict[str, Any]:
+               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None,
+               calendar_query: str | None = None, calendar_id: str | None = None, minutes_before: int = 15,
+               only_on_change: bool = False) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
         kind = kind if kind in KINDS else "cron"
         target = target if target in TARGETS else "run"
-        cron = "" if kind in ("once", "mail") else cron
+        cron = "" if kind in ("once", "mail", "calendar") else cron
         fresh = {"kind": kind, "cron": cron, "run_at": run_at, "timezone": tz, "last_due_at": None}
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
                       "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget, "
-                      "mail_query, target, desk_autonomy, desk_budget) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "mail_query, target, desk_autonomy, desk_budget, calendar_query, calendar_id, minutes_before, only_on_change) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
                        json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
                        json.dumps(budget) if budget else None, mail_query, target,
                        (desk_autonomy or "plan") if target == "desk" else desk_autonomy,
-                       json.dumps(desk_budget) if desk_budget else None))
+                       json.dumps(desk_budget) if desk_budget else None, calendar_query, calendar_id,
+                       int(minutes_before), int(only_on_change)))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -399,8 +433,10 @@ class Jobs:
         cols = {k: v for k, v in patch.items() if k in self.FIELDS}
         if "enabled" in cols:
             cols["enabled"] = int(bool(cols["enabled"]))
-        if cols.get("kind") in ("once", "mail"):
+        if cols.get("kind") in ("once", "mail", "calendar"):
             cols["cron"] = ""
+        if "only_on_change" in cols:
+            cols["only_on_change"] = int(bool(cols["only_on_change"]))
         if cols.get("watch_dir"):
             cols["watch_dir"] = check_watch_dir(cols["watch_dir"])  # stored resolved, as create stores it
         if "allowed_tools" in cols:
@@ -430,6 +466,8 @@ class Jobs:
             cols["watch_seen"] = json.dumps(scan_dir(merged["watch_dir"]))
         if self.MAIL_FIELDS & cols.keys():
             cols["mail_seen"] = None
+        if self.CAL_FIELDS & cols.keys():
+            cols["cal_seen"] = None
         sets = ", ".join(f"{k}=?" for k in cols)
         with self.db.tx() as c:
             c.execute(f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?", (*cols.values(), t, id))
@@ -447,11 +485,11 @@ class Jobs:
         return [d for d in (self._row(r) for r in rows) if d]
 
     def earliest_due(self) -> float | None:
-        """The next slot worth waking for. A mail poll is not one: the capped loop sleep already reaches it, and
+        """The next slot worth waking for. A mail or calendar look is not one: the capped loop sleep already reaches it, and
         waking a sleeping Mac every few minutes to read mail would be the heartbeat this scheduler is not."""
         with self.db.tx() as c:
             r = c.execute("SELECT MIN(next_due_at) AS t FROM jobs WHERE enabled=1 AND next_due_at IS NOT NULL "
-                          "AND kind<>'mail'").fetchone()
+                          "AND kind NOT IN ('mail','calendar')").fetchone()
         return float(r["t"]) if r and r["t"] is not None else None
 
     def watching(self) -> list[dict[str, Any]]:
@@ -494,6 +532,52 @@ class Jobs:
             return []
         return [t for t in threads if t.get("thread_id") in new and old.get(t["thread_id"]) != new[t["thread_id"]]
                 and "SENT" not in ((t.get("messages") or [{}])[-1].get("labels") or [])]
+
+    def poll_calendar(self, job: dict[str, Any], events: list[dict[str, Any]], at: float) -> tuple[list[dict[str, Any]], float | None]:
+        """(events whose trigger time has come, the next trigger time still ahead) from one look at the next 24 h.
+
+        Each event instance (id + start) is booked as fired the moment it is returned, so it fires once, whatever
+        the poll rate. Only an event that has not started yet is worth a "before" run, so one whose trigger passed
+        while the Mac slept and which has begun since is dropped. The first look after arming (no `cal_seen` yet)
+        books the events already inside their window without returning them, so saving a job never fires at once.
+        Returned oldest trigger first; the scheduler fires the newest and counts the rest as skipped."""
+        lead = 60.0 * int(15 if job.get("minutes_before") is None else job["minutes_before"])
+        query = job.get("calendar_query") or ""
+        with self.db.tx() as c:
+            r = c.execute("SELECT cal_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
+        old = json.loads(r["cal_seen"]) if r and r["cal_seen"] else None
+        seen = list(old or [])
+        due: list[tuple[float, dict[str, Any]]] = []
+        ahead: float | None = None
+        for ev in events:
+            start = event_start(ev)
+            if (start is None or start <= at or start > at + CAL_LOOKAHEAD_S or ev.get("status") == "cancelled"
+                    or ev.get("self_response") == "declined" or not event_matches(ev, query)):
+                continue
+            key = f"{ev.get('id')}|{ev.get('start')}"
+            if key in seen:
+                continue
+            if start - lead <= at:
+                seen.append(key)
+                due.append((start - lead, ev))
+            else:
+                ahead = start - lead if ahead is None else min(ahead, start - lead)
+        with self.db.tx() as c:
+            c.execute("UPDATE jobs SET cal_seen=? WHERE id=?", (json.dumps(seen[-CAL_SEEN_KEEP:]), job["id"]))
+        if old is None:
+            return [], ahead
+        return [ev for _, ev in sorted(due, key=lambda t: t[0])], ahead
+
+    def record_digest(self, id: str, digest: str, at: float) -> bool:
+        """Store the digest of a finished run's result; True if it differs from the last one (or there was none)."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT last_digest FROM jobs WHERE id=?", (id,)).fetchone()
+            if r is None:
+                return True
+            if r["last_digest"] == digest:
+                return False
+            c.execute("UPDATE jobs SET last_digest=?, last_change_at=? WHERE id=?", (digest, at, id))
+        return True
 
     def arm(self, at: float) -> int:
         """Give every enabled job with no armed slot one, from now. A job armed this way has nothing to catch up.
@@ -702,7 +786,8 @@ class Scheduler:
     def __init__(self, jobs: Jobs, launch: Callable[[dict[str, Any], dict[str, Any]], Awaitable[str | None]],
                  clock: Callable[[], float] = time.time,
                  sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None,
-                 mail: Callable[[str], list[dict[str, Any]]] | None = None) -> None:
+                 mail: Callable[[str], list[dict[str, Any]]] | None = None,
+                 calendar: Callable[[str | None], list[dict[str, Any]]] | None = None) -> None:
         self.jobs = jobs
         self.launch = launch
         # Optional run policy (jobs_policy.JobPolicy): the overlap guard before a launch, the watcher after it.
@@ -714,6 +799,9 @@ class Scheduler:
         # Blocking Gmail search -> thread metadata (Google.gmail_threads_recent shape), run off the event loop.
         # It raises when Google is not connected. None = mail jobs never fire.
         self.mail = mail
+        # Blocking read of the next 24 h of events of one calendar id (None = primary), from the Google read cache.
+        # It raises when Google is not connected. None = calendar jobs never fire.
+        self.calendar = calendar
         self._woken: float | None = None
         # Set by nudge() (the Mac woke or unlocked): cuts the current nap short so a missed slot fires now.
         self._poke = asyncio.Event()
@@ -787,7 +875,8 @@ class Scheduler:
             Proposals(self.jobs.db).expire(at - pdays * 86400, at)
         due = self.jobs.due(at)
         mail_due = [j for j in due if j["kind"] == "mail"]
-        due = [j for j in due if j["kind"] != "mail"]
+        cal_due = [j for j in due if j["kind"] == "calendar"]
+        due = [j for j in due if j["kind"] not in ("mail", "calendar")]
         # Directory jobs: one listing each. A job that is also clock-due is still one launch this tick.
         seen = {j["id"] for j in due}
         hits = {j["id"]: n for j in self.jobs.watching() if (n := self.jobs.poll_dir(j))}
@@ -831,8 +920,43 @@ class Scheduler:
             if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
                 self.jobs.pause(job["id"], "expired", at)
             await self._start(job, fire, fired)
+        for job in cal_due:
+            events, nxt = await self._poll_calendar(job, at)
+            if not events:
+                continue
+            ev, lead = events[-1], 60.0 * int(15 if job.get("minutes_before") is None else job["minutes_before"])
+            due_at = float(event_start(ev) or at) - lead  # type: ignore[arg-type]
+            late = max(0.0, at - due_at)
+            fire = {"job_id": job["id"], "job": job["name"], "kind": "calendar", "cron": "", "timezone": job["timezone"],
+                    "due_at": due_at, "fired_at": at, "late_seconds": round(late, 3), "missed_slots": len(events) - 1,
+                    "late": late > LATE_GRACE_S or len(events) > 1, "trigger": "calendar",
+                    "event": {k: ev.get(k) for k in ("id", "summary", "start", "end", "attendees", "description", "meet", "location")}}
+            self.jobs.mark_fired(job["id"], fired_at=at, due_at=due_at, next_due_at=nxt)
+            if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
+                self.jobs.pause(job["id"], "expired", at)
+            await self._start(job, fire, fired)
         self.sync_wake()
         return fired
+
+    async def _poll_calendar(self, job: dict[str, Any], at: float) -> tuple[list[dict[str, Any]], float]:
+        """One look at a calendar job's events, and when to look next: the nearer of the next trigger and CAL_POLL_S.
+        Fails closed: no Google, no fire. ponytail: a trigger can land up to MAX_SLEEP_S late (the loop's nap cap)."""
+        nxt = at + CAL_POLL_S
+        events: list[dict[str, Any]] = []
+        ahead: float | None = None
+        if self.calendar is not None and (job.get("calendar_query") or "").strip():
+            try:
+                evs = await asyncio.to_thread(self.calendar, job.get("calendar_id"))
+                events, ahead = self.jobs.poll_calendar(job, evs, at)
+            except Exception as e:  # noqa: BLE001 - a failed look skips this pass, it never fires blind
+                log.info("calendar job %s skipped: %s", job["name"], e)
+                self.jobs.record_skip(job["id"], "google_disconnected" if isinstance(e, GoogleNotConnected)
+                                      else "calendar_unreachable", at)
+        if ahead is not None:
+            nxt = max(at + 1.0, min(nxt, ahead))
+        with self.jobs.db.tx() as c:
+            c.execute("UPDATE jobs SET next_due_at=? WHERE id=?", (nxt, job["id"]))
+        return events, nxt
 
     async def _poll_mail(self, job: dict[str, Any], at: float) -> list[dict[str, Any]]:
         """One Gmail look for a mail job (the next is booked either way). Fails closed: no Google, no fire."""

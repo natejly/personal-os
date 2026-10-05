@@ -7,6 +7,7 @@
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
+import { splitReport } from '../lib/report'
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -166,6 +167,25 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
   )
 }
 
+/** A run's report: the fixed headings (Verified, Assumptions, Done, ...) as labelled sections when it has them, else plain markdown. */
+function ReportBody({ text }: { text: string }): JSX.Element {
+  const md = (t: string): JSX.Element => (
+    <div className="markdown inbox-summary"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{t}</ReactMarkdown></div>
+  )
+  const sections = splitReport(text)
+  if (!sections) return md(text)
+  return (
+    <>
+      {sections.map((x, i) => (
+        <section key={i} className="report-section">
+          {x.heading && <h4 className="report-heading">{x.heading}</h4>}
+          {x.body && md(x.body)}
+        </section>
+      ))}
+    </>
+  )
+}
+
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
@@ -207,9 +227,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
       {open && (
         <>
           {r.error && <p className="msg-error">{r.error}</p>}
-          {r.summary ? (
-            <div className="markdown inbox-summary"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{r.summary}</ReactMarkdown></div>
-          ) : (
+          {r.summary ? <ReportBody text={r.summary} /> : (
             !r.error && <p className="muted">It wrote nothing. {r.tool_calls} tool call{r.tool_calls === 1 ? '' : 's'}.</p>
           )}
         </>
@@ -287,6 +305,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
           {r.dry_run ? <span className="chip">preview</span> : r.manual && <span className="chip">by hand</span>}
+          {r.unchanged && <span className="chip" title="Same result as the run before; not announced">unchanged</span>}
           {r.late && (
             <span className="chip warn" title={r.due_at ? `Due ${fmtDate(r.due_at)}` : undefined}>
               late{r.missed_slots > 0 ? ` · ${r.missed_slots} slot${r.missed_slots === 1 ? '' : 's'} missed` : ''}
@@ -381,12 +400,19 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           ? <span className="muted small" title={job.watch_dir ?? ''}>watching {tildePath(job.watch_dir ?? '')}{job.cron && <> · <code>{job.cron}</code></>}</span>
           : job.kind === 'mail'
             ? <code className="muted small" title="Runs when matching mail arrives">{job.mail_query}</code>
+            : job.kind === 'calendar'
+              ? <span className="muted small" title="Runs shortly before each matching event starts">{job.minutes_before ?? 15} min before <code>{job.calendar_query}</code></span>
           : <span className="muted small" title={job.cron}>{describeCron(job.cron)}</span>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
           : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'paused'}
       </span>
+      {job.only_on_change && (
+        <span className="muted small" title="Runs whose result matches the last one are not announced">
+          {job.last_change_at ? `last change: ${fmtWhen(job.last_change_at)}` : 'no change recorded yet'}
+        </span>
+      )}
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {skipReason(job.last_skip_reason)}</span>
       )}
@@ -396,12 +422,17 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {/* Run and History are the two a row is opened for, so they stay put. The rest appear when the
           row is hovered or holds focus; they keep their space, so nothing shifts when they do. */}
       <span className="job-more">
-        {(job.kind === 'cron' || job.kind === 'once') && (
+        {(job.kind === 'cron' || job.kind === 'once' || job.kind === 'calendar') && (
           <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
             aria-label={`Edit ${job.name}`} aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
             <Pencil size={12} />
           </button>
         )}
+        <label className="chip-check-row small" title="Runs whose result matches the last one are recorded as unchanged and not announced">
+          <input type="checkbox" checked={!!job.only_on_change} aria-label={`Notify only when ${job.name} changes`}
+            onChange={(e) => void save({ only_on_change: e.target.checked })} />
+          <span>Only on change</span>
+        </label>
         <select className="small" value={job.notify ?? 'problems'} aria-label={`Notifications for ${job.name}`}
           title="When a run of this job sends a system notification"
           onChange={(e) => void saveNotify(e.target.value as JobNotifyMode)}>
@@ -499,7 +530,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail', onlyTools: false, desk: false, autonomy: 'plan' as 'plan' | 'propose' }
+const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mins: '15', onlyChange: false, mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail' | 'calendar', onlyTools: false, desk: false, autonomy: 'plan' as 'plan' | 'propose' }
 
 /** `/Users/me/Downloads` -> `~/Downloads`, for display. */
 function tildePath(p: string): string {
@@ -557,21 +588,21 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
   const { createJob, updateJob } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
-    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: job.mail_query ?? '' }
+    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : job.kind === 'calendar' ? 'calendar' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: (job.kind === 'calendar' ? job.calendar_query : job.mail_query) ?? '', mins: String(job.minutes_before ?? 15), onlyChange: !!job.only_on_change }
     : BLANK)
   const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [picked, setPicked] = useState<string[]>(['current_time'])
   const cron = presetCron(sched)
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : f.mode === 'mail' ? !!f.query.trim() : !!f.when)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : (f.mode === 'mail' || f.mode === 'calendar') ? !!f.query.trim() : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     if (!ready || busy) return
     setBusy(true)
     setErr(null)
-    const common = { name: f.name.trim(), prompt: f.prompt.trim() }
+    const common = { name: f.name.trim(), prompt: f.prompt.trim(), only_on_change: f.onlyChange }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
     const schedule = f.mode === 'repeat'
       ? { kind: 'cron' as const, cron }
@@ -579,6 +610,8 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
         ? { kind: 'watch' as const, watch_dir: f.dir.trim() }
         : f.mode === 'mail'
           ? { kind: 'mail' as const, mail_query: f.query.trim() }
+          : f.mode === 'calendar'
+            ? { kind: 'calendar' as const, calendar_query: f.query.trim(), minutes_before: Math.max(0, Math.min(1440, Math.round(Number(f.mins) || 0))) }
           // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
           : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
     let ok: boolean
@@ -612,12 +645,22 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
           <option value="repeat">Repeat</option>
           {!job && <option value="folder">When files appear in a folder</option>}
           <option value="mail">When matching mail arrives</option>
+          <option value="calendar">Before a calendar event</option>
         </select>
         {f.mode === 'repeat'
           ? <SchedulePicker value={sched} onChange={setSched} timezone={job?.timezone} />
           : f.mode === 'folder'
             ? <input type="text" placeholder="Folder, e.g. ~/Downloads" value={f.dir} aria-label="Folder to watch"
                 onChange={(e) => setF({ ...f, dir: e.target.value })} />
+            : f.mode === 'calendar'
+            ? <>
+                <input type="text" placeholder="Event title or guest, e.g. standup" value={f.query} maxLength={300}
+                  aria-label="Calendar event words" title="Every word must appear in the event's title or guest list"
+                  onChange={(e) => setF({ ...f, query: e.target.value })} />
+                <input type="number" min={0} max={1440} value={f.mins} aria-label="Minutes before the event" style={{ width: 64 }}
+                  onChange={(e) => setF({ ...f, mins: e.target.value })} />
+                <span className="muted small">min before</span>
+              </>
             : f.mode === 'mail'
             ? <input type="text" placeholder="Gmail search, e.g. from:landlord" value={f.query} maxLength={500}
                 aria-label="Gmail search" title="Checked every five minutes; mail already there when you save does not count"
@@ -631,6 +674,10 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>{job ? 'Save' : 'Schedule'}</button>
       </div>
       {err && <p className="msg-error">{err}</p>}
+      <label className="chip-check-row small">
+        <input type="checkbox" checked={f.onlyChange} onChange={(e) => setF({ ...f, onlyChange: e.target.checked })} />
+        <span>Notify only when the result changes</span>
+      </label>
       {!job && (
         <label className="chip-check-row small">
           <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />

@@ -332,7 +332,16 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Accepting is what actually sends it, exactly once. A run cannot schedule
   further runs either; that proposal is yours to accept too. If the machine was
   asleep over a slot the task still runs, once, and is told it is late so it says
-  so in its report. A one-off retires itself after it fires.
+  so in its report. A one-off retires itself after it fires. Besides a clock, a
+  task can start from a folder, from matching mail, or **a set number of minutes
+  before a calendar event** whose title or guests match your words (it reads the
+  cached calendar, fires once per event, and is handed the event's details).
+  Tick **Notify only when the result changes** on a task that keeps checking the
+  same thing: a run whose result matches the last one is recorded as unchanged
+  and never reaches the inbox or a notification, and the task shows when it last
+  changed. Unattended reports use fixed headings (Verified, Assumptions, Done,
+  Awaiting approval, Open questions), each claim with its evidence, and the inbox
+  shows them as sections.
 - **Google Workspace.** Sign in once with your own OAuth client; Calendar,
   Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos and creates a
   "Grain Todos" calendar that mirrors todos with a due date.

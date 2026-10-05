@@ -5,6 +5,7 @@ import PopoutSurface from './PopoutSurface'
 import { useCanvas } from './canvas/store'
 import QuickAsk from './features/ask/QuickAsk'
 import QuickCapture from './features/notes/QuickCapture'
+import PrintSurface from './features/notes/PrintSurface'
 import RootBoundary from './RootBoundary'
 import { installFileDropGuard } from './lib/fileDrop'
 import { useStore } from './store'
@@ -33,6 +34,7 @@ useStore.subscribe((s, prev) => {
 const q = params()
 const capture = q.get('surface') === 'capture'
 const ask = q.get('surface') === 'ask'
+const print = q.get('surface') === 'print'
 const windowId = q.get('surface') === 'widget' ? q.get('window') : null
 
 /**
@@ -41,7 +43,7 @@ const windowId = q.get('surface') === 'widget' ? q.get('window') : null
  * owns both actions in either mode, including its own fall-through to closeSelf/minimizeSelf.
  * A pop-out answers for itself in `PopoutSurface`.
  */
-if (!windowId && !capture && !ask) {
+if (!windowId && !capture && !ask && !print) {
   window.os.onMenu((action) => {
     if (useCanvas.getState().loaded) return
     if (action === 'close-window') window.os.closeSelf()
@@ -51,6 +53,6 @@ if (!windowId && !capture && !ask) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RootBoundary>{capture ? <QuickCapture /> : ask ? <QuickAsk /> : windowId ? <PopoutSurface windowId={windowId} /> : <App />}</RootBoundary>
+    <RootBoundary>{print ? <PrintSurface /> : capture ? <QuickCapture /> : ask ? <QuickAsk /> : windowId ? <PopoutSurface windowId={windowId} /> : <App />}</RootBoundary>
   </React.StrictMode>
 )

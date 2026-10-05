@@ -58,6 +58,13 @@ const api: GrainApi = {
     resize: (height: number) => ipcRenderer.invoke('quickask:resize', height),
     openChat: (conversationId: string) => ipcRenderer.invoke('quickask:open', conversationId)
   },
+  print: {
+    /** The hidden print window asks for its note, then says it has finished drawing it. */
+    payload: () => ipcRenderer.invoke('print:payload'),
+    ready: () => ipcRenderer.send('print:ready'),
+    /** Print a note to PDF: 'save' asks where (and reveals the file), 'bytes' hands the PDF back. null when cancelled. */
+    exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => ipcRenderer.invoke('print:export-pdf', title, content, filename, mode)
+  },
   closeSelf: () => ipcRenderer.send('window:close-self'),
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),
   deskNotify: (payload) => ipcRenderer.send('desk:notify', payload),

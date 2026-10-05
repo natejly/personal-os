@@ -404,7 +404,7 @@ export default function DocsView(): JSX.Element {
                 </ViewMenu>
               )}
               <DocRecordButton docId={activeDoc.id} />
-              <ExportMenu title={title} content={body} />
+              <ExportMenu title={title} content={body} projectId={activeDoc.project_id ?? null} />
               {/* One toggle for the whole panel; the tab strip inside picks what it shows. The dot
                   keeps counting assistant edits waiting for review, whatever tab is open. */}
               <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} title={panelOpen ? 'Hide side panel' : 'Show outline, recordings, links and history'}

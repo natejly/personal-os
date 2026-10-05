@@ -4,11 +4,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Check, Download } from 'lucide-react'
 import { normalizeMathBlocks } from '../../lib/mathBlocks'
+import { printFilename } from '../../lib/printDoc'
+import { useStore } from '../../store'
 import { copyMarkdown, downloadMarkdown, printDoc, stripAiFences } from './exportDoc'
 import '../../styles/notes.css'
 
-/** Download the doc as .md, copy its markdown, or print it (the print dialog saves a PDF). */
-export default function ExportMenu({ title, content }: { title: string; content: string }): JSX.Element {
+/** Download the doc as .md, copy its markdown, export a typeset PDF (saved anywhere, or into Uploads), or print it. */
+export default function ExportMenu({ title, content, projectId = null }: { title: string; content: string; projectId?: string | null }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -21,6 +23,20 @@ export default function ExportMenu({ title, content }: { title: string; content:
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
   }, [open])
+
+  const exportPdf = async (mode: 'save' | 'bytes'): Promise<void> => {
+    setOpen(false)
+    const { toast, uploadDocuments } = useStore.getState()
+    const name = printFilename(title)
+    try {
+      const r = await window.os.print.exportPdf(title || 'Untitled', stripAiFences(content), name, mode)
+      if (!r) return
+      if (typeof r === 'string') toast(`Saved ${name}`)
+      else await uploadDocuments([new File([new Uint8Array(r)], name, { type: 'application/pdf' })], projectId)
+    } catch (e) {
+      toast(`PDF export failed: ${(e as Error).message}`, 'error')
+    }
+  }
 
   const print = (): void => {
     setOpen(false)
@@ -41,7 +57,9 @@ export default function ExportMenu({ title, content }: { title: string; content:
             setOpen(false)
             void copyMarkdown(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })
           }}>Copy Markdown</button>
-          <button role="menuitem" className="notes-menu-row" onClick={print}>Print or save as PDF</button>
+          <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('save')}>Export as PDF…</button>
+          <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('bytes')}>Export PDF to Uploads</button>
+          <button role="menuitem" className="notes-menu-row" onClick={print}>Print…</button>
         </div>
       )}
     </div>

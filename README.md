@@ -308,7 +308,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   markdown, or a file on this Mac (a PDF in the built-in viewer, an image, a
   text file). Any ```` ```html ````, ```` ```svg ````, ```` ```mermaid ````,
   ```` ```chart ```` or ```` ```interactive ```` block in a reply has an
-  "Open in side panel" button too. See `docs/side-panel.md`.
+  "Open in side panel" button too. Split puts two things side by side (two
+  PDFs, or a PDF and a note); a file refreshes from disk, and a PDF sits in a
+  quiet frame with its toolbar tucked away. See `docs/side-panel.md`.
 - **Traces.** Every reply records what it did: context assembly, each model
   round with time-to-first-token and token counts, each tool call, and the
   auto-learn pass. Spans stream live into a waterfall in the Context panel.

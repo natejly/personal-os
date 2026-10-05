@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
 import { existsSync, statSync } from 'fs'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
+import { isOpenable } from '../shared/openable'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
@@ -377,6 +378,14 @@ if (gotLock) app.whenReady().then(async () => {
     const p = String(path)
     if (!existsSync(p) || !statSync(p).isDirectory()) return false
     return !(await shell.openPath(p))
+  })
+  // A file the side panel shows. Inside the home folder only; opening is limited to types that cannot run.
+  handle('data:file-action', async (_e, path: string, action: string) => {
+    const p = resolve(String(path))
+    const home = app.getPath('home')
+    if (!p.startsWith(home + sep) || !existsSync(p) || !statSync(p).isFile()) return false
+    if (action === 'reveal') { shell.showItemInFolder(p); return true }
+    return action === 'open' && isOpenable(p) && !(await shell.openPath(p))
   })
   // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
   handle('data:relaunch', () => { app.relaunch(); app.quit() })

@@ -98,3 +98,24 @@ test('a mermaid block in a reply is promoted to the panel from its header', asyn
     await grain.close()
   }
 })
+
+test('a second show with pane right splits the panel; each pane has its own picker', async () => {
+  const grain = await launchApp({ name: 'show-panel-split' })
+  try {
+    const { page } = grain
+    await newChat(page)
+    await showTool(page, { kind: 'markdown', content: '# Left note', title: 'Left' })
+    await expect(panel(page).getByRole('heading', { name: 'Left' })).toBeVisible()
+    await showTool(page, { kind: 'markdown', content: '# Right note', title: 'Right', pane: 'right' })
+    await expect(panel(page).getByLabel('left pane')).toContainText('Left note')
+    await expect(panel(page).getByLabel('right pane')).toContainText('Right note')
+    // The right pane's picker swaps what it shows without touching the left one.
+    await panel(page).getByLabel('What the right pane shows').selectOption({ label: 'Left' })
+    await expect(panel(page).getByLabel('right pane')).toContainText('Left note')
+    await panel(page).getByRole('button', { name: 'Close right pane' }).click()
+    await expect(panel(page).getByLabel('left pane')).toHaveCount(0)
+    await expect(panel(page).getByRole('button', { name: 'Split panel' })).toBeVisible()
+  } finally {
+    await grain.close()
+  }
+})

@@ -1,4 +1,5 @@
 import type { ShowItem } from '@shared/types'
+import { fmtAgo } from './deskFiles'
 
 /**
  * The chat's side panel: what a `show` item renders as. Pure, so node:test pins the file-kind routing,
@@ -44,4 +45,31 @@ export function fmtBytes(n: number | undefined): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** The built-in PDF viewer's chrome off by default (page-fit width, no thumbnails); `toolbar` brings its bar back. */
+export const pdfSrc = (blobUrl: string, toolbar = false): string => `${blobUrl}#toolbar=${toolbar ? 1 : 0}&navpanes=0&view=FitH`
+
+/**
+ * The page count a PDF declares in its page-tree root (`/Count N`), the largest one found; null when the
+ * bytes hold none (the tree is inside a compressed object stream). ponytail: a heuristic, not a parser.
+ */
+export function pdfPageCount(bytes: Uint8Array): number | null {
+  let max = 0
+  for (const m of new TextDecoder('latin1').decode(bytes).matchAll(/\/Count\s+(\d+)/g)) max = Math.max(max, Number(m[1]))
+  return max > 0 ? max : null
+}
+
+/** The slim header's facts under the title: size, pages, and how fresh. `at` is when the panel got the item (ms). */
+export function headerMeta(item: ShowItem, viewer: FileViewer | null, at: number, pages: number | null, nowMs: number = Date.now()): string[] {
+  const out: string[] = []
+  if (item.kind === 'file') {
+    const size = fmtBytes(item.size)
+    if (size) out.push(size)
+    if (viewer === 'pdf' && pages) out.push(`${pages} ${pages === 1 ? 'page' : 'pages'}`)
+  } else if (item.kind === 'chart' || item.kind === 'interactive') {
+    // A tool-made chart has no live source to re-read, so the best a stale one can do is say when it was made.
+    out.push(`generated ${fmtAgo(at / 1000, nowMs)}`)
+  }
+  return out
 }

@@ -3,13 +3,13 @@ import { expect } from '@playwright/test'
 
 export async function newChat(page) {
   await page.getByRole('button', { name: /New chat/ }).first().click()
-  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
 }
 
 /** Types `text` (real newlines allowed) into the composer and sends it; resolves when the new assistant message has stopped thinking. */
 export async function say(page, text, { wait = true } = {}) {
   const before = await page.locator('.msg.assistant').count()
-  const box = page.getByRole('textbox', { name: 'Message' })
+  const box = page.getByRole('textbox', { name: 'Message', exact: true })
   // fill() sets the value in one step; insertText of a huge multi-line string is quadratic inside Blink (harness artifact, not the app).
   await box.fill(text)
   await box.press('Enter')

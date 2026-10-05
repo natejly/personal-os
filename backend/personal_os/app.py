@@ -2303,7 +2303,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
-            hist = expand_commands(hist, command_store, skills)  # `/name args` turns carry their filled command (commands.py)
+            hist = expand_commands(hist, command_store, skills, _mentionable())  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
             return head + [dict(n) for n in run_notes]
@@ -2581,7 +2581,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills)})})
+                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable())})})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
@@ -3991,6 +3991,12 @@ def _persona_text(role: Any) -> str:
         return ""
     from .subagents import persona_block
     return f"## You are the agent '{role.name}'\n{role.description}\n\n{persona_block(role, skills)}"
+
+
+def _mentionable() -> list[str]:
+    """Agent names an `@name` in a message can address: the built-ins and the user's approved, visible ones."""
+    from .subagents import BUILTIN_ROLES
+    return [*(n for n, r in BUILTIN_ROLES.items() if not r.hidden), *(d["name"] for d in agent_defs.list(approved_only=True) if not d["hidden"])]
 
 
 def _agents_hint(modes: dict[str, str]) -> str:

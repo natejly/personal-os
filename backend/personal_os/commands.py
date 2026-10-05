@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from typing import Any
+from typing import Any, Iterable
 
 from .db import new_id, now
 
@@ -121,7 +121,26 @@ def expand_skill(text: str, args: str, skills: Any) -> str:
     return f"{text}\n\n[No approved skill is called “{key}”. Approved skills: {names}. Tell the user, then answer as best you can.]"
 
 
-def expand(text: str, store: "Commands | None", skills: Any = None) -> str:
+_MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9_-]{0,39})")
+
+
+def mention_note(text: str, names: Iterable[str] | None) -> str:
+    """`@name` in a user turn, for an agent that exists, becomes a hint to hand the work to it. The stored row keeps
+    what was typed; the model sees this under the turn. Unknown names are ordinary text."""
+    known = set(names or ())
+    hits = list(dict.fromkeys(m.group(1) for m in _MENTION.finditer(text or "") if m.group(1) in known))
+    if not hits:
+        return ""
+    return "".join(f"\n\n[The user mentioned @{n}: address this to agent {n}. Hand the task to it with agent_spawn role={n} "
+                   "and report what it returns.]" for n in hits[:3])
+
+
+def expand(text: str, store: "Commands | None", skills: Any = None, agents: Iterable[str] | None = None) -> str:
+    """A user turn gains its filled slash command and any @agent hint under it; see _expand_slash and mention_note."""
+    return _expand_slash(text, store, skills) + (mention_note(text, agents) if isinstance(text, str) else "")
+
+
+def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> str:
     """A user turn typed as `/name args` gains the filled command under it; the stored row keeps what was typed.
     Unknown names, and text that is not a leading slash command, pass through unchanged. A subtask command is
     not filled here: the model is told to run it with command_run, so the child agent, its approval and its
@@ -145,10 +164,11 @@ def expand(text: str, store: "Commands | None", skills: Any = None) -> str:
     return f"{text}\n\n[The user ran their saved command /{cmd['name']}. Its filled-in instructions follow; carry them out.]\n{fill(cmd['body'], args)}"
 
 
-def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None) -> list[dict[str, Any]]:
+def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None,
+                   agents: Iterable[str] | None = None) -> list[dict[str, Any]]:
     """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
-    return [{**m, "content": expand(m["content"], store, skills)} if m.get("role") == "user" and isinstance(m.get("content"), str)
-            and m["content"].startswith("/") else m for m in history]
+    return [{**m, "content": expand(m["content"], store, skills, agents)} if m.get("role") == "user" and isinstance(m.get("content"), str)
+            and (m["content"].startswith("/") or "@" in m["content"]) else m for m in history]
 
 
 class Commands:

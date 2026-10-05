@@ -183,3 +183,18 @@ def test_draft_returns_label_and_boundaries(monkeypatch: pytest.MonkeyPatch) -> 
     out = j("POST", "/agents/draft", {"intent": "an inbox triage assistant"})
     assert out["def"]["label"] == "Inbox triage" and out["def"]["boundaries"].startswith("Ask before archiving.")
     assert out["def"]["name"] == "inbox-triage"
+
+
+def test_an_at_mention_of_a_known_agent_becomes_a_hint_under_the_turn() -> None:
+    from personal_os.commands import expand, expand_history, mention_note
+    names = ["researcher", "triager"]
+    note = mention_note("ask @triager to sort this, cc @nobody and mail@example.com", names)
+    assert "address this to agent triager" in note and "agent_spawn role=triager" in note
+    assert "nobody" not in note and "example" not in note
+    assert expand("plain text", None, None, names) == "plain text"
+    assert expand("hey @researcher look", None, None, names).startswith("hey @researcher look\n\n[The user mentioned @researcher")
+    hist = expand_history([{"role": "user", "content": "@triager go"}, {"role": "assistant", "content": "@triager"}], None, None, names)
+    assert "agent_spawn role=triager" in hist[0]["content"] and hist[1]["content"] == "@triager"
+    # The chat runner offers the built-ins and the approved, visible custom agents.
+    make_agent("mentionable")
+    assert {"researcher", "mentionable"} <= set(appmod._mentionable())

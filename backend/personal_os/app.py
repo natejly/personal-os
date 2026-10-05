@@ -3775,7 +3775,7 @@ def _shell_wake(conversation_id: str | None) -> None:
     """A background shell job finished in a desk that has no run going: wake it so it reads the result."""
     desk = desks.by_conversation(conversation_id) if conversation_id else None
     conv = convos.get(conversation_id, with_messages=False) if desk else None
-    if conv and conv["settings"].get("deskId") != desk["id"]:
+    if conv and conv["settings"].get("deskId") == "":
         return  # the chat turned autonomy off: its shell result is read on its next ordinary reply
     if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done", "queued"):
         return

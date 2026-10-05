@@ -566,6 +566,9 @@ def main() -> None:
     store = Store()
     store.seed()
     install(store)
+    for part in filter(None, os.environ.get("GRAIN_FAKE_FAIL", "").split(",")):
+        api, _, n = part.partition(":")
+        store.fail[api] = int(n or 1)
     from personal_os import app as appmod
 
     if os.environ.get("GRAIN_FAKE_GOOGLE_CONNECTED", "1") == "1":

@@ -76,6 +76,11 @@ test('create with guests, recurrence, reminders, color; fake receives the insert
   await page.getByRole('button', { name: 'New event' }).click()
   const ed = editor(page)
   await ed.locator('.ev-title').fill('E2E planning')
+  // The default start is "the next hour", which late in the evening lands in next week; pin it inside this one.
+  const wed = new Date(); wed.setHours(0, 0, 0, 0); wed.setDate(wed.getDate() - ((wed.getDay() + 6) % 7) + 2)
+  const day = `${wed.getFullYear()}-${String(wed.getMonth() + 1).padStart(2, '0')}-${String(wed.getDate()).padStart(2, '0')}`
+  await ed.getByRole('textbox', { name: 'Start' }).fill(`${day}T18:00`)
+  await ed.getByRole('textbox', { name: 'End' }).fill(`${day}T19:00`)
   await ed.getByLabel('Repeats').selectOption({ label: 'Daily' })
   const g = ed.getByPlaceholder('Add guest email, press Enter')
   await g.fill('not-an-email')
@@ -252,4 +257,17 @@ test('calendar API failure shows an error bar, not a crash, and recovers', async
   await grain.fake.fail('calendar', 0)
   await page.locator('.cal-nav').getByRole('button', { name: 'Previous week' }).click()
   await expect(ev(page, 'Standup D0')).toBeVisible()
+})
+
+test('backend gone mid-session: a failed save keeps the editor and its text', async ({ grain }) => {
+  const { page } = grain
+  await openCal(grain)
+  await ev(page, 'Standup D4').click()
+  await editor(page).locator('.ev-title').fill('Will not save')
+  grain.backend.child.kill('SIGKILL')
+  await editor(page).getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.toast.error')).toBeVisible()
+  await expect(editor(page)).toBeVisible()
+  await expect(editor(page).locator('.ev-title')).toHaveValue('Will not save')
+  await expect(editor(page).getByRole('button', { name: 'Save' })).toBeEnabled() // not stuck on "Saving…"
 })

@@ -223,3 +223,19 @@ test('mail at 820x520 keeps the toolbar, list and reader usable', async ({ grain
   await row(page, 'Subject 1 ').click()
   await expect(page.locator('.mail-reader').getByRole('button', { name: 'Reply' })).toBeInViewport()
 })
+
+test('backend gone mid-session: a failed send keeps the composed message', async ({ grain }) => {
+  const { page } = grain
+  await openMail(grain)
+  await page.getByRole('button', { name: 'Compose' }).click()
+  const dlg = page.locator('.mail-compose')
+  await dlg.getByLabel('To').fill('dana@example.com')
+  await dlg.getByLabel('Subject').fill('Offline draft')
+  await dlg.getByPlaceholder('Write your email…').fill('do not lose me')
+  grain.backend.child.kill('SIGKILL')
+  await dlg.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.locator('.toast.error')).toBeVisible()
+  await expect(dlg).toBeVisible() // a failed send never discards the message
+  await expect(dlg.getByPlaceholder('Write your email…')).toHaveValue('do not lose me')
+  await expect(dlg.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
+})

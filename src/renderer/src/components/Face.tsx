@@ -6,7 +6,7 @@ import 'blobatar/motion.css'
 const MOOD: Record<string, Expression> = {
   streaming: thinking, running: thinking, working: thinking, planning: thinking,
   awaiting_plan: unsure, blocked: unsure,
-  needs_approval: surprised, awaiting_approval: surprised,
+  needs_approval: surprised, 'needs-approval': surprised, awaiting_approval: surprised,
   paused: sleepy, queued: sleepy, stopped: sleepy,
   interrupted: scared, timed_out: scared,
   error: sad, failed: sad,

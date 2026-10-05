@@ -14,13 +14,17 @@ import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas, viewport } from '../store'
 import { useRingStatus } from '../useRingStatus'
-import { sessionMood } from './face'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
 const DEFAULT_SIZE = { w: 520, h: 640 }
 /** Blob view: the window is just the creature, this big, with no frame around it. */
 const BLOB = { w: 120, h: 120 }
 type Size = { w: number; h: number }
+
+/** What the blob's pose means, for its tooltip; the ring's words, in the user's. */
+const BLOB_LABEL: Record<string, string> = {
+  working: 'thinking…', 'needs-approval': 'needs your approval', done: 'finished', error: 'something went wrong'
+}
 
 /** Blob view: the window's own choice, else Settings › Behavior › Compact chats. */
 const isBlob = (win: CanvasWindow, compactOn: boolean): boolean => typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
@@ -149,7 +153,6 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const blob = isBlob(win, compactOn)
   // Where the blob was pressed: a press that travels is a drag, one that stays is the click that opens.
   const pressed = useRef<{ x: number; y: number } | null>(null)
-  const mood = useStore((s) => sessionMood(s.sessions[convId]))
 
   // The frame follows the view. The buttons resize as they switch (setBlob); this catches the rest: the
   // setting flipping with windows already on the space, or a window that arrives at the wrong size.
@@ -262,16 +265,18 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     )
   }
 
-  // Blob view: the creature alone, in a frame the CSS strips bare. It is cheap, so it stays up off-screen too.
+  // Blob view: the creature alone, in a frame the CSS strips bare, posed by the same status the ring
+  // shows (thinking while working, surprised when it needs you, happy for a moment when done, sad on
+  // an error). It is cheap, so it stays up and keeps its pose off-screen too.
   if (blob) {
     return (
-      <button className="chat-blob" title={`${convo?.title || 'Chat'} · click to open, drag to move`}
+      <button className="chat-blob" title={`${convo?.title || 'Chat'} · ${BLOB_LABEL[status] ?? 'click to open, drag to move'}`}
         onPointerDown={(e) => { pressed.current = { x: e.clientX, y: e.clientY }; onMove?.(e) }}
         onClick={(e) => {
           const p = pressed.current
           if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
-        <Face name={convId} status={live ? mood : undefined} size="fill" title={convo?.title || 'Chat'} />
+        <Face name={convId} status={status} size="fill" title={convo?.title || 'Chat'} />
       </button>
     )
   }

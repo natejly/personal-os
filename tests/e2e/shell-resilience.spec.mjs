@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { ROOT } from './harness.mjs'
 import { withGrain, launchSupervised, killBackend, restartBackendOnSamePort, ALL_VIEWS_ON } from './helpers/shell.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -53,7 +56,7 @@ test('supervised backend: giving up shows the failed screen, Try again brings it
     await expect(failed).toBeVisible({ timeout: 120_000 })
     // a readable message, developer detail behind a disclosure
     await expect(failed.getByText(/Your data is safe/)).toBeVisible()
-    await failed.getByText('Details').click()
+    await failed.locator('summary').click()
     await expect(failed.locator('pre')).toContainText(/backend/i)
     await page.getByRole('button', { name: /Try again/ }).click()
     await expect(page.locator('.sidebar')).toBeVisible({ timeout: 90_000 })
@@ -105,21 +108,26 @@ test('external backend killed mid-session: actions fail readably, a replacement 
   })
 })
 
-test('RootBoundary: a corrupt persisted setting that crashes the shell shows recovery UI, not a blank window', async () => {
+test('RootBoundary: a hand-edited settings row that crashes the shell shows recovery UI, not a blank window', async () => {
   await withGrain({}, async (grain) => {
-    const { page, api } = grain
-    // hiddenViews must be a list; a string/number survives a hand-edited settings file.
-    const r = await api('/settings', { method: 'PUT', body: { hiddenViews: 5 }, raw: true })
-    test.skip(!r.ok, 'backend validates hiddenViews, so the crash cannot be injected through settings')
+    const { page, dataDir } = grain
+    // The API refuses a non-list hiddenViews, but the row lives in SQLite and can be edited by hand or by an older build.
+    const py = join(ROOT, 'backend', '.venv', 'bin', 'python')
+    const edit = (value) => execFileSync(py, ['-c', 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute("UPDATE settings SET value=? WHERE key=?", (sys.argv[2], "hiddenViews")); c.commit()', join(dataDir, 'personal-os.db'), value])
+    edit('5')
     await page.reload()
-    const err = page.locator('.root-error, .empty-state:has-text("This view hit an error")')
-    await expect(err.first()).toBeVisible({ timeout: 15_000 })
-    // not blank: an opaque recovery surface with a Reload button
-    await expect(page.getByRole('button', { name: /Reload|Try again/ }).first()).toBeVisible()
-    // repair the setting and reload: the app comes back
-    await api('/settings', { method: 'PUT', body: { hiddenViews: [] } })
-    await page.getByRole('button', { name: 'Reload' }).click()
+    const err = page.locator('.root-error')
+    await expect(err).toBeVisible({ timeout: 15_000 })
+    await expect(err.getByRole('heading', { name: /Something broke/ })).toBeVisible()
+    await expect(err.getByRole('button', { name: 'Reload' })).toBeVisible()
+    await expect(err.getByRole('button', { name: 'Try again' })).toBeVisible()
+    // opaque: the window is not see-through
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('.root-error')).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
+    // repair the row; Reload brings the app back
+    edit('[]')
+    await err.getByRole('button', { name: 'Reload' }).click()
     await expect(page.locator('.sidebar')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.root-error')).toHaveCount(0)
   })
 })
 

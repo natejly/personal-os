@@ -6,7 +6,8 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "onboarding"
+      "shell-",
+      "onboarding-"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e",
@@ -89,12 +90,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 13434,
+                  "duration": 6583,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:09:16.297Z",
+                  "startTime": "2026-10-05T05:30:29.876Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -123,12 +124,12 @@
                   "workerIndex": 1,
                   "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 15359,
+                  "duration": 4222,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:09:16.235Z",
+                  "startTime": "2026-10-05T05:30:29.871Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -154,15 +155,15 @@
               "projectName": "",
               "results": [
                 {
-                  "workerIndex": 0,
-                  "parallelIndex": 0,
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 16126,
+                  "duration": 2833,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:09:29.800Z",
+                  "startTime": "2026-10-05T05:30:34.120Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -188,15 +189,15 @@
               "projectName": "",
               "results": [
                 {
-                  "workerIndex": 1,
-                  "parallelIndex": 1,
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 15749,
+                  "duration": 3560,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:09:31.782Z",
+                  "startTime": "2026-10-05T05:30:36.488Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -210,13 +211,1276 @@
           "column": 1
         }
       ]
+    },
+    {
+      "title": "shell-extras.spec.mjs",
+      "file": "shell-extras.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "window minimum size is 820x520 and cannot be dragged smaller",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2306,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:36.967Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ac1ea05fcebb7ae9fbae-dbbf7babdd980a646f1f",
+          "file": "shell-extras.spec.mjs",
+          "line": 7,
+          "column": 1
+        },
+        {
+          "title": "Spaces menu: toggle shows the plane and returns; New chat in a space opens a chat window; New Space works",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2613,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:39.282Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ac1ea05fcebb7ae9fbae-06c73665b10917a7b259",
+          "file": "shell-extras.spec.mjs",
+          "line": 16,
+          "column": 1
+        },
+        {
+          "title": "300 chats: the sidebar stays responsive, scrolls, searches, and nav still works",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9463,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:40.068Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ac1ea05fcebb7ae9fbae-52c16e4e8f601e78e835",
+          "file": "shell-extras.spec.mjs",
+          "line": 29,
+          "column": 1
+        },
+        {
+          "title": "hammering the nav: 40 rapid clicks end on the last view without errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4560,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:41.907Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "ac1ea05fcebb7ae9fbae-873c4a5f70884c32698f",
+          "file": "shell-extras.spec.mjs",
+          "line": 56,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "shell-nav.spec.mjs",
+      "file": "shell-nav.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "every sidebar nav item opens its view and is marked current; Today brings you back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2882,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:46.485Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-ce5be7bbe819d158d0ae",
+          "file": "shell-nav.spec.mjs",
+          "line": 7,
+          "column": 1
+        },
+        {
+          "title": "app switcher icons open Todos, Calendar, Mail and the page agent; one is pressed at a time",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2433,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:49.378Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-deecbcdc6686786b1da2",
+          "file": "shell-nav.spec.mjs",
+          "line": 27,
+          "column": 1
+        },
+        {
+          "title": "hidden views are not in the sidebar; More modules opens Settings → Modules",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1993,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:49.573Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-24e778a6165092eb55c5",
+          "file": "shell-nav.spec.mjs",
+          "line": 44,
+          "column": 1
+        },
+        {
+          "title": "⌘B hides and shows the sidebar from the menu, the button and the title-bar toggle",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2551,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:51.582Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-7b9d6dc3816cc103d75c",
+          "file": "shell-nav.spec.mjs",
+          "line": 54,
+          "column": 1
+        },
+        {
+          "title": "sidebar resize: drag, keyboard, clamps, double-click reset, persisted across relaunch",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3851,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:51.821Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-accb2b6a10d5cb5bcf3d",
+          "file": "shell-nav.spec.mjs",
+          "line": 70,
+          "column": 1
+        },
+        {
+          "title": "command palette: opens, fuzzy filters, arrows + Enter run, every command executes, Esc closes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3392,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:54.145Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-958b73489311d7ee9e24",
+          "file": "shell-nav.spec.mjs",
+          "line": 121,
+          "column": 1
+        },
+        {
+          "title": "menu shortcuts: every View/File item does what its label says",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3517,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:55.678Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-95cd93a743c9e0ea9f7b",
+          "file": "shell-nav.spec.mjs",
+          "line": 195,
+          "column": 1
+        },
+        {
+          "title": "prev/next chat shortcuts step through the sidebar list",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4466,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:57.547Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-c3838e89003dd838dbd1",
+          "file": "shell-nav.spec.mjs",
+          "line": 254,
+          "column": 1
+        },
+        {
+          "title": "page agent and context drawer shortcuts toggle the panels; context panel only lives in a chat",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3736,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:30:59.211Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-d96c9c9b9fef21bbed86",
+          "file": "shell-nav.spec.mjs",
+          "line": 272,
+          "column": 1
+        },
+        {
+          "title": "nothing overflows horizontally at 820x520 on any view",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7597,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:02.023Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "17b177d21898990fb7e6-0069acbea703e95e297c",
+          "file": "shell-nav.spec.mjs",
+          "line": 297,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "shell-panels.spec.mjs",
+      "file": "shell-panels.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "page agent carries each view's content to the model",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 6248,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:02.970Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-6e527b1c6707fd25220d",
+          "file": "shell-panels.spec.mjs",
+          "line": 22,
+          "column": 1
+        },
+        {
+          "title": "page agent: width resizes with the handle and persists; hints send on click; selection rides along",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4537,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:09.226Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-1dca8c12fa36d7dfbf3e",
+          "file": "shell-panels.spec.mjs",
+          "line": 68,
+          "column": 1
+        },
+        {
+          "title": "context drawer opens, closes and resizes in a chat; width persists",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3470,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:09.639Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-83f06a1a3958f3f29ce1",
+          "file": "shell-panels.spec.mjs",
+          "line": 104,
+          "column": 1
+        },
+        {
+          "title": "find bar: matches count, steps with Enter, wraps, Esc closes, clears on chat switch",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3748,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:13.116Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-c388f7d85124a0f9d354",
+          "file": "shell-panels.spec.mjs",
+          "line": 130,
+          "column": 1
+        },
+        {
+          "title": "sidebar chat pulse shows a reply streaming in another chat, then settles",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 9588,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:13.769Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-9e207066cd877a4ae2d8",
+          "file": "shell-panels.spec.mjs",
+          "line": 172,
+          "column": 1
+        },
+        {
+          "title": "theme: Settings switches light/dark/system; system follows prefers-color-scheme",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3674,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:16.872Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-8d240d9d34bc6ee1587a",
+          "file": "shell-panels.spec.mjs",
+          "line": 195,
+          "column": 1
+        },
+        {
+          "title": "pop-out: a space widget pops out to its own window and returns",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3965,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:20.557Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "84ca3fbf9ff554d8dda0-65e5ad6816682e2e3b6e",
+          "file": "shell-panels.spec.mjs",
+          "line": 236,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "shell-resilience.spec.mjs",
+      "file": "shell-resilience.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "supervised backend: a killed backend shows the restarting banner, then recovers on its own",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 6729,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:23.380Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-f53bda322b20c512b118",
+          "file": "shell-resilience.spec.mjs",
+          "line": 10,
+          "column": 1
+        },
+        {
+          "title": "supervised backend: giving up shows the failed screen, Try again brings it back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 44185,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:24.539Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-6fb6c45ae7975f0446eb",
+          "file": "shell-resilience.spec.mjs",
+          "line": 37,
+          "column": 1
+        },
+        {
+          "title": "external backend killed mid-session: actions fail readably, a replacement on the same port recovers without relaunch",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4472,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:30.117Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-c3779e6866f9239172b3",
+          "file": "shell-resilience.spec.mjs",
+          "line": 74,
+          "column": 1
+        },
+        {
+          "title": "RootBoundary: a hand-edited settings row that crashes the shell shows recovery UI, not a blank window",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2643,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [
+                    {
+                      "buffer": ""
+                    },
+                    {
+                      "buffer": ""
+                    }
+                  ],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:34.595Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-d066757272c09cd10145",
+          "file": "shell-resilience.spec.mjs",
+          "line": 111,
+          "column": 1
+        },
+        {
+          "title": "idle 20 s on Today: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22208,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:37.245Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-97a8006a8fe339f93563",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Chat: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22310,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:31:59.464Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-b92039e24f46f2772788",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Todos: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22345,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:32:08.733Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-fd3793e757c82c2133e4",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Calendar: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22372,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:32:21.783Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-ef97ddeb3d70e716bf38",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Mail: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22248,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:32:31.088Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-49ee367715030ebef17e",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Files: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22258,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:32:44.164Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-65b690d60d8394023881",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Meetings: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22809,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:32:53.345Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-30e1ab10d11ccf35e40b",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Cowork: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22604,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:33:06.431Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-af2b87444f220ceb6d7a",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Library: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22234,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:33:16.163Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-73fb86cc829d7818741d",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Activity: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 22333,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:33:29.044Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-efb3f2205208fff1b5e6",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        },
+        {
+          "title": "idle 20 s on Space: no console errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22191,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:33:38.405Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "69a8e6bd83b186467eb4-f1252302d51c7b0f1329",
+          "file": "shell-resilience.spec.mjs",
+          "line": 149,
+          "column": 3
+        }
+      ]
     }
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:09:11.078Z",
-    "duration": 36534.417,
-    "expected": 4,
+    "startTime": "2026-10-05T05:30:29.477Z",
+    "duration": 211142.96600000001,
+    "expected": 40,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

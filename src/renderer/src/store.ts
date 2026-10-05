@@ -1804,7 +1804,12 @@ export const useStore = create<State>((set, get) => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
       // shortcuts wired, and StrictMode's second mount must not add a second listener.
       wireMenu()
-      if (inited) return
+      if (inited) {
+        // "Try again" on the failed screen drops `ready` and calls init once more. After the app has loaded there
+        // is nothing left to fetch, only the screen to bring back; returning here left it on the boot logo for good.
+        if (loadedOnce && !get().ready) set({ ready: true })
+        return
+      }
       inited = true
       if (!stateWired && typeof window.os.onBackendState === 'function') {
         stateWired = true

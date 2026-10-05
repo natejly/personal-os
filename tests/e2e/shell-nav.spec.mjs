@@ -71,7 +71,7 @@ test('sidebar resize: drag, keyboard, clamps, double-click reset, persisted acro
   let { page } = grain
   const width = () => page.locator('aside.sidebar').evaluate((e) => Math.round(e.getBoundingClientRect().width))
   const handle = () => page.getByRole('separator', { name: 'Sidebar width' })
-  expect(await width()).toBe(260)
+  await expect.poll(width).toBe(260)
   const box = await handle().boundingBox()
   const y = box.y + 200
   const drag = async (dx) => {
@@ -84,10 +84,10 @@ test('sidebar resize: drag, keyboard, clamps, double-click reset, persisted acro
     await page.mouse.up()
   }
   await drag(60)
-  expect(await width()).toBeGreaterThan(300)
-  expect(await width()).toBeLessThanOrEqual(330)
+  await expect.poll(width).toBeGreaterThan(300)
+  await expect.poll(width).toBeLessThanOrEqual(330)
   await drag(900)
-  expect(await width()).toBe(480) // max clamp
+  await expect.poll(width).toBe(480) // max clamp
   await drag(-250)
   const mid = await width()
   expect(mid).toBeGreaterThan(190)
@@ -95,26 +95,26 @@ test('sidebar resize: drag, keyboard, clamps, double-click reset, persisted acro
   // keyboard
   await handle().focus()
   await page.keyboard.press('ArrowRight')
-  expect(await width()).toBe(mid + 16)
+  await expect.poll(width).toBe(mid + 16)
   await page.keyboard.press('Shift+ArrowRight')
-  expect(await width()).toBe(Math.min(480, mid + 16 + 64))
+  await expect.poll(width).toBe(Math.min(480, mid + 16 + 64))
   await page.keyboard.press('Shift+ArrowLeft')
   for (let i = 0; i < 30; i++) await page.keyboard.press('Shift+ArrowLeft')
-  expect(await width()).toBe(190) // min clamp by keyboard never collapses
+  await expect.poll(width).toBe(190) // min clamp by keyboard never collapses
   await expect(page.locator('aside.sidebar')).toBeVisible()
   await page.keyboard.press('Shift+ArrowRight')
   const saved = await width()
   expect(await page.evaluate(() => localStorage.getItem('grain.pane.sidebar-w'))).toBe(String(saved))
   page = await grain.relaunch()
-  expect(await width()).toBe(saved)
+  await expect.poll(width).toBe(saved)
   // double-click resets
   await handle().dblclick()
-  expect(await width()).toBe(260)
+  await expect.poll(width).toBe(260)
   // dragging far below the minimum collapses the pane (and reopening is not a sliver)
   await drag(-400)
   await expect(page.locator('.app')).toHaveClass(/sidebar-collapsed/)
   await page.getByRole('button', { name: /Show sidebar/ }).first().click()
-  expect(await width()).toBe(260)
+  await expect.poll(width).toBe(260)
   expect(grain.consoleErrors).toEqual([])
 })
 

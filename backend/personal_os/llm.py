@@ -211,6 +211,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "chatNotify": True,
     # Spaces: a chat window shows the chat's face instead of the transcript until switched.
     "compactChats": False,
+    # Interface zoom, percent (80-160 in steps of 5); every window applies it as its page zoom factor.
+    "uiZoom": 100,
     # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
     "planMode": "off",
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).

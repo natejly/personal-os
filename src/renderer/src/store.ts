@@ -24,6 +24,7 @@ import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
+import { stepZoom } from './lib/zoom'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -1025,6 +1026,10 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'new-note') void s.createDoc({})
       else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
+      else if (action.startsWith('zoom:')) {
+        const cur = s.settings.uiZoom ?? 100
+        void s.saveSettings({ uiZoom: action === 'zoom:reset' ? 100 : stepZoom(cur, action === 'zoom:in' ? 1 : -1) })
+      }
       else if (action === 'chat:next') s.stepChat(1)
       else if (action === 'chat:prev') s.stepChat(-1)
       else if (action === 'chat:search') s.searchChats()

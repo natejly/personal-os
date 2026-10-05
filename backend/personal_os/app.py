@@ -760,6 +760,7 @@ def get_settings() -> dict[str, Any]:
 # (0) or from wedging every reply (a string the int() in Budget cannot parse).
 NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxToolRounds": (1, 60),
+    "uiZoom": (80, 160),
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
     "subagentMaxConcurrent": (1, 20),

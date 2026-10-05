@@ -246,9 +246,10 @@ function buildMenu(): void {
         { role: 'toggleDevTools' },
         { type: 'separator' },
         // Explicit, because ⌘0 is Today above and resetZoom's default would have been the dead duplicate.
-        { role: 'resetZoom', accelerator: 'CmdOrCtrl+Alt+0' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        // These change the uiZoom setting (the renderer writes it and every window follows), not the page directly.
+        { label: 'Actual Size', accelerator: 'CmdOrCtrl+Alt+0', click: () => sendMenu('zoom:reset') },
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => sendMenu('zoom:in') },
+        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => sendMenu('zoom:out') },
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
@@ -329,6 +330,9 @@ if (gotLock) app.whenReady().then(async () => {
   if (background && isMac) app.dock?.hide()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
+  handle('ui:zoom', (e, percent: number) => {
+    if (typeof percent === 'number' && percent >= 80 && percent <= 160) e.sender.setZoomFactor(percent / 100)
+  })
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())

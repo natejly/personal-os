@@ -1235,6 +1235,10 @@ class Insights:
         action = s.get("action") or {}
         atype = str(action.get("type") or "none")
         result: dict[str, Any] = {"type": atype}
+        # A double click (or a retry after a slow answer) must not write a second todo or memory:
+        # once a write has landed the suggestion is `done`, and "put it back" is the way to offer it again.
+        if atype in ("todo", "memory") and s["status"] == "done":
+            return {**result, "already": True, "suggestion": s}
         if atype == "todo":
             todo = self.todos.create(
                 title=_line(action.get("title") or s["title"], 200),

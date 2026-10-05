@@ -3204,6 +3204,8 @@ export const useStore = create<State>((set, get) => {
       }
     },
     startRecording: async (meetingId) => {
+      // A click that beats the first status load must not read "unknown" as "not consented".
+      if (!get().meetingStatus) await get().refreshMeetingStatus()
       // Asked once per install, and nothing records until it is acknowledged. The click is
       // remembered rather than dropped, so accepting the notice finishes what the user pressed.
       if (!get().meetingStatus?.consented) {
@@ -3738,6 +3740,8 @@ export const useStore = create<State>((set, get) => {
       try {
         const out = await api.activity.applyInsight(id)
         await get().loadActivityInsights()
+        // A second click on a suggestion that already wrote its todo or memory changes nothing.
+        if ((out as { already?: boolean }).already) return
         if (out.type === 'prompt' && out.prompt) {
           // Setting the thing up is a conversation with tool approvals in it, so the suggestion
           // hands the message over rather than acting: a fresh chat with the prompt in its

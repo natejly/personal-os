@@ -1209,9 +1209,13 @@ class Toolbox:
             want = min(off + n, 25)
             try:
                 rows, meta = await websearch.search(self.settings(), query, want, time_range, site, allowed_domains, blocked_domains)
+            except (websearch.ProviderError, httpx.HTTPError) as e:
+                return tool_error(redact.scrub_command_output(f"web_search failed: {e}"))
             except ValueError as e:
                 return tool_error(redact.scrub_command_output(f"web_search: {e}"), field="domains" if "domains" in str(e) else "site" if "site" in str(e) else "time_range",
                                   example={"query": redact.scrub_command_output(query), "time_range": "week", "site": "sqlite.org"})
+            if not rows and meta.get("failed"):
+                return tool_error(redact.scrub_command_output("web_search: every engine failed: " + "; ".join(f"{k}: {v}" for k, v in meta["failed"].items())))
             for i, row in enumerate(rows):
                 _allow_url(ctx, row.get("url"))
                 if i >= off and row.get("url"):  # only the rows this page returns get a number, as in search_documents

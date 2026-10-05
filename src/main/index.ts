@@ -37,6 +37,8 @@ for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
 initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
 hookConsole()
 
+const background = process.env.GRAIN_E2E_BACKGROUND === '1'
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -58,7 +60,8 @@ function createWindow(): void {
     }
   })
 
-  win.once('ready-to-show', () => win?.show())
+  // Test runs set GRAIN_E2E_BACKGROUND so the window appears without taking focus from whatever the user is doing.
+  win.once('ready-to-show', () => (background ? win?.showInactive() : win?.show()))
 
   // When the renderer dies there is no React error and no macOS crash report -- the window simply goes
   // blank, and because it is transparent that looks like the app vanishing. These say why.
@@ -323,6 +326,7 @@ if (!gotLock) app.quit()
 else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
+  if (background && isMac) app.dock?.hide()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('backend:url', () => backendUrl())

@@ -111,7 +111,9 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     PERSONAL_OS_BACKEND_URL: backend.url,
     PERSONAL_OS_AUTH_TOKEN: token,
     PERSONAL_OS_DATA_DIR: dataDir,
-    GRAIN_USER_DATA: profile
+    GRAIN_USER_DATA: profile,
+    // Windows open behind the user's work (no dock icon, no focus steal); E2E_FOREGROUND=1 when debugging focus.
+    GRAIN_E2E_BACKGROUND: process.env.E2E_FOREGROUND ? '0' : '1'
   }
   delete env.ELECTRON_RUN_AS_NODE
   const executablePath = join(ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim())

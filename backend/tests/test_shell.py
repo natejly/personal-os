@@ -753,6 +753,23 @@ def test_auto_ok_truth_table(tmp_path: Path) -> None:
     assert not ok()
 
 
+def test_a_token_in_a_shell_path_error_is_stripped(box: Box) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    out = asyncio.run(box.tb.specs["shell_run"].fn(box.ctx, command="ls", cwd=f"/tmp/{pat}"))
+    assert pat not in str(out) and "[github-pat]" in out["error"]
+
+
+def test_a_token_in_a_shell_cwd_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    jobs = shell.ShellJobs()
+    job = shell.Job("j1", "pwd", f"/tmp/note-{pat}", "c1", None, True, False, 1000)
+    job.status = "exited"
+    job.exit_code = 0
+    out = jobs.poll(job)
+    assert pat not in out["cwd"] and "[github-pat]" in out["cwd"]
+    assert pat in job.cwd
+
+
 @needs_seatbelt
 def test_cd_persists_between_calls_and_an_explicit_cwd_wins(box: Box) -> None:
     (box.root / "a" / "b").mkdir(parents=True)

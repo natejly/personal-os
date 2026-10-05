@@ -17,7 +17,7 @@ import time
 from itertools import combinations
 from typing import Any
 
-from . import llm
+from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
 from .learn import _parse_json
 from .repos import ALL, Graph, Memories
@@ -28,6 +28,11 @@ log = logging.getLogger("personal_os")
 def _line(text: Any, limit: int = 2000) -> str:
     """One line. A memory or a label sits in the proposal prompt, so a newline cannot open a new group."""
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _shown(text: Any, limit: int = 2000) -> str:
+    """One line, with credentials removed. The stored memory stays as written."""
+    return _line(redact.scrub_command_output(str(text or "")), limit)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_proposals (
@@ -228,10 +233,10 @@ class Consolidator:
                     alias[tag] = it
                     group_of[tag] = gi
                     if cand["type"] == "entity":
-                        lines.append(f"  [{tag}] {_line(it.get('label'), 200)} ({_line(it.get('type'), 40)}, {it['degree']} relations)")
+                        lines.append(f"  [{tag}] {_shown(it.get('label'), 200)} ({_line(it.get('type'), 40)}, {it['degree']} relations)")
                     else:
                         saved = time.strftime("%Y-%m-%d", time.localtime(it["created_at"]))
-                        lines.append(f"  [{tag}] saved={saved}: {_line(it.get('content'))}")
+                        lines.append(f"  [{tag}] saved={saved}: {_shown(it.get('content'))}")
             extraction_model = settings.get("extractionModel") or model
             try:
                 raw = await llm.complete(settings, extraction_model, [{"role": "system", "content": PROMPT},

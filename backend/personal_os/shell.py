@@ -531,7 +531,8 @@ class ShellJobs:
 
     def poll(self, job: Job, limit: int = TRUNC_BYTES) -> dict[str, Any]:
         """Output since the last poll, at most `limit` chars of it; `more` says whether a poll would return more."""
-        out: dict[str, Any] = {"job_id": job.id, "status": job.status, "exit_code": job.exit_code, "cwd": job.cwd}
+        out: dict[str, Any] = {"job_id": job.id, "status": job.status, "exit_code": job.exit_code,
+                               "cwd": _scrub(str(job.cwd or ""))}
         if job.status == "orphaned":
             out["note"] = ("This job was started by an earlier run of the app. Its output is gone and it cannot be adopted; "
                            "shell_kill stops it.")
@@ -662,7 +663,7 @@ def register(tb: Any) -> None:
                 except ShellError:
                     pass
         except ShellError as e:
-            return tool_error(str(e))
+            return tool_error(_scrub(str(e)))
         network = bool(s.get("shellNetwork"))
         usable = sandbox_available()
         if unsandboxed and usable and not jobs.sandbox_failed:
@@ -718,8 +719,8 @@ def register(tb: Any) -> None:
         except ShellError as e:
             jobs.egress.revoke(token)
             shutil.rmtree(tmp, ignore_errors=True)
-            return tool_error(str(e))
-        base: dict[str, Any] = {"cwd": str(where), "sandboxed": not unsandboxed, "network": bool(network or unsandboxed)}
+            return tool_error(_scrub(str(e)))
+        base: dict[str, Any] = {"cwd": _scrub(str(where)), "sandboxed": not unsandboxed, "network": bool(network or unsandboxed)}
         if proxied:
             base["network"] = {"mode": "allowlist", "contacted": [], "blocked": []}
 
@@ -762,7 +763,7 @@ def register(tb: Any) -> None:
             return res
         if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
             jobs.sandbox_failed = True
-            return tool_error("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run.",
+            return tool_error(_scrub("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run."),
                               alternative="retry with unsandboxed=true, which asks the user for approval on every call")
         shown, cut = truncate(text)
         if job.end_cwd:
@@ -772,7 +773,7 @@ def register(tb: Any) -> None:
                 ended = None  # it cd'd out of every granted root: the next call starts from the default folder again
             if ended:
                 _remember_cwd(ctx.get("conversation_id"), str(ended))
-                base["cwd"] = str(ended)
+                base["cwd"] = _scrub(str(ended))
             else:
                 _LAST_CWD.pop(ctx.get("conversation_id") or "", None)
         out: dict[str, Any] = {"exit_code": job.exit_code, "output": shown, "truncated": cut,
@@ -817,7 +818,7 @@ def register(tb: Any) -> None:
     async def shell_poll(ctx: dict[str, Any], job_id: str) -> Any:
         job = jobs.get(str(job_id), ctx.get("conversation_id"))
         if not job:
-            return tool_error(f"No shell job '{job_id}' in this conversation.", field="job_id",
+            return tool_error(_scrub(f"No shell job '{job_id}' in this conversation."), field="job_id",
                               alternative="start one with shell_run(background=true)")
         out = jobs.poll(job)
         seen = jobs.net_view(job)
@@ -838,7 +839,7 @@ def register(tb: Any) -> None:
     async def shell_kill(ctx: dict[str, Any], job_id: str) -> Any:
         job = jobs.get(str(job_id), ctx.get("conversation_id"))
         if not job:
-            return tool_error(f"No shell job '{job_id}' in this conversation.", field="job_id")
+            return tool_error(_scrub(f"No shell job '{job_id}' in this conversation."), field="job_id")
         status = await jobs.kill(job)
         _note_shell_copies(ctx, int(getattr(job, "since_ns", 0) or 0))
         return {"job_id": job.id, "status": status, "exit_code": job.exit_code}

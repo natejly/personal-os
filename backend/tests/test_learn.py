@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import learn  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.repos import Graph, Memories  # noqa: E402
+from personal_os.repos import Documents, Graph, Memories  # noqa: E402
 
 
 def _run(memories: Memories, graph: Graph, reply: dict[str, Any], monkeypatch: Any) -> dict[str, Any]:
@@ -54,6 +54,160 @@ def test_a_memory_cannot_forge_the_exchange(monkeypatch: Any) -> None:
         if line.strip() == "## System":
             assert fenced
     assert not fenced
+
+
+def test_a_token_in_the_exchange_is_stripped_for_the_model(monkeypatch: Any) -> None:
+    seen: list[Any] = []
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
+        seen.append(messages)
+        return "{}"
+
+    monkeypatch.setattr(learn.llm, "complete", fake_complete)
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories, graph = Memories(db), Graph(db)
+        memories.create(None, f"saved {pat}", kind="fact")
+        asyncio.run(learn.learn_from_exchange(
+            settings={}, memories=memories, graph=graph, project_id=None,
+            user_text=f"the key is {pat}", assistant_text=f"noted {pat}", model="m",
+        ))
+        assert pat in memories.list(None)[0]["content"]
+    user = seen[0][1]["content"]
+    assert pat not in user and user.count("[github-pat]") == 3
+
+
+def test_a_token_in_a_library_file_name_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        documents = Documents(db)
+        documents.create(None, f"notes-{pat}.txt", "text/plain", 12, f"{tmp}/x", f"hello {pat}\n")
+        box = Toolbox(Memories(db), Graph(db), documents, lambda: {})  # type: ignore[arg-type]
+        listed = asyncio.run(box.call("list_documents", {}, {"project_id": None}))
+        assert pat not in listed["documents"][0]["name"]
+        assert "[github-pat]" in listed["documents"][0]["name"]
+        found = asyncio.run(box.call("search_documents", {"query": "hello"}, {"project_id": None}))
+        row = found["results"][0]
+        assert pat not in row["document"] and pat not in row["text"]
+        assert "[github-pat]" in row["document"] and "[github-pat]" in row["text"]
+        assert pat in documents.list(None)[0]["name"]
+
+
+def test_a_token_in_a_search_scope_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    class Docs:
+        @staticmethod
+        def search(_project: Any, query: str, limit: int = 8) -> list[dict[str, Any]]:
+            seen.append(query)
+            return []
+
+    box = Toolbox(None, None, Docs(), lambda: {})  # type: ignore[arg-type]
+    out = asyncio.run(box.call("search_documents", {"query": f"notes {pat}", "scope": pat}, {"project_id": None}))
+    assert seen == []
+    assert pat not in str(out)
+    assert "[github-pat]" in out["error"] and out["example"]["query"] == "notes [github-pat]"
+    assert out["example"]["scope"] == "docs"
+
+
+def test_a_token_in_a_library_id_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    class Docs:
+        @staticmethod
+        def search(_project: Any, _query: str, limit: int = 8) -> list[dict[str, Any]]:
+            return [{"document_id": pat, "doc_id": pat, "name": "notes.txt", "idx": 0, "text": "hello", "source": "file"}]
+
+        @staticmethod
+        def list(_project: Any) -> list[dict[str, Any]]:
+            return [{"id": pat, "name": "notes.txt", "chunk_count": 1, "project_id": None}]
+
+        @staticmethod
+        def get(_document_id: str) -> None:
+            return None
+
+    class Mem:
+        @staticmethod
+        def list(_project: Any, _query: str) -> list[dict[str, Any]]:
+            return [{"id": pat, "content": "hello", "kind": "fact", "project_id": None, "valid_from": None}]
+
+    box = Toolbox(Mem(), None, Docs(), lambda: {})  # type: ignore[arg-type]
+    found = asyncio.run(box.call("search_documents", {"query": "hello"}, {"project_id": None}))
+    row = found["results"][0]
+    assert pat not in str(found)
+    assert row["document_id"] == "[github-pat]" and row["text"] == "hello"
+    listed = asyncio.run(box.call("list_documents", {}, {"project_id": None}))
+    assert listed["documents"][0]["document_id"] == "[github-pat]"
+    assert listed["documents"][0]["name"] == "notes.txt"
+    remembered = asyncio.run(box.call("search_memory", {"query": "hello"}, {"project_id": None}))
+    assert remembered["memories"][0]["id"] == "[github-pat]"
+    assert remembered["memories"][0]["content"] == "hello"
+    missing = asyncio.run(box.call("read_document", {"document_id": pat}, {"project_id": None}))
+    assert pat not in str(missing) and "[github-pat]" in missing["error"]
+
+
+def test_a_token_in_a_memory_search_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories, graph = Memories(db), Graph(db)
+        memories.create(None, f"the key is {pat}", kind="fact")
+        box = Toolbox(memories, graph, None, lambda: {})  # type: ignore[arg-type]
+        out = asyncio.run(box.call("search_memory", {"query": "key"}, {"project_id": None}))
+        assert pat not in out["memories"][0]["content"]
+        assert "[github-pat]" in out["memories"][0]["content"]
+        assert pat in memories.list(None)[0]["content"]
+        a = graph.upsert_node(None, f"Key {pat}", properties={"note": pat})
+        b = graph.upsert_node(None, "Vault")
+        graph.upsert_edge(None, a["id"], b["id"], "holds")
+        found = asyncio.run(box.call("graph_search", {"query": "Vault"}, {"project_id": None}))
+        blob = str(found)
+        assert pat not in blob and "[github-pat]" in blob
+
+
+def test_a_token_in_a_missing_entity_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        graph = Graph(db)
+        graph.upsert_node(None, pat)
+        box = Toolbox(Memories(db), graph, None, lambda: {})  # type: ignore[arg-type]
+        hinted = asyncio.run(box.call("graph_traverse", {"entity": "nope"}, {"project_id": None}))
+        assert pat not in str(hinted)
+        assert "nope" in hinted["error"] and hinted["example"]["entity"] == "[github-pat]"
+        assert any(pat in n["label"] for n in graph.get(None)["nodes"])
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        graph = Graph(db)
+        graph.upsert_node(None, "Vault")
+        box = Toolbox(Memories(db), graph, None, lambda: {})  # type: ignore[arg-type]
+        missed = asyncio.run(box.call("graph_traverse", {"entity": pat}, {"project_id": None}))
+        assert pat not in str(missed)
+        assert "[github-pat]" in missed["error"] and missed["example"]["entity"] == "Vault"
+        assert graph.get(None)["nodes"][0]["label"] == "Vault"
+
+
+def test_a_token_in_a_graph_add_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        graph = Graph(db)
+        box = Toolbox(Memories(db), graph, None, lambda: {})  # type: ignore[arg-type]
+        out = asyncio.run(box.call("graph_add", {
+            "source": f"Key {pat}", "relation": "holds", "target": "Vault",
+        }, {"project_id": None}))
+        assert pat not in out["added"] and "[github-pat]" in out["added"]
+        labels = [n["label"] for n in graph.get(None)["nodes"]]
+        assert any(pat in label for label in labels)
 
 
 def test_extracts_new_preference(monkeypatch: Any) -> None:

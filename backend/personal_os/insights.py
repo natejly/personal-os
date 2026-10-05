@@ -33,6 +33,7 @@ from datetime import datetime
 from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 
+from . import redact
 from .db import Database, new_id, now, row_to_dict
 from .repos import Memories
 from .todos import Todos
@@ -645,6 +646,11 @@ def _line(text: Any, limit: int = 200) -> str:
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
 
 
+def _shown(text: Any, limit: int = 200) -> str:
+    """One line, with credentials removed. The mined pattern itself stays as stored."""
+    return _line(redact.scrub_command_output(str(text or "")), limit)
+
+
 def _fence(text: str) -> str:
     return "```\n" + str(text or "").replace("```", "'''") + "\n```"
 
@@ -661,14 +667,14 @@ def digest(pat: dict[str, Any]) -> str:
         "Patterns (id | confidence | what):",
     ]
     for p in pat.get("patterns") or []:
-        lines.append(f"- {p['id']} | {p['confidence']:.2f} | {_line(p.get('title'), 160)} - {_line(p.get('detail'), 300)}")
-    apps = ", ".join(f"{_line(a['app'], 80)} {_mins(a['seconds'])}" for a in (pat.get("apps") or [])[:8])
+        lines.append(f"- {p['id']} | {p['confidence']:.2f} | {_shown(p.get('title'), 160)} - {_shown(p.get('detail'), 300)}")
+    apps = ", ".join(f"{_shown(a['app'], 80)} {_mins(a['seconds'])}" for a in (pat.get("apps") or [])[:8])
     if apps:
         lines += ["", f"Time by app: {apps}"]
-    cats = ", ".join(f"{_line(c['path'], 80)} {_mins(c['seconds'])}" for c in (pat.get("categories") or []) if "/" not in str(c.get("path") or ""))
+    cats = ", ".join(f"{_shown(c['path'], 80)} {_mins(c['seconds'])}" for c in (pat.get("categories") or []) if "/" not in str(c.get("path") or ""))
     if cats:
         lines.append(f"Time by category: {cats}")
-    hosts = ", ".join(f"{_line(h['host'], 80)} x{h['visits']}" for h in (pat.get("hosts") or [])[:8])
+    hosts = ", ".join(f"{_shown(h['host'], 80)} x{h['visits']}" for h in (pat.get("hosts") or [])[:8])
     if hosts:
         lines.append(f"Sites (host only): {hosts}")
     return "\n".join(lines)
@@ -1025,7 +1031,7 @@ class Insights:
         parts = [
             "## Mined patterns", digest(pat),
             "", "## How they work (profile built from the same data)",
-            _fence(prof) if prof.strip() else "(none yet)",
+            _fence(redact.scrub_command_output(prof)) if prof.strip() else "(none yet)",
             "", "## What this app can do", SURFACE,
         ]
         if tools:
@@ -1301,14 +1307,18 @@ class Insights:
     def brief(self, limit: int = 5) -> dict[str, Any]:
         """The compact form the assistant gets through a tool: habits plus what is still on offer."""
         o = self.overview()
+
+        def shown(text: Any) -> str:
+            return redact.scrub_command_output(str(text or ""))
+
         return {
-            "habits": [{"statement": h["statement"], "confidence": h["confidence"]} for h in o["habits"][:10]],
-            "patterns": [{"what": p["title"], "detail": p["detail"], "confidence": p["confidence"]}
+            "habits": [{"statement": shown(h["statement"]), "confidence": h["confidence"]} for h in o["habits"][:10]],
+            "patterns": [{"what": shown(p["title"]), "detail": shown(p["detail"]), "confidence": p["confidence"]}
                          for p in o["patterns"][:8]],
             "open_suggestions": [
-                {"id": s["id"], "kind": s["kind"], "title": s["title"], "why": s["why"],
-                 "impact": s["impact"], "how": s["detail"],
-                 "prompt": (s.get("action") or {}).get("prompt", "")}
+                {"id": s["id"], "kind": s["kind"], "title": shown(s["title"]), "why": shown(s["why"]),
+                 "impact": shown(s["impact"]), "how": shown(s["detail"]),
+                 "prompt": shown((s.get("action") or {}).get("prompt", ""))}
                 for s in o["suggestions"] if s["status"] == "new"
             ][:limit],
             "note": "Suggestions are proposals the user has not accepted. Offer one when it is relevant; "

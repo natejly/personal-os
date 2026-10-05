@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from . import widget_spec
+from . import redact, widget_spec
 from .dashboards import INTERNAL_SOURCES, Dashboards
 
 DASHBOARD = "Chat widgets"
@@ -37,7 +37,7 @@ def register(box: Any, store: Dashboards, canvases: Any, fetch: Callable[[str], 
             return tool_error(f"widget_create: kind must be one of {', '.join(widget_spec.KINDS)}", field="kind")
         src = _source(source)
         if not src:
-            return tool_error(f"widget_create: no data source {source!r}", field="source",
+            return tool_error(redact.scrub_command_output(f"widget_create: no data source {source!r}"), field="source",
                               expected="an internal source name (" + ", ".join(INTERNAL_SOURCES) + ") or the id of an existing source",
                               example={"kind": "chart", "source": "todos", "prompt": "open todos by priority"})
         d = next((x for x in store.list() if x["name"] == DASHBOARD), None) or store.create(DASHBOARD)
@@ -46,7 +46,7 @@ def register(box: Any, store: Dashboards, canvases: Any, fetch: Callable[[str], 
         w = await widget_spec.run_widget(store, w, cfg, cfg.get("extractionModel") or cfg["defaultModel"], fetch, regenerate=True)
         if w.get("data_error") and not (w.get("spec") or {}).get("kind"):
             store.delete_widget(w["id"])
-            return tool_error(f"widget_create: {w['data_error']}", field="prompt")
+            return tool_error(redact.scrub_command_output(f"widget_create: {w['data_error']}"), field="prompt")
         out: dict[str, Any] = {"widget_id": w["id"], "title": w["title"], "kind": w["kind"], "source": src["name"],
                                "note": "Call widget_place to put it on a space."}
         if w.get("data_error"):
@@ -63,16 +63,16 @@ def register(box: Any, store: Dashboards, canvases: Any, fetch: Callable[[str], 
     async def widget_place(ctx: dict[str, Any], widget_id: str, space: str = "") -> Any:
         w = store.widget(widget_id)
         if not w:
-            return tool_error(f"widget_place: no widget {widget_id}", field="widget_id")
+            return tool_error(redact.scrub_command_output(f"widget_place: no widget {widget_id}"), field="widget_id")
         spaces = canvases.list()
         c = next((x for x in spaces if space and (x["id"] == space or x["name"].lower() == space.lower())), None) \
             or (None if space else next((x for x in spaces if not x.get("locked")), None))
         if not c:
             msg = (f"widget_place: no space {space!r}" if space else
                    "widget_place: every space is locked by the user" if spaces else "widget_place: there are no spaces yet")
-            return tool_error(msg, field="space", expected="a space name or id; omit for the first unlocked space")
+            return tool_error(redact.scrub_command_output(msg), field="space", expected="a space name or id; omit for the first unlocked space")
         if c.get("locked"):  # the same rule space_add_widget keeps: a locked space is the user's frozen view
-            return tool_error(f"The space {c['name']!r} is locked by the user; ask them to unlock it.", field="space")
+            return tool_error(redact.scrub_command_output(f"The space {c['name']!r} is locked by the user; ask them to unlock it."), field="space")
         win = canvases.add_window(c["id"], "dashboard-widget", ref_id=w["id"], title=w["title"], w=420, h=320,
                                   config={"dashboard_id": w.get("dashboard_id")} if w.get("dashboard_id") else None)
         return {"placed": True, "window_id": win["id"], "space": c["name"], "widget_id": w["id"]}

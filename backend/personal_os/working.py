@@ -22,6 +22,7 @@ import json
 import re
 from typing import Any
 
+from . import redact
 from .db import Database, new_id, now, row_to_dict
 from .repos import fts_query
 
@@ -110,9 +111,9 @@ def render_plan(steps: list[dict[str, Any]]) -> str:
     """The checklist as the model sees it: one line per step, status first."""
     lines = []
     for i, s in enumerate(steps, 1):
-        line = f"{MARK.get(s['status'], '[ ]')} {i}. {s['text']}"
+        line = f"{MARK.get(s['status'], '[ ]')} {i}. {redact.scrub_command_output(str(s.get('text') or ''))}"
         if s.get("note"):
-            line += f" — {s['note']}"
+            line += f" — {redact.scrub_command_output(str(s['note']))}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -253,16 +254,16 @@ class ToolResults:
 
         blob = _dumps(result)
         if len(blob) <= INLINE_CHARS:
-            return blob, None
+            return redact.scrub_command_output(blob), None
         shape = shape_of(result)
         if untrusted:
             # Reading this blob later has to taint again. Clearing the chat banner does not delete it.
             shape["untrusted"] = True
         row = self.store(conversation_id, message_id, tool, blob, shape)
-        return _dumps({
+        return redact.scrub_command_output(_dumps({
             "result_id": row["id"], "tool": tool, "total_chars": row["total_chars"], "shape": shape,
             "preview": summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
-        }), row["id"]
+        })), row["id"]
 
     def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
         return self.render(conversation_id, message_id, tool, result, untrusted)[0]

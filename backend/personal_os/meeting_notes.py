@@ -15,6 +15,8 @@ import re
 from datetime import datetime
 from typing import Any, Callable
 
+from . import redact
+
 # Per-kind hints in the shape of assist.KIND_HINTS: a label for the picker, the sections the
 # enhanced notes should reach for, and one line of voice guidance appended to the system prompt.
 TEMPLATES: dict[str, dict[str, Any]] = {
@@ -187,6 +189,17 @@ def _template_block(tpl: dict[str, Any]) -> str:
             f"support them -- and never in place of a heading the user wrote themselves:\n{sections}\n")
 
 
+def _public_payload(value: Any) -> Any:
+    """The copy sent to the model. The stored transcript and notes stay as recorded."""
+    if isinstance(value, str):
+        return redact.scrub_command_output(value)
+    if isinstance(value, list):
+        return [_public_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _public_payload(item) for key, item in value.items()}
+    return value
+
+
 def cap_transcript(text: str, limit: int) -> str:
     """Fit a transcript into the prompt by keeping both ends of it.
 
@@ -292,7 +305,7 @@ async def enhance(
     }
     if names:
         payload["speakers"] = names
-    user = json.dumps(payload, ensure_ascii=False)
+    user = json.dumps(_public_payload(payload), ensure_ascii=False)
     try:
         raw = await complete_fn(
             settings, model,
@@ -550,7 +563,7 @@ async def summarize_recording(
         raw = await complete_fn(
             settings, model,
             [{"role": "system", "content": _doc_prompt(names) + _template_block(tpl) + _language_rule(language)},
-             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+             {"role": "user", "content": json.dumps(_public_payload(payload), ensure_ascii=False)}],
             kind="doc_recording",
         )
         data = _parse_json(raw)
@@ -591,7 +604,7 @@ async def _summarize_long(*, complete_fn, settings, model, meeting, doc_title, d
         raw = await complete_fn(
             settings, model,
             [{"role": "system", "content": REDUCE_PROMPT},
-             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+             {"role": "user", "content": json.dumps(_public_payload(payload), ensure_ascii=False)}],
             kind="doc_recording")
         data = _parse_json(raw)
         out["markdown"] = str(data.get("summary_markdown") or "").strip()

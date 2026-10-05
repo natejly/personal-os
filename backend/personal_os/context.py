@@ -263,7 +263,7 @@ def build_context(
     rq = retrieval_text or query
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
-    parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
+    parts: list[str] = [redact.scrub_command_output(global_system_prompt.strip())] if global_system_prompt.strip() else []
     hidden = [{"docs": "Files"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
@@ -278,11 +278,11 @@ def build_context(
         used["project"] = {"id": project["id"], "name": project["name"]}
         # Name and description are labels. A newline in either one would open a new prompt section.
         # The project's own system prompt is instructions the user wrote, so it stays multi-line.
-        name = _one_line(str(project.get("name") or "this project"), 200) or "this project"
-        desc = _one_line(str(project.get("description") or ""), 500)
+        name = redact.scrub_command_output(_one_line(str(project.get("name") or "this project"), 200) or "this project")
+        desc = redact.scrub_command_output(_one_line(str(project.get("description") or ""), 500))
         parts.append(f"You are currently working in the project \"{name}\"." + (f" {desc}" if desc else ""))
         if project.get("system_prompt", "").strip():
-            parts.append(project["system_prompt"].strip())
+            parts.append(redact.scrub_command_output(project["system_prompt"].strip()))
 
     if page:
         block = page_block(page)
@@ -338,14 +338,14 @@ def build_context(
             room, items, shown = PINNED_TOTAL, [], []
             for d in pins:
                 raw, limit = d.get("text") or "", min(PINNED_LIMIT, room)
-                text = _clip(raw, limit)
+                text = _clip(redact.scrub_command_output(str(raw)), limit)
                 if room <= 0 or not text:
                     continue
                 room -= len(text)
                 # Each pinned file is citable as the span it shows (what _clip kept), numbered before the excerpts.
                 lead = len(raw) - len(raw.lstrip())
                 end = lead + min(len(raw.strip()), limit)
-                items.append(f"### [{len(shown) + 1}] {d['name']}\n{text}")
+                items.append(f"### [{len(shown) + 1}] {redact.scrub_command_output(str(d.get('name') or ''))}\n{text}")
                 shown.append(range_ref("file", d["name"], raw, lead, end, document_id=d["id"]))
             items, n = _fit(items, _budget(settings, "pinned"), head, "\n\n")
             shown = shown[:len(items)]

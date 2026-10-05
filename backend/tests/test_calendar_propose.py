@@ -199,6 +199,26 @@ class ProposeTests(Base):
         self.assertNotIn("truncated", tools.summarize_result(out))
 
 
+    def test_a_token_in_a_proposed_event_title_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        out = self.call("calendar_propose", note=f"because {pat}", changes=[
+            {"op": "create", "summary": f"Sync {pat}", "start": "2026-10-07T15:00", "end": "2026-10-07T15:30"}])
+        shown = out["results"][0]
+        self.assertNotIn(pat, shown["s"])
+        self.assertIn("[github-pat]", shown["s"])
+        self.assertNotIn(pat, out["note"])
+        self.assertIn("[github-pat]", out["note"])
+        made = self.server.events[("primary", shown["id"])]
+        self.assertIn(pat, made["summary"])
+
+    def test_a_token_in_a_proposed_change_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        out = self.call("calendar_propose", changes=[{"op": "create", "summary": "Sync", "start": pat, "end": "2026-10-07T15:30"}])
+        self.assertNotIn(pat, str(out))
+        self.assertIn("[github-pat]", out["error"])
+        self.assertEqual(self.server.events, {})
+
+
 class FindTimeTests(Base):
     def setUp(self) -> None:
         super().setUp()
@@ -252,9 +272,25 @@ class FindTimeTests(Base):
         self.assertIn("error", self.call("calendar_find_time", duration_minutes=0, window_start="2030-01-01", window_end="2030-01-02"))
         self.assertIn("error", self.call("calendar_find_time", duration_minutes=30, window_start="2030-01-01", window_end="2030-01-02", working_hours="18-9"))
 
+    def test_a_token_in_working_hours_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        out = self.call("calendar_find_time", duration_minutes=30, window_start="2030-01-01", window_end="2030-01-02",
+                        working_hours=f"{pat}-18")
+        self.assertNotIn(pat, str(out))
+        self.assertIn("[github-pat]", out["error"])
+        self.assertEqual(self.server.events, {})
+
     def test_a_window_in_the_past_is_an_error(self) -> None:
         out = self.call("calendar_find_time", duration_minutes=30, window_start="2020-01-01", window_end="2020-01-02")
         self.assertIn("already over", out["error"])
+
+    def test_a_token_in_an_attendee_is_stripped_from_the_slot_result(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        day, _ = self._window()
+        out = self.call("calendar_find_time", duration_minutes=30, window_start=day, window_end=day, attendees=[pat], timezone="UTC")
+        self.assertEqual(self.fb_calls[-1][1], [pat])
+        self.assertNotIn(pat, str(out))
+        self.assertEqual(out["attendees"], ["[github-pat]"])
 
 
 class FreeBusyTests(Base):
@@ -272,6 +308,15 @@ class FreeBusyTests(Base):
     def test_explicit_calendars_are_used_as_given(self) -> None:
         self.call("calendar_free_busy", time_min="2026-10-07T00:00:00Z", time_max="2026-10-08T00:00:00Z", calendars=["work@x.com"])
         self.assertEqual([i["id"] for i in self.g.fb_queries[-1]["items"]], ["work@x.com"])
+
+    def test_a_token_in_a_calendar_id_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        self.g.fb_rows = {pat: {"busy": [], "errors": [{"reason": "notFound"}]}}
+        out = self.call("calendar_free_busy", time_min="2026-10-07T00:00:00Z", time_max="2026-10-08T00:00:00Z", calendars=[pat])
+        self.assertEqual([i["id"] for i in self.g.fb_queries[-1]["items"]], [pat])
+        self.assertNotIn(pat, str(out))
+        self.assertIn("[github-pat]", out["calendars"])
+        self.assertEqual(out["unreachable"], ["[github-pat]"])
 
 
 class EditedArgsRefusedTests(unittest.TestCase):

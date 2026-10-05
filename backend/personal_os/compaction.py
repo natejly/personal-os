@@ -155,7 +155,7 @@ def tool_record(events: list[dict[str, Any]] | None, include_untrusted: bool = F
         if ev.get("error") and ev.get("interrupted"):
             status = "interrupted"
         elif ev.get("error"):
-            status = "error: " + _one_line(ev["error"], 120)
+            status = "error: " + _one_line(redact.scrub_command_output(str(ev["error"])), 120)
         elif ev.get("approval") == "deny":
             status = "declined"
         elif ev.get("blocked") or ev.get("blocked_by"):
@@ -167,7 +167,7 @@ def tool_record(events: list[dict[str, Any]] | None, include_untrusted: bool = F
         else:
             status = "ok"
         try:
-            args = json.dumps(_short_args(ev.get("arguments") or {}), ensure_ascii=False, sort_keys=True, default=str)
+            args = redact.scrub_command_output(json.dumps(_short_args(ev.get("arguments") or {}), ensure_ascii=False, sort_keys=True, default=str))
         except (TypeError, ValueError):
             args = "{}"
         line = f"- {ev['name']} {args} -> {status}"
@@ -179,7 +179,7 @@ def tool_record(events: list[dict[str, Any]] | None, include_untrusted: bool = F
         if ev.get("tainted") and not include_untrusted:
             line += " " + WITHHELD
         elif ev.get("result_preview"):
-            line += " | " + _one_line(ev["result_preview"], TOOL_PREVIEW_CHARS)
+            line += " | " + _one_line(redact.scrub_command_output(str(ev["result_preview"])), TOOL_PREVIEW_CHARS)
         lines.append(line)
     if not lines:
         return ""

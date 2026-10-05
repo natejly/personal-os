@@ -110,6 +110,16 @@ def test_plan_persists_and_normalizes() -> None:
     check(appmod.work_plans.get(cid) is None and appmod.work_plans.block(cid) == "", "clearing removes the plan and its block")
 
 
+def test_a_token_in_a_plan_step_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    cid = new_conv()
+    appmod.work_plans.set(cid, [{"text": f"Use {pat}", "status": "in_progress", "note": f"found {pat}"}])
+    block = appmod.work_plans.block(cid)
+    check(pat not in block and block.count("[github-pat]") == 2, "the reinjected plan strips a token")
+    stored = appmod.work_plans.get(cid)
+    check(pat in stored["steps"][0]["text"] and pat in stored["steps"][0]["note"], "the stored plan stays unchanged")
+
+
 def test_plan_is_reinjected_last_every_round() -> None:
     """The whole point: after a round of tool output, the plan is the final thing the model reads."""
     cid = new_conv()
@@ -209,6 +219,45 @@ def test_read_tool_result_tool_pages_the_handle() -> None:
     check(ok["text"] == _dumps(result)[:500], "the tool returns the stored bytes")
     check(ok["has_more"] and ok["next_offset"] == 500, "it pages")
     check("error" in bad and handle["result_id"] in str(bad), "an unknown id is a shaped error that names the live handles")
+
+
+def test_a_token_in_a_stored_result_is_stripped_when_paged() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    cid = new_conv()
+    row = appmod.tool_results.store(cid, "msg1", "gmail_read", f"the key is {pat}\n", {})
+    ctx = {"project_id": None, "conversation_id": cid}
+
+    async def go() -> Any:
+        return await appmod.toolbox.call("read_tool_result", {"result_id": row["id"], "offset": 0, "limit": 500}, ctx)
+
+    out = asyncio.run(go())
+    check(pat not in out["text"] and "[github-pat]" in out["text"], "paging a stored result strips a token")
+    check(pat in appmod.tool_results.read(cid, row["id"], 0, 500)["text"], "the stored blob stays unchanged")
+
+
+def test_a_token_in_a_tool_message_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    cid = new_conv()
+    small = appmod.tool_results.for_model(cid, None, "gmail_read", {"body": f"the key is {pat}"})
+    check(pat not in small and "[github-pat]" in small, "a small tool message strips a token")
+    big = {"body": f"the key is {pat} " + ("x" * (INLINE_CHARS + 100))}
+    handle = json.loads(appmod.tool_results.for_model(cid, "m1", "gmail_read", big))
+    check(pat not in handle["preview"] and "[github-pat]" in handle["preview"], "the preview strips a token")
+    stored = appmod.tool_results.read(cid, handle["result_id"], 0, 800)["text"]
+    check(pat in stored, "the stored blob stays unchanged")
+
+
+def test_a_token_in_a_missing_result_id_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    cid = new_conv()
+    appmod.tool_results.store(cid, "m1", "gmail_read", "hello", {})
+
+    async def go() -> Any:
+        return await appmod.toolbox.call("read_tool_result", {"result_id": pat},
+                                         {"project_id": None, "conversation_id": cid})
+
+    out = asyncio.run(go())
+    check(pat not in str(out) and "[github-pat]" in out["error"], "a missing result id is stripped from the error")
 
 
 def test_paging_an_untrusted_handle_taints_again() -> None:

@@ -184,6 +184,45 @@ def test_a_token_in_dashboard_facts_is_stripped() -> None:
         check(pat not in text and "[github-pat]" in text, "a token in the facts is stripped")
 
 
+def test_a_token_in_widget_sample_rows_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    text = ws._spec_prompt(
+        "show the values",
+        {"name": "Feed", "kind": "http", "description": f"includes {pat}"},
+        {"items": [{"name": f"row {pat}", "value": 1}]},
+        "chart",
+    )
+    check(pat not in text and text.count("[github-pat]") == 2, "a token in sample rows or the source description is stripped")
+    check("$.items" in text, "the real row path is still offered")
+
+
+def test_a_token_in_a_rejected_spec_is_stripped_on_repair() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    src = {"id": "s1", "name": "S", "kind": "http", "description": ""}
+    seen: list[list[dict[str, str]]] = []
+
+    async def grab(settings: Any, model: Any, messages: Any, **kw: Any) -> str:
+        seen.append([dict(m) for m in messages])
+        if len(seen) == 1:
+            return ('{"kind":"chart","path":"$.items","select":{"x":"name","y":["value"]},'
+                    '"transforms":[{"op":"filter","field":"name","cmp":"' + pat
+                    + '","value":"a"}],"chart":{"type":"bar"}}')
+        return GOOD
+
+    saved = llm.complete
+    llm.complete = grab  # type: ignore[assignment]
+    try:
+        spec, problems = run(ws.generate_spec({}, "m", "values", src, DATA, "chart"))
+    finally:
+        llm.complete = saved  # type: ignore[assignment]
+    check(len(seen) == 2 and problems == [], "a rejected spec gets one repair call")
+    assistant = next(m["content"] for m in seen[1] if m["role"] == "assistant")
+    repair = seen[1][-1]["content"]
+    check(pat not in assistant and "[github-pat]" in assistant, "the previous reply is stripped")
+    check(pat not in repair and "[github-pat]" in repair, "a token echoed in the problem list is stripped")
+    check(spec["select"]["y"] == ["value"], "the repaired spec is the one that is kept")
+
+
 def test_generate_spec() -> None:
     src = {"id": "s1", "name": "S", "kind": "http", "description": ""}
     CALLS.clear()
@@ -403,6 +442,8 @@ def test_source_keys_stay_out_of_sqlite_and_fetch_errors() -> None:
 
 TESTS = [test_resolve_path, test_transforms, test_validate_and_autofix, test_stat, test_generate_spec,
          test_source_labels_cannot_open_a_section, test_a_token_in_dashboard_facts_is_stripped,
+         test_a_token_in_widget_sample_rows_is_stripped,
+         test_a_token_in_a_rejected_spec_is_stripped_on_repair,
          test_bind_ttl_and_lifecycle, test_schema_migration, test_routes, test_inline_rows,
          test_source_keys_stay_out_of_sqlite_and_fetch_errors]
 

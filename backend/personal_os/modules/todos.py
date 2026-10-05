@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .. import todo_rules
+from .. import redact, todo_rules
 from ..google import GoogleNotConnected
 from ..gtasks import TasksSync
 from ..todocal import TodoCalendarMirror
@@ -235,6 +235,16 @@ class TodosModule(Module):
         R = box.specs.__setitem__
         store = self.store
 
+        def _shown_todo(row: dict[str, Any]) -> dict[str, Any]:
+            out = dict(row)
+            for key in ("title", "notes"):
+                if isinstance(out.get(key), str):
+                    out[key] = redact.scrub_command_output(out[key])
+            tags = out.get("tags")
+            if isinstance(tags, list):
+                out["tags"] = [redact.scrub_command_output(item) if isinstance(item, str) else item for item in tags]
+            return out
+
         async def todo_list(ctx: dict[str, Any], include_done: bool = False, all_projects: bool = False, offset: int = 0, sort: str = "due", tag: str = "", list_name: str = "", status: str = "") -> Any:
             scope = "__all__" if all_projects else ctx["project_id"]
             items = store.list(scope, include_done=include_done, tag=tag, list_name=list_name) if not all_projects else store.list("__all__", include_done=include_done, tag=tag, list_name=list_name)
@@ -245,7 +255,9 @@ class TodosModule(Module):
             today = date.today()
             if sort == "urgency":
                 items = sorted(items, key=lambda t: -todo_rules.urgency_of(t, today))
-            rows = [{"id": t["id"], "title": t["title"], "due": t["due"], "priority": t["priority"], "done": bool(t["done"]), "notes": t["notes"][:200],
+            rows = [{"id": t["id"], "title": redact.scrub_command_output(str(t["title"] or "")),
+                     "due": t["due"], "priority": t["priority"], "done": bool(t["done"]),
+                     "notes": redact.scrub_command_output(str(t["notes"] or ""))[:200],
                      "urgency": todo_rules.urgency_of(t, today), "repeat": t.get("repeat"), "estimate_min": t.get("estimate_min"),
                      "tags": t.get("tags"), "parent_id": t.get("parent_id"), "blocked_by": t.get("depends_on"), "list": t.get("list_name"), "status": t["status"]} for t in items]
             out = page(rows, offset=offset, limit=50, key="todos")
@@ -271,8 +283,8 @@ class TodosModule(Module):
                 rp = {"every": repeat_every or 1, "unit": repeat_unit, "mode": repeat_mode} if repeat_unit else None
                 t = store.create(title, None if personal else ctx["project_id"], notes=notes, due=due, priority=priority, repeat=rp, estimate_min=estimate_min, tags=tags, parent_id=parent_id, list_name=list_name, status=status)
             except ValueError as e:
-                return tool_error(str(e), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
-            return {"id": t["id"], "title": t["title"], "due": t["due"]}
+                return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit or parent_id", expected="day, week, month or year; parent_id from todo_list", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
+            return {"id": t["id"], "title": redact.scrub_command_output(str(t["title"] or "")), "due": t["due"]}
         R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low). Not for your own working checklist — that is todo_write.",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
              "repeat_every": {"type": "integer", "description": "Repeat every N units (default 1)."}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
@@ -298,8 +310,8 @@ class TodosModule(Module):
             try:
                 t = store.update(id, patch)
             except ValueError as e:
-                return tool_error(str(e), field="repeat_unit, parent_id or depends_on", expected="a valid value; ids from todo_list, no cycles", example={"id": "td_8c41a2", "repeat_unit": "week"})
-            return t or tool_error(f"No todo with id '{id}'.", field="id", expected="an id from todo_list",
+                return tool_error(redact.scrub_command_output(str(e)), field="repeat_unit, parent_id or depends_on", expected="a valid value; ids from todo_list, no cycles", example={"id": "td_8c41a2", "repeat_unit": "week"})
+            return _shown_todo(t) if t else tool_error(redact.scrub_command_output(f"No todo with id '{id}'."), field="id", expected="an id from todo_list",
                                    example={"id": "td_8c41a2", "done": True}, alternative="todo_list to get the current ids")
         R("todo_update", ToolSpec("todo_update", "Update or complete a todo by id (from todo_list).",
             _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"},
@@ -316,10 +328,11 @@ class TodosModule(Module):
         async def todo_delete(ctx: dict[str, Any], id: str) -> Any:
             t = store.get(id)
             if not t:
-                return tool_error(f"No todo with id '{id}'.", field="id", expected="an id from todo_list",
+                return tool_error(redact.scrub_command_output(f"No todo with id '{id}'."), field="id", expected="an id from todo_list",
                                   example={"id": "td_8c41a2"}, alternative="todo_list to get the current ids")
             store.trash(id)
-            return {"deleted": t["title"], "note": "moved to the trash; the user can restore it for 30 days"}
+            return {"deleted": redact.scrub_command_output(str(t["title"] or "")),
+                    "note": "moved to the trash; the user can restore it for 30 days"}
         R("todo_delete", ToolSpec("todo_delete", "Delete a todo by id (it goes to the trash, restorable for 30 days). Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
             _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 

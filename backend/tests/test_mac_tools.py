@@ -352,6 +352,48 @@ def test_trash_local_moves_to_the_trash_and_dedupes(home: Path) -> None:
             mac.trash_local(bad)
 
 
+def test_a_token_in_a_local_path_error_is_stripped(home: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb = make_toolbox()
+    out = asyncio.run(tb.call("trash_local_file", {"path": f"~/Desktop/missing-{pat}.pdf"}, {}))
+    assert "error" in out
+    assert pat not in out["error"] and "[github-pat]" in out["error"]
+    assert not (home / "Desktop" / f"missing-{pat}.pdf").exists()
+    missing = asyncio.run(tb.call("read_local_file", {"path": f"~/Desktop/missing-{pat}.pdf"}, {}))
+    assert pat not in missing["error"] and "[github-pat]" in missing["error"]
+
+
+def test_a_token_in_a_local_path_is_stripped(home: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb = make_toolbox()
+    name = f"note-{pat}.md"
+    wrote = asyncio.run(tb.call("write_local_file", {"path": f"~/Desktop/{name}", "content": "hi"}, {}))
+    assert pat not in wrote["path"] and "[github-pat]" in wrote["path"]
+    assert (home / "Desktop" / name).read_text() == "hi"
+    moved = asyncio.run(tb.call("move_local_file", {"path": f"~/Desktop/{name}", "to": f"~/Documents/{name}"}, {}))
+    assert pat not in moved["from"] and pat not in moved["path"]
+    assert (home / "Documents" / name).is_file()
+    trashed = asyncio.run(tb.call("trash_local_file", {"path": f"~/Documents/{name}"}, {}))
+    assert pat not in trashed["path"] and pat not in trashed["trashed_to"]
+    assert "[github-pat]" in trashed["path"]
+
+
+def test_a_token_in_a_local_write_error_is_stripped(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    def boom(*_a: Any, **_k: Any) -> None:
+        raise OSError(f"cannot write {pat}")
+
+    monkeypatch.setattr(mac, "write_local", boom)
+    monkeypatch.setattr(mac, "trash_local", boom)
+    tb = make_toolbox()
+    wrote = asyncio.run(tb.call("write_local_file", {"path": "~/Desktop/note.md", "content": "hi"}, {}))
+    assert pat not in str(wrote) and "[github-pat]" in wrote["error"]
+    assert not (home / "Desktop" / "note.md").exists()
+    trashed = asyncio.run(tb.call("trash_local_file", {"path": "~/Desktop/note.md"}, {}))
+    assert pat not in str(trashed) and "[github-pat]" in trashed["error"]
+
+
 def test_file_writes_ask_first_and_errors_are_shaped(home: Path) -> None:
     tb = make_toolbox()
     modes = tb.effective({}, None, None)
@@ -479,6 +521,67 @@ def test_modes_and_reserved_names() -> None:
     assert tb.specs["run_shortcut"].taints  # a Shortcut's output is whatever that Shortcut returns
 
 
+def test_a_token_in_shortcut_output_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"shortcut": "Export", "ok": True, "output": f"saved {pat}", "error": ""}
+
+    monkeypatch.setattr(mac, "run_shortcut", fake)
+    tb = make_toolbox()
+    out = asyncio.run(tb.specs["run_shortcut"].fn({}, name="Export"))
+    assert pat not in out["output"] and "[github-pat]" in out["output"]
+
+
+def test_a_token_in_a_shortcut_name_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    async def fake(name: str, text_input: str | None = None, timeout: float = 60.0) -> dict[str, Any]:
+        seen.append(name)
+        return {"shortcut": name, "ok": True, "output": "done", "error": ""}
+
+    async def bad_list(folder: str | None = None) -> list[str]:
+        raise ValueError(f"no folder {pat}")
+
+    monkeypatch.setattr(mac, "run_shortcut", fake)
+    monkeypatch.setattr(mac, "list_shortcuts", bad_list)
+    tb = make_toolbox()
+    out = asyncio.run(tb.specs["run_shortcut"].fn({}, name=pat))
+    assert seen == [pat]
+    assert pat not in str(out) and out["shortcut"] == "[github-pat]" and out["output"] == "done"
+    err = asyncio.run(tb.call("list_shortcuts", {"folder": pat}, {}))
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+
+
+def test_a_token_in_a_spotlight_hit_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"query": "x", "results": [{"path": f"/Users/me/Desktop/{pat}.txt", "name": f"{pat}.txt"}], "count": 1}
+
+    monkeypatch.setattr(mac, "mdfind", fake)
+    out = asyncio.run(make_toolbox().call("find_files", {"query": "x"}, {}))
+    hit = out["results"][0]
+    assert pat not in hit["path"] and pat not in hit["name"]
+    assert "[github-pat]" in hit["path"] and "[github-pat]" in hit["name"]
+
+
+def test_a_token_in_a_file_search_query_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    async def fake(query: str, **_kw: Any) -> dict[str, Any]:
+        seen.append(query)
+        return {"query": query, "folders": [f"~/Desktop/{pat}"], "results": [], "count": 0}
+
+    monkeypatch.setattr(mac, "mdfind", fake)
+    out = asyncio.run(make_toolbox().call("find_files", {"query": pat, "folders": [f"~/Desktop/{pat}"]}, {}))
+    assert seen == [pat]
+    assert pat not in str(out)
+    assert out["query"] == "[github-pat]" and "[github-pat]" in out["folders"][0]
+
+
 def test_open_page_needs_the_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mac, "page_bridge", mac.PageBridge())
     tb = make_toolbox()
@@ -505,6 +608,32 @@ def test_open_page_blocks_bad_urls_before_the_bridge(monkeypatch: pytest.MonkeyP
     assert called == []
     out = asyncio.run(tb.call("open_page", {"url": "https://example.com/a"}, {}))
     assert out["text"] == "ok" and called == ["https://example.com/a"]
+
+
+def test_a_token_in_an_opened_page_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    called: list[str] = []
+
+    async def fake_open(url: str, **_kw: Any) -> dict[str, Any]:
+        called.append(url)
+        return {"url": url, "title": "Ex", "text": "hello",
+                "links": [{"text": "docs", "href": f"https://example.com/{pat}"}]}
+
+    async def no_dns(_host: str) -> None:
+        return None
+
+    monkeypatch.setattr(mac.page_bridge, "open_page", fake_open)
+    monkeypatch.setattr(tools, "_resolve", no_dns)
+    tb = make_toolbox()
+    url = f"https://example.com/{pat}"
+    out = asyncio.run(tb.call("open_page", {"url": url}, {}))
+    assert called == [url]
+    assert pat not in str(out)
+    assert "[github-pat]" in out["url"] and "[github-pat]" in out["links"][0]["href"]
+    assert out["text"] == "hello"
+    err = asyncio.run(tb.call("open_page", {"url": url}, {"tainted": True, "allowed_urls": set()}))
+    assert called == [url]
+    assert pat not in str(err) and "restricted" in err["error"] and "[github-pat]" in err["error"]
 
 
 def test_tool_errors_are_shaped(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

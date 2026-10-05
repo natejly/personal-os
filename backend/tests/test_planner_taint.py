@@ -85,9 +85,25 @@ def test_a_local_task_does_not_taint_the_day_plan() -> None:
     assert "calendar_propose" in out["note"]  # the plan ends in one approvable card, not a button hunt
 
 
+def test_a_token_in_a_planned_todo_title_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    box = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
+    mod = _mod("local")
+    mod.todos.list = lambda *_a, **_k: [{  # type: ignore[method-assign]
+        "id": "t1", "title": f"Send {pat}", "source": "local", "done": 0,
+        "due": "2026-10-02", "priority": 1, "estimate_min": 30, "notes": "",
+    }]
+    mod.register_tools(box)
+    out = asyncio.run(box.call("schedule_suggest", {"days": 1}, {"project_id": None}))
+    blob = str(out)
+    assert pat not in blob and "[github-pat]" in blob
+    assert "error" not in out
+
+
 if __name__ == "__main__":
     test_a_meeting_task_taints_the_day_plan()
     test_an_email_followup_taints_the_day_plan()
     test_a_google_task_taints_the_day_plan()
     test_a_local_task_does_not_taint_the_day_plan()
+    test_a_token_in_a_planned_todo_title_is_stripped()
     print("ok")

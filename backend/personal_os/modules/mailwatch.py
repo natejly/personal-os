@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import mailwatch as mw
+from .. import redact
 from ..cache import bypass
 from ..google import GoogleNotConnected
 from ..mailwatch import MailWatch
@@ -143,7 +144,11 @@ class MailWatchModule(Module):
             if kind not in ("awaiting_reply", "to_reply"):
                 return tool_error(f"Unknown kind '{kind}'.", field="kind", expected="awaiting_reply or to_reply", example={"kind": "to_reply"})
             await asyncio.to_thread(self.refresh_sync)
-            rows = [{"thread_id": t["thread_id"], "subject": t["subject"], "last_from": t["last_from"], "age_days": round(t["age_days"], 1), "reason": t["reason"]}
+            rows = [{"thread_id": t["thread_id"],
+                     "subject": redact.scrub_command_output(str(t["subject"] or "")),
+                     "last_from": redact.scrub_command_output(str(t["last_from"] or "")),
+                     "age_days": round(t["age_days"], 1),
+                     "reason": redact.scrub_command_output(str(t["reason"] or ""))}
                     for t in self.store.list(kind, at=self.clock())]
             return page(rows, offset=offset, limit=limit, key="threads")
         box.specs["mail_followups"] = ToolSpec(

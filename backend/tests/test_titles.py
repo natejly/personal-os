@@ -155,6 +155,24 @@ def test_placeholder_and_clean() -> None:
     check(titles.clean("<think>only</think>") == "", "nothing usable is empty")
 
 
+def test_a_token_in_a_message_is_stripped_before_the_title() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    async def fake(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn", **kw: Any) -> str:
+        seen.append(messages[-1]["content"])
+        return "Notes"
+
+    real = llm.complete
+    llm.complete = fake  # type: ignore[assignment]
+    try:
+        out = asyncio.run(titles.generate({}, "m", [f"please look at {pat}"]))
+    finally:
+        llm.complete = real  # type: ignore[assignment]
+    check(out == "Notes", "the title still comes back")
+    check(pat not in seen[0] and "[github-pat]" in seen[0], "a token in the message is stripped before the title model")
+
+
 def test_happy_path() -> None:
     reset()
     cid = j("POST", "/conversations", {})["id"]
@@ -242,7 +260,8 @@ def test_regenerate() -> None:
     j("POST", "/conversations/nope/title", expect=404)
 
 
-TESTS = [test_placeholder_and_clean, test_happy_path, test_detached, test_rename_race, test_failure_and_off, test_regenerate]
+TESTS = [test_placeholder_and_clean, test_a_token_in_a_message_is_stripped_before_the_title,
+         test_happy_path, test_detached, test_rename_race, test_failure_and_off, test_regenerate]
 
 if __name__ == "__main__":
     failures = 0

@@ -30,6 +30,20 @@ def _offered(tools):  # type: ignore[no-untyped-def]
     return {s["function"]["name"] for s in tb.schemas(tb.effective(tools, None, None))}
 
 
+def test_a_token_in_a_space_name_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    made = cv.create(f"Room {pat}")
+    assert made is not None
+    cv.add_window(made["id"], "todos", title=f"List {pat}")
+    listed = call("space_list")
+    row = next(s for s in listed["spaces"] if s["canvas_id"] == made["id"])
+    assert pat not in row["name"] and "[github-pat]" in row["name"]
+    assert pat not in row["windows"][0]["title"] and "[github-pat]" in row["windows"][0]["title"]
+    stored = cv.get(made["id"])
+    assert pat in stored["name"] and pat in stored["windows"][0]["title"]
+    cv.delete(made["id"])
+
+
 def test_add_arrange_and_guards() -> None:
     sid = call("space_list")["spaces"][0]["canvas_id"]
     assert "space_add_widget" in _offered({})

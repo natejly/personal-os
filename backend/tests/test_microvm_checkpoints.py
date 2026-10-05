@@ -228,6 +228,85 @@ def test_reset_removes_checkpoint_images() -> None:
     assert [c["label"] for c in sb.checkpoints("c2")["checkpoints"]] == ["keepme"]
 
 
+def test_a_token_in_a_checkpoint_label_is_stripped() -> None:
+    import asyncio
+
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    slug = microvm.ckpt_slug(pat)
+    sb, d = make()
+    tb = Toolbox(None, None, None, lambda: {}, sandboxes=sb)  # type: ignore[arg-type]
+    ctx = {"conversation_id": "c9"}
+    saved = asyncio.run(tb.specs["sandbox_checkpoint"].fn(ctx, label=pat))
+    assert slug not in str(saved)
+    assert saved["checkpoint"] == "[github-pat]"
+    assert "[github-pat]" in saved["tag"] and "[github-pat]" in saved["kept"]
+    assert any(slug in tag for tag in d.images)
+    restored = asyncio.run(tb.specs["sandbox_restore"].fn(ctx, label=pat))
+    assert restored == {"restored": "[github-pat]"}
+    missing = "github_pat_11BBBBBBBB0BBBBBBBBBBBBBBBBB"
+    err = asyncio.run(tb.specs["sandbox_restore"].fn(ctx, label=missing))
+    assert missing.lower() not in str(err).lower() and slug not in str(err)
+    assert "[github-pat]" in err["error"]
+
+
+def test_a_token_in_a_sandbox_path_is_stripped() -> None:
+    import asyncio
+
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    class Box:
+        def holds_import(self, _cid: str) -> bool:
+            return False
+
+        def write_file(self, _cid: str, path: str, content: str, append: bool = False) -> dict[str, Any]:
+            seen.append(path)
+            if path == "missing":
+                raise SandboxError(f"could not write /workspace/{pat}: denied")
+            return {"written": f"/workspace/{path}", "bytes": len(content.encode()), "appended": append}
+
+        def read_file(self, _cid: str, path: str, offset: int = 0, length: int = 6000) -> dict[str, Any]:
+            return {"path": f"/workspace/{path}", "text": f"hello {pat}", "offset": 0, "total_bytes": 4,
+                    "images": [{"name": pat, "mime": "image/png", "bytes": 4, "data": f"data:image/png;base64,{pat}"}]}
+
+        def list_files(self, _cid: str, path: str | None = None) -> dict[str, Any]:
+            return {"path": f"/workspace/{pat}", "entries": [{"type": "file", "bytes": 1, "path": f"/workspace/{pat}"}]}
+
+    tb = Toolbox(None, None, None, lambda: {}, sandboxes=Box())  # type: ignore[arg-type]
+    ctx = {"conversation_id": "c9"}
+    wrote = asyncio.run(tb.specs["sandbox_write_file"].fn(ctx, path=pat, content="hello"))
+    assert seen == [pat]
+    assert pat not in str(wrote) and wrote["written"] == "/workspace/[github-pat]"
+    read = asyncio.run(tb.specs["sandbox_read_file"].fn(ctx, path=pat))
+    assert pat not in read["path"] and pat not in read["text"] and read["images"][0]["name"] == "[github-pat]"
+    assert pat in read["images"][0]["data"]
+    listed = asyncio.run(tb.specs["sandbox_list_files"].fn(ctx))
+    assert pat not in str(listed) and listed["entries"][0]["path"] == "/workspace/[github-pat]"
+    err = asyncio.run(tb.specs["sandbox_write_file"].fn(ctx, path="missing", content="x"))
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+
+
+def test_a_token_in_a_sandbox_document_id_is_stripped() -> None:
+    import asyncio
+
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    class Docs:
+        def get(self, document_id: str) -> dict[str, Any] | None:
+            seen.append(document_id)
+            if document_id == "doc1":
+                return {"id": "doc1", "name": "note.md", "text": f"body {pat}"}
+            return None
+
+    docs = Docs()
+    tb = Toolbox(None, None, docs, lambda: {}, sandboxes=object())  # type: ignore[arg-type]
+    err = asyncio.run(tb.specs["sandbox_put_document"].fn({"conversation_id": "c9"}, document_id=pat))
+    assert seen == [pat]
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+    assert docs.get("doc1")["text"] == f"body {pat}"
+
+
 def test_tools_registered_and_wired() -> None:
     sb, d = make()
     tb = Toolbox(None, None, None, lambda: {}, sandboxes=sb)  # type: ignore[arg-type]

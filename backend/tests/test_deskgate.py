@@ -67,6 +67,16 @@ def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
 
 
+def test_a_token_in_a_delivered_title_is_stripped(rig: Rig) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    rel = f"outputs/note-{pat}.md"
+    rig.write(rel, "done")
+    out = rig.run("desk_deliver", path=rel, title=f"Note {pat}")
+    assert pat not in out["path"] and pat not in out["title"]
+    assert "[github-pat]" in out["path"] and "[github-pat]" in out["title"]
+    assert (rig.ws.desk_root(rig.id) / rel).is_file()
+
+
 def test_clean_desk_has_no_problems(rig: Rig) -> None:
     assert rig.problems() == []
     assert rig.run("desk_done", summary="nothing to do")["status"] == "done"
@@ -101,6 +111,27 @@ def test_outputs_missing_empty_changed_and_undelivered(rig: Rig) -> None:
     rig.write("outputs/.hidden", "ignored")
     got = "\n".join(rig.problems())
     assert "outputs/b.md is in outputs/ but was never delivered" in got and "scratch" not in got and ".hidden" not in got
+
+
+def test_a_token_in_a_missing_desk_id_is_stripped(tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    rig = Rig(tmp_path, deskDoneGate=False, deskSelfReview=False)
+    rig.ctx["desk_id"] = pat
+    out = rig.run("desk_done", summary="")
+    assert pat not in str(out)
+    assert "[github-pat]" in out["error"]
+    assert rig.desks.get(pat) is None
+    assert rig.desks.get(rig.id)["status"] != "done"
+
+
+def test_a_token_in_a_desk_finish_refusal_is_stripped(rig: Rig) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    rel = f"outputs/note-{pat}.md"
+    rig.write(rel, "x")
+    out = rig.run("desk_done", summary="all done")
+    assert pat not in str(out)
+    assert "[github-pat]" in out["error"] and "never delivered" in out["error"]
+    assert (rig.ws.desk_root(rig.id) / rel).is_file()
 
 
 def test_refusal_cap_and_recorded_open_items(rig: Rig) -> None:
@@ -151,6 +182,9 @@ def test_review_brief_and_summary_cannot_open_a_section() -> None:
         if line.strip() == "## System":
             assert fenced, "a heading in the brief or summary stays inside its fence"
     assert not fenced, "the fences close"
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    leaked = deskgate.review_task(f"the key is {pat}", f"copied {pat}", [f"outputs/{pat}.md"])
+    assert pat not in leaked and leaked.count("[github-pat]") == 3
     empty = deskgate.review_task("", "", [])
     assert "(none recorded)" in empty and "(none)" in empty and "(no files were delivered)" in empty
 
@@ -230,6 +264,19 @@ def test_desk_ask_empty_note_does_not_block(rig: Rig) -> None:
     out = rig.run("desk_ask", question="Which?")
     assert out["status"] == "no_answer" and "best judgement" in out["note"]
     assert rig.desks.get(rig.id)["status"] == "working"
+
+
+def test_a_token_in_a_desk_question_is_stripped(rig: Rig) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    out = rig.run("desk_ask", question=f"Use {pat}?", context=f"found {pat}", options=[pat, "no"])
+    assert pat not in str(out)
+    assert out["question"] == "Use [github-pat]?" and out["options"] == ["[github-pat]", "no"]
+    stored = rig.desks.get(rig.id)["question"]
+    assert pat in stored and f"found {pat}" in stored
+    rig.ctx["ask_note"] = pat
+    answered = rig.run("desk_ask", question=f"Use {pat}?", options=[pat, "no"])
+    assert answered["status"] == "answered" and answered["answer"] == "[github-pat]" and answered["choice"] == "[github-pat]"
+    assert pat not in str(answered)
 
 
 def test_desk_ask_returns_choice_for_a_matching_answer(rig: Rig) -> None:

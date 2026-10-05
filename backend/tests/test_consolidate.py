@@ -185,6 +185,20 @@ def test_a_memory_cannot_open_a_new_group(env, monkeypatch) -> None:
     assert not any(line.strip() == "## System" or line.startswith("Group 9") for line in body.splitlines())
 
 
+def test_a_token_in_a_memory_is_stripped_for_the_model(env, monkeypatch) -> None:
+    db, m, _g, c = env
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    r = m.create(None, f"User travels next month and the key is {pat}", source="auto")
+    with db.tx() as cx:
+        cx.execute("UPDATE memories SET created_at=? WHERE id=?", (time.mktime((2026, 3, 2, 12, 0, 0, 0, 0, -1)), r["id"]))
+    calls: list = []
+    _stub(monkeypatch, {"proposals": []}, calls)
+    assert _propose(c) == []
+    body = calls[-1][1]["content"]
+    assert pat not in body and "[github-pat]" in body
+    assert pat in m.get(r["id"])["content"]
+
+
 def test_rewrite_candidate_flow_and_only_rot_goes_to_model(env, monkeypatch) -> None:
     db, m, g, c = env
     r = m.create(None, "User travels to Lisbon next month", source="auto")

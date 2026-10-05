@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .. import redact
 from ..health import Health, HealthError
 from ..health_sync import PROVIDERS, HealthSources
 from ..tools import ToolSpec, _obj, tool_error
@@ -262,7 +263,8 @@ class HealthModule(Module):
 
         def unknown(name: str) -> Any:
             keys = [m["key"] for m in store.metrics()]
-            return tool_error(f"No health metric '{name}'.", field="metric", expected=f"one of: {', '.join(keys)}",
+            return tool_error(redact.scrub_command_output(f"No health metric '{name}'."), field="metric",
+                              expected=redact.scrub_command_output(f"one of: {', '.join(keys)}"),
                               example={"metric": "sleep", "value": 7.5}, alternative="health_summary to see every metric")
 
         async def health_summary(ctx: dict[str, Any], days: int = 7, metric: str | None = None, today: str | None = None) -> Any:
@@ -274,11 +276,12 @@ class HealthModule(Module):
             try:
                 rows = store.summary(days, today, include_hidden=m is not None, metric=m["key"] if m else None)
             except HealthError as e:
-                return tool_error(str(e), field="today", expected="YYYY-MM-DD", example={"days": 7})
+                return tool_error(redact.scrub_command_output(str(e)), field="today", expected="YYYY-MM-DD", example={"days": 7})
             out = []
             for s in rows:
                 row: dict[str, Any] = {
-                    "metric": s["key"], "label": s["label"], "kind": s["kind"], "unit": s["unit"], "per_day": s["agg"],
+                    "metric": s["key"], "label": redact.scrub_command_output(str(s["label"] or "")),
+                    "kind": s["kind"], "unit": redact.scrub_command_output(str(s["unit"] or "")), "per_day": s["agg"],
                     "today": _fmt(s, s["today"]), "avg": _fmt(s, s["avg"]), "previous_avg": _fmt(s, s["prev_avg"]),
                     "days_logged": s["logged_days"], "last": s["last"],
                 }
@@ -288,7 +291,7 @@ class HealthModule(Module):
                     row["daily"] = {p["day"]: _fmt(s, p["value"]) for p in s["series"] if p["value"] is not None}
                 if m:
                     row["recent_entries"] = [{"id": e["id"], "day": e["day"], "value": e["value"],
-                                             "note": store._note(e.get("note") or "")}
+                                             "note": redact.scrub_command_output(store._note(e.get("note") or ""))}
                                              for e in store.entries(m["key"], limit=20)]
                 out.append(row)
             return {"days": days, "metrics": out}
@@ -305,8 +308,8 @@ class HealthModule(Module):
             try:
                 e = store.log(m["key"], value, day, note, source="assistant")
             except HealthError as err:
-                return tool_error(str(err), field="value", expected="a number in the metric's range (scale 1-5, check 1/0)",
-                                  example={"metric": m["key"], "value": 1 if m["kind"] == "check" else 3})
+                return tool_error(redact.scrub_command_output(str(err)), field="value", expected="a number in the metric's range (scale 1-5, check 1/0)",
+                                  example={"metric": redact.scrub_command_output(str(m["key"] or "")), "value": 1 if m["kind"] == "check" else 3})
             return {"id": e["id"], "metric": m["key"], "day": e["day"], "logged": _fmt(m, e["value"])}
         R("health_log", ToolSpec("health_log",
             "Log a health reading for the user. `metric` is a key or label from health_summary. Values: hours for sleep, a count for steps/water, minutes for exercise, "
@@ -320,7 +323,8 @@ class HealthModule(Module):
         async def health_delete_entry(ctx: dict[str, Any], id: str) -> Any:
             e = store.entry(id)
             if not e:
-                return tool_error(f"No health entry with id '{id}'.", field="id", expected="an id from health_summary(metric=…).recent_entries",
+                return tool_error(redact.scrub_command_output(f"No health entry with id '{id}'."), field="id",
+                                  expected="an id from health_summary(metric=…).recent_entries",
                                   example={"id": "a1b2c3"}, alternative="health_summary with `metric` to list entry ids")
             store.delete_entry(id)
             return {"deleted": {"metric": e["metric"], "day": e["day"], "value": e["value"]}}

@@ -249,6 +249,40 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(asyncio.run(self.box.send_now(row["id"]))["status"], "sent")
 
     # ---- the agent's reach ----
+    def test_a_token_in_a_queued_subject_is_stripped(self) -> None:
+        from personal_os.tools import Toolbox
+
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        ctx = {"project_id": None, "conversation_id": "c1"}
+        queued = asyncio.run(box.call("gmail_send", {
+            "to": "mira@example.com", "subject": f"Hi {pat}", "body": f"body {pat}",
+        }, ctx))
+        self.assertNotIn(pat, queued["subject"])
+        self.assertIn("[github-pat]", queued["subject"])
+        listed = asyncio.run(box.call("gmail_outbox", {}, ctx))
+        self.assertNotIn(pat, listed["waiting"][0]["subject"])
+        self.assertIn("[github-pat]", listed["waiting"][0]["subject"])
+        stored = self.box.get(queued["queued"])
+        self.assertIn(pat, stored["subject"])
+
+    def test_a_token_in_a_sent_id_is_stripped(self) -> None:
+        from personal_os.tools import Toolbox
+
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        ctx = {"project_id": None, "conversation_id": "c1"}
+        queued = asyncio.run(box.call("gmail_send", {"to": "mira@example.com", "subject": "Hi", "body": "x"}, ctx))
+        with self.db.tx() as c:
+            c.execute("UPDATE pending_sends SET id=?, status='sent' WHERE id=?", (pat, queued["queued"]))
+        err = asyncio.run(box.call("gmail_outbox", {"action": "cancel", "id": pat}, ctx))
+        self.assertNotIn(pat, str(err))
+        self.assertIn("[github-pat]", err["error"])
+        stored = self.box.get(pat)
+        self.assertEqual(stored["id"], pat)
+        self.assertEqual(stored["status"], "sent")
+        self.assertEqual(stored["to"], "mira@example.com")
+
     def test_the_agent_can_cancel_but_not_hurry_a_send(self) -> None:
         from personal_os.tools import Toolbox
 

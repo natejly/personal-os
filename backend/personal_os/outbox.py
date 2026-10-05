@@ -39,7 +39,7 @@ import time
 from typing import Any, Callable
 
 from .db import Database, new_id, row_to_dict
-from . import mail_edits, verify
+from . import mail_edits, redact, verify
 from .google import GoogleNotConnected, NotSent
 
 log = logging.getLogger(__name__)
@@ -344,9 +344,14 @@ def router(outbox: Outbox) -> Any:
 def queued_result(row: dict[str, Any]) -> dict[str, Any]:
     """What the model is told when its send is held. It has not been sent, and must not say so."""
     if row.get("status") == SENT:  # the hold is turned off, so it really did go out
-        return row
+        shown = dict(row)
+        for key in ("subject", "body", "error"):
+            if isinstance(shown.get(key), str):
+                shown[key] = redact.scrub_command_output(shown[key])
+        return shown
     left = row.get("seconds_left") or row.get("hold_seconds") or 0
-    return {"queued": row.get("id"), "to": row.get("to"), "subject": row.get("subject"),
+    return {"queued": row.get("id"), "to": row.get("to"),
+            "subject": redact.scrub_command_output(str(row.get("subject") or "")),
             "status": row.get("status"), "sends_in_seconds": left,
             "note": f"NOT SENT YET. Held for {left}s so the user can undo it, then it goes out on its own. "
                     "Tell them it will send shortly and that they can cancel it; do not say it was sent. "

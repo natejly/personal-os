@@ -124,6 +124,22 @@ def test_delete_sweeps_windows() -> None:
     j("GET", f"/artifacts/{a['id']}", expect=404)
 
 
+def test_a_token_in_an_artifact_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    html = GOOD.replace("Tip splitter", f"Tip {pat}")
+    ctx: dict[str, Any] = {"project_id": None}
+    out = asyncio.run(toolbox.call("artifact_create", {"title": f"Tip {pat}", "html": html}, ctx))
+    check(pat not in out["title"] and "[github-pat]" in out["title"], "create strips the title")
+    check(pat in ctx["artifact"]["title"], "the card keeps the stored title")
+    read = asyncio.run(toolbox.call("artifact_read", {"artifact_id": out["artifact_id"]}, {"project_id": None}))
+    check(pat not in read["title"] and pat not in read["html"] and "[github-pat]" in read["html"], "read strips the source")
+    listed = asyncio.run(toolbox.call("artifact_list", {"query": "Tip"}, {"project_id": None}))
+    row = next(x for x in listed if x["artifact_id"] == out["artifact_id"])
+    check(pat not in row["title"] and "[github-pat]" in row["title"], "list strips the title")
+    stored = j("GET", f"/artifacts/{out['artifact_id']}")
+    check(pat in stored["code"] and pat in stored["title"], "the saved artifact stays unchanged")
+
+
 def test_tools() -> None:
     names = {t["name"]: t for t in toolbox.list()}
     check(all(n in names and names[n]["danger"] == "writes" for n in ("artifact_create", "artifact_edit", "artifact_update")), "three tools, local writes")
@@ -139,7 +155,7 @@ def test_tools() -> None:
 
 
 TESTS = [test_create_edit_restore_render, test_render_headers_and_auth, test_lint, test_generate_with_one_repair,
-         test_delete_sweeps_windows, test_tools]
+         test_delete_sweeps_windows, test_a_token_in_an_artifact_is_stripped, test_tools]
 
 if __name__ == "__main__":
     failures = 0

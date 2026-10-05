@@ -917,6 +917,111 @@ def test_pinned_notes_cannot_open_a_section() -> None:
           "a pinned note cannot open a new section")
 
 
+def test_a_token_in_resumed_history_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    ch = sa.Child(
+        id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="follow up", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id=None,
+        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+    )
+    prior = [
+        {"role": "user", "content": "first task"},
+        {"role": "assistant", "content": f"the file had {pat}"},
+    ]
+    msgs = mgr._seed(ch, {}, prior)
+    check(pat not in msgs[1]["content"] and "[github-pat]" in msgs[1]["content"], "a token in resumed history is stripped")
+    check(msgs[-1]["content"] == "follow up", "the new task is the last message")
+    check(prior[1]["content"] == f"the file had {pat}", "the stored transcript stays unchanged")
+
+
+def test_a_token_in_a_subagent_report_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    ch = sa.Child(
+        id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id=None,
+        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+    )
+    ch.text = f"found {pat} in the file"
+    ch.state = "completed"
+    ch.exit_reason = "done"
+    out = mgr.report(ch)
+    check(pat not in out["report"] and "[github-pat]" in out["report"], "a token in a report is stripped")
+    check(ch.text == f"found {pat} in the file", "the child's own text stays unchanged")
+
+
+def test_a_token_in_a_pinned_note_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    note = {"pinned": 1, "content": f"the key is {pat}"}
+
+    class Mem:
+        def for_context(self, *_a: Any, **_k: Any) -> list[dict[str, Any]]:
+            return [note]
+
+    old_m, old_p = mgr.memories, mgr.projects
+    mgr.memories = Mem()  # type: ignore[assignment]
+    mgr.projects = None
+    try:
+        ch = sa.Child(
+            id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
+            depth=1, conversation_id=None, message_id=None, desk_id=None,
+            ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(), roots=(),
+        )
+        system = mgr._seed(ch, {}, None)[0]["content"]
+    finally:
+        mgr.memories, mgr.projects = old_m, old_p
+    check(pat not in system and "[github-pat]" in system, "a token in a pinned note is stripped")
+    check(note["content"] == f"the key is {pat}", "the stored note stays unchanged")
+
+
+def test_a_token_in_a_child_tool_result_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    ch = sa.Child(
+        id="c-token", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id=None,
+        ctx={"settings": appmod.settings()}, modes={"current_time": "on"}, steps=3, meter=sa.Meter(), roots=(),
+    )
+
+    async def fake_call(_ch: Any, _name: str, _args: dict[str, Any], _uid: str, _spec: Any) -> dict[str, str]:
+        return {"note": f"the key is {pat}"}
+
+    prev_call, prev_store = mgr._call, mgr.store
+    mgr._call, mgr.store = fake_call, None
+    try:
+        text = run(mgr._exec(ch, {"id": "1", "name": "current_time"}, {}))
+    finally:
+        mgr._call, mgr.store = prev_call, prev_store
+    check(pat not in text and "[github-pat]" in text, "a token in a child tool result is stripped")
+
+
+def test_a_token_in_a_subagent_root_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    root = tempfile.mkdtemp()
+    ctx = mkctx(new_conv(), settings={**appmod.settings(), "workspaceRoots": [root]})
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/tmp/{pat}"}, ctx))
+    check(pat not in str(out) and "[github-pat]" in out["error"] and "outside" in out["error"],
+          "a token in a worker root is stripped")
+    ch = sa.Child(
+        id="c", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="look", model="m",
+        depth=1, conversation_id=None, message_id=None, desk_id=None,
+        ctx={}, modes={}, steps=3, meter=sa.Meter(), roots=(Path(root).resolve(),),
+    )
+    msg = mgr._confine(ch, "write_local_file", {"path": f"/tmp/{pat}.txt"})
+    check(msg is not None and pat not in msg and "[github-pat]" in msg, "a token in a confined path is stripped")
+
+
+def test_a_token_in_a_subagent_id_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    ctx = mkctx(new_conv())
+    missing = run(appmod.toolbox.call("agent_spawn", {"task": "look", "resume_id": pat}, ctx))
+    check(pat not in str(missing) and "[github-pat]" in missing["error"], "a token in a resume id is stripped")
+    role = run(appmod.toolbox.call("agent_spawn", {"task": "look", "role": pat}, ctx))
+    check(pat not in str(role) and "[github-pat]" in role["error"], "a token in a role name is stripped")
+    waited = run(appmod.toolbox.call("agent_wait", {"ids": [pat]}, ctx))
+    check(pat not in str(waited) and "[github-pat]" in waited["error"], "a token in a wait id is stripped")
+    stopped = run(appmod.toolbox.call("agent_stop", {"id": pat}, ctx))
+    check(pat not in str(stopped) and "[github-pat]" in stopped["error"], "a token in a stop id is stripped")
+
+
 def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
         check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")

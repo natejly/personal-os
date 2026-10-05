@@ -84,9 +84,34 @@ def test_other_peoples_text_cannot_close_the_quote() -> None:
     _inside(completion)
 
 
+def test_a_token_in_a_draft_is_stripped() -> None:
+    seen: list[str] = []
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake(settings: object, model: str, messages: list[dict[str, str]], kind: str = "assist") -> str:
+        seen.append(messages[-1]["content"])
+        return '{"feedback": ["ok"], "revised": "thanks"}'
+
+    real = assist.llm.complete
+    assist.llm.complete = fake  # type: ignore[assignment]
+    try:
+        asyncio.run(assist.review_email(
+            {"defaultModel": "m"}, "a@b.c", "Hi", f"the key is {pat}", f"they wrote {pat}",
+        ))
+        asyncio.run(assist.complete_text(
+            {"defaultModel": "m"}, "note", f"I think {pat}", f"then {pat}", f"thread {pat}",
+        ))
+    finally:
+        assist.llm.complete = real  # type: ignore[assignment]
+    assert len(seen) == 2
+    for text in seen:
+        assert pat not in text and "[github-pat]" in text
+
+
 if __name__ == "__main__":
     test_a_completion_cannot_add_a_second_instruction()
     test_quotes_and_blank_lines_collapse()
     test_a_new_word_keeps_its_space_and_only_whole_word_echoes_are_cut()
     test_other_peoples_text_cannot_close_the_quote()
+    test_a_token_in_a_draft_is_stripped()
     print("ok")

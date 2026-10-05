@@ -67,6 +67,17 @@ def call(cid: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
     return {"id": cid, "name": name, "arguments": json.dumps(args)}
 
 
+def test_a_token_in_a_resume_note_is_stripped() -> None:
+    from personal_os.resume import build_resume_note
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    note = build_resume_note(
+        {"message_id": "m1"},
+        [(1, "delta", {"id": "m1", "text": f"using {pat}"}),
+         (2, "tool_result", {"name": "gmail_read", "arguments": {"q": pat}, "result_preview": f"body {pat}"})],
+        [], [])
+    assert pat not in note and note.count("[github-pat]") == 3
+
+
 def dead_run(*, taint: bool = False, journal: str | None = None, status: str = "interrupted", pending: bool = False) -> tuple[str, str]:
     """A run that died mid-reply, built by hand the way the tape and journal would have left it."""
     cid = appmod.convos.create(None, "t", "m")["id"]

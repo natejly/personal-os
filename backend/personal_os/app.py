@@ -4762,13 +4762,15 @@ async def create_job(body: JobIn) -> dict[str, Any]:
     _check_job_budget(body.budget)
     await _check_job_model(body.model)
     _check_target(body.target, body.desk_autonomy, body.allowed_tools)
-    return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
+    job = jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
                        model=body.model or None, budget=body.budget or None,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None,
                        mail_query=body.mail_query.strip() if body.kind == "mail" and body.mail_query else None,
                        target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget)
+    scheduler.nudge()  # re-read the earliest slot now: the loop may be mid-way through a 60 s nap past this job's time
+    return job
 
 
 @app.patch("/jobs/{id}")
@@ -4804,6 +4806,7 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     job = jobs.update(id, patch)
     if not job:
         raise HTTPException(404, "No such job")
+    scheduler.nudge()  # an enable or a new time may be due before the current nap ends
     return job
 
 

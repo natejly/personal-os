@@ -637,6 +637,8 @@ let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** Bumped by every local job write, so a slower list read that started before it cannot put the old list back. */
+let jobsEdits = 0
 /** What a doc save would send: each field only when it differs from the saved copy. */
 const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string | null): { content?: string; title?: string } | null => {
   const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
@@ -3835,8 +3837,10 @@ export const useStore = create<State>((set, get) => {
       }
     },
     refreshJobs: async () => {
+      const seen = jobsEdits
       try {
-        set({ jobs: await api.jobs.list() })
+        const list = await api.jobs.list()
+        if (seen === jobsEdits) set({ jobs: list })
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
       }
@@ -3844,6 +3848,7 @@ export const useStore = create<State>((set, get) => {
     createJob: async (input) => {
       try {
         const job = await api.jobs.create(input)
+        jobsEdits++
         set((s) => ({ jobs: [...s.jobs, job].sort((a, b) => a.name.localeCompare(b.name)) }))
         get().toast(`Scheduled: ${job.name}`, 'info')
         void get().refreshAgentInbox()
@@ -3856,6 +3861,7 @@ export const useStore = create<State>((set, get) => {
     deleteJob: async (id) => {
       try {
         await api.jobs.delete(id)
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }))
         void get().refreshAgentInbox()
       } catch (e) {
@@ -3865,6 +3871,7 @@ export const useStore = create<State>((set, get) => {
     setJobEnabled: async (id, enabled) => {
       try {
         const job = await api.jobs.update(id, { enabled })
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
         void get().refreshAgentInbox()
       } catch (e) {
@@ -3874,6 +3881,7 @@ export const useStore = create<State>((set, get) => {
     updateJob: async (id, patch) => {
       try {
         const job = await api.jobs.update(id, patch)
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
         void get().refreshAgentInbox()
         return null

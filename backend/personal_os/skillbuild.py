@@ -80,7 +80,8 @@ PROMPT_TALK = re.compile(r"\b(system prompt|your instructions|these instructions
 # Values that belong to the one time the task was done, not to the method. A procedure carrying them
 # is a transcript: it will tell the assistant to mail last month's address next quarter.
 CONCRETE_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"[\w.+-]+@[\w-]+\.[\w.]{2,}", "an email address"),
+    # Bounded runs: an unbounded `[\w.+-]+@` is quadratic on a long word with no "@" (13 s for 60 KB of text).
+    (r"[\w.+-]{1,64}@[\w-]{1,63}\.[\w.]{2,}", "an email address"),
     (r"https?://\S+", "a URL"),
     (r"\b\d{4}-\d{2}-\d{2}\b", "a date"),
     (r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b", "a date"),

@@ -22,6 +22,7 @@ import CoworkSettings, { CoworkAdvanced } from './CoworkSettings'
 import RunSafetySettings from './RunSafetySettings'
 import SandboxSettings from './SandboxSettings'
 import GoogleSettings from './GoogleSettings'
+import MicrosoftSettings from './MicrosoftSettings'
 import MeetingSettings from './MeetingSettings'
 import SupportSettings, { ReliabilitySettings } from './SupportSettings'
 import UsageView from './UsageView'
@@ -495,8 +496,21 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
               <p className="muted">Accounts the assistant can read from and act on. Signing in and the sync switches take effect at once; the rest is saved with Save.</p>
+              <div className="integration">
+                <div role="radiogroup" aria-label="Mail & Calendar provider" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <b style={{ marginRight: 'auto' }}>Mail &amp; Calendar provider</b>
+                  {(['google', 'microsoft'] as const).map((p) => (
+                    <button key={p} type="button" role="radio" aria-checked={(draft.pimProvider ?? 'google') === p}
+                      className={(draft.pimProvider ?? 'google') === p ? 'primary-btn' : 'ghost-btn'}
+                      onClick={() => { patch({ pimProvider: p }); void saveEarly({ pimProvider: p }) }}>{p === 'google' ? 'Google' : 'Microsoft'}</button>
+                  ))}
+                </div>
+                <p className="muted small">One provider is active at a time. Mail, Calendar, the agent&apos;s mail and calendar tools, the reply tracker and the undo outbox follow it. Todos sync and Files stay on Google.</p>
+              </div>
               <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} onChange={(p) => patch(p)}
                 onSaveCreds={() => saveEarly({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
+              <MicrosoftSettings clientId={draft.microsoftClientId ?? ''} tenant={draft.microsoftTenant ?? ''} onChange={(p) => patch(p)}
+                onSaveCreds={() => saveEarly({ microsoftClientId: draft.microsoftClientId, microsoftTenant: draft.microsoftTenant })} />
               {/* The undo window on outgoing mail. The backend clamps the number to HOLD_MIN..HOLD_MAX (outbox.py). */}
               <h4>Outgoing email</h4>
               <label className="toggle-row plain">

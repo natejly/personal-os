@@ -123,7 +123,7 @@ def mkctx(conv_id: str, modes: dict[str, str] | None = None, **extra: Any) -> di
 
 
 def spawn_calls(*tasks: str, **kw: Any) -> list[dict[str, Any]]:
-    return [call(f"s{i}", "agent_spawn", {"task": t, **kw}) for i, t in enumerate(tasks)]
+    return [call(f"s{i}", "agent_spawn", {"task": t, "role": "researcher", **kw}) for i, t in enumerate(tasks)]
 
 
 # ---- tool sets -------------------------------------------------------------------------------------
@@ -146,7 +146,12 @@ def test_tool_narrowing() -> None:
     wm = mgr.child_modes(pm, mgr.role_for("worker"), None, 1)
     check("agent_spawn" in wm and "agent_wait" in wm, "a worker below max depth may spawn")
     check("run_python" in wm and "write_local_file" in wm, "a worker adds writers")
-    check("gmail_send" not in wm and "save_memory" not in wm and "todo_write" not in wm, "no worker gets external or memory tools")
+    check("gmail_send" not in wm and "save_memory" not in wm and "todo_write" not in wm, "no worker gets the structural blocks")
+    gm = mgr.child_modes(pm, mgr.role_for("general"), None, 1)
+    ext = [n for n, sp in appmod.toolbox.specs.items() if sp.danger == "external" and pm.get(n) in ("on", "ask") and n not in sa.CHILD_BLOCK and appmod.toolbox.available(n)]
+    check(ext and all(n in gm and gm[n] == pm[n] for n in ext), "a general child keeps the parent's external tools in the same mode")
+    check(set(gm) <= {n for n, m in pm.items() if m in ("on", "ask")} - sa.CHILD_BLOCK, "a child's tools are within the parent's set minus CHILD_BLOCK")
+    check("run_python" in gm and "write_local_file" in gm, "the default role carries the parent's writers")
     deep = mgr.child_modes(pm, mgr.role_for("worker"), None, 2)
     check("agent_spawn" not in deep and "agent_wait" not in deep and "agent_stop" not in deep, "at max depth the spawn tools are not offered")
     pm["run_python"] = "off"
@@ -1127,7 +1132,7 @@ def test_settings_and_routes() -> None:
     row = asyncio.run(appmod.get_run("sa_r1"))
     check(row["kind"] == "subagent" and row["parent_run_id"] == "parent_r", "GET /runs/{id} serves a child run")
     listing = asyncio.run(appmod.list_agent_defs())
-    check({r["name"] for r in listing["builtin"]} == {"researcher", "worker", "reviewer"}, "the built-in roles are listed")
+    check({r["name"] for r in listing["builtin"]} == {"general", "researcher", "worker", "reviewer"}, "the built-in roles are listed")
 
 
 def main() -> int:

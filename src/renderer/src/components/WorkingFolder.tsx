@@ -13,12 +13,7 @@ export default function WorkingFolder({ conversationId }: { conversationId?: str
     const id = conversationId ?? s.focusedConversationId
     return id ? s.sessions[id]?.conversation.settings.workingFolder : s.draftChatSettings.workingFolder
   })
-  const isDesk = useStore((s) => {
-    const id = conversationId ?? s.focusedConversationId
-    return !!(id && s.sessions[id]?.conversation.settings.deskId)
-  })
   const setChatSettings = useStore((s) => s.setChatSettings)
-  if (isDesk) return null // a desk already has its workspace
 
   const pick = async (): Promise<void> => {
     const chosen = await window.os.data.chooseFolder()

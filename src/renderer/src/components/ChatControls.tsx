@@ -1,6 +1,7 @@
 import { DEFAULT_EFFORT } from '@shared/types'
 import { useStore, useConversation } from '../store'
 import ModelMenu from './ModelMenu'
+import { RESPONSE_STYLES } from '../lib/responseStyle'
 
 /**
  * Model, reasoning effort and fast mode, under the text box rather than above the transcript — the
@@ -20,7 +21,12 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const model = convo?.model ?? (draft ? draftModel : null) ?? defaultModel
   const effort = convo?.settings?.effort ?? (draft ? draftEffort : DEFAULT_EFFORT)
   const fast = convo?.settings?.fast ?? (draft ? draftFast : false)
+  const globalStyle = useStore((s) => s.settings.responseStyle) ?? 'default'
+  const draftStyle = useStore((s) => s.draftChatSettings.responseStyle)
+  const setChatSettings = useStore((s) => s.setChatSettings)
+  const style = convo?.settings?.responseStyle ?? (draft ? draftStyle ?? globalStyle : 'default')
   return (
+    <>
     <ModelMenu
       model={model}
       effort={effort}
@@ -28,5 +34,15 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
       placement="up"
       onChange={(c) => void setChatConfig(c, conversationId)}
     />
+    <select
+      className="muted small"
+      aria-label="Response style"
+      title="Response style"
+      value={style}
+      onChange={(e) => void setChatSettings({ responseStyle: e.target.value }, conversationId)}
+    >
+      {RESPONSE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.id === 'default' ? 'Style' : s.label}</option>)}
+    </select>
+    </>
   )
 }

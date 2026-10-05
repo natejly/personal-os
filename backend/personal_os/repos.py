@@ -140,7 +140,8 @@ class Projects:
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
 DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                         "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
+                         "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {},
+                         "responseStyle": "default", "responseStyleText": ""}
 # A private chat neither reads nor writes what carries over to other chats. `private` is set only at
 # creation; _hydrate forces these off on every read, so no later PATCH can turn them back on.
 # Style banking needs no flag of its own: it is gated on the chat's autoLearn.

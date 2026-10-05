@@ -354,7 +354,7 @@ def _agent_errors(where: str, a: dict[str, Any], role_ok: Callable[[str], bool] 
     errs = []
     if not isinstance(a.get("task"), str) or not a["task"].strip():
         errs.append(f"{where}: the agent needs a task (a string, which may use templates)")
-    role = a.get("role") or "researcher"
+    role = a.get("role") or "general"
     if not isinstance(role, str) or (role_ok is not None and not role_ok(role)):
         errs.append(f"{where}: unknown agent role {role!r}")
     if a.get("tools") is not None and not (isinstance(a["tools"], list) and all(isinstance(t, str) for t in a["tools"])):
@@ -651,9 +651,9 @@ class Engine:
     """Runs approved workflow runs, one asyncio task each."""
 
     def __init__(self, store: Workflows, toolbox: Any, subagents: Any, run_store: Any, settings_fn: Callable[[], dict[str, Any]],
-                 projects: Any = None) -> None:
+                 projects: Any = None, conv_cfg: Callable[[dict[str, Any], str | None], dict[str, Any]] | None = None) -> None:
         self.store, self.toolbox, self.subagents, self.runs = store, toolbox, subagents, run_store
-        self.settings, self.projects = settings_fn, projects
+        self.settings, self.projects, self.conv_cfg = settings_fn, projects, conv_cfg
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.stops: dict[str, asyncio.Event] = {}
         self.seq: dict[str, int] = {}
@@ -754,6 +754,8 @@ class Engine:
 
     def _ctx(self, run: dict[str, Any], stop: asyncio.Event) -> dict[str, Any]:
         cfg = self.settings()
+        if self.conv_cfg is not None:  # the chat's working folder reaches its workflow's steps
+            cfg = self.conv_cfg(cfg, run.get("conversation_id"))
         project = None
         if self.projects is not None and run.get("project_id"):
             try:
@@ -922,7 +924,7 @@ class Engine:
         # Those tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on' into a forced card for
         # them: a tainted run forces it here instead, and no allow rule lifts it.
         forced = forced or (spec.danger in ASK_LOCKED_DANGER and bool(ctx.get("tainted")))
-        cfg = self.settings()
+        cfg = ctx.get("settings") or self.settings()
         roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
         perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"), roots=roots)
         if perm.refusal:
@@ -959,7 +961,7 @@ class Engine:
         args = {k: v for k, v in a.items() if k in ("task", "role", "tools", "model", "root")}
         if not isinstance(args.get("task"), str) or not args["task"].strip():
             raise _StepFailed("the agent's task rendered empty")
-        args["role"] = args.get("role") or "researcher"
+        args["role"] = args.get("role") or "general"
         while True:
             if stop.is_set():
                 raise _StepFailed("cancelled")

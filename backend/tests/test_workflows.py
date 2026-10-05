@@ -353,6 +353,22 @@ def test_run_reports_to_its_chat() -> None:
     check(len(said()) == 2, "a run with no chat posts nowhere")
 
 
+def test_step_sees_the_chats_working_folder() -> None:
+    reset()
+    folder = tempfile.mkdtemp(prefix="wf_folder_", dir=str(Path.home()))
+    try:
+        cid = appmod.convos.create(None, "t", "m")["id"]
+        appmod.convos.update(cid, {"settings": {"workingFolder": folder}})
+        w = save(DIGEST)
+        r = store.create_run(w, {"folder": "/a"}, conversation_id=cid)
+        roots = engine._ctx(store.get_run(r["id"]), asyncio.Event())["settings"]["workspaceRoots"]
+        check(roots and roots[0] == str(Path(folder).resolve()), "a step run from a chat with a working folder sees it in workspaceRoots")
+        r2 = store.create_run(w, {"folder": "/a"})
+        check(folder not in (engine._ctx(store.get_run(r2["id"]), asyncio.Event())["settings"].get("workspaceRoots") or []), "a run with no chat does not")
+    finally:
+        os.rmdir(folder)
+
+
 # ---- the engine ----------------------------------------------------------------------------------
 
 def test_full_run_with_fan_out_and_approval() -> None:

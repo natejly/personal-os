@@ -525,7 +525,8 @@ toolbox.subagents = subagent_mgr
 subagent_mgr.snaps = snaps
 # Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
 workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
-workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_store, settings, projects)
+workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_store, settings, projects,
+                              conv_cfg=lambda cfg, cid: _conv_cfg(cfg, cid))
 command_store = Commands(db)
 toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
 # The insights pass proposes automations, so it is told which tools this install actually has - an
@@ -628,6 +629,19 @@ def _working_folder(conv_settings: dict[str, Any]) -> str | None:
     except mac.LocalPathError:
         return None
     return str(p) if p.is_dir() else None
+
+
+def _with_folder(cfg: dict[str, Any], folder: str | None) -> dict[str, Any]:
+    """`cfg` with `folder` granted first among the workspace roots (a no-op without one)."""
+    if not folder:
+        return cfg
+    return {**cfg, "workspaceRoots": [folder, *[r for r in (cfg.get("workspaceRoots") or []) if r != folder]]}
+
+
+def _conv_cfg(cfg: dict[str, Any], conv_id: str | None) -> dict[str, Any]:
+    """Settings for a run that belongs to a conversation: its working folder is granted like a workspace root."""
+    conv = convos.get(conv_id) if conv_id else None
+    return _with_folder(cfg, _working_folder(conv["settings"])) if conv else cfg
 
 
 FOLDER_HINT = ("## Working folder\nThe user bound this chat to `{path}`. shell_run, opencode_run, the fs_* tools and the local file "
@@ -1801,8 +1815,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # A chat bound to a working folder (the Folder control under the composer) grants that folder to this run the
     # way a Settings workspace root would, and first, so an empty cwd or a relative path means that folder.
     folder = _working_folder(conv["settings"])
-    if folder:
-        cfg = {**cfg, "workspaceRoots": [folder, *[r for r in (cfg.get("workspaceRoots") or []) if r != folder]]}
+    cfg = _with_folder(cfg, folder)
     model = body.model or conv["model"] or cfg["defaultModel"]
     # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
     # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.

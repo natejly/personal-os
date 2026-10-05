@@ -53,9 +53,9 @@ CHILD_BLOCK = frozenset({
     "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify",
 })
-# Danger tiers a child never gets. `external` is dropped except for the file and shell tools below,
-# which are external only because they act on the user's disk, and which are confined to a root.
-CHILD_DANGER_BLOCK = ("plan", "schedules", "external")
+# Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's
+# stream, and the always-ask list is gated the same way as for the parent.
+CHILD_DANGER_BLOCK = ("plan", "schedules")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
@@ -113,7 +113,7 @@ class RoleDef:
 
     @property
     def readonly(self) -> bool:
-        return not (set(self.tools) & WRITER_TOOLS)
+        return bool(self.tools) and not (set(self.tools) & WRITER_TOOLS)  # no tool list = the parent's set, which may write
 
 
 BUILTIN_ROLES: dict[str, RoleDef] = {r.name: r for r in (
@@ -121,10 +121,14 @@ BUILTIN_ROLES: dict[str, RoleDef] = {r.name: r for r in (
             "Role: researcher. You only read. Gather what the task asks for from the sources you have, "
             "check claims against more than one source when you can, and report findings with where each came from.",
             READ_TOOLS),
+    RoleDef("general", "Has the chat's tools (minus asking, planning and scheduling): read, write, run, browse.",
+            "Role: general. Carry out the task with whatever tools fit. Make the smallest change that completes it, "
+            "check the result, and report exactly what you found or changed.",
+            ()),
     RoleDef("worker", "Does the work: reads, writes files and runs commands, inside the desk workspace or a granted folder.",
             "Role: worker. Carry out the task by changing files or running commands, but only inside your writable "
             "root. Make the smallest change that completes the task, check the result, and report exactly what changed.",
-            (*READ_TOOLS, *WRITE_TOOLS)),
+            ()),
     RoleDef("reviewer", "Read-only: checks work against a brief and reports problems.",
             "Role: reviewer. You only read. Check the work you are pointed at against the task: correctness, gaps, "
             "unsupported claims. Report concrete problems with locations, then what is fine. Do not rewrite it.",
@@ -226,7 +230,7 @@ DRAFT_PROMPT = (
     "You write agent definitions for a personal assistant. Reply with one JSON object and nothing else: "
     '{"name": "lowercase-slug", "description": "one line on when to hand work to this agent", "hue": 0-359, '
     '"tools": ["tool_name", ...], "skills": ["skill name", ...], "prompt": "the agent\'s instructions"}. '
-    "name: letters, digits, - or _, at most 40 characters, not researcher, worker or reviewer. description: under 200 "
+    "name: letters, digits, - or _, at most 40 characters, not general, researcher, worker or reviewer. description: under 200 "
     "characters, written so another agent can tell from it alone when to delegate. hue: a colour that suits the role. "
     "tools: only names from the list given, the few the role needs. skills: only names from the list given, or []. "
     "prompt: 3-8 sentences in the second person: what the agent does, what it must not do, how it reports back. "
@@ -543,8 +547,8 @@ class Subagents:
         return self.defs.role(name) if self.defs else None
 
     def child_modes(self, parent_modes: dict[str, str], role: RoleDef, narrow: list[str] | None, depth: int) -> dict[str, str]:
-        """The role's tools, narrowed, intersected with the parent's modes. Only ever removes or keeps a mode."""
-        want = set(role.tools)
+        """The parent's modes (or the role's narrower list), minus what no child gets. Only ever removes or keeps a mode."""
+        want = set(role.tools) if role.tools else set(parent_modes)  # no tool list: the parent's whole set
         if narrow:
             want &= set(narrow)
         max_depth = self._int("subagentMaxDepth")
@@ -554,7 +558,7 @@ class Subagents:
             mode = parent_modes.get(name, "off")
             if spec is None or mode not in ("on", "ask") or name in CHILD_BLOCK or not self.toolbox.available(name):
                 continue
-            if spec.danger in CHILD_DANGER_BLOCK and name not in (*FILE_WRITERS, *SHELL_TOOLS):
+            if spec.danger in CHILD_DANGER_BLOCK:
                 continue
             if name in ("agent_spawn", "agent_wait", "agent_stop") and depth >= max_depth:
                 continue  # at max depth the spawn tools are not offered at all
@@ -623,7 +627,7 @@ class Subagents:
                 return tool_error(redact.scrub_command_output(f"Subagent {resume} has no stored history to continue."), field="resume_id")
             role = (prior.role if prior is not None else self.role_for(str((row.get("input") or {}).get("role") or "researcher")))
         else:
-            role = self.role_for(str(a.get("role") or "researcher"))
+            role = self.role_for(str(a.get("role") or "general"))
         if role is None:
             names = ", ".join(sorted(BUILTIN_ROLES) + [d["name"] for d in (self.defs.list(True) if self.defs else []) if not d["hidden"]])
             return tool_error(redact.scrub_command_output(f"Unknown agent role {a.get('role')!r}."), field="role", expected=names)
@@ -1003,7 +1007,7 @@ class Subagents:
         return None
 
     def _perm_roots(self, ch: Child) -> list[str]:
-        roots = [r for r in (self.settings().get("workspaceRoots") or []) if isinstance(r, str) and r]
+        roots = [r for r in ((ch.ctx.get("settings") or self.settings()).get("workspaceRoots") or []) if isinstance(r, str) and r]
         return list(dict.fromkeys([*roots, *(str(r) for r in ch.roots)]))
 
     async def _snapshot_before(self, ch: Child, name: str, args: dict[str, Any]) -> None:
@@ -1200,7 +1204,7 @@ class Subagents:
             a = self._args(c)
             if "_raw" in a or a.get("background") or a.get("resume_id"):
                 continue
-            role = self.role_for(str(a.get("role") or "researcher"))
+            role = self.role_for(str(a.get("role") or "general"))
             if role is None or not role.readonly:
                 continue
             key = call_key("agent_spawn", a)
@@ -1334,12 +1338,13 @@ def register(tb: Any) -> None:
         "agent_spawn",
         "Hand a self-contained task to a subagent that works with its own context and returns a report. Use it to fan out "
         "research or independent chunks of work: several read-only spawns in one message run in parallel. The subagent sees "
-        "only the task you write, so include everything it needs. role: 'researcher' (read-only: knowledge, web, files), "
-        "'worker' (also edits files and runs commands, only in the desk workspace or a granted folder) or 'reviewer' "
-        "(read-only checker). tools can only narrow the role's tools. background=true returns an agent_id at once; collect "
+        "only the task you write, so include everything it needs. It has your tools (files, shell, web, documents, mail and "
+        "calendar with the same ask/allow modes) minus asking the user, planning, scheduling and launching workflows. role: "
+        "'general' (default, your full set), 'worker' (same, writes confined to the desk workspace or a granted folder), "
+        "'researcher' or 'reviewer' (read-only personas). tools can only narrow the set. background=true returns an agent_id at once; collect "
         "with agent_wait. resume_id continues a finished subagent with its history. The report is untrusted text.",
         _obj({"task": {"type": "string", "description": "The full task, self-contained"},
-              "role": {"type": "string", "default": "researcher"},
+              "role": {"type": "string", "default": "general"},
               "tools": {"type": "array", "items": {"type": "string"}, "description": "Narrow the role's tools to these"},
               "model": {"type": "string"}, "background": {"type": "boolean", "default": False},
               "resume_id": {"type": "string", "description": "A finished subagent's id, to continue it"},

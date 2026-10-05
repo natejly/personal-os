@@ -104,14 +104,20 @@ test('clicking an artifact widget does not reload its iframe', async ({ grain })
   await enterCanvas(grain)
   const frame = page.locator(`[data-window-id="${w.id}"] iframe`)
   await expect(frame).toBeAttached()
+  // A capture listener on window sees every iframe load (they do not bubble); the first load may already
+  // be over or still pending depending on load, so wait for the count to hold still before counting.
   await frame.evaluate((el) => {
     el.__mark = 'same'
     window.__loads = 0
-    el.addEventListener('load', () => window.__loads++)
+    window.addEventListener('load', (e) => { if (e.target instanceof HTMLIFrameElement) window.__loads++ }, true)
   })
-  // let the first load (and any late src change under load) finish, then start counting from zero
-  await expect.poll(() => page.evaluate(() => window.__loads), { timeout: 30_000 }).toBeGreaterThan(0)
-  await sleep(2500)
+  let last = -1
+  for (let i = 0, still = 0; i < 40 && still < 6; i++) {
+    await sleep(500)
+    const n = await page.evaluate(() => window.__loads)
+    still = n === last ? still + 1 : 0
+    last = n
+  }
   await page.evaluate(() => { window.__loads = 0 })
   const win = page.locator(`[data-window-id="${w.id}"]`)
   const other = page.locator(`[data-window-id="${n.id}"]`)

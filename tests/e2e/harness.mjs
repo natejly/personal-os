@@ -117,7 +117,12 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   const consoleErrors = []
   const openApp = async () => {
     const app = await electron.launch({ executablePath, args: [join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT, timeout: 60_000 })
-    const page = await app.firstWindow({ timeout: 60_000 })
+    let page = await app.firstWindow({ timeout: 60_000 })
+    // A restored pop-out can open before the main window: the shell is the one that is not a widget surface.
+    for (let i = 0; i < 240 && page.url().includes('surface=widget'); i++) {
+      await sleep(250)
+      page = app.windows().find((p) => !p.url().includes('surface=widget')) ?? page
+    }
     page.setDefaultTimeout(15_000)
     page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
     page.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message))

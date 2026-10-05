@@ -636,6 +636,8 @@ export interface ConversationSettings {
   job_id?: string
   /** Set when this conversation is a desk's transcript. Desk and job transcripts cannot be branched. */
   deskId?: string
+  /** The doc this chat is bound to: opening the doc brings the chat back in the page agent panel. */
+  docId?: string
   /** A folder the user bound this chat to (the Folder control under the composer): granted to the shell, file and
    *  coding-agent tools for this chat's runs, first in the root list. "" or absent means none. */
   workingFolder?: string

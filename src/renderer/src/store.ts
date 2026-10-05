@@ -2460,13 +2460,15 @@ export const useStore = create<State>((set, get) => {
         }
         const { pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
         const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
+        const doc = get().view === 'docs' ? get().activeDoc : null
+        if (doc) pageSettings.docId = doc.id
         const fromUpload = uploadTaintTarget === 'page'
         if (fromUpload) {
           pageSettings.tainted = true
           pageSettings.taint_sources = [uploadTaintSource || 'upload']
         }
         if (Object.keys(pageSettings).length) {
-          const patched = await api.conversations.patch(c.id, { settings: pageSettings }).catch(() => null)
+          const patched = await api.conversations.patch(c.id, { settings: pageSettings, ...(doc ? { title: `${doc.title || 'Untitled'} — chat` } : {}) }).catch(() => null)
           if (fromUpload && !patched?.settings?.tainted) {
             get().toast('Could not mark this chat untrusted after the upload', 'error')
             return false
@@ -2603,7 +2605,12 @@ export const useStore = create<State>((set, get) => {
       try {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
-        if (get().docTabs.includes(id)) set({ activeDoc: doc, docDraft: null, docTitleDraft: null })
+        if (get().docTabs.includes(id)) {
+          // The doc's chat comes with it: the newest conversation bound to this doc, else a fresh thread.
+          const bound = get().conversations.find((c) => c.settings?.docId === id)
+          set({ activeDoc: doc, docDraft: null, docTitleDraft: null, pageAgentId: bound?.id ?? null })
+          if (bound && !get().sessions[bound.id]) void get().openSession(bound.id).catch(() => undefined)
+        }
         void get().refreshDocRevisions(id)
       } catch (e) {
         get().toast((e as Error).message, 'error')

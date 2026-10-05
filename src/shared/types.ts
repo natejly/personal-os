@@ -1526,6 +1526,7 @@ export type BackgroundEvent =
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
   /** A shell job started, ended or was killed: the Running list refetches. */
   | { event: 'shell_jobs'; data: { live: number } }
+  | { event: 'todos_changed'; data: Record<string, never> }
 
 /** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
 export interface ShellJobInfo {

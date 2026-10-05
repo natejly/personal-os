@@ -46,7 +46,8 @@ export default function TodosView(): JSX.Element {
   // The store starts with no todos, which is not the same as there being none.
   const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => { void refreshTodos(scope, showDone || board, sort).finally(() => setLoaded(true)) }, [scope, showDone, board, sort, refreshTodos])
+  const todosTick = useStore((s) => s.todosTick)
+  useEffect(() => { void refreshTodos(scope, showDone || board, sort).finally(() => setLoaded(true)) }, [scope, showDone, board, sort, refreshTodos, todosTick])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
   // Cleared before the request, so a second Enter (or Enter then Add) cannot post the same todo twice;

@@ -164,6 +164,8 @@ export interface State {
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
   dashboard: TodayDashboard | null
   todos: Todo[]
+  /** Bumped (debounced) when the backend says todos changed elsewhere; the open Todos view re-reads on it. */
+  todosTick: number
   recap: Recap | null
   recapLoading: boolean
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
@@ -617,6 +619,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let todosSeq = 0
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 /** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
@@ -1154,6 +1157,7 @@ export const useStore = create<State>((set, get) => {
    * row itself is folded in every time. The inbox refresh is coalesced across a burst of desks.
    */
   let inboxTimer: ReturnType<typeof setTimeout> | null = null
+  let todosTickTimer: ReturnType<typeof setTimeout> | null = null
   const onDeskChanged = (d: Desk): void => {
     const st = get()
     const before = (st.activeDesk?.id === d.id ? st.activeDesk : st.desks.find((x) => x.id === d.id))?.status
@@ -1194,6 +1198,8 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'todos_changed') {
+            if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
@@ -1712,6 +1718,7 @@ export const useStore = create<State>((set, get) => {
     mailWatchKind: null,
     dashboard: null,
     todos: [],
+    todosTick: 0,
     recap: null,
     recapLoading: false,
     agentInbox: null,
@@ -4046,14 +4053,27 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },
 
-    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => set({ todos: await api.todos.list(scope, includeDone, '', sort) }),
+    // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
+    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => {
+      const n = ++todosSeq
+      const rows = await api.todos.list(scope, includeDone, '', sort)
+      if (n === todosSeq) set({ todos: rows })
+    },
     addTodo: async (t) => {
       await api.todos.create(t)
       await Promise.all([get().refreshTodos(), get().refreshDashboard()])
     },
     updateTodo: async (id, patch) => {
       const recurs = patch.done === true && !!get().todos.find((x) => x.id === id)?.repeat
-      const t = await api.todos.update(id, patch)
+      // Completing is shown at once (a 500-row list otherwise waits a full round trip to react); put back if the write fails.
+      const before = get().todos.find((x) => x.id === id)
+      const optimistic = typeof patch.done === 'boolean' && before
+      if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? { ...x, done: patch.done ? 1 : 0 } : x)) }))
+      let t
+      try { t = await api.todos.update(id, patch) } catch (e) {
+        if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? before : x)) }))
+        throw e
+      }
       if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
       if ('done' in patch || 'due' in patch || 'clear_due' in patch) void get().refreshDashboard()  // todo_stats: the nav badge and Today card

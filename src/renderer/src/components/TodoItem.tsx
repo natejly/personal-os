@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -45,7 +45,7 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   return { ...cur, due, ...link }
 }
 
-export default function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
+function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
   const toast = useStore((s) => s.toast)
@@ -142,3 +142,5 @@ export default function TodoItem({ todo, showProject = true, compact = false, de
     </div>
   )
 }
+
+export default memo(TodoItem)

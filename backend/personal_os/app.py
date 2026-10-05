@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import activity, approval_edits, autoreview, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, otel_export, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -855,6 +855,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = toolbox.cap_modes(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "autoReview" and v not in autoreview.LEVELS:
+            raise HTTPException(422, "autoReview must be 'off', 'risky' or 'all-writes'")
         elif k == "alwaysAsk":
             if not all(isinstance(x, str) for x in v):
                 raise HTTPException(422, "alwaysAsk must be a list of tool names")
@@ -2983,6 +2985,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if skip_permissions and pre is None and not perm.refusal:
                     mode = permrules.lift_permission_ask(c["name"], mode, skip=True, forced=forced or perm.forced, danger=danger,
                                                          fenced=fs_ask or perm.kind == "rule")
+                # Review gate: a call that would run without a card gets a second model's look first. An "ask" verdict
+                # always wins (over allow rules and grants alike); an unattended run only records it.
+                review = None
+                if (mode == "on" and claimed is None and pre is None and not proposing and not skip_permissions
+                        and autoreview.wants_review(cfg.get("autoReview"), danger)):
+                    review = await autoreview.review(
+                        cfg, model, name=c["name"], description=spec.description if spec else "", args=args, user_text=user_text,
+                        mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop)
+                    if review["verdict"] == "ask" and not proposal_only(run):
+                        mode = "ask"
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
@@ -2991,6 +3003,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
+                                    "review": review,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
@@ -3306,7 +3319,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          **({"repaired": True} if c["_repaired"] else {}),
                          **({"invalid": invalid} if invalid else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
-                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
+                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
+                         **({"review": review} if review else {})}
                 stuck = None
                 if detector is not None and ran:
                     detector.observe(c["name"], args, result)

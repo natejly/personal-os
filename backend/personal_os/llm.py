@@ -100,6 +100,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
+    # Review gate (autoreview.py): off | risky | all-writes. A second model looks at a call that would run unasked and may turn it into a card.
+    "autoReview": "off",
+    "autoReviewModel": "",  # "" = the extraction model, else the chat model
     # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
     # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
     # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.

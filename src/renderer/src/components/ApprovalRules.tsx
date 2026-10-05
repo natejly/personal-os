@@ -33,6 +33,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
 
   return (
     <div className="approval-rules">
+      {event.review?.verdict === 'ask' && <p className="muted small">Review: {event.review.reason}</p>}
       {perm?.kind === 'doom_loop' && <p className="muted small">The same call has now been made three times in a row. No rule can wave this one through.</p>}
       {perm?.kind === 'opaque' && <p className="muted small">This command uses substitutions or a heredoc, so it cannot be matched against rules and always asks.</p>}
       {perm?.kind === 'external_directory' && <p className="muted small">This command touches a folder outside your workspace.</p>}

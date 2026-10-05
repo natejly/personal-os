@@ -125,7 +125,8 @@ test('pasting 200 KB becomes a file attachment; the composer stays responsive', 
   })
   await expect(page.getByText(/Pasted text was long|attached as/)).toBeVisible({ timeout: 30_000 })
   expect(Date.now() - t0).toBeLessThan(15_000)
-  await expect.poll(async () => (await box.inputValue()).length, { timeout: 30_000 }).toBeGreaterThan(0)
+  // The text rides on the message as a chip; the box stays empty.
+  await expect(page.locator('.file-chip').first()).toBeVisible({ timeout: 30_000 })
   expect((await box.inputValue()).length).toBeLessThan(5000)
   await box.type(' summarise this')
   await box.press('Enter')

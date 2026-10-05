@@ -291,7 +291,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
   await openSettings(p2, 'Modules')
-  await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
+  await expect(dialog(p2).getByRole('group', { name: 'Where Library shows' })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)
 })

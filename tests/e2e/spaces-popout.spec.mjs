@@ -30,6 +30,9 @@ async function popOut(g, w) {
   await menuClick(g.app, 'Pop Out')
   await expect.poll(() => g.app.windows().length, { timeout: 30_000 }).toBeGreaterThan(before)
   await expect.poll(async () => (await windowsOf(g, (await spaces(g))[0].id)).find((x) => x.id === w.id).state).toBe('popped')
+  // Menu actions are dropped until the surface has loaded its window row; wait for the widget body.
+  await expect.poll(() => popWindows(g).length).toBeGreaterThan(0)
+  await popWindows(g)[0].locator('.popout-body .face').waitFor()
 }
 
 test('pop out a window: a second BrowserWindow appears, the canvas shows a ghost, Return brings it back', async ({ grain }) => {

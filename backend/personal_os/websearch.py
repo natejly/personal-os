@@ -21,6 +21,34 @@ _DOMAIN = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 _TRACKING = re.compile(r"^(utm_|fbclid$|gclid$|mc_eid$|ref$)", re.I)
 
 
+BRAVE_MAX = 20  # Brave answers 422 for count > 20
+RETRY_DELAYS = (0.5, 1.5)  # backoff before the 2nd and 3rd attempt on a keyed engine
+
+
+def clamp_query(q: str) -> str:
+    """Brave rejects (422) queries over 400 chars or 50 words: collapse whitespace, then cut to both limits."""
+    return " ".join(q.split()[:50])[:400].rstrip()
+
+
+def _why(e: BaseException) -> str:
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code}"
+    return (str(e).splitlines() or [""])[0] or type(e).__name__
+
+
+async def _retrying(fn: Any, *a: Any) -> list[dict[str, Any]]:
+    """Retry 429, 5xx and network errors with backoff; other statuses (400, 401, 422...) fail at once."""
+    for i in range(len(RETRY_DELAYS) + 1):
+        try:
+            return await fn(*a)
+        except httpx.HTTPError as e:
+            code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else 0
+            if (code and code != 429 and code < 500) or i == len(RETRY_DELAYS):
+                raise
+            await asyncio.sleep(RETRY_DELAYS[i])
+    return []
+
+
 class ProviderError(Exception):
     pass
 
@@ -78,7 +106,8 @@ def apply_site(query: str, site: str) -> str:
 
 # ---- providers: each returns [{title,url,snippet}] ----
 async def brave(cfg: dict[str, Any], q: str, n: int, tr: str) -> list[dict[str, Any]]:
-    params: dict[str, Any] = {"q": q, "count": n}
+    params: dict[str, Any] = {"q": q, "count": min(n, BRAVE_MAX)}
+    n = min(n, BRAVE_MAX)
     if tr:
         params["freshness"] = BRAVE_FRESH[tr]
     async with httpx.AsyncClient(timeout=20) as c:
@@ -182,19 +211,21 @@ async def search(cfg: dict[str, Any], query: str, want: int, time_range: str = "
     tr = (time_range or "").strip().lower()
     if tr and tr not in TIME_RANGES:
         raise ValueError(f"time_range must be one of {', '.join(TIME_RANGES)}")
-    q = apply_site(query, site)
+    q = clamp_query(apply_site(query, site))
     meta: dict[str, Any] = {}
     failed: dict[str, str] = {}
 
     async def one(name: str, fn: Any) -> list[dict[str, Any]]:
         return await fn(cfg, q, want, tr)
 
-    if cfg.get("braveApiKey"):
-        meta["engines_used"] = ["brave"]
-        return await one("brave", brave), meta
-    if cfg.get("tavilyApiKey"):
-        meta["engines_used"] = ["tavily"]
-        return await one("tavily", tavily), meta
+    for nm, key, fn in (("brave", "braveApiKey", brave), ("tavily", "tavilyApiKey", tavily)):
+        if cfg.get(key):
+            try:
+                meta["engines_used"] = [nm]
+                return await _retrying(fn, cfg, q, want, tr), meta
+            except httpx.HTTPError as e:  # keyed engine down: note it and fall through as if no key were set
+                failed[nm] = _why(e)
+    meta.pop("engines_used", None)
     names = (["searxng"] if searxng_base_safe(cfg) else []) + ["exa"]
     fns = {"searxng": searxng, "exa": exa}
     results = await asyncio.gather(*(one(nm, fns[nm]) for nm in names), return_exceptions=True)

@@ -1618,6 +1618,11 @@ export interface GrainApi {
     reveal: (path: string) => Promise<boolean>
     relaunch: () => Promise<void>
   }
+  print: {
+    payload: () => Promise<{ title: string; content: string } | null>
+    ready: () => void
+    exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => Promise<string | Uint8Array | null>
+  }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
   closeSelf: () => void
   minimizeSelf: () => void

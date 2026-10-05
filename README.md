@@ -143,7 +143,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     Settings → Tools → **File edits** → *Accept all* writes them straight
     in instead, still showing the diff and still undoable from the history.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
-    daily note. On macOS any note can be recorded or dictated into, with the
+    daily note. Export menu → *Export as PDF…* typesets the note (maths,
+    code, tables) for A4 or Letter, or files the PDF straight into Uploads. On macOS any note can be recorded or dictated into, with the
     transcript kept apart from the text and a summary proposed for you to
     accept. See [docs/docs-editor.md](docs/docs-editor.md).
   - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other

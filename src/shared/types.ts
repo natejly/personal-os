@@ -1251,6 +1251,12 @@ export interface Settings {
   gatherShortcut: string
   /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
   quickCaptureShortcut?: string
+  /** Read-aloud voice (a speechSynthesis voice URI); empty is the system default. */
+  ttsVoice?: string
+  /** Read-aloud speaking rate, 0.8 to 1.5. */
+  ttsRate?: number
+  /** Voice chat ends itself after this many replies. */
+  voiceLoopMaxTurns?: number
   /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
   dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */

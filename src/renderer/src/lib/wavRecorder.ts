@@ -37,7 +37,16 @@ export function encodeWav(samples: Float32Array, inRate: number): ArrayBuffer {
   return buf
 }
 
+/** Root-mean-square level of a block of samples, 0 to 1. */
+export const rms = (b: Float32Array): number => {
+  let sum = 0
+  for (let i = 0; i < b.length; i++) sum += b[i] * b[i]
+  return b.length ? Math.sqrt(sum / b.length) : 0
+}
+
 export interface WavRecording {
+  /** Level of the newest audio block, for silence detection. */
+  level: () => number
   /** Release the mic and return the clip. */
   stop: () => Promise<Blob>
   /** Release the mic and drop the audio. */
@@ -52,7 +61,8 @@ export async function startWavRecording(): Promise<WavRecording> {
   // ponytail: ScriptProcessor is deprecated but needs no module file; an AudioWorklet if Chromium drops it.
   const proc = ctx.createScriptProcessor(4096, 1, 1)
   const chunks: Float32Array[] = []
-  proc.onaudioprocess = (e) => { chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))) }
+  let last = 0
+  proc.onaudioprocess = (e) => { const b = new Float32Array(e.inputBuffer.getChannelData(0)); last = rms(b); chunks.push(b) }
   src.connect(proc)
   proc.connect(ctx.destination)
   const release = (): void => {
@@ -61,6 +71,7 @@ export async function startWavRecording(): Promise<WavRecording> {
     void ctx.close()
   }
   return {
+    level: () => last,
     stop: async () => {
       release()
       const all = new Float32Array(chunks.reduce((n, c) => n + c.length, 0))

@@ -122,6 +122,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
     # Hold this in the Files editor to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
+    # Read aloud (the platform speech engine) and the hands-free voice chat loop's safety cap.
+    "ttsVoice": "",
+    "ttsRate": 1.0,
+    "voiceLoopMaxTurns": 20,
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Meetings / Activity ship off (they record); Settings → Modules turns them back on.
     "homeWidgets": {"meetings": False},

@@ -19,6 +19,7 @@ import MessageEditor from './MessageEditor'
 import { statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
+import ReadAloudButton from './ReadAloudButton'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -343,6 +344,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
+            {!bare && !isUser && message.content.trim() && <ReadAloudButton id={message.id} text={message.content} />}
             {editable && isUser && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />

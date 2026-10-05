@@ -30,6 +30,7 @@ import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
 import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
 import PlannerMailSettings from './PlannerMailSettings'
+import { VoiceSettings } from './ReadAloudButton'
 
 type Tab = SettingsTab
 
@@ -627,6 +628,8 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Notify me about scheduled jobs</b><small>A system notification when a job fails, is paused or leaves something for you while the app is in the background. Each job can also be set to always or never notify.</small></span>
                 <input type="checkbox" checked={draft.notifyJobs !== false} onChange={(e) => patch({ notifyJobs: e.target.checked })} /><span className="switch" />
               </label>
+              <h4>Voice</h4>
+              <VoiceSettings draft={draft} patch={patch} />
               <h4>Spaces</h4>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Compact chats</b><small>A chat window added to a space starts as a blob: just the chat's creature, no frame. Drag the creature to move it, click it to open the chat; the face button in an open chat's head shrinks it again.</small></span>

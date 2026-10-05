@@ -318,3 +318,7 @@
 .widget .messages-inner .markdown > :first-child { margin-top: 0; }
 .widget .messages-inner .markdown > :last-child { margin-bottom: 0; }
 .widget .chat-head { height: 26px; padding: 0 8px; }
+
+/* Face: the creature alone, centred, scaled to the frame with a little air around it. */
+.face-widget { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.face-widget .face { width: 82%; height: 82%; }

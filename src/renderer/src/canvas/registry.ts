@@ -7,6 +7,7 @@ import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
 import { def as dashboardWidget } from './widgets/dashboardWidget'
 import { def as documents } from './widgets/documents'
+import { def as face } from './widgets/face'
 import { def as graph } from './widgets/graph'
 import { def as memory } from './widgets/memory'
 import { def as note } from './widgets/note'
@@ -74,7 +75,8 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   usage,
   activity,
   web,
-  artifact
+  artifact,
+  face
 }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.

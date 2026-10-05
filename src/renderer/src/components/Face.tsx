@@ -19,12 +19,12 @@ const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
  * The same name always draws the same creature, so an agent is recognisable wherever it shows up.
  * Live ones move all the time; the rest only move on hover, which keeps a long transcript quiet.
  */
-export default function Face({ name, status, size = 26, title }: { name: string; status?: string; size?: number; title?: string }): JSX.Element {
+export default function Face({ name, status, size = 26, title }: { name: string; status?: string; size?: number | 'fill'; title?: string }): JSX.Element {
   return (
     <Blobatar
       className="face"
       name={name}
-      size={size}
+      size={size === 'fill' ? undefined : size}
       title={title}
       expression={(status && MOOD[status]) || idle}
       animate={status && LIVE.has(status) ? 'always' : 'hover'}

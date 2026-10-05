@@ -10,7 +10,7 @@ import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
 import { composerKey, setDraftFiles } from '../../lib/drafts'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
-import { retainSession, useChatFace, useConversation, useIsStreaming, useStore, useStreamingMessageId, useSubagents } from '../../store'
+import { retainSession, useChatFace, useConversation, useIsStreaming, useNowText, useStore, useStreamingMessageId, useSubagents } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas, viewport } from '../store'
@@ -49,6 +49,12 @@ function ChatRing({ convId, status, title }: { convId: string; status: string; t
   const openSubagent = useStore((s) => s.openSubagent)
   return <CrewRing center={{ name: face.name, hue: face.hue, status, title }}
     kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
+}
+
+/** The blob's speech bubble: what the reply is doing right now, beside the face only while something is in flight. */
+function BlobSay({ convId }: { convId: string }): JSX.Element | null {
+  const now = useNowText(convId)
+  return now ? <span className="blob-say" role="status">{now}</span> : null
 }
 
 /**
@@ -296,6 +302,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
           if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
         <ChatRing convId={convId} status={status} title={convo?.title || 'Chat'} />
+        <BlobSay convId={convId} />
       </button>
     )
   }

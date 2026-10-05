@@ -4,7 +4,7 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
-import { useStore, useMessageSubagents } from '../store'
+import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
@@ -16,7 +16,7 @@ import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import { statusText, statusTicks, waitText } from '../lib/runStatus'
+import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 
@@ -67,10 +67,15 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [reasoning, open, streaming])
   const last = events[events.length - 1]
+  // The subagents this reply started wear their faces on the line itself, so one click reaches a child's
+  // transcript without opening the fold. Live state comes from the stream while the run is on.
+  const subs = useSubagents(conversationId)
+  // The live segment is what the reply is doing now: the call in flight, its subagents, or its latest thought.
+  const now = streaming && !answering ? nowText({ reasoning, tool_events: events, content: '' }, subs) : null
   const label = [
     reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
     events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
-    streaming && !answering && last ? describeCall(last.name, last.arguments).verb : ''
+    now ?? (streaming && !answering && last ? describeCall(last.name, last.arguments).verb : '')
   ].filter(Boolean).join(' · ')
   return (
     <div className={`reasoning ${streaming && !answering ? 'live' : ''}`}>

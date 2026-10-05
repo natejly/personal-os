@@ -200,6 +200,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # A system notification when a desk needs you or finishes, while the window is not focused.
     "deskNotify": True,
     "chatNotify": True,
+    # Spaces: a chat window folds to a face and a one-line box until it is opened.
+    "compactChats": False,
     # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
     "planMode": "off",
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).

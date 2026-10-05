@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, MessageSquare, MessagesSquare, Pencil } from 'lucide-react'
+import { Check, ChevronsDownUp, MessageSquare, MessagesSquare, Pencil } from 'lucide-react'
 import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
+import Face from '../../components/Face'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
@@ -15,6 +16,17 @@ import { useCanvas } from '../store'
 import { useRingStatus } from '../useRingStatus'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
+const DEFAULT_SIZE = { w: 520, h: 640 }
+/** The folded chat (Settings › Behavior › Compact chats): a pill holding the face and a one-line box. */
+const PILL = { w: 300, h: 52 }
+
+/** Resize the frame the way a drag would -- optimistic rect, debounced layout PUT -- and remember a size in config. */
+const resizeTo = (win: CanvasWindow, size: { w: number; h: number }, config?: Record<string, unknown>): void => {
+  const st = useCanvas.getState()
+  st.patchWindow(win.id, size)
+  st.markLayoutDirty([win.id])
+  if (config) void st.setWindowConfig(win.id, config)
+}
 
 /**
  * `Composer` keeps its draft in local state and belongs to another slice, so a drop reaches it the way
@@ -97,7 +109,28 @@ const ChatTitle = ({ convId, title, switcher }: { convId: string; title: string;
   )
 }
 
-function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
+/** Folded chat: the face carries the status, the box sends and unfolds. Click the face to unfold without sending. */
+function ChatBubble({ convId, title, status, onExpand }: { convId: string; title: string; status: string; onExpand: () => void }): JSX.Element {
+  const [text, setText] = useState('')
+  const send = (): void => {
+    const t = text.trim()
+    setText('')
+    onExpand()
+    if (t) void useStore.getState().send(t, convId)
+  }
+  return (
+    <div className="chat-bubble">
+      <button type="button" className="chat-bubble-face" title={`${title || 'Chat'} · open`} onClick={onExpand}>
+        <Face name="Grain" status={status === 'idle' ? undefined : status} size={30} />
+      </button>
+      <input aria-label={`Message ${title || 'chat'}`} placeholder="Message…" value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') send() }} />
+    </div>
+  )
+}
+
+function ChatWidget({ window: win, live, onTitle, onConfig }: WidgetProps): JSX.Element {
   const convId = win.ref_id ?? ''
   const root = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -111,6 +144,17 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
+  const compactOn = useStore((s) => !!s.settings.compactChats)
+  // With the setting on a chat starts folded; unfolding is remembered per window.
+  const folded = compactOn && win.config.collapsed !== false
+
+  // The frame follows the fold: the pill while folded, the remembered size back when open. Keyed on
+  // the rect too, so flipping the setting with windows already on the space resizes them as well.
+  useEffect(() => {
+    if (!convId) return
+    if (folded && win.h > PILL.h) resizeTo(win, PILL, { full_size: { w: win.w, h: win.h } })
+    else if (!folded && win.h <= PILL.h) resizeTo(win, (win.config.full_size as typeof PILL | undefined) ?? DEFAULT_SIZE)
+  }, [folded, win.h])
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -215,6 +259,10 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     )
   }
 
+  if (folded) {
+    return <ChatBubble convId={convId} title={convo?.title ?? ''} status={status} onExpand={() => onConfig({ collapsed: false })} />
+  }
+
   // Off-screen, minimized or zoomed out: the message list unmounts, so streamed tokens stop
   // re-rendering it, while the ring stays mounted and the session keeps running.
   if (!live) {
@@ -235,7 +283,10 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
   return (
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
-      <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
+      <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<>
+        <ChatSwitcher win={win} convId={convId} />
+        {compactOn && <button className="icon-btn ghost xs" title="Fold to a face" onClick={() => onConfig({ collapsed: true })}><ChevronsDownUp size={11} /></button>}
+      </>} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
           {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
@@ -253,7 +304,7 @@ export const def: WidgetDef = {
   kind: 'chat',
   label: 'Chat',
   icon: <MessageSquare size={18} />,
-  defaultSize: { w: 520, h: 640 },
+  defaultSize: DEFAULT_SIZE,
   minSize: { w: 360, h: 320 },
   chrome: 'full',
   statusful: true,

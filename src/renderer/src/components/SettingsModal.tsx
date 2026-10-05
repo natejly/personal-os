@@ -491,6 +491,10 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
+                <span className="toggle-text"><b>Compact chats in Spaces</b><small>A chat window folds to a face and a message box. Click the face, or send a message, to open the chat; fold it again from its title bar.</small></span>
+                <input type="checkbox" checked={!!draft.compactChats} onChange={(e) => patch({ compactChats: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
                 <span className="toggle-text"><b>Notify me about scheduled jobs</b><small>A system notification when a job fails, is paused or leaves something for you while the app is in the background. Each job can also be set to always or never notify.</small></span>
                 <input type="checkbox" checked={draft.notifyJobs !== false} onChange={(e) => patch({ notifyJobs: e.target.checked })} /><span className="switch" />
               </label>

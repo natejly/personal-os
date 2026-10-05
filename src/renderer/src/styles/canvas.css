@@ -817,3 +817,11 @@
   }
   .overview-space:hover .overview-proxy { transform: none; }
 }
+
+/* A folded chat is a pill: no corners, no resize, no close glyph, and the grab strip becomes a tab down
+   the left edge so the face underneath it stays a click, not a drag. Right-click still has every option. */
+.win:has(.chat-bubble) { border-radius: 999px; }
+.win:has(.chat-bubble) .win-resize,
+.win:has(.chat-bubble) .win-grip,
+.win:has(.chat-bubble) .win-close { display: none; }
+.win:has(.chat-bubble) .win-move { left: 0; right: auto; width: 18px; height: 100%; }

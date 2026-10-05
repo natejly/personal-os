@@ -1830,15 +1830,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     cfg = settings()
     # A chat bound to a working folder (the Folder control under the composer) grants that folder to this run the
     # way a Settings workspace root would, and first, so an empty cwd or a relative path means that folder.
-    folder = _working_folder(conv["settings"])
-    cfg = _with_folder(cfg, folder)
-    model = body.model or conv["model"] or cfg["defaultModel"]
     # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
     # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.
     persona = subagent_mgr.role_for(str(conv["settings"].get("agent") or "")) if conv["settings"].get("agent") else None
     if conv["settings"].get("agent") and persona is None:
         yield "error", {"message": f"The agent {conv['settings']['agent']!r} is not approved. Approve it in Library > Agents, or clear it from this chat."}
         return
+    # The agent's own folder stands in when the chat has none bound.
+    folder = _working_folder(conv["settings"]) or (_working_folder({"workingFolder": persona.workspace}) if persona else None)
+    cfg = _with_folder(cfg, folder)
+    model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
     # Auto: the model for this turn is chosen from the message (router.py). The chat keeps `auto`; the reply row and
@@ -2043,6 +2044,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             run is not None and run.kind in UNATTENDED_KINDS)
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
+            # The definition this chat speaks as: a task scheduled from here keeps running as it (schedule_task).
+            "agent_id": persona.id if persona is not None else None,
             # The same list as context_used's chunks: search_documents numbers new passages after the prompt's (tools._cite).
             "citations": used["chunks"],
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
@@ -2060,7 +2063,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "run_id": run.run_id if run else None,
         }
         use_tools = conv["settings"].get("useTools", True)
-        modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
+        modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
+                                  persona.tool_modes if persona is not None else None) if use_tools else {}
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
         if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
@@ -2327,7 +2331,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
-            hist = expand_commands(hist, command_store, skills)  # `/name args` turns carry their filled command (commands.py)
+            hist = expand_commands(hist, command_store, skills, _mentionable())  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
             return head + [dict(n) for n in run_notes]
@@ -2607,7 +2611,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills)})})
+                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable())})})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
@@ -4037,6 +4041,12 @@ def _persona_text(role: Any) -> str:
     return f"## You are the agent '{role.name}'\n{role.description}\n\n{persona_block(role, skills)}"
 
 
+def _mentionable() -> list[str]:
+    """Agent names an `@name` in a message can address: the built-ins and the user's approved, visible ones."""
+    from .subagents import BUILTIN_ROLES
+    return [*(n for n, r in BUILTIN_ROLES.items() if not r.hidden), *(d["name"] for d in agent_defs.list(approved_only=True) if not d["hidden"])]
+
+
 def _agents_hint(modes: dict[str, str]) -> str:
     """The user's approved agents, by description, so the reply can delegate to the right one. Stable across turns (it
     changes only when a definition does), so it sits in the cacheable prefix beside tools_hint."""
@@ -4279,6 +4289,27 @@ def delete_command(cmd_id: str) -> dict[str, bool]:
 
 class AgentDefIn(BaseModel):
     text: str
+    # label, boundaries, notes, workspace, tool_modes (and skills) ride beside the text: see AgentDefs.set_scope.
+    scope: dict[str, Any] | None = None
+
+
+def _check_scope(scope: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A scope as it may be stored: a tool-mode map that is only on/ask/off, with ask-locked tools capped at ask, and a folder
+    the file tools could be granted (the same guard as a chat's working folder)."""
+    if not scope:
+        return scope
+    out = dict(scope)
+    if "tool_modes" in out:
+        tm = out["tool_modes"] or {}
+        if not isinstance(tm, dict) or any(v not in ("on", "ask", "off") for v in tm.values()):
+            raise HTTPException(422, "tool_modes must map tool names to on, ask or off")
+        out["tool_modes"] = toolbox.cap_modes(tm)
+    if str(out.get("workspace") or "").strip():
+        try:
+            out["workspace"] = str(mac.allowed_root(str(out["workspace"]).strip()))
+        except mac.LocalPathError as e:
+            raise HTTPException(422, f"{out['workspace']} cannot be an agent folder: {e}") from e
+    return out
 
 
 @app.get("/agents/defs")
@@ -4292,7 +4323,7 @@ async def list_agent_defs() -> dict[str, Any]:
 @app.post("/agents/defs")
 async def create_agent_def(body: AgentDefIn) -> dict[str, Any]:
     try:
-        return agent_defs.save(body.text)
+        return agent_defs.save(body.text, scope=_check_scope(body.scope))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -4302,9 +4333,63 @@ async def update_agent_def(def_id: str, body: AgentDefIn) -> dict[str, Any]:
     if not agent_defs.get(def_id):
         raise HTTPException(404, "No such agent definition")
     try:
-        return agent_defs.save(body.text, def_id)  # editing withdraws the approval
+        return agent_defs.save(body.text, def_id, _check_scope(body.scope))  # editing withdraws the approval
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+@app.patch("/agents/defs/{def_id}/scope")
+async def patch_agent_scope(def_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """The user's own switches on an agent (label, boundaries, notes, folder, tool modes, skills). Unlike an edit of the prompt
+    this keeps the approval: nothing here is model-written."""
+    if not agent_defs.get(def_id):
+        raise HTTPException(404, "No such agent definition")
+    return agent_defs.set_scope(def_id, _check_scope(body) or {}) or {}
+
+
+def _agent_activity(row: dict[str, Any]) -> dict[str, Any]:
+    """What an agent is doing now, from its chats and routines: runs in flight, and things waiting on the user
+    (pending approval cards in its conversations, pending proposals from its routines)."""
+    with db.tx() as c:
+        convs = [r["id"] for r in c.execute("SELECT id FROM conversations WHERE deleted_at IS NULL AND json_extract(settings,'$.agent')=?",
+                                            (row["name"],)).fetchall()]
+        marks = ",".join("?" * len(convs))
+        working = c.execute(f"SELECT COUNT(*) AS n FROM agent_runs WHERE status='running' AND conversation_id IN ({marks})", convs).fetchone()["n"] if convs else 0
+        cards = c.execute(f"SELECT COUNT(*) AS n FROM approvals WHERE status='pending' AND conversation_id IN ({marks})", convs).fetchone()["n"] if convs else 0
+        props = c.execute("SELECT COUNT(*) AS n FROM proposals WHERE status='pending' AND job_id IN (SELECT id FROM jobs WHERE agent_id=?)",
+                          (row["id"],)).fetchone()["n"]
+    return {"conversations": convs, "working": working, "needs_you": cards + props}
+
+
+@app.get("/agents/status")
+async def agents_status() -> dict[str, dict[str, int]]:
+    """{agent name: {working, needs_you}} for every definition: the marks on the Library rows and the inbox's agent list."""
+    out = {}
+    for d in agent_defs.list():
+        a = _agent_activity(d)
+        out[d["name"]] = {"working": a["working"], "needs_you": a["needs_you"]}
+    return out
+
+
+@app.get("/agents/defs/{def_id}/home")
+async def agent_home(def_id: str) -> dict[str, Any]:
+    """One agent's page: its chats, its routines (jobs bound to it), its last 20 runs across both, and its status."""
+    row = agent_defs.get(def_id)
+    if not row:
+        raise HTTPException(404, "No such agent definition")
+    act = _agent_activity(row)
+    with db.tx() as c:
+        chats = [dict(r) for r in c.execute(
+            "SELECT id, title, project_id, updated_at FROM conversations WHERE deleted_at IS NULL AND archived_at IS NULL "
+            "AND json_extract(settings,'$.agent')=? AND json_extract(settings,'$.job_id') IS NULL ORDER BY updated_at DESC LIMIT 50",
+            (row["name"],)).fetchall()]
+        marks = ",".join("?" * len(act["conversations"]))
+        runs = [dict(r) for r in c.execute(
+            f"SELECT r.run_id, r.conversation_id, r.kind, r.status, r.error, r.started_at, r.ended_at, c.title FROM agent_runs r "
+            f"LEFT JOIN conversations c ON c.id=r.conversation_id WHERE r.kind IN ('chat','job') AND r.conversation_id IN ({marks}) "
+            f"ORDER BY r.started_at DESC LIMIT 20", act["conversations"]).fetchall()] if act["conversations"] else []
+    return {"agent": row, "chats": chats, "routines": [j for j in jobs.list() if j.get("agent_id") == def_id], "runs": runs,
+            "working": act["working"], "needs_you": act["needs_you"]}
 
 
 @app.post("/agents/defs/{def_id}/approve")
@@ -4776,6 +4861,13 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
                          job.get("model") or cfg.get("defaultModel") or "")
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
     conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
+    if job.get("agent_id"):
+        # The routine runs as its agent: the chat runner reads settings.agent for the prompt, skills, boundaries and
+        # tool overrides. A deleted agent stops the routine rather than letting it run without its limits.
+        ag = agent_defs.get(job["agent_id"])
+        if ag is None:
+            raise RuntimeError("The agent this routine belongs to no longer exists")
+        conv_settings["agent"] = ag["name"]
     if job.get("budget"):
         conv_settings["job_budget"] = job["budget"]  # read by the runner, which clamps it again (_job_caps)
     if fire.get("mail") or fire.get("event"):
@@ -4901,6 +4993,8 @@ class JobIn(BaseModel):
     target: str = "run"
     desk_autonomy: str | None = None
     desk_budget: dict[str, Any] | None = None
+    # Run as this agent definition (Library > Agents > Routines); not for a desk job.
+    agent_id: str | None = None
 
 
 class JobPatch(BaseModel):
@@ -4926,6 +5020,16 @@ class JobPatch(BaseModel):
     target: str | None = None
     desk_autonomy: str | None = None
     desk_budget: dict[str, Any] | None = None
+    agent_id: str | None = None  # an explicit null runs it as plain Grain again
+
+
+def _check_agent(agent_id: str | None, target: str | None) -> None:
+    if not agent_id:
+        return
+    if not agent_defs.get(agent_id):
+        raise HTTPException(400, "No such agent")
+    if target == "desk":
+        raise HTTPException(400, "A desk job cannot run as an agent: keep it a run job")
 
 
 def _check_target(target: str | None, autonomy: str | None, allowed_tools: list[str] | None = None) -> None:
@@ -5057,6 +5161,7 @@ async def create_job(body: JobIn) -> dict[str, Any]:
     _check_job_budget(body.budget)
     await _check_job_model(body.model)
     _check_target(body.target, body.desk_autonomy, body.allowed_tools)
+    _check_agent(body.agent_id, body.target)
     job = jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
@@ -5066,7 +5171,8 @@ async def create_job(body: JobIn) -> dict[str, Any]:
                        calendar_query=body.calendar_query.strip() if body.kind == "calendar" and body.calendar_query else None,
                        calendar_id=body.calendar_id or None, minutes_before=body.minutes_before,
                        only_on_change=body.only_on_change,
-                       target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget)
+                       target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget,
+                       agent_id=body.agent_id or None)
     scheduler.nudge()  # re-read the earliest slot now: the loop may be mid-way through a 60 s nap past this job's time
     return job
 
@@ -5093,6 +5199,7 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     _check_job_budget(patch.get("budget"))
     await _check_job_model(patch.get("model"))
     _check_target(merged.get("target") or "run", merged.get("desk_autonomy"), merged.get("allowed_tools"))
+    _check_agent(merged.get("agent_id"), merged.get("target"))
     if merged.get("target") == "desk" and not merged.get("desk_autonomy"):
         patch["desk_autonomy"] = "plan"
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],

@@ -566,7 +566,12 @@ class Database:
             # whose deletion took it along, so restoring the project brings back exactly those rows.
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'"},
             "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
-            "agent_defs": {"skills": "TEXT NOT NULL DEFAULT '[]'", "hue": "INTEGER"},
+            "agent_defs": {"skills": "TEXT NOT NULL DEFAULT '[]'", "hue": "INTEGER",
+                           # Scope (subagents.AgentDefs.set_scope): a one-line label, the user's boundaries and notes, a
+                           # per-agent tool-mode map (chat > agent > project > global) and an optional working folder.
+                           "label": "TEXT NOT NULL DEFAULT ''", "boundaries": "TEXT NOT NULL DEFAULT ''",
+                           "tool_modes": "TEXT NOT NULL DEFAULT '{}'", "workspace": "TEXT NOT NULL DEFAULT ''",
+                           "notes": "TEXT NOT NULL DEFAULT ''"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
             "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''",
@@ -593,7 +598,9 @@ class Database:
                      "cal_seen": "TEXT", "only_on_change": "INTEGER NOT NULL DEFAULT 0", "last_digest": "TEXT",
                      "last_change_at": "REAL",
                      # target='desk': a fire starts a desk (desk_autonomy plan|propose, desk_budget JSON) instead of a run.
-                     "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT"},
+                     "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT",
+                     # The agent definition this routine runs as (its prompt, skills, boundaries, tool overrides); NULL = plain.
+                     "agent_id": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

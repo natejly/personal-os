@@ -2209,6 +2209,8 @@ export interface Job {
   /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
   desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
   desk_budget: Record<string, number> | null
+  /** The agent definition this routine runs as (its prompt, skills, boundaries and tool overrides). null = plain. */
+  agent_id?: string | null
 }
 
 export interface JobBudget {
@@ -3191,10 +3193,32 @@ export interface AgentDef {
   hidden: boolean
   approved: boolean
   body: string
+  /** One line naming its job ("Inbox triage"). */
+  label: string
+  /** What it must ask before doing and what it never does; fenced into its system prompt. */
+  boundaries: string
+  /** "What this agent should remember": fenced into its system prompt after the boundaries. */
+  notes: string
+  /** Its own working folder when a chat has none bound; empty = none. */
+  workspace: string
+  /** Tool modes for this agent only: above the project's, below the chat's. Empty = inherit. */
+  tool_modes: Record<string, ToolMode>
 }
 export interface BuiltinAgent { name: string; description: string; tools: string[]; hue: number | null }
 /** The editable fields of a definition: what the editor holds and what a draft returns. */
 export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'steps' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
+  & Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes'>>
+/** The fields that ride beside the definition text (PATCH /agents/defs/{id}/scope keeps the approval). */
+export type AgentScope = Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes' | 'skills'>>
+/** GET /agents/defs/{id}/home: one agent's page. */
+export interface AgentHomeData {
+  agent: AgentDef
+  chats: { id: string; title: string; project_id: string | null; updated_at: number }[]
+  routines: Job[]
+  runs: { run_id: string; conversation_id: string | null; kind: string; status: string; error: string | null; started_at: number; ended_at: number | null; title: string | null }[]
+  working: number
+  needs_you: number
+}
 /** GET /subagents/{id}: the run row, live state while it runs, and its history (OpenAI-shaped messages). */
 export interface SubagentView {
   run: { run_id: string; status: string; parent_run_id: string | null; input?: Record<string, unknown>; budget?: Record<string, number> | null }

@@ -2,7 +2,7 @@ import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, AgentDef, AgentFields, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
@@ -218,7 +218,7 @@ export const api = {
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
      *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
      *  a mail job passes kind:'mail' and `mail_query`; a calendar job passes kind:'calendar', `calendar_query` and `minutes_before`. target:'desk' makes each fire open a desk instead of a run. */
-    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget']; agent_id?: string | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
     update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
@@ -481,8 +481,14 @@ export const api = {
   /** Agent definitions: built-in roles plus the user's own, which cannot be spawned until approved. */
   agentDefs: {
     list: () => req<{ builtin: BuiltinAgent[]; custom: AgentDef[] }>('/agents/defs'),
-    create: (text: string) => req<AgentDef>('/agents/defs', { method: 'POST', body: json({ text }) }),
-    update: (id: string, text: string) => req<AgentDef>(`/agents/defs/${id}`, { method: 'PUT', body: json({ text }) }),
+    create: (text: string, scope?: AgentScope) => req<AgentDef>('/agents/defs', { method: 'POST', body: json({ text, scope }) }),
+    update: (id: string, text: string, scope?: AgentScope) => req<AgentDef>(`/agents/defs/${id}`, { method: 'PUT', body: json({ text, scope }) }),
+    /** The user's own switches (label, boundaries, notes, folder, tool modes, skills): unlike an edit, the approval stays. */
+    scope: (id: string, scope: AgentScope) => req<AgentDef>(`/agents/defs/${id}/scope`, { method: 'PATCH', body: json(scope) }),
+    /** Chats, routines, last runs and status of one agent. */
+    home: (id: string) => req<AgentHomeData>(`/agents/defs/${id}/home`),
+    /** {agent name: {working, needs_you}} for every definition. */
+    status: () => req<Record<string, { working: number; needs_you: number }>>('/agents/status'),
     approve: (id: string, approved: boolean) => req<AgentDef>(`/agents/defs/${id}/approve?approved=${approved}`, { method: 'POST' }),
     delete: (id: string) => req<{ ok: boolean }>(`/agents/defs/${id}`, { method: 'DELETE' }),
     /** A model drafts the definition text from a line of intent; nothing is saved until the user does. */

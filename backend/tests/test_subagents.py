@@ -710,12 +710,12 @@ def test_writers_confined_and_serialized() -> None:
     run(pair(root_a, nested))
     check(LIVE["peak"] == 1, "a root and one nested in it overlap, so they serialize")
 
-    # without any granted root or desk, a worker has no writers at all
+    # with no root set, the default workspace folder (~/Grain) is the worker's root, so it still has writers
     reset(workspaceRoots=[])
     SCRIPTS["bare"] = [{"text": "nothing to write in"}]
     run(appmod.toolbox.call("agent_spawn", {"task": "bare", "role": "worker"}, mkctx(new_conv())))
     offered = next(s for s in SEEN if s["child"])["tools"]
-    check("write_local_file" not in offered, "a worker with nowhere to write is not offered write_local_file")
+    check("write_local_file" in offered, "a worker falls back to the default workspace folder for its writers")
 
 
 # ---- definitions -----------------------------------------------------------------------------------

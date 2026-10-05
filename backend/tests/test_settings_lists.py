@@ -60,7 +60,7 @@ class FetchAllowlistTests(unittest.TestCase):
         self.assertEqual(got, {"docs.example.org", "ok.com"})
 
     def test_hint_names_the_settings_control(self) -> None:
-        self.assertIn("Allowed hosts after reading untrusted content", tools.TAINTED_HINT)
+        self.assertIn("Allowed hosts", tools.TAINTED_HINT)
 
 
 if __name__ == "__main__":

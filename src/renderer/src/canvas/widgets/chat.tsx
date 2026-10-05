@@ -22,6 +22,9 @@ const DEFAULT_SIZE = { w: 520, h: 640 }
 const BLOB = { w: 120, h: 120 }
 type Size = { w: number; h: number }
 
+/** Blob view: the window's own choice, else Settings › Behavior › Compact chats. */
+const isBlob = (win: CanvasWindow, compactOn: boolean): boolean => typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
+
 /**
  * Resize the frame about its centre the way a drag would -- optimistic rect, debounced layout PUT --
  * and remember something in config alongside.
@@ -114,7 +117,7 @@ const ChatTitle = ({ convId, title, actions }: { convId: string; title: string; 
   )
 }
 
-function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element {
+function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProps): JSX.Element {
   const convId = win.ref_id ?? ''
   const root = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -131,7 +134,9 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
   // Blob view: the window shows only this chat's creature, posed by this chat's own state. A window
   // that has never chosen follows Settings › Behavior › Compact chats; the head's button overrides it.
   const compactOn = useStore((s) => !!s.settings.compactChats)
-  const blob = typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
+  const blob = isBlob(win, compactOn)
+  // Where the blob was pressed: a press that travels is a drag, one that stays is the click that opens.
+  const pressed = useRef<{ x: number; y: number } | null>(null)
   const mood = useStore((s) => sessionMood(s.sessions[convId]))
 
   // The frame follows the view: it shrinks to the blob and grows back to the size it had. Keyed on the
@@ -248,7 +253,12 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
   // Blob view: the creature alone, in a frame the CSS strips bare. It is cheap, so it stays up off-screen too.
   if (blob) {
     return (
-      <button className="chat-blob" title={`${convo?.title || 'Chat'} · show chat`} onClick={() => onConfig({ blob: false })}>
+      <button className="chat-blob" title={`${convo?.title || 'Chat'} · click to open, drag to move`}
+        onPointerDown={(e) => { pressed.current = { x: e.clientX, y: e.clientY }; onMove?.(e) }}
+        onClick={(e) => {
+          const p = pressed.current
+          if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) onConfig({ blob: false })
+        }}>
         <Face name={convId} status={live ? mood : undefined} size="fill" title={convo?.title || 'Chat'} />
       </button>
     )
@@ -268,8 +278,8 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
 
   const actions = (
     <>
-      <button className="icon-btn ghost xs" title="Shrink to a face" onClick={() => onConfig({ blob: true })}><Smile size={11} /></button>
       <ChatSwitcher win={win} convId={convId} />
+      <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => onConfig({ blob: true })}><Smile size={11} /></button>
     </>
   )
 
@@ -304,6 +314,10 @@ export const def: WidgetDef = {
   chrome: 'full',
   statusful: true,
   needsRef: true,
+  menu: (win, onConfig) =>
+    isBlob(win, !!useStore.getState().settings.compactChats)
+      ? [{ label: 'Open chat', icon: <MessageSquare size={14} />, run: () => onConfig({ blob: false }) }]
+      : [{ label: 'Shrink to a face', icon: <Smile size={14} />, run: () => onConfig({ blob: true }) }],
   accepts: ACCEPTS,
   Component: ChatWidget
 }

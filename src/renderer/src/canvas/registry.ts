@@ -1,5 +1,6 @@
-import type { FC } from 'react'
+import type { FC, PointerEvent as ReactPointerEvent } from 'react'
 import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
+import type { MenuEntry } from './Menu'
 import { setDefaultConfigs, setDefaultSizes } from './store'
 import { def as activity } from './widgets/activity'
 import { def as artifact } from './widgets/artifact'
@@ -37,6 +38,8 @@ export interface WidgetDef {
   defaultConfig?: Record<string, unknown>
   /** drag payload kinds this widget accepts as a drop target */
   accepts?: DragKind[]
+  /** Entries the frame adds to this window's right-click menu, under 'Bring to front'. */
+  menu?: (win: CanvasWindow, onConfig: (patch: Record<string, unknown>) => void) => MenuEntry[]
   Component: FC<WidgetProps>
 }
 
@@ -47,6 +50,8 @@ export interface WidgetProps {
   live: boolean
   onConfig: (patch: Record<string, unknown>) => void
   onTitle: (t: string) => void
+  /** The frame's move gesture, for a body that has shed its chrome and wants to be dragged by its face. Absent on a locked space. */
+  onMove?: (e: ReactPointerEvent) => void
 }
 
 /** A kind a module owns; absent means the module list and the catalog disagree, which cannot render. */

@@ -111,6 +111,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
       ]
     : [
         { label: 'Bring to front', run: () => focusWindow(win.id) },
+        ...(def?.menu?.(win, (p) => void useCanvas.getState().setWindowConfig(win.id, p)) ?? []),
         ...(minimal
           ? []
           : [
@@ -174,7 +175,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
             <button className="ghost-btn" onClick={() => void returnToCanvas(win.id)}>Return to canvas</button>
           </div>
         ) : (
-          <WindowHost win={win} focused={focused} live={live} />
+          <WindowHost win={win} focused={focused} live={live} onMove={locked ? undefined : onDragPointerDown} />
         )}
       </div>
 

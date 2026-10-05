@@ -1130,6 +1130,19 @@ def test_settings_and_routes() -> None:
     check({r["name"] for r in listing["builtin"]} == {"researcher", "worker", "reviewer"}, "the built-in roles are listed")
 
 
+def test_now_change_publishes_a_subagent_event() -> None:
+    run = FakeRun()
+    ch = sa.Child(id="sa_x", parent_id="", role=sa.BUILTIN_ROLES["researcher"], task="t", model="m", depth=1, conversation_id="c",
+                  message_id="m1", desk_id=None, ctx={"run": run}, modes={}, steps=3, meter=sa.Meter(None))
+    mgr._set_now(ch, "thinking")
+    check(run.events and run.events[-1][0] == "subagent" and run.events[-1][1]["now"] == "thinking" and run.events[-1][1]["message_id"] == "m1", "a now change is published")
+    mgr._set_now(ch, "fetch_url x")
+    check(len(run.events) == 1, "a second change inside a second is throttled")
+    ch.pub_at -= 2
+    mgr._set_now(ch, "fetch_url y")
+    check(len(run.events) == 2 and run.events[-1][1]["now"] == "fetch_url y", "after the throttle window it publishes again")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

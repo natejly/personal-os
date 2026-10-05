@@ -408,6 +408,7 @@ class Child:
     messages: list[dict[str, Any]] = field(default_factory=list)
     text: str = ""
     state: str = "running"          # running | completed | partial | error
+    pub_at: float = 0.0             # when a `subagent` event last went out, to throttle the "now" pings
     now: str = ""                   # the one-line "working on" shown while it runs: a tool call, or thinking
     exit_reason: str = ""
     error: str | None = None
@@ -721,7 +722,16 @@ class Subagents:
         if self.store is not None:
             self.store.append(ch.id, ch.seq, event, data)
 
+    def _set_now(self, ch: Child, text: str) -> None:
+        """The "working on" line changed: show it live, at most one event a second per child."""
+        if text == ch.now:
+            return
+        ch.now = text
+        if time.monotonic() - ch.pub_at >= 1.0:
+            self._publish(ch)
+
     def _publish(self, ch: Child) -> None:
+        ch.pub_at = time.monotonic()
         run = ch.ctx.get("run")
         if run is not None:
             try:
@@ -800,7 +810,7 @@ class Subagents:
                 ch.steers.clear()
                 ch.cancel.clear()
             ch.rounds = rnd
-            ch.now = "thinking"
+            self._set_now(ch, "thinking")
             known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
@@ -910,7 +920,7 @@ class Subagents:
         spec = self.toolbox.specs.get(name)
         raw_mode = ch.modes.get(name, "off")
         t0 = time.time()
-        ch.now = _now_line(name, args)
+        self._set_now(ch, _now_line(name, args))
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
         decision, result = "allow", None
         if spec is None or raw_mode == "off":

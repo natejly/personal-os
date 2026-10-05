@@ -10,8 +10,8 @@ export async function newChat(page) {
 export async function say(page, text, { wait = true } = {}) {
   const before = await page.locator('.msg.assistant').count()
   const box = page.getByRole('textbox', { name: 'Message' })
-  await box.click()
-  await page.keyboard.insertText(text)
+  // fill() sets the value in one step; insertText of a huge multi-line string is quadratic inside Blink (harness artifact, not the app).
+  await box.fill(text)
   await box.press('Enter')
   if (wait) {
     await expect(page.locator('.msg.assistant')).toHaveCount(before + 1, { timeout: 60_000 })

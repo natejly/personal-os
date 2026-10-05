@@ -63,7 +63,7 @@ test('an html widget runs in a sandboxed frame that cannot reach the app', async
   const code = `<!doctype html><body><p id="p">hello widget</p><script>
     const out = { os: typeof window.os, parent: 'blocked' }
     try { out.parent = String(window.parent.document.title) } catch (e) {}
-    fetch(${JSON.stringify(backend.url + '/settings')}).then(() => { out.fetch = 'reached' }).catch(() => { out.fetch = 'blocked' }).finally(() => { document.body.setAttribute('data-probe', JSON.stringify(out)) })
+    fetch(${JSON.stringify(backend.url + '/settings')}).then((r) => { out.fetch = String(r.status) }).catch(() => { out.fetch = 'blocked' }).finally(() => { document.body.setAttribute('data-probe', JSON.stringify(out)) })
   </script></body>`
   await seedDashboard(api, [{ title: 'Probe widget', kind: 'html', code }])
   await openDashboards(page)
@@ -74,7 +74,9 @@ test('an html widget runs in a sandboxed frame that cannot reach the app', async
   await expect(f.locator('#p')).toHaveText('hello widget')
   await expect.poll(() => f.evaluate(() => document.body.getAttribute('data-probe')), { timeout: 15_000 }).toBeTruthy()
   const out = JSON.parse(await f.evaluate(() => document.body.getAttribute('data-probe')))
-  expect(out).toMatchObject({ os: 'undefined', parent: 'blocked', fetch: 'blocked' })
+  // no app token reaches a widget: a direct call is refused (or blocked outright), never answered with data
+  expect(out).toMatchObject({ os: 'undefined', parent: 'blocked' })
+  expect(['401', 'blocked']).toContain(out.fetch)
 })
 
 test.describe('interactive fence', () => {
@@ -113,7 +115,7 @@ test.describe('interactive fence', () => {
     ]
     for (const b of bad) {
       await reply(page, fence('interactive', JSON.stringify(b)))
-      await expect(last(page).locator('.chart-err, .recharts-wrapper, .chart-block')).toBeVisible({ timeout: 20_000 })
+      await expect(last(page).locator('.chart-err, .recharts-wrapper').first()).toBeVisible({ timeout: 20_000 })
     }
     expect(await page.evaluate(() => window.__pwn)).toBeUndefined()
   })

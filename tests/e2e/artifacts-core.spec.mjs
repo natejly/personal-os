@@ -162,8 +162,7 @@ test('a 2 MB html fence in a reply survives (code view, copy), and Save as artif
   await page.reload()
   await newChat(page)
   const huge = '<p id="e">end</p><!--' + 'x'.repeat(2 * 1024 * 1024) + '-->'
-  await page.getByRole('textbox', { name: 'Message' }).click()
-  await page.keyboard.insertText('!!reply ```html\n' + huge + '\n```')
+  await page.getByRole('textbox', { name: 'Message' }).fill('!!reply ```html\n' + huge + '\n```')
   await page.getByRole('textbox', { name: 'Message' }).press('Enter')
   const block = page.locator('.art-fence').last()
   await expect(block).toBeVisible({ timeout: 90_000 })

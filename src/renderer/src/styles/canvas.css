@@ -297,6 +297,9 @@
    (the creature carries the mood) or move strip -- the creature itself is the drag handle (chat.tsx
    takes the frame's move gesture through WidgetProps.onMove). Right-click keeps every option. */
 .win:has(.chat-blob) { border: 0; border-radius: 50%; background: none; box-shadow: none; }
+/* The speech bubble hangs outside the 120px frame, so the blob's window and body stop clipping
+   (`content-visibility: auto` brings paint containment of its own, hence `visible`). */
+.win:has(.chat-blob), .win:has(.chat-blob) .win-body { overflow: visible; contain: none; content-visibility: visible; }
 .win:has(.chat-blob)::before,
 .win:has(.chat-blob)::after,
 .win:has(.chat-blob) .win-resize,

@@ -7,6 +7,7 @@ from typing import Any
 
 from . import redact
 from .repos import Documents, Graph, Memories
+from .style_presets import styleBlock
 from .style import STYLE_HINT, context_block as style_block, voice_wanted
 
 
@@ -283,6 +284,10 @@ def build_context(
         parts.append(f"You are currently working in the project \"{name}\"." + (f" {desc}" if desc else ""))
         if project.get("system_prompt", "").strip():
             parts.append(redact.scrub_command_output(project["system_prompt"].strip()))
+
+    # Chat replies only: a draft turn writes as the user, and the voice profile owns that tone.
+    if not draft and (rs := styleBlock(str(conv_settings.get("responseStyle") or "default"), str(conv_settings.get("responseStyleText") or ""))):
+        parts.append(redact.scrub_command_output(rs))
 
     if page:
         block = page_block(page)

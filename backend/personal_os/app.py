@@ -1254,7 +1254,11 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
 
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
-    return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"], private=body.private)
+    cfg = settings()
+    out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"], private=body.private)
+    if cfg.get("responseStyle", "default") != "default":  # the global choice seeds a new chat; the chat owns it from then on
+        out = convos.update(out["id"], {"settings": {"responseStyle": cfg["responseStyle"], "responseStyleText": cfg.get("responseStyleText", "")}}) or out
+    return out
 
 
 @app.get("/conversations/search")

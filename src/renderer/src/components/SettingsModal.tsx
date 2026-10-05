@@ -11,6 +11,7 @@ import { navEntries, placeOf, type NavPlace } from '../shell/nav'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
 import { chatModelIds } from '../lib/modelLabel'
+import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
 import type { Settings, ShortcutState } from '@shared/types'
 import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
@@ -627,6 +628,14 @@ export default function SettingsModal(): JSX.Element {
               <label><span className="toggle-text"><b>Global system prompt</b><small>Instructions the assistant gets in every chat.</small></span>
                 <textarea rows={6} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} />
               </label>
+              <label className="setting-row"><span className="toggle-text"><b>Response style</b><small>How replies are shaped in new chats. A chat can change its own under the text box.</small></span>
+                <select value={draft.responseStyle ?? 'default'} onChange={(e) => patch({ responseStyle: e.target.value })}>
+                  {RESPONSE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </label>
+              {draft.responseStyle === 'custom' && <label><span className="toggle-text"><small>Your own instruction for how replies should read.</small></span>
+                <textarea rows={4} maxLength={RESPONSE_STYLE_TEXT_MAX} value={draft.responseStyleText ?? ''} onChange={(e) => patch({ responseStyleText: e.target.value })} />
+              </label>}
               <h4>Notifications</h4>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>

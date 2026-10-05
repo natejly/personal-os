@@ -47,7 +47,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    Open in chat continues it in the main window.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
-   chat if the assistant should read or write files there; with none set, it
+   chat if the assistant should read or write files there; the **Style** picker
+   under the box shapes replies (concise, formal, tutor, thorough or your own
+   wording), and Settings → Behavior sets it for new chats; with none set, it
    uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.

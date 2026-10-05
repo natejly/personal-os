@@ -633,6 +633,9 @@ export interface ConversationSettings {
   useStyle: boolean
   /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
   draftMode?: boolean
+  /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
+  responseStyle?: string
+  responseStyleText?: string
   /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
   planMode?: 'off' | 'auto' | 'always'
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
@@ -1387,6 +1390,9 @@ export interface Settings {
   notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
   planMode?: 'off' | 'auto' | 'always'
+  /** How a new chat's replies are shaped: default, concise, formal, tutor, thorough or custom (then `responseStyleText`). */
+  responseStyle?: string
+  responseStyleText?: string
   googleClientId: string
   googleClientSecret: string
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */

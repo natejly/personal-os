@@ -1,4 +1,11 @@
-# Cowork + Planning Mode — implementation spec
+# Cowork + Planning Mode — original design
+
+> **Status.** This is the original implementation spec, kept for its reasoning. It is not a description
+> of the current code. The desk model, workspaces, autonomy modes, parking and the plan-mode guards
+> shipped, on main's `plans.Plans` / `runs.RunStore` substrate. These sections describe things that were
+> **not built as written**: the data model in §2 (the branch's own `runlog.py` tape and `ActionPlans`
+> tables), the run ledger in §3.11, the build plan in §8, and the judge debate in §11. Code anchors name a
+> module or function, not a line; read the code for the current shape.
 
 
 > **Note (integration).** This spec was written for the branch's own `ActionPlans` module and run
@@ -17,7 +24,7 @@
 > by a second turn. Every desk write reaches `GET /events` as `desk_status` through `Desks.on_change`.
 
 Target worktree: `/Users/natejly/Desktop/Personal OS/.claude/worktrees/cowork-planning` (branch `worktree-cowork-planning`, forked from `main` at `ebfa585`).
-Every `file:line` below was read in this tree. Where a line number is quoted, that line really is what the text says it is.
+Module and function names below refer to that tree as it was when the spec was written.
 
 ---
 
@@ -43,17 +50,17 @@ places, not a prompt. It works the same inline in an ordinary chat and as stage 
 
 Four consequences we accept deliberately:
 
-1. **One conversation per desk.** `RunBus` is keyed by `conversation_id` only (`runs.py:127`, `runs.py:142`), and
-   `POST /conversations/{id}/chat` 409s on a second live run (`app.py:826-829`). Giving each desk its own
+1. **One conversation per desk.** `RunBus` is keyed by `conversation_id` only (`RunBus.get`, `RunBus.live`), and
+   `POST /conversations/{id}/chat` 409s on a second live run (`app.py`). Giving each desk its own
    conversation means N desks are N ordinary runs with *zero* bus surgery, and the desk gets
-   `microvm.Sandboxes` per-conversation isolation (`microvm.py:107`) for free. The cost is one filter on
+   `microvm.Sandboxes` per-conversation isolation (`microvm.py`) for free. The cost is one filter on
    `Conversations.list`, enumerated in §3.9.
 2. **The row is the truth; the ring is a cache.** A new `runlog.py` writes every run, every published event
    (deltas coalesced), every tool call and every approval to SQLite. This is what makes a desk survivable,
    resumable, and decidable from another window or after a restart. Approvals stop being process-memory futures
    that a restart silently orphans.
 3. **Long autonomy is bought by chaining bounded replies, never by raising `maxToolRounds`.** `maxToolRounds`
-   stays 25 (`llm.py:54`). A desk that exhausts a reply's budget mid-plan starts a *fresh* bounded run against
+   stays 25 (`llm.py`). A desk that exhausts a reply's budget mid-plan starts a *fresh* bounded run against
    the same approved plan, guarded by a desk-level turn budget. That is a standing project anti-goal
    honoured, not dodged.
 4. **The plan binds arguments, not intentions.** Approving step 3 approves `sha256(canonical(args))` for that
@@ -69,11 +76,11 @@ spends the budget without a gate). No pixel clicking. No new heavy dependency �
 
 ## 2. Data model
 
-Four new modules own nine tables. **None of them goes in `db.py`.** `Database._migrate` (`db.py:154-166`) runs
-inside `Database.__init__`, which is `app.py:50` — before any of these classes exist, so a `_migrate` entry for
+Four new modules own nine tables. **None of them goes in `db.py`.** `Database._migrate` (`db.py`) runs
+inside `Database.__init__`, which is `app.py` — before any of these classes exist, so a `_migrate` entry for
 their tables would `PRAGMA table_info` an absent table. Each module declares a module-level `SCHEMA` and runs
-`c.executescript(SCHEMA)` in its repo constructor, the `canvas.py:21-30` / `docs.py` pattern. Post-release
-columns get an additive `PRAGMA table_info` + `ALTER TABLE` loop in that constructor (`todos.py:49-53` is the
+`c.executescript(SCHEMA)` in its repo constructor, the `canvas.py` / `docs.py` pattern. Post-release
+columns get an additive `PRAGMA table_info` + `ALTER TABLE` loop in that constructor (`todos.py` is the
 only worked example in the tree).
 
 Construction order in `app.py` is schema-creation order and is load-bearing: `RunStore` → `ActionPlans` →
@@ -129,7 +136,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   tool        TEXT NOT NULL,
   args        TEXT NOT NULL,
   args_digest TEXT NOT NULL,
-  call_id     TEXT,               -- the uid "{message_id}:{provider_call_id}" (app.py:687)
+  call_id     TEXT,               -- the uid "{message_id}:{provider_call_id}" (app.py)
   status      TEXT NOT NULL,      -- started | done | error | unknown
   result      TEXT,               -- JSON, truncated at RESULT_CAP
   error       TEXT,
@@ -224,8 +231,8 @@ class RunStore:
 `RunStore` keeps **one long-lived connection** guarded by a `threading.Lock`, with
 `PRAGMA synchronous=NORMAL` and `PRAGMA foreign_keys=ON` issued on it. This is the only place in the tree that
 does so, and it needs a comment saying why: it is written from inside the event loop on every coalesced flush
-and every tool call, and `Database.tx()` (`db.py:174-184`) opens a fresh connection per call. The connection is
-obtained through `db.connect()` (`db.py:168-172`) so the foreign-keys pragma is applied the same way as
+and every tool call, and `Database.tx()` (`db.py`) opens a fresh connection per call. The connection is
+obtained through `db.connect()` (`db.py`) so the foreign-keys pragma is applied the same way as
 everywhere else, and no other module shares it.
 
 ### 2.2 `backend/personal_os/plans.py` — the approval artifact
@@ -315,7 +322,7 @@ class ActionPlans:
     def remaining(self, plan_id: str) -> list[dict[str, Any]]: ...
     def block(self, plan_id: str) -> str | None:
         """The approved plan as a `[x] / [>] / [ ]` checklist, re-injected as the LAST system message
-        each round. convos.history() (repos.py:174-180) replays prose only, so without this the plan is
+        each round. convos.history() (repos.py) replays prose only, so without this the plan is
         invisible to the model from turn two onward."""
     def model_result(self, plan: dict[str, Any]) -> dict[str, Any]: ...
 ```
@@ -482,10 +489,10 @@ class Workspace:
 
 | File:line | Change |
 |---|---|
-| `repos.py:87` `DEFAULT_CONV_SETTINGS` | add `"planMode": None` (None = inherit global) and `"deskId": None`. No migration: `settings` is a JSON blob (`db.py:37`) hydrated at `repos.py:100-103`. |
-| `llm.py:35-74` `DEFAULT_SETTINGS` | add `"planMode": "off"`, `"approvalWaitSeconds": 600`, `"parkAfterSeconds": 180`, `"deskMaxTurns": 12`, `"deskMaxCost": 2.0`, `"deskMaxLive": 4`, `"deskNotify": True`. **Mandatory** — `PUT /settings` (`app.py:287-291`) drops any key not present here, silently. |
-| `tools.py:32` `DEFAULT_MODE` | add `"plan": "ask"`. |
-| `mcp_servers.py:24` `DANGER_LEVELS` | add `"plan"`, with a comment that it is built-in only and an MCP server may never declare it. |
+| `repos.py` `DEFAULT_CONV_SETTINGS` | add `"planMode": None` (None = inherit global) and `"deskId": None`. No migration: `settings` is a JSON blob (`db.py`) hydrated at `repos.py`. |
+| `llm.py` `DEFAULT_SETTINGS` | add `"planMode": "off"`, `"approvalWaitSeconds": 600`, `"parkAfterSeconds": 180`, `"deskMaxTurns": 12`, `"deskMaxCost": 2.0`, `"deskMaxLive": 4`, `"deskNotify": True`. **Mandatory** — `PUT /settings` (`app.py`) drops any key not present here, silently. |
+| `tools.py` `DEFAULT_MODE` | add `"plan": "ask"`. |
+| `mcp_servers.py` `DANGER_LEVELS` | add `"plan"`, with a comment that it is built-in only and an MCP server may never declare it. |
 
 No `db.py` edit at all.
 
@@ -504,28 +511,28 @@ No `db.py` edit at all.
 
 ### 3.2 Edits to `runs.py` (verified anchors)
 
-* `Run.__init__` (`runs.py:46-60`) takes `store: RunStore`, `kind: str = "chat"`, `desk_id: str | None = None`,
+* `Run.__init__` (`runs.py`) takes `store: RunStore`, `kind: str = "chat"`, `desk_id: str | None = None`,
   `turn: int = 0`; sets `self.status = "running"`.
-* `Run.info()` (`runs.py:65-67`) returns `kind`, `desk_id`, `turn`, `status` alongside what it returns today, so
-  `GET /runs` (`app.py:864-866`) can tell a desk run from a chat run without a second query.
-* `Run.publish` (`runs.py:70-80`) keeps its ring and queue fan-out verbatim and gains one line:
+* `Run.info()` (`runs.py`) returns `kind`, `desk_id`, `turn`, `status` alongside what it returns today, so
+  `GET /runs` (`app.py`) can tell a desk run from a chat run without a second query.
+* `Run.publish` (`runs.py`) keeps its ring and queue fan-out verbatim and gains one line:
   `self.store.append(self.run_id, self.seq, event, data)`.
-* `Run.end(status="done")` (`runs.py:82-88`) flushes the delta buffer and stamps `ended_at`/`status` on the row.
+* `Run.end(status="done")` (`runs.py`) flushes the delta buffer and stamps `ended_at`/`status` on the row.
 * **New** `Run.watchers` property → `len(self._subs)`. Two lines; used by the viewer-aware park timer (§4.5).
 * `Run.set_status(s)` writes `agent_runs.status`.
 * `RunBus.__init__(store)`; `RunBus.start(conversation_id, runner, *, kind="chat", desk_id=None, turn=0, input=None)`
-  creates the row **before** `asyncio.create_task` (`runs.py:139-144`).
-* `RunBus.shutdown` (`runs.py:153-165`) ends each run with status `interrupted`, not `done`, so the next boot can
+  creates the row **before** `asyncio.create_task` (`runs.py`).
+* `RunBus.shutdown` (`runs.py`) ends each run with status `interrupted`, not `done`, so the next boot can
   tell a kill from a clean finish.
-* Keying stays `self._runs[conversation_id] = run` (`runs.py:142`). Unchanged, on purpose.
+* Keying stays `self._runs[conversation_id] = run` (`runs.py`). Unchanged, on purpose.
 
 > A subscriber holds a reference to its `Run` object, not to `RunBus._runs`, so replacing the map entry never
 > breaks an attached stream — it only changes what a *new* attach finds. That is what makes chaining (§3.6) safe.
 
 ### 3.3 Singletons and wiring in `app.py`
 
-Import line, added to the local-import run at `app.py:27-46` (it is not alphabetised; drop it next to
-`.presets` at `app.py:41`):
+Import line, added to the local-import run at `app.py` (it is not alphabetised; drop it next to
+`.presets` at `app.py`):
 
 ```python
 from .cowork import AUTONOMY, LIVE as DESK_LIVE, NEEDS_YOU, STATUSES as DESK_STATUSES, DeskRuntime, Desks
@@ -537,14 +544,14 @@ from .workspace import Workspace
 Singletons:
 
 ```python
-# after app.py:56 (`docs = Docs(db)`); conversations/projects are core db.py tables, so the FKs resolve.
+# after app.py (`docs = Docs(db)`); conversations/projects are core db.py tables, so the FKs resolve.
 run_store = RunStore(db)
 aplans    = ActionPlans(db)
 desks     = Desks(db)
 workspace = Workspace(db.data_dir)
 ```
 
-`app.py:184` becomes `bus = RunBus(run_store)`. `app.py:241` gains two kwargs:
+`app.py` becomes `bus = RunBus(run_store)`. `app.py` gains two kwargs:
 
 ```python
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards,
@@ -552,7 +559,7 @@ toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=goog
                   desks=desks, plans=aplans, workspace=workspace)
 ```
 
-Beside `_approvals` (`app.py:188`):
+Beside `_approvals` (`app.py`):
 
 ```python
 # Fast-wake only. The `approvals` row is the source of truth; a restart loses the Future and the
@@ -562,7 +569,7 @@ _answers: dict[str, str] = {}
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
 ```
 
-### 3.4 Prompt fragments and caps (beside `RENDER_HINT`/`TOOLS_HINT`, `app.py:411-424`)
+### 3.4 Prompt fragments and caps (beside `RENDER_HINT`/`TOOLS_HINT`, `app.py`)
 
 ```python
 PLAN_MODE_HINT = """## Planning mode
@@ -614,7 +621,7 @@ returns a dict to publish or `None`.
 
 ### 3.6 The run adapters
 
-`_chat_stream`'s signature (`app.py:483`) becomes:
+`_chat_stream`'s signature (`app.py`) becomes:
 
 ```python
 async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event,
@@ -622,7 +629,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event,
                        ) -> AsyncIterator[tuple[str, Any]]:
 ```
 
-`_run_chat` (`app.py:814-818`) passes `run=run`. The desk adapter sits beside it:
+`_run_chat` (`app.py`) passes `run=run`. The desk adapter sits beside it:
 
 ```python
 async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
@@ -694,7 +701,7 @@ run.publish("desk_handoff", {"desk_id": desk_id, "conversation_id": run.conversa
 
 The renderer treats `desk_handoff` as a promise: when the current `chatStream` generator ends, it calls
 `attachSession(convId)` in a **bounded** retry (6 attempts, 250 ms apart, stop on success). `attachSession`
-(`store.ts:704-714`) already reads `GET /runs` and `watchRun` dedupes on `run_id` (`store.ts:420-422`), so a
+(`store.ts`) already reads `GET /runs` and `watchRun` dedupes on `run_id` (`store.ts`), so a
 retry that lands early is a harmless no-op and a retry that lands late finds the run. Bounded, triggered by a
 known event: not a poller.
 
@@ -736,8 +743,8 @@ the desk's box is the documented way to pick a desk back up — the same box, aw
 
 ### 3.8 Endpoints
 
-Appended at EOF (`app.py:2468`) under `# ---------------- cowork: desks, plans and workspaces ----------------`,
-with Pydantic `XIn`/`XPatch` immediately above each handler, `wsid()` (`app.py:253-262`) on every writer's
+Appended at EOF (`app.py`) under `# ---------------- cowork: desks, plans and workspaces ----------------`,
+with Pydantic `XIn`/`XPatch` immediately above each handler, `wsid()` (`app.py`) on every writer's
 `project_id`, `HTTPException(404, ...)` on a falsy repo return, `{"ok": True}` from deletes.
 
 **Desks**
@@ -765,7 +772,7 @@ with Pydantic `XIn`/`XPatch` immediately above each handler, `wsid()` (`app.py:2
 | `POST /cowork/inbox/{event_id}/seen` | — | `{ok: true}` |
 
 `POST .../message` forks on `bus.live(conv_id)`: live → the existing steer path (persist with
-`convos.add_message`, `run.publish("user_message", um)`, append to `run.steers` — `app.py:838-853`); not live →
+`convos.add_message`, `run.publish("user_message", um)`, append to `run.steers` — `app.py`); not live →
 clear `desks.question`, then start the supervisor with that message as the turn's content. The user types the
 same way whether the agent is awake or not.
 
@@ -782,7 +789,7 @@ the truth), then `run_store.decide(call_id, "allow"|"deny", by="user", note=note
 `_approvals[call_id]` if a Future exists, then — if the plan's desk is `blocked` — resumes it. A 404 only when
 no plan row exists; a plan whose run has died still decides cleanly.
 
-**Runs and approvals** (edits in place, `app.py:856-888`)
+**Runs and approvals** (edits in place, `app.py`)
 
 | Method / path | Change |
 |---|---|
@@ -806,20 +813,20 @@ async def _cowork_startup() -> None:
         log.warning("cowork recovery failed", exc_info=True)
 ```
 
-Shutdown needs no new hook: `bus.shutdown()` is already wired at `app.py:1110-1114`, it cancels every run task,
-`_chat_stream`'s `CancelledError` path (`app.py:770-775`) persists the partial message, and `_desk_supervisor`'s
+Shutdown needs no new hook: `bus.shutdown()` is already wired at `app.py`, it cancels every run task,
+`_chat_stream`'s `CancelledError` path (`app.py`) persists the partial message, and `_desk_supervisor`'s
 `finally` drops its entry.
 
 ### 3.9 `Conversations.list` — the blast radius, enumerated
 
-`repos.py:94` gains `include_desks: bool = False` and filters hydrated rows whose `settings.deskId` is truthy.
+`repos.py` gains `include_desks: bool = False` and filters hydrated rows whose `settings.deskId` is truthy.
 There are exactly three callers in the backend (`grep -n "convos.list(" backend/personal_os/`):
 
 | Call site | Decision |
 |---|---|
-| `app.py:370` `GET /conversations` | default (`include_desks=False`), **plus** a query param `include_desks: bool = False` so a desk's conversation is still listable on demand |
-| `app.py:1482` dashboard `recent_conversations` | default — a desk belongs on the Cowork rail, not in Recent chats |
-| `app.py:1892` recap source | `include_desks=True` — the recap summarises what happened, and a desk's work happened |
+| `app.py` `GET /conversations` | default (`include_desks=False`), **plus** a query param `include_desks: bool = False` so a desk's conversation is still listable on demand |
+| `app.py` dashboard `recent_conversations` | default — a desk belongs on the Cowork rail, not in Recent chats |
+| `app.py` recap source | `include_desks=True` — the recap summarises what happened, and a desk's work happened |
 
 `GET /conversations/{id}` is untouched, so the detail pane can always open a desk's transcript by id. Nothing
 else in the tree calls `list()`.
@@ -830,7 +837,7 @@ else in the tree calls `list()`.
 |---|---|---|
 | Desk row, plan, steps, outputs, events | SQLite | — |
 | Workspace files | disk | — |
-| Transcript | `messages` rows via `convos.finish_message` (`repos.py:157-164`) | — |
+| Transcript | `messages` rows via `convos.finish_message` (`repos.py`) | — |
 | Run tape | `agent_runs` + `run_events` (deltas coalesced, pruned after 14 d once ended) | fidelity past `MAX_RUN_EVENTS`, where deltas stop being taped and `events_truncated=1` |
 | Pending approval / plan | the `approvals` + `action_plans` rows | the in-process `Future`; the waiting run is gone |
 | In-flight tool call | the `tool_calls` row, flipped `started` → `unknown` | whether it actually happened |
@@ -856,15 +863,15 @@ silently repeats an external write, and nothing claims an unknown call succeeded
 ### 3.11 The ledger, and why it is prose
 
 A resumed desk does not get a reconstructed `assistant(tool_calls)` / `tool` message history.
-`convos.history()` (`repos.py:174-180`) returns `{role, content}` only and drops every row with empty content,
+`convos.history()` (`repos.py`) returns `{role, content}` only and drops every row with empty content,
 so rebuilding a legal pair sequence from the tape is fragile and one malformed pair breaks the request on
 OpenAI-compatible backends (the same reason `_final_round` still sends schemas with `tool_choice="none"`,
-`app.py:570-573`). Instead `context.build_context` gains `ledger: str | None = None`, appended as a `parts`
+`app.py`). Instead `context.build_context` gains `ledger: str | None = None`, appended as a `parts`
 entry with `used["ledger"] = n`, rendering the last 120 `tool_calls` rows as
 `idx · tool · one-line args · ok|err|unknown · age`, under *"Work already completed on this desk. Do not repeat
 it."* The agent's real memory of its own work is the workspace, which it can re-read.
 
-`POST /context/preview` (`app.py:928-938`) hardcodes its flag set and must gain the new parameter as `None`.
+`POST /context/preview` (`app.py`) hardcodes its flag set and must gain the new parameter as `None`.
 
 ---
 
@@ -885,12 +892,12 @@ settings. `'auto'` lets a reply act until its first mutating call, then switches
 
 ### 4.2 Guard 1 — the model is never offered the tool
 
-A single closure replaces **both** `toolbox.schemas(modes)` call sites, `app.py:546` and `app.py:730`:
+A single closure replaces **both** `toolbox.schemas(modes)` call sites, `app.py` and `app.py`:
 
 ```python
 def _schemas() -> list[dict[str, Any]]:
     """One function, because the always_chat/always_global grant path recomputes tool_schemas at
-    app.py:729-730; a plan-mode filter applied at only one of the two sites lets a granted write tool
+    app.py; a plan-mode filter applied at only one of the two sites lets a granted write tool
     reappear mid-plan. `modes` is mutated in place by that grant path, so this filters a copy and
     writes it back rather than rebuilding from a stale snapshot — otherwise the user's 'Always' click
     is silently discarded on the next recompute."""
@@ -908,14 +915,14 @@ def _schemas() -> list[dict[str, Any]]:
 
 > **Why `network` is allowed while planning.** A plan whose arguments were invented without looking at anything
 > is a plan whose exact-argument binding is worth very little — the user approves guessed file paths and guessed
-> queries. The usual objection is that one `web_search` taints the run (`tools.py:377-378`) and then every
-> `external` tool is forced to `ask` (`tools.py:352-357`), which would void every later claim. §4.6 removes that
+> queries. The usual objection is that one `web_search` taints the run (`tools.py`) and then every
+> `external` tool is forced to `ask` (`tools.py`), which would void every later claim. §4.6 removes that
 > objection by distinguishing taint the plan predicted from taint it did not, so research during planning is
 > safe to allow and we allow it.
 
 ### 4.3 Guard 2 — one decision function at the call site
 
-`app.py:680-682` is today exactly:
+`app.py` is today exactly:
 
 ```python
 raw_mode = modes.get(c["name"], "off")
@@ -951,7 +958,7 @@ Resolution order, top to bottom:
 2. `name == "desk_ask"` → `("ask", forced=False)` — handled as a question card (§5 tools).
 3. `planning and specs[name].danger not in PLAN_SAFE_DANGER` →
    `deny=PLAN_BLOCKED.format(name=name)`, `forced=True`. `forced` rides out on the `tool_call` event
-   (`app.py:688-689`) and into the tool event record (`app.py:753-755`), so the UI can say *"blocked while
+   (`app.py`) and into the tool event record (`app.py`), so the UI can say *"blocked while
    planning"* rather than *"turned off"*.
 4. `autonomy == "propose" and danger == "external"` → `deny="this desk may only propose external actions"`.
 5. Compute `would_force = gate(name, raw_mode, ctx) != raw_mode` **and** the expected-taint verdict of §4.6.
@@ -972,8 +979,8 @@ The `tool_call` event gains `off_plan`, `plan_step` and `blocked_by: 'plan_mode'
 
 ### 4.4 Guard 3 — the second gate, in the module that owns the functions
 
-`Toolbox.gate` (`tools.py:352-357`) gains a clause **above** the taint clause, and `Toolbox.call`
-(`tools.py:359`) gains a hard refusal at the very top, before `spec.fn` is awaited:
+`Toolbox.gate` (`tools.py`) gains a clause **above** the taint clause, and `Toolbox.call`
+(`tools.py`) gains a hard refusal at the very top, before `spec.fn` is awaited:
 
 ```python
 # tools.py, Toolbox.call — this is the second gate, in the module that owns the tool functions, so a
@@ -985,13 +992,13 @@ if ctx.get("proposal_only") and spec.danger == "external":
     return denied(name, "this desk may only propose external actions")
 ```
 
-`tool_ctx` (`app.py:538-544`) gains `plan_phase`, `proposal_only`, `desk_id`, `workspace`, `plan_id`, `run_id`,
+`tool_ctx` (`app.py`) gains `plan_phase`, `proposal_only`, `desk_id`, `workspace`, `plan_id`, `run_id`,
 `message_id`.
 
 ### 4.5 The pause: a row, a Future, and a viewer-aware park
 
-The approval block (`app.py:694-730`) keeps its 2 s `asyncio.wait_for(asyncio.shield(fut), timeout=2)` shield
-loop, its `budget.paused` accounting (`app.py:715`) and its `t0` reset verbatim. Three changes:
+The approval block (`app.py`) keeps its 2 s `asyncio.wait_for(asyncio.shield(fut), timeout=2)` shield
+loop, its `budget.paused` accounting (`app.py`) and its `t0` reset verbatim. Three changes:
 
 ```python
 row = run_store.open_approval(call_id=uid, run_id=run.run_id, conversation_id=conv_id, desk_id=desk_id,
@@ -1020,19 +1027,19 @@ while not fut.done():
 
 * **Parking is not an exception.** When `parked` is set, the loop synthesizes a tool message for this call and
   for every remaining pending call, sets `partial = "blocked"`, and breaks out through the existing
-  `_final_round()` path (`app.py:562-584`). That keeps the message list legal — the same reason the budget path
-  at `app.py:650-659` answers every pending call — and it means the park never crosses `_chat_stream`'s
-  `except Exception` at `app.py:776`. The desk settles to `blocked` with a `needs_you` event. The approval row
+  `_final_round()` path (`app.py`). That keeps the message list legal — the same reason the budget path
+  at `app.py` answers every pending call — and it means the park never crosses `_chat_stream`'s
+  `except Exception` at `app.py`. The desk settles to `blocked` with a `needs_you` event. The approval row
   stays `pending`, so the card is still decidable tomorrow, from any window, after a restart.
 * **The chat timeout is a setting, not a constant.** `approvalWaitSeconds` defaults to 600, matching today's
-  hardcoded `if waited >= 600` (`app.py:710`), and the row records `decided_by='timeout'` so the UI can say the
+  hardcoded `if waited >= 600` (`app.py`), and the row records `decided_by='timeout'` so the UI can say the
   card expired rather than pretending the user declined.
 * **`run.watchers`** (`len(run._subs)`) is what stops a park from firing in front of a user who is reading a
   twelve-step plan. With a viewer attached, the run waits indefinitely, stop-aware, polling the row.
 
 ### 4.6 Expected taint — why "research X and email me" works
 
-Taint is sticky for the conversation (`app.py:542`, `app.py:785-788`), and `Toolbox.gate` forces every
+Taint is sticky for the conversation (`_chat_stream`), and `Toolbox.gate` forces every
 `external` tool to `ask` once set. Naively, a desk that web-searches can never again execute a pre-approved
 send, and the single most obvious cowork task ends blocked on its last step.
 
@@ -1047,7 +1054,7 @@ The fix is to distinguish taint the user already signed off from taint they did 
   and the claim stands. If no — the agent fetched something off-plan — the call is forced to `ask` and no step
   is consumed.
 * A plan proposed while the run was *already* tainted records `tainted=1`, and its approval degrades to one-shot
-  exactly as `app.py:718-719` already does for forced cards.
+  exactly as `app.py` already does for forced cards.
 
 This is checkable, it is visible on the card, and it is the only place in the design where a pre-approval can
 survive a taint — narrowly, provably, and with the user told in advance.
@@ -1056,14 +1063,14 @@ survive a taint — narrowly, provably, and with the user told in advance.
 
 Identical code path with `desk_id=None`. The composer gets a toggle (⌘⇧P) writing
 `conv.settings.planMode` ∈ `off | auto | always` — spreading the existing settings object, because the merge at
-`repos.py:132-135` is shallow and `tools` is the standing example of what happens if you forget.
+`repos.py` is shallow and `tools` is the standing example of what happens if you forget.
 
 * `always` — every turn plans before acting.
 * `auto` — the first time `decide_call` sees a mutating call in a reply, it flips `planning` on, denies that one
   call with `PLAN_BLOCKED`, and recomputes `tool_schemas` via `_schemas()`. This works because `_chat_stream`
-  reads `conv` once at `app.py:485` and keeps using the in-memory `conv["settings"]` for the whole reply; the
+  reads `conv` once at `app.py` and keeps using the in-memory `conv["settings"]` for the whole reply; the
   flip mutates that in-memory copy only. This is the same documented in-memory mutation the approval path
-  already performs at `app.py:722`, and it must carry the same kind of comment.
+  already performs at `app.py`, and it must carry the same kind of comment.
 * The card renders inline in the assistant bubble, from the `plan` SSE event, in the reply's own flow where
   the plan was proposed.
 
@@ -1086,11 +1093,11 @@ Identical code path with `desk_id=None`. The composer gets a toggle (⌘⇧P) wr
 ## 5. Tools
 
 One new danger level and two new groups. All registration follows the house trampoline pattern: a module-level
-`def _register_X(self: Toolbox) -> None:` after the last registrar (`tools.py:1091`), first line
+`def _register_X(self: Toolbox) -> None:` after the last registrar (`tools.py`), first line
 `R = self.specs.__setitem__`, and `Toolbox._register_X = _register_X  # type: ignore[attr-defined]` beside
-`tools.py:1093-1094`.
+`tools.py`.
 
-**New danger level `plan`** → `DEFAULT_MODE["plan"] = "ask"` (`tools.py:32`). It means *"this tool is the
+**New danger level `plan`** → `DEFAULT_MODE["plan"] = "ask"` (`tools.py`). It means *"this tool is the
 approval card"*: always `ask`, allowed while planning, never grantable.
 
 **Group `plan`** (registered when `plans is not None`):
@@ -1102,30 +1109,30 @@ approval card"*: always `ask`, allowed while planning, never grantable.
 **Group `desk`** (registered when `desks is not None and workspace is not None`). Stripped from `modes` outside
 a desk conversation by `_schemas()`, and every handler additionally returns
 `tool_error("This tool only works inside a cowork desk.")` when `ctx.get("desk_id")` is missing — belt and
-braces, because `Toolbox.available()` (`tools.py:312-319`) cannot see `ctx`.
+braces, because `Toolbox.available()` (`tools.py`) cannot see `ctx`.
 
 | Tool | Danger | What it does |
 |---|---|---|
 | `desk_list_files(prefix="", offset=0, limit=50)` | `safe` | `page(entries, key="files")` |
-| `desk_read_file(path, offset=0, length=6000)` | `safe` | Line-windowed, returns `next_offset`. **Not** `taints=True`: the workspace holds what this agent wrote. Paging is also the mitigation for the flat 24 000-char cap at `app.py:761`. |
+| `desk_read_file(path, offset=0, length=6000)` | `safe` | Line-windowed, returns `next_offset`. **Not** `taints=True`: the workspace holds what this agent wrote. Paging is also the mitigation for the flat 24 000-char cap at `app.py`. |
 | `desk_write_file(path, content, mode="create")` | `writes` | `create` refuses to clobber; quotas and blocked suffixes enforced in `Workspace.write`, surfaced as a `tool_error` with current usage |
 | `desk_trash_file(path)` | `writes` | moves to `.trash/`; nothing in a workspace is ever unlinked |
-| `desk_deliver(path, title, summary="")` | `writes` | Nominates a file under `outputs/` as a deliverable: upserts a `desk_outputs` row at `proposed` with its sha. Returns `{"status": "awaiting_review", ...}`. The `docs.propose` (`docs.py:266-279`) propose-not-apply shape — the agent never promotes anything itself. |
+| `desk_deliver(path, title, summary="")` | `writes` | Nominates a file under `outputs/` as a deliverable: upserts a `desk_outputs` row at `proposed` with its sha. Returns `{"status": "awaiting_review", ...}`. The `docs.propose` (`docs.py`) propose-not-apply shape — the agent never promotes anything itself. |
 | `desk_ask(question, context="")` | `plan` | Writes `desks.question`, sets `blocked`, returns `{"status": "waiting_for_user", "note": "Stop here and end your turn."}`. **No second blocking primitive**: the model ends its turn, the desk sits in Needs you, the user's answer through the steer box starts the next turn — which survives a restart for free. |
 | `desk_done(summary, next_steps="")` | `safe` | `review` if there are proposed outputs, else `done`. A desk's terminal state is a decision, not an inference. |
-| `desk_import_sandbox(sandbox_path, path)` | `writes` | Copies a file out of the desk's own container (`sandboxes.read_file(ctx["conversation_id"], ...)`, `microvm.py:216`) into the workspace. Taints *conditionally* via a local `_mark()` closure reading `sandboxes.networked(conv_id)` (`microvm.py:180`), the `tools.py:904-911` pattern, and appends to `ctx["taint_sources"]` itself because `ToolSpec.taints` is static. |
+| `desk_import_sandbox(sandbox_path, path)` | `writes` | Copies a file out of the desk's own container (`sandboxes.read_file(ctx["conversation_id"], ...)`, `microvm.py`) into the workspace. Taints *conditionally* via a local `_mark()` closure reading `sandboxes.networked(conv_id)` (`microvm.py`), the `tools.py` pattern, and appends to `ctx["taint_sources"]` itself because `ToolSpec.taints` is static. |
 
-`Toolbox.__init__` (`tools.py:290-293`) gains `desks=None, plans=None, workspace=None`, stores them, and adds
-the two guarded `self._register_plan()` / `self._register_cowork()` calls to the chain at `tools.py:296-307`.
+`Toolbox.__init__` (`tools.py`) gains `desks=None, plans=None, workspace=None`, stores them, and adds
+the two guarded `self._register_plan()` / `self._register_cowork()` calls to the chain at `tools.py`.
 
 **Mandatory registrations.** All nine names (`propose_plan`, `desk_list_files`, `desk_read_file`,
 `desk_write_file`, `desk_trash_file`, `desk_deliver`, `desk_ask`, `desk_done`, `desk_import_sandbox`) go into
-`RESERVED_TOOL_NAMES` (`mcp_servers.py:40-58`) or `backend/personal_os/tests/test_mcp_servers.py:82-88` fails.
+`RESERVED_TOOL_NAMES` (`mcp_servers.py`) or `backend/personal_os/tests/test_mcp_servers.py` fails.
 That test regexes `ToolSpec\(\s*"([A-Za-z0-9_]+)"`, so every `ToolSpec` first argument must be a string literal.
-`ALTERNATIVE` (`tools.py:61-92`) gains an entry for each, including the plan-mode fallbacks
+`ALTERNATIVE` (`tools.py`) gains an entry for each, including the plan-mode fallbacks
 (`"propose_plan": "describe the steps in prose and ask the user how to proceed"`) — without them a call denied
-while planning falls back to the generic *"continue without it"* (`tools.py:111-112`) and the model loops
-straight into `REPEAT_LIMIT = 5` (`app.py:433`).
+while planning falls back to the generic *"continue without it"* (`tools.py`) and the model loops
+straight into `REPEAT_LIMIT = 5` (`app.py`).
 
 **No `cowork_spawn`.** A desk is created by the user.
 
@@ -1143,7 +1150,7 @@ straight into `REPEAT_LIMIT = 5` (`app.py:433`).
   .trash/      desk_trash_file moves here; nothing is ever unlinked
 ```
 
-`data_dir` is `db.data_dir` (`db.py:146`), beside the existing `uploads/`, so the workspace rides the
+`data_dir` is `db.data_dir` (`db.py`), beside the existing `uploads/`, so the workspace rides the
 `PERSONAL_OS_DATA_DIR` contract and tests get a tempdir for free. `desks.workspace` stores the **relative**
 path `cowork/<id>`, never an absolute one, so moving the data directory does not strand every desk.
 
@@ -1159,7 +1166,7 @@ path `cowork/<id>`, never an absolute one, so moving the data directory does not
 3. **Execution.** Unchanged and already right. `run_python` (`sandbox.py`) gets a throwaway `mkdtemp` under
    `sandbox-exec` with the data dir explicitly denied — it therefore *cannot see the workspace*, by design.
    Code that must touch workspace files uses `microvm.Sandboxes`, which already keys one persistent container
-   per `conversation_id` (`microvm.py:107`) — and a desk is one conversation, so a desk gets a private
+   per `conversation_id` (`microvm.py`) — and a desk is one conversation, so a desk gets a private
    `/workspace`, network off by default, with **no change to microvm.py**. Moving a file across is explicit in
    both directions (`sandbox_write_file` / `desk_import_sandbox`); there is deliberately no bind mount, because
    a bind mount would let container code bypass layer 1.
@@ -1186,9 +1193,9 @@ longer matches, so the review UI can never preview bytes the agent has since rew
 2. **Books** the work through `run_store.call_once(run_id, PROMOTE_STEP, "promote", ...)`, so a crash between
    the claim and the read-back leaves an auditable `unknown` row rather than a silent half-promotion.
 3. **Promotes** by `destination`:
-   * `doc` → `docs.create(title, content, project_id)` (`docs.py:175`) — the doc is searchable immediately via
+   * `doc` → `docs.create(title, content, project_id)` (`docs.py`) — the doc is searchable immediately via
      `docs_fts`.
-   * `doc_append` with `doc_id` → `docs.propose(doc_id, after, summary, tool="cowork")` (`docs.py:266-279`),
+   * `doc_append` with `doc_id` → `docs.propose(doc_id, after, summary, tool="cowork")` (`docs.py`),
      which writes a **pending** `doc_revisions` row and leaves the doc untouched until the user accepts it in
      the existing Docs review UI. An agent never overwrites a document the user wrote.
    * `document` → copy into `<data_dir>/uploads/` and run the existing ingest/chunk path.
@@ -1222,7 +1229,7 @@ Named `ActionPlan*` and `Desk*` throughout — never bare `Plan` / `PlanStep`, w
 define differently; and CSS classes are `.aplan-*` / `.cowork-*` / `.desk-*`, never `.plan-*`. This costs
 nothing now and saves a rename later.
 
-Added after `Recap` (`types.ts:499`), before the Canvas banner:
+Added after `Recap` (`types.ts`), before the Canvas banner:
 
 ```ts
 export type DeskStatus = 'draft'|'planning'|'awaiting_plan'|'working'|'needs_approval'|'blocked'
@@ -1257,16 +1264,16 @@ export interface DeskEvent { id: string; desk_id: string; run_id: string | null;
   body: string; data: Record<string, unknown>; needs_you: boolean; seen: boolean; created_at: number }
 ```
 
-Also: `ToolDanger` (the union at `types.ts:33`) gains `'plan'`; `ToolEvent` gains
+Also: `ToolDanger` (the union at `types.ts`) gains `'plan'`; `ToolEvent` gains
 `off_plan?: boolean`, `plan_step?: string | null`, `blocked_by?: 'plan_mode' | null`; `Message` gains
-`plan?: ActionPlan | null` (non-persisted, beside `partial?`); `SessionStatus` (`types.ts:634`) gains
-`'awaiting-plan'`; `RunInfo` (`types.ts:643`) gains `kind`, `desk_id`, `turn`, `status`;
+`plan?: ActionPlan | null` (non-persisted, beside `partial?`); `SessionStatus` (`types.ts`) gains
+`'awaiting-plan'`; `RunInfo` (`types.ts`) gains `kind`, `desk_id`, `turn`, `status`;
 `ConversationSettings` gains `planMode: 'off'|'auto'|'always'|null` and `deskId: string | null`;
 `Settings` gains `planMode`, `approvalWaitSeconds`, `parkAfterSeconds`, `deskMaxTurns`, `deskMaxCost`,
-`deskMaxLive`, `deskNotify` (and `store.ts:504`'s initial-state literal gains them, or the first-run modal
+`deskMaxLive`, `deskNotify` (and `store.ts`'s initial-state literal gains them, or the first-run modal
 blanks them).
 
-Four new `ChatEvent` members (`types.ts:436-449`):
+Four new `ChatEvent` members (`types.ts`):
 
 ```ts
 | { event: 'plan'; data: { message_id: string; call_id: string; plan: ActionPlan } }
@@ -1276,20 +1283,20 @@ Four new `ChatEvent` members (`types.ts:436-449`):
 | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
 ```
 
-Each is the four-file edit by convention: backend yield, this union, `backend/tests/test_runs.py:30-31`
+Each is the four-file edit by convention: backend yield, this union, `backend/tests/test_runs.py`
 `CHAT_EVENTS`, and both renderer consumers below.
 
 ### 7.2 API (`src/renderer/src/lib/api.ts`)
 
-* `approve(callId, decision, note?)` — widened (`api.ts:71`).
-* `chatStream(convId, since = 0, signal?, runId?)` (`api.ts:291`) becomes **reconnecting**: it appends
+* `approve(callId, decision, note?)` — widened (`api.ts`).
+* `chatStream(convId, since = 0, signal?, runId?)` (`api.ts`) becomes **reconnecting**: it appends
   `&run_id=`, reads the `id:` line into a `lastSeq`, and on a non-aborted read error retries up to 8 times with
   exponential backoff capped at 5 s, resuming from `lastSeq`. This is what makes "leave and come back tomorrow"
   and a laptop sleep work.
-* A new `cowork: { desks: {...}, plans: {...}, inbox: {...} }` group after the `activity:` block (`api.ts:231`),
-  one method per endpoint in §3.8, using the module-level `json()` (`api.ts:56`) and `scope()` (`api.ts:59`).
+* A new `cowork: { desks: {...}, plans: {...}, inbox: {...} }` group after the `activity:` block (`api.ts`),
+  one method per endpoint in §3.8, using the module-level `json()` (`api.ts`) and `scope()` (`api.ts`).
 * `conversations.plan(id)`.
-* Type imports added to the block at `api.ts:1-7`.
+* Type imports added to the block at `api.ts`.
 
 ### 7.3 `lib/planDigest.ts` (+ `.test.ts`)
 
@@ -1299,29 +1306,29 @@ fetch. Its test pins `canon()` against the same fixture set `test_plan_mode.py` 
 
 ### 7.4 Store slice (`src/renderer/src/store.ts`)
 
-`View` (`store.ts:19`) gains `'cowork'`; `ClassicView` derives, and `wireMenu`'s generic
-`action.startsWith('view:')` (`store.ts:373`) routes it with no edit.
+`View` (`store.ts`) gains `'cowork'`; `ClassicView` derives, and `wireMenu`'s generic
+`action.startsWith('view:')` (`store.ts`) routes it with no edit.
 
-State, after the activity block (~`store.ts:124`): `desks: Desk[]`, `activeDeskId: string | null`,
+State, after the activity block (`store.ts`): `desks: Desk[]`, `activeDeskId: string | null`,
 `activeDesk: FullDesk | null`, `deskFiles: DeskFile[]`, `deskPreview: { path: string; text: string } | null`,
-`deskInbox: DeskEvent[]`, `deskBusy: boolean`. Defaults after `store.ts:549`.
+`deskInbox: DeskEvent[]`, `deskBusy: boolean`. Defaults after `store.ts`.
 
-Actions (signatures ~`store.ts:196`, bodies after `purgeActivity` ~`store.ts:1046`, under a
+Actions (signatures `store.ts`, bodies after `purgeActivity` `store.ts`, under a
 `// ---- cowork desks ----` banner): `refreshDesks`, `refreshDeskInbox`, `openDesk(id)`, `createDesk(p)`,
 `startDesk`, `resumeDesk`, `pauseDesk`, `stopDesk`, `messageDesk(id, text)`, `patchDesk`, `deleteDesk`,
 `loadDeskFiles(id, path?)`, `previewDeskFile(id, path)`, `acceptOutputs(id, sel)`, `rejectOutputs(id, ids, note)`,
 `decidePlan(planId, decision, edits?, note?)`, `setPlanMode(convId, mode)`, `markDeskEventSeen(id)`.
 
 `openDesk(id)` does exactly three things: `api.cowork.desks.get(id)`; `retainSession(conversation_id)`
-(`store.ts:1181`) in the caller's effect pair, because the 12-session LRU (`MAX_SESSIONS = 12`, `store.ts:50`)
+(`store.ts`) in the caller's effect pair, because the 12-session LRU (`MAX_SESSIONS = 12`, `store.ts`)
 evicts by `touchedAt` and a desk pane is not `focusedConversationId` — the exact bug
-`canvas/widgets/chat.tsx:139-140` guards; and `attachSession(conversation_id)` when the desk is live.
+`canvas/widgets/chat.tsx` guards; and `attachSession(conversation_id)` when the desk is live.
 
-`setView` (`store.ts:607-610`) gains `if (view === 'cowork') { void get().refreshDesks() }`. `init()` kicks
+`setView` (`store.ts`) gains `if (view === 'cowork') { void get().refreshDesks() }`. `init()` kicks
 `refreshDeskInbox()` **once** so the sidebar badge and the Today card are live before the view is ever opened.
 There is no timer anywhere.
 
-`applyEvent` (`store.ts:302-349`) gains:
+`applyEvent` (`store.ts`) gains:
 
 ```ts
 case 'plan':          return mapMsg(ev.data.message_id, (m) => ({ ...m, plan: ev.data.plan }))
@@ -1331,10 +1338,10 @@ case 'desk_status':
 case 'desk_handoff':  return s          // desk-level; handled in watchRun's side-effect switch
 ```
 
-`countApprovals` (`store.ts:56`) folds in `m.plan?.status === 'pending'` — a plan gates the run the same way an
+`countApprovals` (`store.ts`) folds in `m.plan?.status === 'pending'` — a plan gates the run the same way an
 approval does, and without this the amber ring never clears.
 
-`watchRun`'s side-effect switch (`store.ts:436-453`) gains:
+`watchRun`'s side-effect switch (`store.ts`) gains:
 
 ```ts
 case 'desk_status':
@@ -1354,7 +1361,7 @@ and, in the generator's `finally`, when `handoff` is set: a bounded re-attach �
 
 `reduceStatus` gains explicit cases **before** the `default`, whose `idle → working` would resurrect a finished
 run from a late event — exactly the hazard the `span` / `learned` / `learn_error` cases at
-`sessionStatus.ts:28-32` already guard:
+`sessionStatus.ts` already guard:
 
 ```ts
 case 'plan':          return 'awaiting-plan'
@@ -1369,38 +1376,38 @@ case 'desk_handoff':  return prev
 
 | File | What |
 |---|---|
-| `components/CoworkView.tsx` | The view, `DocsView.tsx`-shaped. `<main className="page cowork-page">` → `<header className="page-header drag">` with the `!sidebarOpen` un-collapse button (`DocsView.tsx:146`), `<h2><Users size={16}/> Cowork</h2>`, `.no-drag .header-right` with `<ScopeSelect>` and **New desk**. Body `.cowork-body` is `grid-template-columns: 300px minmax(0,1fr)`. Holds the `DeskRail` and `NewDeskCard` sub-components, as `DocsView` holds `DocList`. |
+| `components/CoworkView.tsx` | The view, `DocsView.tsx`-shaped. `<main className="page cowork-page">` → `<header className="page-header drag">` with the `!sidebarOpen` un-collapse button (`DocsView.tsx`), `<h2><Users size={16}/> Cowork</h2>`, `.no-drag .header-right` with `<ScopeSelect>` and **New desk**. Body `.cowork-body` is `grid-template-columns: 300px minmax(0,1fr)`. Holds the `DeskRail` and `NewDeskCard` sub-components, as `DocsView` holds `DocList`. |
 | `components/DeskRail.tsx` | Four fixed sections that **are** the triage model: **Needs you** (`NEEDS_YOU`), **Working**, **Review**, **Done**. Each row: a status ring, the title, the live `headline`, elapsed time, `<ChatPulse>` when live, and badges for pending approvals and unseen events. |
 | `components/DeskDetail.tsx` | Title (inline-editable), status pill, a `turn n/12 · $0.42 · 6m` meter, lifecycle buttons, and the four-tab strip. Owns the `retainSession` + `attachSession` effect pair. |
 | `components/DeskPlan.tsx` | The Plan tab: `<ActionPlanCard>` while pending; once approved, the same steps as a live checklist with `[x] / [>] / [ ]` marks, tool chips tinted by danger, and per-step failure reasons. **Amend plan** posts a steer asking for a re-plan. |
 | `components/DeskFiles.tsx` | Workspace tree (outputs/ first, work/ collapsed) with new/modified badges, a preview pane (markdown rendered, images inline, binary = name and size), and a **Diff** toggle rendering the backend's unified diff with `lib/diff.ts`. |
 | `components/DeskReview.tsx` | The Output tab and the reason the feature exists. One card per output: title, path, size, preview excerpt, checkbox, and a `.seg` destination of **Doc / Append to doc / Document / Download**. Footer: **Accept selected**, **Send back** (prompts for a note, posts it as a message and resumes — review is a loop, not a binary), **Reject**. After accept, a verified tick or a red *"could not verify the write"* row, read from the response, never assumed. |
-| `components/ActionPlanCard.tsx` | One component, two mount points (inline in chat via `ToolEvents`, and the Plan tab). Header, intent, a **computed side-effect strip** from each step's danger (*"sends 1 email · writes 2 files · reads the web"*), a taint banner when `expected_taint` is non-empty, then numbered step rows with a drop checkbox, tool chip, `why`, and an **Edit** disclosure turning the arguments into a validated JSON textarea. Footer: **Approve & run** (⌘⇧A), **Approve with changes**, **Reject** (⌘⇧D) + a note. Also exports `AskUserCard` for `desk_ask`. Takes actions via single selectors only (`useStore((s) => s.decidePlan)`) and keeps all edit state local — `Message.tsx:10-11` documents that any broader subscription in that subtree re-renders every message per streamed token. |
+| `components/ActionPlanCard.tsx` | One component, two mount points (inline in chat via `ToolEvents`, and the Plan tab). Header, intent, a **computed side-effect strip** from each step's danger (*"sends 1 email · writes 2 files · reads the web"*), a taint banner when `expected_taint` is non-empty, then numbered step rows with a drop checkbox, tool chip, `why`, and an **Edit** disclosure turning the arguments into a validated JSON textarea. Footer: **Approve & run** (⌘⇧A), **Approve with changes**, **Reject** (⌘⇧D) + a note. Also exports `AskUserCard` for `desk_ask`. Takes actions via single selectors only (`useStore((s) => s.decidePlan)`) and keeps all edit state local — `Message.tsx` documents that any broader subscription in that subtree re-renders every message per streamed token. |
 | `components/PlanModeToggle.tsx` | `ListChecks` icon, `aria-pressed`, ⌘⇧P, cycling `off → auto → always`, spreading the old settings object. |
 | `components/AgentInbox.tsx` | The Today card. It lists `deskInbox` rows under "Needs you" beside approvals and proposals; a desk event whose run has a pending approval is dropped so it is not shown twice. |
 | `styles/cowork.css` | `.cowork-body` (`min-height: 0; overflow: hidden`, so the `.app` grid row stays definite — `styles.css:120-126`), `.cowork-side`, `.desk-row`/`.active`, `.desk-ring-*`, `.desk-tabs`, `.desk-file-*`, `.diff-add`/`.diff-del`, `.desk-output-*`. `var(--token)` colours only; every class feature-prefixed, because `styles.css` is one flat namespace. |
 
 Edited components: `ToolEvents.tsx` (icons for the nine tools; route a pending `propose_plan` to
-`ActionPlanCard` and `desk_ask` to `AskUserCard` above the generic approval block at `ToolEvents.tsx:55`; an
+`ActionPlanCard` and `desk_ask` to `AskUserCard` above the generic approval block at `ToolEvents.tsx`; an
 *"in plan"* tag when `plan_step` is set, a *"not in the plan"* warning when `off_plan`, and a *"planning"* tag
 when `blocked_by === 'plan_mode'`); `Message.tsx` (render `{message.plan && <ActionPlanCard …/>}` as a sibling
-of `<ToolEvents>` inside `.markdown`, `Message.tsx:24-32`); `ToolPermissions.tsx` (`GROUP_ICON` gains
+of `<ToolEvents>` inside `.markdown`, `Message.tsx`); `ToolPermissions.tsx` (`GROUP_ICON` gains
 `plan`/`desk`, `DANGER_LABEL` gains `'plan' → 'Always asks'`); `Composer.tsx` (mount `PlanModeToggle`);
 `HomeView.tsx`; `styles.css` (an `/* ---------- Action plans ---------- */` block after the
 Approvals section at `styles.css:989-995`, reusing the `.approval` recipe, with `.aplan-*` names).
 
 ### 7.7 Shell wiring
 
-* `App.tsx:110-111` — `{view === 'cowork' && <CoworkView />}` between the activity and project lines.
-* `Sidebar.tsx:33-43` — `{ view: 'cowork', label: 'Cowork', icon: <Users size={15} /> }` after Activity. **No
+* `App.tsx` — `{view === 'cowork' && <CoworkView />}` between the activity and project lines.
+* `Sidebar.tsx` — `{ view: 'cowork', label: 'Cowork', icon: <Users size={15} /> }` after Activity. **No
   `kind`**: there is no canvas widget in v1, and a `kind` would make the row a drag source for a widget that
-  does not exist. `libCount` (`Sidebar.tsx:103-111`) gains `if (v === 'cowork') return needsYouCount || null`
+  does not exist. `libCount` (`Sidebar.tsx`) gains `if (v === 'cowork') return needsYouCount || null`
   before the fallthrough, which otherwise shows a nonsense document count.
 * `modules.ts` — `OPTIONAL_VIEWS` gains `{ view: 'cowork', label: 'Cowork' }` (SettingsModal renders the
-  checkbox from this array, `SettingsModal.tsx:125-130`, with no edit there) (the Today card is the Agent inbox, which also lists desks; there is no separate Today toggle).
-* `src/main/index.ts:169` — `{ label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') }`
-  after the Activity ⌘9 item. ⌘0–⌘9 are exhausted (`index.ts:160-169`) and ⌘⇧C/⌘B/⌘I are taken
-  (`index.ts:171-173`); ⌘⇧K is free. No renderer change — `store.ts:373` routes any `view:*`.
+  checkbox from this array, `SettingsModal.tsx`, with no edit there) (the Today card is the Agent inbox, which also lists desks; there is no separate Today toggle).
+* `src/main/index.ts` — `{ label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') }`
+  after the Activity ⌘9 item. ⌘0–⌘9 are exhausted (`index.ts`) and ⌘⇧C/⌘B/⌘I are taken
+  (`index.ts`); ⌘⇧K is free. No renderer change — `store.ts` routes any `view:*`.
 * `src/main/index.ts` also gains a one-shot **native notification** on a terminal desk transition
   (`review`/`blocked`/`failed`), fired from an IPC message the renderer sends when it sees that `desk_status`,
   gated by `settings.deskNotify`. It fires on the transition, from an event already flowing — not a poller. It
@@ -1544,11 +1551,11 @@ Critical path: **WP-1 → WP-3 → WP-5 → WP-6 → WP-7 → WP-8 → WP-9 → 
 
 ## 9. Tests
 
-Backend tests are standalone scripts in `backend/tests/`, no pytest, copying `test_canvas.py:1-31` verbatim
+Backend tests are standalone scripts in `backend/tests/`, no pytest, copying `test_canvas.py` verbatim
 (tempdir `PERSONAL_OS_DATA_DIR` and `PERSONAL_OS_AUTH_TOKEN` set **before** importing `personal_os.app`,
 `TestClient` with the token header, `check(cond, label)` / `j(method, path, body, expect)` helpers, a
 `__main__` block printing the tally). `llm.stream_chat` is monkeypatched with a scripted async generator whose
-signature tracks the real one (`test_runs.py:50-57`). Unit-level repo tests live in
+signature tracks the real one (`test_runs.py`). Unit-level repo tests live in
 `backend/personal_os/tests/` as `unittest.TestCase` subclasses with invariant-stating docstrings.
 
 **`backend/tests/test_runlog.py`** — canonicalisation fixtures; `call_once` caching; the `started` → `unknown`
@@ -1596,10 +1603,10 @@ creates a pending revision and does not touch the doc; deleting without `purge` 
 ## 10. Non-goals
 
 1. **No canvas widget in v1.** `canvas/registry.ts` is a `Record<WidgetKind, WidgetDef>`, so adding `'cowork'`
-   to `WidgetKind` and `canvas.py:11-14` turns a half-finished widget into a typecheck failure. It is a clean
+   to `WidgetKind` and `canvas.py` turns a half-finished widget into a typecheck failure. It is a clean
    follow-on: add the kind to both mirrors, write `canvas/widgets/cowork.tsx`, register it, give the Sidebar row
    a `kind`, and call `canvases.delete_windows_for("cowork", id)` from the delete route (`canvas_windows.ref_id`
-   has no FK, `canvas.py:43`).
+   has no FK, `canvas.py`).
 2. **No `cowork_spawn`.** Desks are created by the user, never by a model.
 3. **No scheduling.** Cowork is not cron. `worktree-agent-jobs`' `Scheduler` is a separate feature.
 4. **No writing into the user's filesystem.** `target: "file"` promotion needs `worktree-filesystem-access`'s

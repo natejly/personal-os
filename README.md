@@ -435,10 +435,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘3 | Today / Chats / Todos / Calendar |
-| ⌘6 / ⌘7 | Settings → Memory / its knowledge graph |
-| ⌘8 | Files → Uploads |
-| ⌘9 | Activity |
+| ⌘0 … ⌘7 | Today / Chats / Todos / Calendar / Files / Mail / Settings → Memory / Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
 | ⌘⇧K | Cowork |
 | ⌘⇧F | Search chats |
@@ -617,7 +614,7 @@ from character counts and the row is flagged `estimated`.
 
 ## Activity monitor
 
-Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
+Off by default. Turn it on in the **Activity** panel (⌘7), where each signal is a
 separate switch with a plain description of what it records — or flip **Record
 everything** for one switch that records everything, with the redaction and
 “never record” filters down. Turning that mode off restores the settings it

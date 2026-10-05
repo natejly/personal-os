@@ -4,15 +4,21 @@ import { useStore } from '../../store'
 import type { WidgetDef, WidgetProps } from '../registry'
 import Face from '../../components/Face'
 
+type AppState = ReturnType<typeof useStore.getState>
+
+/** One conversation's mood, in the words Face reads: answering, waiting on you, or idle. */
+export const sessionMood = (c: AppState['sessions'][string] | undefined): string | undefined =>
+  c?.streaming?.answering ? 'streaming' : c && c.pendingApprovals > 0 ? 'needs_approval' : undefined
+
 /**
  * The assistant's mood across the whole app, as one word Face knows: thinking while any chat is
  * answering, surprised while something waits on you, idle otherwise. Derived in the selector so the
  * widget only re-renders when the word changes, not on every token.
  */
-const mood = (s: ReturnType<typeof useStore.getState>): string | undefined => {
-  const sessions = Object.values(s.sessions)
-  if (sessions.some((c) => c.streaming?.answering)) return 'streaming'
-  if (sessions.some((c) => c.pendingApprovals > 0) || s.desks.some((d) => NEEDS_YOU.includes(d.status))) return 'needs_approval'
+const mood = (s: AppState): string | undefined => {
+  const moods = Object.values(s.sessions).map(sessionMood)
+  if (moods.includes('streaming')) return 'streaming'
+  if (moods.includes('needs_approval') || s.desks.some((d) => NEEDS_YOU.includes(d.status))) return 'needs_approval'
   return undefined
 }
 

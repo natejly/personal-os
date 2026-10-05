@@ -585,6 +585,11 @@ class Database:
                      # When a run of this job is worth an OS notification: 'problems' | 'always' | 'never'.
                      "notify": "TEXT NOT NULL DEFAULT 'problems'",
                      "mail_query": "TEXT", "mail_seen": "TEXT",
+                     # kind='calendar': fire `minutes_before` an event matching calendar_query starts; cal_seen holds the
+                     # "id|start" keys already fired. only_on_change: a run whose result digest equals last_digest is not news.
+                     "calendar_query": "TEXT", "calendar_id": "TEXT", "minutes_before": "INTEGER NOT NULL DEFAULT 15",
+                     "cal_seen": "TEXT", "only_on_change": "INTEGER NOT NULL DEFAULT 0", "last_digest": "TEXT",
+                     "last_change_at": "REAL",
                      # target='desk': a fire starts a desk (desk_autonomy plan|propose, desk_budget JSON) instead of a run.
                      "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",

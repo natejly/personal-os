@@ -2084,7 +2084,7 @@ export interface RunInfo {
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
 
-export type JobKind = 'cron' | 'once' | 'watch' | 'mail'
+export type JobKind = 'cron' | 'once' | 'watch' | 'mail' | 'calendar'
 
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
@@ -2098,6 +2098,15 @@ export interface Job {
   cron: string
   /** A Gmail search, for kind 'mail'. Polled at most every five minutes. */
   mail_query?: string | null
+  /** kind 'calendar': words that must all appear in an event's title or attendees; the job fires `minutes_before`
+   *  the start of each matching event in the next 24 h, once per event. `calendar_id` null = the primary calendar. */
+  calendar_query?: string | null
+  calendar_id?: string | null
+  minutes_before?: number
+  /** A run whose result matches the previous run's is recorded as unchanged and not announced. */
+  only_on_change?: boolean
+  /** When a run's result last differed from the one before it (only kept while `only_on_change` is on). */
+  last_change_at?: number | null
   /** The single instant a one-off runs at; null for a repeating job. */
   run_at: number | null
   timezone: string
@@ -2195,7 +2204,7 @@ export interface JobRunSummary {
   pending_proposals: number
   /** Marked read in the Agent Inbox (inbox_seen). A read card collapses to one line. */
   seen: boolean
-  /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
+  /** The run's own report, from the event tape. Shown as the body; headed sections are split out for display only. */
   summary: string
 }
 
@@ -2213,6 +2222,8 @@ export interface JobRunRecord {
   attempt: number
   retry_of: string | null
   manual: boolean
+  /** The result matched the previous run's on a job that notifies only on change. */
+  unchanged?: boolean
   /** A read-only preview, not a real run; left out of the stats. */
   dry_run: boolean
   tool_calls: number

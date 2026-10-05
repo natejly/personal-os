@@ -217,10 +217,10 @@ export const api = {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
      *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
-     *  a mail job passes kind:'mail' and `mail_query`. target:'desk' makes each fire open a desk instead of a run. */
-    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
+     *  a mail job passes kind:'mail' and `mail_query`; a calendar job passes kind:'calendar', `calendar_query` and `minutes_before`. target:'desk' makes each fire open a desk instead of a run. */
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */

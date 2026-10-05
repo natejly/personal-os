@@ -28,7 +28,8 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from .jobs import retryable
+from .job_history import result_digest
+from .jobs import Proposals, retryable
 
 log = logging.getLogger(__name__)
 
@@ -161,6 +162,21 @@ class JobPolicy:
                 out.append(rid)
         return out
 
+    def note_change(self, job_id: str, run_id: str, row: dict[str, Any]) -> None:
+        """For a job set to notify only on change: compare this run's result digest with the last one's and, when
+        equal, flag the run `unchanged` so the inbox and notifications leave it out. A run that left proposals is
+        news whatever its text says. ponytail: the flag lands when the watcher sees the run end (a few seconds), so
+        a very fast inbox refresh can still show it once."""
+        job = self.jobs.get(job_id)
+        if not job or not job.get("only_on_change") or not row.get("message_id"):
+            return
+        digest = result_digest(self.runs.transcript(run_id, row["message_id"])[0])
+        if not digest:
+            return
+        changed = self.jobs.record_digest(job_id, digest, self.clock())
+        if not changed and not Proposals(self.jobs.db).list(None, run_id=run_id, limit=1):
+            self.runs.mark_unchanged(run_id)
+
     async def settle(self, job: dict[str, Any], fire: dict[str, Any], run_id: str, row: dict[str, Any]) -> None:
         jid = job["id"]
         attempt = int(fire.get("attempt") or 1)
@@ -168,6 +184,7 @@ class JobPolicy:
         if status not in FAILED:
             if status == "done":
                 self.jobs.record_outcome(jid, True)
+                self.note_change(jid, run_id, row)
             return  # stopped / cancelled by the user: neither a success nor a failure
         cur = self.jobs.get(jid)
         if cur is None:

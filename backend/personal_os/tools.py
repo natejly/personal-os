@@ -1465,6 +1465,7 @@ class Toolbox:
             schedule = (j["cron"] if j["kind"] == "cron" else
                         f"once at {_iso(j['run_at'])}" if j["kind"] == "once" else
                         f"when mail matching '{j.get('mail_query')}' arrives" if j["kind"] == "mail" else
+                        f"{j.get('minutes_before')} min before events matching '{j.get('calendar_query')}'" if j["kind"] == "calendar" else
                         f"when files change in {j.get('watch_dir')}" + (f", and on {j['cron']}" if j["cron"] else ""))
             return {"id": redact.scrub_command_output(str(j["id"] or "")),
                     "name": redact.scrub_command_output(str(j["name"] or "")),

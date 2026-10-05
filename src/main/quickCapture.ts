@@ -6,6 +6,7 @@
 import { BrowserWindow } from 'electron'
 import { join } from 'path'
 import { guardNavigation } from './navigation'
+import { background, reveal } from './background'
 
 let capture: BrowserWindow | null = null
 
@@ -28,7 +29,7 @@ export const toggleCapture = (): void => {
   })
   capture = w
   guardNavigation(w.webContents)
-  w.once('ready-to-show', () => { w.show(); w.focus() })
+  w.once('ready-to-show', () => { reveal(w); if (!background) w.focus() })
   // Losing focus dismisses it, so it never lingers behind other windows.
   w.on('blur', () => { if (!w.isDestroyed()) w.close() })
   w.on('closed', () => { if (capture === w) capture = null })

@@ -17,6 +17,7 @@ import { hostBlocked, isPrivateHost, sessionResolver } from './pageGuard'
 import { handle } from './ipc'
 import { clearSignIn, listSignIns } from './agentCookies'
 import { buildSnapshot, hintsFromDomSnapshot, riskOf, type NodeHint, type RefEntry } from './axSnapshot'
+import { reveal } from './background'
 
 const PARTITION = 'persist:agent'
 const MAX_SESSIONS = 3
@@ -293,7 +294,7 @@ function safeHost(u: string): string {
 function applyVisibility(s: Sess): void {
   for (const t of s.tabs) {
     if (t.win.isDestroyed()) continue
-    if (s.visible && t === s.active) t.win.show()
+    if (s.visible && t === s.active) reveal(t.win)
     else if (t.win.isVisible()) t.win.hide()
   }
 }

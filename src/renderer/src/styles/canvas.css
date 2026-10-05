@@ -293,6 +293,15 @@
   transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, translate var(--dur-snap) var(--spring);
 }
 .win.minimized { display: none; }
+/* A chat in blob view has no rectangle: no glass, border, shadow, handles, close glyph or status glyph
+   (the creature carries the mood). The top strip still moves it and right-click keeps every option. */
+.win:has(.chat-blob) { border: 0; border-radius: 50%; background: none; box-shadow: none; }
+.win:has(.chat-blob)::before,
+.win:has(.chat-blob)::after,
+.win:has(.chat-blob) .win-resize,
+.win:has(.chat-blob) .win-close,
+.win:has(.chat-blob) .win-grip { display: none; }
+.win[data-kind='chat']:has(.chat-blob) .win-move { right: 0; }
 .win.maximized { border-radius: var(--win-radius-sm); }
 .win.popped { opacity: 0.55; }
 .win.selected { outline: 1.5px solid var(--accent); outline-offset: 1px; }

@@ -17,6 +17,21 @@ import { useRingStatus } from '../useRingStatus'
 import { sessionMood } from './face'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
+const DEFAULT_SIZE = { w: 520, h: 640 }
+/** Blob view: the window is just the creature, this big, with no frame around it. */
+const BLOB = { w: 120, h: 120 }
+type Size = { w: number; h: number }
+
+/**
+ * Resize the frame about its centre the way a drag would -- optimistic rect, debounced layout PUT --
+ * and remember something in config alongside.
+ */
+const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown>): void => {
+  const st = useCanvas.getState()
+  st.patchWindow(win.id, { ...size, x: Math.round(win.x + (win.w - size.w) / 2), y: Math.round(win.y + (win.h - size.h) / 2) })
+  st.markLayoutDirty([win.id])
+  if (config) void st.setWindowConfig(win.id, config)
+}
 
 /**
  * `Composer` keeps its draft in local state and belongs to another slice, so a drop reaches it the way
@@ -118,6 +133,14 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
   const compactOn = useStore((s) => !!s.settings.compactChats)
   const blob = typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
   const mood = useStore((s) => sessionMood(s.sessions[convId]))
+
+  // The frame follows the view: it shrinks to the blob and grows back to the size it had. Keyed on the
+  // rect too, so a window that arrives already small (or the setting flipping) is caught as well.
+  useEffect(() => {
+    if (!convId) return
+    if (blob && win.h > BLOB.h) resizeTo(win, BLOB, { full_size: { w: win.w, h: win.h } })
+    else if (!blob && win.h <= BLOB.h) resizeTo(win, (win.config.full_size as Size | undefined) ?? DEFAULT_SIZE)
+  }, [blob, win.h])
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -222,6 +245,15 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
     )
   }
 
+  // Blob view: the creature alone, in a frame the CSS strips bare. It is cheap, so it stays up off-screen too.
+  if (blob) {
+    return (
+      <button className="chat-blob" title={`${convo?.title || 'Chat'} · show chat`} onClick={() => onConfig({ blob: false })}>
+        <Face name={convId} status={live ? mood : undefined} size="fill" title={convo?.title || 'Chat'} />
+      </button>
+    )
+  }
+
   // Off-screen, minimized or zoomed out: the message list unmounts, so streamed tokens stop
   // re-rendering it, while the ring stays mounted and the session keeps running.
   if (!live) {
@@ -236,23 +268,10 @@ function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.
 
   const actions = (
     <>
-      <button className="icon-btn ghost xs" title={blob ? 'Show chat' : 'Show as face'} aria-pressed={blob}
-        onClick={() => onConfig({ blob: !blob })}>
-        {blob ? <MessageSquare size={11} /> : <Smile size={11} />}
-      </button>
+      <button className="icon-btn ghost xs" title="Shrink to a face" onClick={() => onConfig({ blob: true })}><Smile size={11} /></button>
       <ChatSwitcher win={win} convId={convId} />
     </>
   )
-  if (blob) {
-    return (
-      <div className="widget">
-        <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
-        <button className="face-widget chat-face" title="Show chat" onClick={() => onConfig({ blob: false })}>
-          <Face name={convId} status={mood} size="fill" title={convo?.title || 'Chat'} />
-        </button>
-      </div>
-    )
-  }
 
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
@@ -280,7 +299,7 @@ export const def: WidgetDef = {
   kind: 'chat',
   label: 'Chat',
   icon: <MessageSquare size={18} />,
-  defaultSize: { w: 520, h: 640 },
+  defaultSize: DEFAULT_SIZE,
   minSize: { w: 360, h: 320 },
   chrome: 'full',
   statusful: true,

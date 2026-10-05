@@ -4,9 +4,9 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, useSubagents } from '../store'
 import { api } from '../lib/api'
-import ToolEvents from './ToolEvents'
+import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
@@ -66,6 +66,10 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [reasoning, open, streaming])
   const last = events[events.length - 1]
+  // The subagents this reply started wear their faces on the line itself, so one click reaches a child's
+  // transcript without opening the fold. Live state comes from the stream while the run is on.
+  const subs = useSubagents(conversationId)
+  const kids = useMemo(() => events.filter((t) => t.name === 'agent_spawn' && t.result_preview).flatMap((t) => agentIds(t.result_preview!)), [events])
   const label = [
     reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
     events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
@@ -79,6 +83,14 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
         <span className="reasoning-label">{label}</span>
         {streaming && !answering && <span className="thinking mini"><span /><span /><span /></span>}
       </button>
+      {kids.length > 0 && (
+        <span className="reasoning-kids">
+          {kids.map((id) => (
+            <button key={id} className="crew-face" title={`${subs[id]?.role ?? 'subagent'}: ${subs[id]?.now || subs[id]?.state || 'open'}`} aria-label={`Open subagent ${id.slice(-4)}`}
+              onClick={() => useStore.getState().openSubagent(id)}><Face name={id} status={subs[id]?.state} size={16} /></button>
+          ))}
+        </span>
+      )}
       {open && reasoning && <div className="reasoning-body" ref={body}>{reasoning}</div>}
       {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
     </div>

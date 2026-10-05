@@ -89,7 +89,8 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
   const [err, setErr] = useState('')
   const [filter, setFilter] = useState('')
   const tools = useStore((s) => s.tools)
-  const skills = useStore((s) => s.skills.filter((x) => x.status === 'approved'))
+  const allSkills = useStore((s) => s.skills)
+  const skills = useMemo(() => allSkills.filter((x) => x.status === 'approved'), [allSkills])
   const set = (patch: Partial<AgentFields>): void => setF((x) => ({ ...x, ...patch }))
   const toggle = (key: 'tools' | 'skills', v: string): void => set({ [key]: f[key].includes(v) ? f[key].filter((x) => x !== v) : [...f[key], v] })
   const shown = useMemo(() => {

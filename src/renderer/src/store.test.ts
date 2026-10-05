@@ -957,7 +957,9 @@ test('an over-long send is refused before any request, with the size notice', as
 test('status: sets the live line, and a token, tool call, done or null clears it; an unknown id changes nothing', () => {
   const retry = { event: 'status', data: { id: 'm1', kind: 'retry', attempt: 1, max: 3, until: 5000, reason: 'rate_limit' } } as ChatEvent
   const held = applyEvent(session(), retry, true)
-  assert.deepEqual(held.conversation?.messages?.[0].status, { kind: 'retry', attempt: 1, max: 3, until: 5000, reason: 'rate_limit' })
+  assert.deepEqual(held.conversation?.messages?.[0].status, { kind: 'retry', attempt: 1, max: 3, until: 5000, reason: 'rate_limit', model: undefined, why: undefined })
+  const route = applyEvent(session(), { event: 'status', data: { id: 'm1', kind: 'route', model: 'fast-m', why: 'short follow-up' } } as ChatEvent, true)
+  assert.equal(route.conversation?.messages?.[0].status?.why, 'short follow-up')
   const clears: ChatEvent[] = [
     { event: 'delta', data: { id: 'm1', text: 'x' } },
     { event: 'reasoning', data: { id: 'm1', text: 'x' } },

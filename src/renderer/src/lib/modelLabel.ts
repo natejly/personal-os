@@ -6,6 +6,7 @@
 const ROUTE = /^(?:[\w.-]+\/)?accounts\/[^/]+\/(?:models|routers)\//
 
 export function modelLabel(id: string): string {
+  if (id === 'auto') return 'Auto'
   return id.replace(ROUTE, '')
 }
 

@@ -34,7 +34,7 @@ from . import skillbuild
 from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
-from . import plans
+from . import plans, router
 from . import reach
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block
@@ -3165,7 +3165,7 @@ def _register_skills(self: Toolbox) -> None:
         cfg = self.settings()
         cand = await induce_skill(settings=cfg, skills=self.skills, project_id=ctx.get("project_id"),
                                   conversation_id=ctx.get("conversation_id"), transcript=transcript,
-                                  model=(conv.get("model") or cfg.get("defaultModel") or ""))
+                                  model=router.concrete(conv.get("model"), cfg))
         if not cand:
             return {"candidate": None,
                     "note": "Nothing reusable enough to save. Tell the user. Do not invent a procedure and do not claim one was saved."}

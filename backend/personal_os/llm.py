@@ -87,6 +87,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
+    "fastModel": "",  # what Auto sends a short, plain message to (router.py); empty means Auto uses the default model
+    "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
     "consolidateEvery": 25,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
     "autoTitle": True,  # a short model-written chat title after the first reply (uses the extraction model)

@@ -574,11 +574,14 @@ export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflo
 
 /** A transient line under a streaming reply. `retry` counts down to `until` (epoch ms); `compacting` has no end time. */
 export interface MessageStatus {
-  kind: 'retry' | 'compacting'
+  kind: 'retry' | 'compacting' | 'route'
   attempt?: number
   max?: number
   until?: number
   reason?: 'rate_limit' | 'provider_error' | 'connection'
+  /** `route`: the model Auto picked and the short reason. */
+  model?: string
+  why?: string
 }
 
 export interface Message {
@@ -1218,6 +1221,9 @@ export interface Settings {
   githubTokenSet?: boolean
   googleClientSecretSet?: boolean
   defaultModel: string
+  /** Auto sends short plain messages here; empty means Auto uses the default model. */
+  fastModel: string
+  autoRoute: boolean
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
@@ -1460,7 +1466,7 @@ export type ChatEvent =
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
-  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason'] } }
+  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason']; model?: string; why?: string } }
   | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }

@@ -35,6 +35,7 @@ interface ModelMenuProps {
  */
 export default function ModelMenu({ model, effort, fast, onChange, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
+  const fastModel = useStore((s) => s.settings.fastModel)
   const modelsError = useStore((s) => s.modelsError)
   const loadModels = useStore((s) => s.loadModels)
   const [retrying, setRetrying] = useState(false)
@@ -51,9 +52,11 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
   const options = useMemo(() => {
     // Embedding and similar models are not chat choices; the current model stays visible whatever its kind.
     const ids = chatModelIds(models)
-    if (model && !ids.includes(model)) ids.unshift(model)
-    return modelChoices(ids, query, model).map((id) => ({ id, label: modelLabel(id) }))
-  }, [models, model, query])
+    if (model && model !== 'auto' && !ids.includes(model)) ids.unshift(model)
+    const rows = modelChoices(ids, query, model).map((id) => ({ id, label: modelLabel(id) }))
+    // Auto sits first once a fast model is set (or when the chat is already on it).
+    return (fastModel || model === 'auto') && 'auto'.includes(query.trim().toLowerCase()) ? [{ id: 'auto', label: 'Auto' }, ...rows] : rows
+  }, [models, model, query, fastModel])
 
   const suffix = variantSuffix(fast)
   const effortShown = showsEffort(models, model)
@@ -234,7 +237,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
                     <span className="model-menu-row-name" title={m.id === m.label ? undefined : m.id}>{m.label}</span>
                     <span className="model-menu-row-end">
                       {selected && <Check size={14} className="model-menu-check" aria-hidden />}
-                      <button
+                      {m.id !== 'auto' && <button
                         type="button"
                         className="model-menu-edit"
                         aria-label={`Edit parameters for ${m.label}`}
@@ -242,7 +245,7 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
                         onClick={(e) => { e.stopPropagation(); setEditing(on ? null : m.id) }}
                       >
                         Edit
-                      </button>
+                      </button>}
                     </span>
                   </div>
                 )

@@ -372,6 +372,13 @@ export default function SettingsModal(): JSX.Element {
               <label><span className="toggle-text"><b>Default chat model</b></span>
                 <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="Model id" spellCheck={false} />
               </label>
+              <label><span className="toggle-text"><b>Fast model</b><small>What Auto uses for short, plain messages. Choosing Auto in the model menu needs this.</small></span>
+                <input list="model-options" value={draft.fastModel ?? ''} onChange={(e) => patch({ fastModel: e.target.value })} placeholder="None" spellCheck={false} />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Auto: pick the fast or the default model per message</b><small>New chats start on Auto. Long, analytical or tool-heavy messages, and High or Max reasoning, always use the default model.</small></span>
+                <input type="checkbox" checked={!!draft.autoRoute} onChange={(e) => patch({ autoRoute: e.target.checked })} /><span className="switch" />
+              </label>
               <div className="setting-row">
                 <span className="toggle-text"><b>Run setup again</b><small>Walks through choosing a provider and key from the start, with a connection test.</small></span>
                 <button className="ghost-btn" type="button" onClick={() => (dirty ? setPending('setup') : void rerunSetup())}><RotateCcw size={14} /> Run setup</button>

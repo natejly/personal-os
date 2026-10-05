@@ -40,7 +40,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    reply already knows who you are. Connect Google from Settings (⌘,) →
    Integrations; Calendar, Mail and the first-prompt suggestions wait for it.
 2. **Chat.** ⌘N opens a new chat. The model and effort pickers sit under the
-   composer. Type `/` for slash commands: `/skill`, `/schedule`, `/loop`,
+   composer. Set a fast model in Settings → Model and pick **Auto** in the model
+   menu: short plain messages go to the fast model, long, analytical or
+   tool-heavy ones (and High or Max reasoning) to the default, with the reason
+   shown while the reply starts. Type `/` for slash commands: `/skill`, `/schedule`, `/loop`,
    `/compact`, `/skills`, `/commands` and `/plan` (⌘⇧P also cycles plan mode).
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the

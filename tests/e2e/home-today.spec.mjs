@@ -68,7 +68,7 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
     await save(page)
   }
   await setAll('Hidden')
-  expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'cowork', 'health', 'library', 'mail', 'meetings', 'todos'])
+  expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'health', 'library', 'mail', 'meetings', 'todos'])
   for (const n of names) expect(await shown(n), `${n} hidden`).toBe(false)
   await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])

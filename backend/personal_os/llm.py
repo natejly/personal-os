@@ -261,6 +261,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskSelfReview": True,
     # The model view_image sends pictures to. Empty = the chat model, when the provider says it reads images.
     "visionModel": "",
+    # The model generate_image calls (POST /images/generations, OpenAI shape). Empty = the tool says it is not set up.
+    "imageModel": "",
     # The agent's own browser (browser.py): interactive pages in a separate cookie jar, driven from a desk or chat.
     "browserEnabled": True,
     "browserMaxTabs": 4,

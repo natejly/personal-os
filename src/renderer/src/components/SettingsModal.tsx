@@ -422,6 +422,9 @@ export default function SettingsModal(): JSX.Element {
               <label><span className="toggle-text"><b>Extraction model</b><small>Leave blank to use the chat model.</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
+              <label><span className="toggle-text"><b>Image model</b><small>Used by the generate_image tool. The provider must expose an OpenAI-compatible /images/generations endpoint (LiteLLM routes these; many hosted providers offer FLUX-class models).</small></span>
+                <input list="model-options" value={draft.imageModel ?? ''} onChange={(e) => patch({ imageModel: e.target.value })} placeholder="Not set" spellCheck={false} />
+              </label>
               <h4>Search</h4>
               <label><span className="toggle-text"><b>Embedding model</b><small>Shared with file search. After changing it, Save, then press Rebuild search index. Memories re-embed as they are searched.</small></span>
                 <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />

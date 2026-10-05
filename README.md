@@ -95,6 +95,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   `/skills`, `/commands` and `/plan`. Attachments ride on the message as chips,
   and their text is given to the model under a size cap. Chat rows show a face
   that blinks while the chat works.
+- **Image generation.** `generate_image` makes pictures with the model chosen under
+  Settings → Model(s) → Image model (any provider that exposes an OpenAI-compatible
+  `/images/generations` endpoint). Results are saved in Uploads and shown in the chat;
+  the tool asks first by default (change it under Settings → Tools).
 - **Tools with permissions.** The assistant can search your uploaded files, read and
   revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing

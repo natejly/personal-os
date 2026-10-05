@@ -41,10 +41,9 @@ function DocCreateCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const id = str(p.data?.doc_id)
-  const words = num(p.data?.words)
   return (
     <CardShell {...props} icon={<FilePlus size={14} />} title="Create doc" subject={str(p.data?.created) || str(event.arguments.title) || undefined} hideResult={!unreadable(p, event)}>
-      <Meta items={[['Filed under', str(p.data?.filed_under) || str(event.arguments.folder) || null], ['Words', words !== null ? words.toLocaleString() : null]]} />
+      <Meta items={[['Filed under', str(p.data?.filed_under) || str(event.arguments.folder) || null]]} />
       {id && <button type="button" className="ghost-btn" onClick={() => void useStore.getState().openDoc(id)}>Open</button>}
       <ErrorLine event={event} />
     </CardShell>

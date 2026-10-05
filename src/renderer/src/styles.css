@@ -347,7 +347,6 @@ kbd {
 /* 22px to look at, 24px to hit, without the row growing to fit it. */
 .convo-item .icon-btn::before { content: ''; position: absolute; inset: -1px; }
 .convo-item .ghost:focus-visible { opacity: 1; }
-.convo-list h4.pinned-head { display: flex; align-items: center; gap: 5px; }
 .convo-list h4.archived-head { margin: 8px 0 2px; }
 .convo-list h4.archived-head .section-toggle { font: inherit; text-transform: inherit; letter-spacing: inherit; padding: 0; }
 .convo-item.archived { color: var(--text-muted); }

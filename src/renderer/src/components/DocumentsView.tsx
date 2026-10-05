@@ -5,7 +5,6 @@ import { api } from '../lib/api'
 import type { Document } from '@shared/types'
 import ProjectChip from './ProjectChip'
 
-const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
 /**
  * Uploads, for Files → Uploads, Settings and a project. Always hosted by another view, so it is a body
@@ -57,7 +56,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
               <button className="icon-btn ghost danger" aria-label={`Delete ${d.name}`} onClick={(e) => { e.stopPropagation(); void deleteDocument(d.id) }}><Trash2 size={13} /></button>
             </div>
             <p className="doc-preview">{d.preview || '(no text extracted)'}</p>
-            <div className="doc-meta">{scope === 'all' && <ProjectChip projectId={d.project_id} showPersonal />} {fmtSize(d.size)} · {d.chunk_count} chunks · {new Date(d.created_at * 1000).toLocaleDateString()}</div>
+            <div className="doc-meta">{scope === 'all' && <ProjectChip projectId={d.project_id} showPersonal />} {new Date(d.created_at * 1000).toLocaleDateString()}</div>
           </div>
         ))}
       </div>

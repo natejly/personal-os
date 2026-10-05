@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
-import ProjectChip from './ProjectChip'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
 import FindBar from './FindBar'
@@ -94,7 +93,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         </div>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
-          <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
         <AppSwitcher />

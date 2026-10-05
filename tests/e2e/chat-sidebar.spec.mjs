@@ -58,11 +58,11 @@ test('pin, archive, unarchive, delete with undo', async ({ grain }) => {
   // pin
   await menuOf(page, 'Chat one').click({ force: true })
   await page.getByRole('menuitem', { name: 'Pin' }).click()
-  await expect(page.locator('.pinned-head')).toBeVisible()
+  await expect(page.locator('.convo-list h4', { hasText: 'Pinned' })).toBeVisible()
   await expect(page.locator('.convo-list .convo-item').first()).toContainText('Chat one')
   await menuOf(page, 'Chat one').click({ force: true })
   await page.getByRole('menuitem', { name: 'Unpin' }).click()
-  await expect(page.locator('.pinned-head')).toHaveCount(0)
+  await expect(page.locator('.convo-list h4', { hasText: 'Pinned' })).toHaveCount(0)
   // archive then unarchive
   await menuOf(page, 'Chat two').click({ force: true })
   await page.getByRole('menuitem', { name: 'Archive' }).click()

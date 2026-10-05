@@ -14,7 +14,6 @@ const TABS: { key: Tab; icon: JSX.Element }[] = [
   { key: 'files', icon: <FileText size={11} /> }
 ]
 const readTab = (v: unknown): Tab => (TABS.some((t) => t.key === v) ? (v as Tab) : 'chats')
-const kb = (n: number): string => (n < 1024 ? `${n} B` : n < 1_048_576 ? `${Math.round(n / 1024)} KB` : `${(n / 1_048_576).toFixed(1)} MB`)
 
 const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element => {
   const id = win.ref_id ?? ''
@@ -101,7 +100,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
                 <div key={d.id} className="widget-row" {...dragProps({ kind: 'document', id: d.id, label: d.name, projectId: id })}>
                   <FileText size={12} />
                   <span className="grow widget-title" title={d.name}>{d.name}</span>
-                  <span className="widget-meta">{kb(d.size)} · {d.chunk_count}c</span>
+                  <span className="widget-meta">{new Date(d.created_at * 1000).toLocaleDateString()}</span>
                 </div>
               ))}
             </div>

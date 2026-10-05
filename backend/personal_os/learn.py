@@ -520,7 +520,8 @@ class Skills:
 
     def approved_block(self, project_id: str | None = None) -> str:
         """The only path from this table into a prompt. A candidate or a reject can never come out of it."""
-        rows = [s for s in self.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
+        # The built-in guide (guide.py) is reached through skill_view and a one-line prompt hint, never inlined.
+        rows = [s for s in self.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip() and s.get("source") != "builtin"]
         return skill_block(rows) if rows else ""
 
 

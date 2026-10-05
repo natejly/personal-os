@@ -77,7 +77,7 @@ def test_default_offers_core_plus_search() -> None:
     names = OFFERED[0]
     assert "tool_search" in names and "graph_search" not in names and "trash_local_file" not in names
     assert all(n == "tool_search" or tools.is_core(appmod.toolbox.specs[n]) for n in names), names
-    assert SIZES[0] < 25_000, SIZES[0]
+    assert SIZES[0] < 27_000, SIZES[0]  # core set grew by doc_delete, show and the agent_spawn text on 2026-10-05
 
 
 def test_search_loads_and_persists_per_conversation() -> None:

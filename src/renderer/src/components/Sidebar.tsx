@@ -9,7 +9,7 @@ import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { viewHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
-import { navEntries, placeOf } from '../shell/nav'
+import { navEntries, navTitle, placeOf } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
@@ -56,7 +56,7 @@ const PROJECT_ROWS = 4
  * A row without a `view` (Web) exists only as a widget, so it only shows in canvas mode and a click
  * opens its window directly.
  */
-type NavEntry = { view?: View; label: string; icon: JSX.Element; kind?: WidgetKind }
+type NavEntry = { view?: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind }
 
 /** One line under a project group header: a chat or a doc, sorted together by recency. */
 type ProjectRow =
@@ -66,8 +66,8 @@ type ProjectRow =
 // The fixed rows. Every other view (shell/nav.tsx) is slotted between these by Settings → Modules,
 // which also moves it to the title bar (AppSwitcher) or hides it.
 const TOP: NavEntry[] = [
-  { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'docs', label: 'Files', icon: <Files size={15} /> }
+  { view: 'home', description: 'Your day at a glance: plan, mail, events and what the agent did', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
+  { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
 ]
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
@@ -216,7 +216,7 @@ export default function Sidebar(): JSX.Element {
 
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
   const navItem = (n: NavEntry): JSX.Element => (
-    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
+    <button key={n.label} title={navTitle(n)} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
       onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>

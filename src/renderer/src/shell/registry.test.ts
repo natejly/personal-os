@@ -6,6 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { WIDGETS } from '../canvas/registry'
+import { navEntries } from './nav'
 import { MODULES, moduleForView, moduleHome } from './registry'
 
 const unique = (xs: string[]): boolean => new Set(xs).size === xs.length
@@ -24,6 +25,10 @@ test('an optional view is in OPTIONAL_VIEWS and a home card is in HOME_MODULES',
     if (m.home) assert.ok(HOME_MODULES.some((h) => h.key === m.home!.key), `${m.key}: home ${m.home.key}`)
     if (m.nav) assert.ok(m.view, `${m.key}: nav needs a view`)
   }
+})
+
+test('every nav entry says what it is for', () => {
+  for (const e of navEntries()) assert.ok(e.description?.trim(), `${e.view} needs a description`)
 })
 
 test('the canvas catalog serves each module widget, and lookups find their module', () => {

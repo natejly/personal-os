@@ -38,6 +38,8 @@ export interface ModuleHome {
 export interface ModuleDef {
   key: string
   label: string
+  /** One line on what the view is for, shown on hover. */
+  description?: string
   icon: JSX.Element
   view?: ModuleView
   /** Requires `view` (a nav entry opens it). Its canvas drag kind is `widget.kind` when there is one. */

@@ -1822,7 +1822,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
    or count competes with the name, and the rows under it are indented to the header's text, not to
    its icon. */
 /* 16px to look at, 24px to hit: the box stays small enough for a tree row, the target does not. */
-.icon-btn.xs { position: relative; width: 16px; height: 16px; margin-left: -4px; }
+/* `padding: 0`: the button's default 1px 6px left a 4px content box, and the 11px glyph squashed to fit it. */
+.icon-btn.xs { position: relative; width: 16px; height: 16px; padding: 0; margin-left: -4px; }
+.icon-btn.xs svg { flex: none; }
 .icon-btn.xs::before { content: ''; position: absolute; inset: -4px; }
 .project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }

@@ -341,7 +341,7 @@
 .face-widget .face { width: 82%; height: 82%; }
 /* A chat window in blob view: only the creature, filling the (small) frame. Drag it to move the
    window, click it to get the chat back; it leans in on hover so it reads as something to press. */
-.chat-blob { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; cursor: grab; touch-action: none; }
+.chat-blob { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: none; cursor: grab; touch-action: none; }
 .chat-blob:active { cursor: grabbing; }
 .chat-blob .face { width: 90%; height: 90%; transition: transform var(--dur-hover) ease; }
 .chat-blob:hover .face { transform: scale(1.06); }

@@ -12,7 +12,7 @@ import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserAppro
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
-import { useCanvas } from '../store'
+import { useCanvas, viewport } from '../store'
 import { useRingStatus } from '../useRingStatus'
 import { sessionMood } from './face'
 
@@ -27,13 +27,25 @@ const isBlob = (win: CanvasWindow, compactOn: boolean): boolean => typeof win.co
 
 /**
  * Resize the frame about its centre the way a drag would -- optimistic rect, debounced layout PUT --
- * and remember something in config alongside.
+ * kept inside the visible plane, and remember something in config alongside. Both writes land in the
+ * same render, so a body that mounts on the way (the composer) measures itself in its final frame.
  */
 const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown>): void => {
   const st = useCanvas.getState()
-  st.patchWindow(win.id, { ...size, x: Math.round(win.x + (win.w - size.w) / 2), y: Math.round(win.y + (win.h - size.h) / 2) })
+  const v = viewport()
+  const left = -v.panX / v.zoom
+  const top = -v.panY / v.zoom
+  const x = Math.max(left, Math.min(win.x + (win.w - size.w) / 2, left + v.width / v.zoom - size.w))
+  const y = Math.max(top, Math.min(win.y + (win.h - size.h) / 2, top + v.height / v.zoom - size.h))
+  st.patchWindow(win.id, { ...size, x: Math.round(x), y: Math.round(y) })
   st.markLayoutDirty([win.id])
   if (config) void st.setWindowConfig(win.id, config)
+}
+
+/** Fold a chat window to its blob, or grow it back to the size it had. */
+const setBlob = (win: CanvasWindow, on: boolean): void => {
+  if (on) resizeTo(win, BLOB, { blob: true, full_size: { w: win.w, h: win.h } })
+  else resizeTo(win, (win.config.full_size as Size | undefined) ?? DEFAULT_SIZE, { blob: false })
 }
 
 /**
@@ -139,12 +151,12 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const pressed = useRef<{ x: number; y: number } | null>(null)
   const mood = useStore((s) => sessionMood(s.sessions[convId]))
 
-  // The frame follows the view: it shrinks to the blob and grows back to the size it had. Keyed on the
-  // rect too, so a window that arrives already small (or the setting flipping) is caught as well.
+  // The frame follows the view. The buttons resize as they switch (setBlob); this catches the rest: the
+  // setting flipping with windows already on the space, or a window that arrives at the wrong size.
   useEffect(() => {
     if (!convId) return
-    if (blob && win.h > BLOB.h) resizeTo(win, BLOB, { full_size: { w: win.w, h: win.h } })
-    else if (!blob && win.h <= BLOB.h) resizeTo(win, (win.config.full_size as Size | undefined) ?? DEFAULT_SIZE)
+    if (blob && win.h > BLOB.h) setBlob(win, true)
+    else if (!blob && win.h <= BLOB.h) setBlob(win, false)
   }, [blob, win.h])
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
@@ -257,7 +269,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
         onPointerDown={(e) => { pressed.current = { x: e.clientX, y: e.clientY }; onMove?.(e) }}
         onClick={(e) => {
           const p = pressed.current
-          if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) onConfig({ blob: false })
+          if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
         <Face name={convId} status={live ? mood : undefined} size="fill" title={convo?.title || 'Chat'} />
       </button>
@@ -279,7 +291,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
   const actions = (
     <>
       <ChatSwitcher win={win} convId={convId} />
-      <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => onConfig({ blob: true })}><Smile size={11} /></button>
+      <button className="icon-btn ghost xs" title="Shrink to a face" aria-label="Shrink to a face" onClick={() => setBlob(win, true)}><Smile size={11} /></button>
     </>
   )
 
@@ -314,10 +326,10 @@ export const def: WidgetDef = {
   chrome: 'full',
   statusful: true,
   needsRef: true,
-  menu: (win, onConfig) =>
+  menu: (win) =>
     isBlob(win, !!useStore.getState().settings.compactChats)
-      ? [{ label: 'Open chat', icon: <MessageSquare size={14} />, run: () => onConfig({ blob: false }) }]
-      : [{ label: 'Shrink to a face', icon: <Smile size={14} />, run: () => onConfig({ blob: true }) }],
+      ? [{ label: 'Open chat', icon: <MessageSquare size={14} />, run: () => setBlob(win, false) }]
+      : [{ label: 'Shrink to a face', icon: <Smile size={14} />, run: () => setBlob(win, true) }],
   accepts: ACCEPTS,
   Component: ChatWidget
 }

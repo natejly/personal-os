@@ -15,7 +15,7 @@ from the **+** on the Spaces bar, or by right-clicking the plane. Several chats 
 each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
 frame, drag the creature to move it, click it (or **Open chat** in the menu) to grow the chat back, and
-Settings › Behavior › **Compact chats in Spaces** makes the blob the default for windows that have not
+Settings › Behavior › Spaces › **Compact chats** makes the blob the default for windows that have not
 chosen. Sticky notes and the Web browser exist only here.
 
 Windows move, resize, minimize and maximize. The Spaces bar holds the space tabs (drag to reorder),

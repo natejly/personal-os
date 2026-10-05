@@ -609,12 +609,13 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Compact chats in Spaces</b><small>New chat windows on a space open as the chat's face instead of the transcript. The face button in a window's head switches either way.</small></span>
-                <input type="checkbox" checked={!!draft.compactChats} onChange={(e) => patch({ compactChats: e.target.checked })} /><span className="switch" />
-              </label>
-              <label className="toggle-row plain">
                 <span className="toggle-text"><b>Notify me about scheduled jobs</b><small>A system notification when a job fails, is paused or leaves something for you while the app is in the background. Each job can also be set to always or never notify.</small></span>
                 <input type="checkbox" checked={draft.notifyJobs !== false} onChange={(e) => patch({ notifyJobs: e.target.checked })} /><span className="switch" />
+              </label>
+              <h4>Spaces</h4>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Compact chats</b><small>A chat window added to a space starts as a blob: just the chat's creature, no frame. Drag the creature to move it, click it to open the chat; the face button in an open chat's head shrinks it again.</small></span>
+                <input type="checkbox" checked={!!draft.compactChats} onChange={(e) => patch({ compactChats: e.target.checked })} /><span className="switch" />
               </label>
               <h4>Appearance</h4>
               <div className="setting-row">

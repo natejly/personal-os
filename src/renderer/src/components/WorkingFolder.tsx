@@ -27,7 +27,7 @@ export default function WorkingFolder({ conversationId }: { conversationId?: str
   const name = folder ? folder.replace(/\/+$/, '').split('/').pop() || folder : ''
   return (
     <span className={`composer-ctl working-folder ${folder ? 'on' : ''}`}>
-      <button className="working-folder-pick" title={folder ? `Working in ${folder}. Click to change.` : 'Work in a folder: the assistant may read, edit and run commands there'}
+      <button className="working-folder-pick" title={folder ? `Working in ${folder}. Click to change.` : 'Work in a folder: the assistant may read, edit and run commands there (default: ~/Grain)'}
         onClick={() => void pick()}>
         <FolderOpen size={13} /> {folder ? name : 'Folder'}
       </button>

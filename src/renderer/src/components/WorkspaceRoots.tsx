@@ -13,7 +13,7 @@ export function WorkspaceRoots({ value, onChange }: { value: string[]; onChange:
   return (
     <div className="workspace-roots">
       <h4>Workspace folders</h4>
-      <p className="muted small">Editing, copying and creating folders here runs without asking. Anywhere else the assistant asks first. A desk's own folder is always allowed. Use absolute paths inside your home folder.</p>
+      <p className="muted small">Editing, copying and creating folders here runs without asking. Anywhere else the assistant asks first. A desk's own folder is always allowed. Use absolute paths inside your home folder. ~/Grain is used when the list is empty.</p>
       {value.length > 0 && (
         <ul className="plain-list">
           {value.map((p) => (

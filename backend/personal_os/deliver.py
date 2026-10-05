@@ -129,7 +129,7 @@ def _resolve(tb: Any, ctx: dict[str, Any], raw: Any) -> tuple[Path | None, dict[
     g = fsx.grants_for(tb, ctx)
     p = Path(os.path.realpath(os.path.expanduser(s)))
     if not os.path.isabs(os.path.expanduser(s)):
-        return None, tool_error(f"{s!r} is relative and there is no desk workspace to resolve it against. " + FILE_HOME, field="path")
+        return None, tool_error(f"{s!r} is relative and there is no desk workspace to resolve it against; use an absolute path, or set a folder under Settings (Workspace folders) or the chat's Working folder. " + FILE_HOME, field="path")
     if not (g.in_desk(p) or g.in_roots(p)):
         return None, tool_error(f"{s} is outside every folder you may use. " + FILE_HOME, field="path")
     return p, None

@@ -171,7 +171,9 @@ def test_meeting_list_arms_the_external_gate() -> None:
     assert tb.gate("web_search", "on", ctx) == "ask"
     assert tb.gate("save_memory", "on", ctx) == "ask"
     assert tb.gate("doc_create", "on", ctx) == "ask"
-    assert tb.gate("doc_edit", "on", ctx) == "ask"
+    # A doc_edit in review mode (the default) lands as a diff the user accepts: that is its card. Apply mode must still ask.
+    assert tb.gate("doc_edit", "on", ctx) == "on"
+    assert tb.gate("doc_edit", "on", {**ctx, "settings": {"docEditMode": "apply"}}) == "ask"
     assert tb.gate("todo_add", "on", ctx) == "ask"
     assert tb.gate("todo_delete", "on", ctx) == "ask"
     assert tb.gate("todo_update", "on", ctx) == "ask"

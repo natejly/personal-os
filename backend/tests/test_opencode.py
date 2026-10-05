@@ -71,7 +71,7 @@ def box(tmp_path: Path) -> Box:
 
 def test_registered_in_the_shell_group_asks_by_default_and_is_reserved(box: Box) -> None:
     spec = box.tb.specs["opencode_run"]
-    assert (spec.group, spec.danger, spec.default_mode) == ("shell", "executes", "ask")
+    assert (spec.group, spec.danger, box.tb.default_mode(spec)) == ("shell", "executes", "ask")
     assert "opencode_run" in RESERVED_TOOL_NAMES
     # a reply that read untrusted content cannot drive a networked coding agent without a card
     assert box.tb.gate("opencode_run", "on", {}, {"prompt": "x"}) == "on"

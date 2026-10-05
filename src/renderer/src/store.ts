@@ -1152,10 +1152,17 @@ export const useStore = create<State>((set, get) => {
    * row itself is folded in every time. The inbox refresh is coalesced across a burst of desks.
    */
   let inboxTimer: ReturnType<typeof setTimeout> | null = null
+  let deskListLoading = false
   const onDeskChanged = (d: Desk): void => {
     const st = get()
     const before = (st.activeDesk?.id === d.id ? st.activeDesk : st.desks.find((x) => x.id === d.id))?.status
     putDesk(d)
+    // A desk started outside this window (an agent's desk_start, a scheduled job) is not on the rail yet. putDesk only
+    // updates rows it has, so ask the list, which applies the scope filter itself.
+    if (before === undefined && !deskListLoading) {
+      deskListLoading = true
+      void get().refreshDesks().finally(() => { deskListLoading = false })
+    }
     if (before === d.status) return
     if (st.activeDeskId === d.id) void get().openDesk(d.id)
     if (d.status === 'review') void get().loadDeskFiles(d.id)

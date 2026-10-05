@@ -6,9 +6,11 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "approvals-rules",
+      "cowork-narrow",
+      "cowork-lifecycle",
       "--grep",
-      "Settings"
+      "elsewhere|820x520",
+      "--repeat-each=2"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
@@ -22,16 +24,16 @@
     "grepInvert": null,
     "maxFailures": 0,
     "metadata": {
-      "actualWorkers": 1
+      "actualWorkers": 2
     },
     "preserveOutput": "always",
     "projects": [
       {
         "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/out/e2e",
-        "repeatEach": 1,
+        "repeatEach": 2,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 1
+          "actualWorkers": 2
         },
         "id": "",
         "name": "",
@@ -70,13 +72,13 @@
   },
   "suites": [
     {
-      "title": "approvals-rules.spec.mjs",
-      "file": "approvals-rules.spec.mjs",
+      "title": "cowork-lifecycle.spec.mjs",
+      "file": "cowork-lifecycle.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "Settings → Tools: add rules in the UI, bad rules are refused, the tester explains, Save persists",
+          "title": "25 desks on the rail: sections, counts, [ and ] stepping, at 820x520",
           "ok": true,
           "tags": [],
           "tests": [
@@ -91,12 +93,35 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 5372,
+                  "duration": 3502,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:44:10.821Z",
+                  "startTime": "2026-10-05T06:14:45.658Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            },
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3139,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:14:49.479Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -104,8 +129,130 @@
               "status": "expected"
             }
           ],
-          "id": "644f2b319da58fd3ed14-dba37e06a8e53206742d",
-          "file": "approvals-rules.spec.mjs",
+          "id": "0ae59ffa24bf550aca61-b529e455375b764bf24d",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 177,
+          "column": 1
+        },
+        {
+          "title": "a desk started elsewhere (agent tool, scheduled job) shows up on an open rail without a reload",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2816,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:14:45.656Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            },
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2141,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:14:52.640Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-54c67a582c10130ad21e",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 204,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-narrow.spec.mjs",
+      "file": "cowork-narrow.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "820x520: a waiting plan, an ask-as-it-goes card, and the review pane keep their buttons reachable",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5207,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:14:48.530Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            },
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 3,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4570,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:14:54.064Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7b93a76380271e8b40db-0c5b2e697b8cbff211ab",
+          "file": "cowork-narrow.spec.mjs",
           "line": 15,
           "column": 1
         }
@@ -114,9 +261,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:44:09.341Z",
-    "duration": 6914.608,
-    "expected": 1,
+    "startTime": "2026-10-05T06:14:45.224Z",
+    "duration": 13442.589,
+    "expected": 6,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

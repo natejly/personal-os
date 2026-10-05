@@ -6,7 +6,7 @@ import { ROOT } from '../harness.mjs'
 /** SIGKILL by default: a crash, not a clean shutdown. Resolves once /health answers again. */
 export async function restartBackend(grain, { signal = 'SIGKILL' } = {}) {
   const old = grain.backend.child
-  const exited = new Promise((r) => (old.exitCode !== null ? r() : old.once('exit', r)))
+  const exited = new Promise((r) => (old.exitCode !== null || old.signalCode !== null ? r() : old.once('exit', r)))
   try { old.kill(signal) } catch {}
   await exited
   const env = {

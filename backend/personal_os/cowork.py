@@ -499,7 +499,13 @@ class Desks:
             )
             self._event(c, did, "status", _body("draft", "", None), needs_you=False, run_id=None,
                         data={"status": "draft"}, t=t)
-            return self._one(c, did)  # type: ignore[return-value]
+            row = self._one(c, did)
+        if self.on_change is not None and row:  # a draft nobody started yet is still a new row on every open rail
+            try:
+                self.on_change(row)
+            except Exception:  # noqa: BLE001 - a rail update must never fail the create
+                pass
+        return row  # type: ignore[return-value]
 
     @_notifies
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:

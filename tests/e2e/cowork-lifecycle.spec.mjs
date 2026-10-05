@@ -201,6 +201,18 @@ test('25 desks on the rail: sections, counts, [ and ] stepping, at 820x520', asy
   expect(realErrors(grain)).toEqual([])
 })
 
+test('a desk started elsewhere (agent tool, scheduled job) shows up on an open rail without a reload', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+  const { page } = grain
+  await openCowork(page)
+  await expect(page.locator('.empty-state')).toBeVisible()
+  await mk(grain, { brief: 'from elsewhere', title: 'Elsewhere desk', autonomy: 'plan', start: false })
+  await expect(rail(page).getByText('Elsewhere desk')).toBeVisible()
+  await mk(grain, { brief: 'again', title: 'Elsewhere two', autonomy: 'plan', start: false })
+  await expect(rail(page).getByText('Elsewhere two')).toBeVisible()
+  expect(realErrors(grain)).toEqual([])
+})
+
 test('desk with a 100 KB brief and a long title is created and rendered', async ({ grain }) => {
   await resize(grain)
   const { page } = grain

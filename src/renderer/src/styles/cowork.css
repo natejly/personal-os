@@ -396,3 +396,30 @@
 .cowork-net .seg { align-self: flex-start; }
 .cowork-error { margin: 0; color: var(--danger); font-size: 12px; }
 .cowork-env-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- A chat working autonomously (DeskStrip, DeskPanel, AutonomyToggle) ---------- */
+.autonomy.on { color: var(--accent); }
+.autonomy-ctl { position: relative; display: inline-flex; }
+.autonomy-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; width: min(320px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 10px; padding: 10px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18));
+}
+.autonomy-menu .desk-autonomy { grid-template-columns: 1fr; }
+.desk-strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 auto 6px; padding: 5px 10px;
+  width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; font-size: 12.5px;
+  border: 1px solid var(--border); border-left: 3px solid var(--ring, var(--border)); border-radius: 8px; background: var(--bg-elev);
+}
+.desk-strip-status { font-weight: 600; white-space: nowrap; }
+.desk-strip-detail { color: var(--text-muted); min-width: 0; flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-strip-meta { color: var(--text-faint); white-space: nowrap; }
+.desk-inline { display: flex; flex-direction: column; gap: 8px; }
+.desk-inline:empty { display: none; }
+.desk-panel {
+  position: relative; width: var(--desk-panel-w, 460px); max-width: 60vw; flex-shrink: 0; min-height: 0;
+  display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elev);
+}
+.desk-panel .desk-tabs { display: flex; align-items: center; padding: 6px 8px 0; }
+.desk-panel .desk-files { grid-template-columns: minmax(140px, 40%) minmax(0, 1fr); }
+@media (max-width: 760px) { .desk-panel { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 8; } }

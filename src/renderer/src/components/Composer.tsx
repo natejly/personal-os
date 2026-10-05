@@ -7,6 +7,7 @@ import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
 import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
+import AutonomyToggle from './AutonomyToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import WorkingFolder from './WorkingFolder'
 import { uploadNote } from '../lib/uploadNote'
@@ -63,6 +64,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const queueId = !onSend && activeId ? activeId : null
   const cardPending = useStore((s) => !!queueId && (s.sessions[queueId]?.pendingApprovals ?? 0) > 0)
   const desk = useStore((s) => !!queueId && s.desks.some((d) => d.conversation_id === queueId))
+  const deskBound = useStore((s) => !!s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.deskId)
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
@@ -431,7 +433,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         {conversationId !== '\u0000page-agent' && (
           <>
             <SkipPermissionsToggle conversationId={conversationId} />
-            <PlanModeToggle conversationId={conversationId} />
+            {/* A chat working autonomously plans by its desk's autonomy, so its own plan mode steps aside. */}
+            {!deskBound && <PlanModeToggle conversationId={conversationId} />}
+            <AutonomyToggle conversationId={conversationId} />
             <WorkingFolder conversationId={conversationId} />
           </>
         )}

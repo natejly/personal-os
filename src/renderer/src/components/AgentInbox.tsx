@@ -18,7 +18,7 @@ import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
-import { AUTONOMY } from './DeskRail'
+import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })

@@ -196,6 +196,10 @@ DESK_RESUME = ("Resuming this desk after an interruption. Check the approved pla
 DESK_NUDGE = ("You ended your reply without calling `desk_done` or `desk_ask`. If the brief is finished, call "
               "`desk_done` now with a short summary. If you need a decision only the user can make, call "
               "`desk_ask`. Otherwise keep working on the next unfinished piece — do not just summarise.")
+# The first turn of a chat the user switched to working on its own: the conversation above is the brief.
+CHAT_HANDOFF = ("The user has asked you to carry on with the task in this conversation on your own. The conversation "
+                "so far is your brief. Work it through to done in your workspace; call `desk_ask` if only the user can "
+                "decide something, and `desk_done` when it is finished.")
 CONTINUE_MESSAGES = {"continue": DESK_CONTINUE, "resume": DESK_RESUME, "nudge": DESK_NUDGE}
 NOTES_CAP = 3000
 NOTES_FILE = "work/PROGRESS.md"

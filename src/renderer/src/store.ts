@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -463,6 +463,11 @@ export interface State {
   markDeskEventSeen: (eventId: string) => Promise<void>
   /** Every unseen needs-you row of ONE desk at once — opening the desk is the acknowledgement. */
   markDeskSeen: (deskId: string) => Promise<void>
+  /** Open the chat a desk works in (every desk is a conversation). */
+  goToDesk: (id: string) => Promise<void>
+  /** Turn autonomy on for a chat: a desk binds to it and starts. Turning it off stops it and unbinds the chat. */
+  workAutonomously: (convId: string, autonomy: DeskAutonomy, budget?: DeskBudget) => Promise<void>
+  stopWorkingAutonomously: (convId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
   refreshAgentDefs: () => Promise<void>
@@ -1033,7 +1038,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openFiles('uploads')
-      else if (action.startsWith('desk:')) { s.setView('cowork'); void s.openDesk(action.slice(5)) }
+      else if (action.startsWith('desk:')) void s.goToDesk(action.slice(5))
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
         // A view turned off in Settings → Modules stays off: its shortcut says how to turn it back on.
@@ -1061,6 +1066,11 @@ export const useStore = create<State>((set, get) => {
         : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id && x.updated_at <= d.updated_at ? d : x)) : st.desks,
       activeDesk: st.activeDesk?.id === d.id && st.activeDesk.updated_at <= d.updated_at ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
+  /** settings.deskId on both copies of the chat row: the open session and the sidebar list. '' unbinds. */
+  const bindDesk = (convId: string, deskId: string): void => {
+    patchConversation(convId, (c) => ({ ...c, settings: { ...c.settings, deskId } }))
+    set((st) => ({ conversations: st.conversations.map((c) => (c.id === convId ? { ...c, settings: { ...c.settings, deskId } } : c)) }))
+  }
   const queuedNote = (position: number): string => `Queued #${position}: it starts when another desk finishes`
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
   const deskConv = (id: string): string | undefined => {
@@ -2322,6 +2332,20 @@ export const useStore = create<State>((set, get) => {
             return fail()
           }
         }
+        // A chat working autonomously: the message goes to its desk, which steers a live turn or wakes the next one,
+        // and attached files are copied into the desk's inputs/ folder rather than inlined.
+        const deskId = get().sessions[id]?.conversation.settings.deskId
+        if (deskId) {
+          try {
+            if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
+          } catch (e) {
+            get().toast((e as Error).message, 'error')
+            return fail()
+          }
+          const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
+          dropPending(id, pend.key)
+          return ok
+        }
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
@@ -3149,6 +3173,37 @@ export const useStore = create<State>((set, get) => {
       } catch {
         void get().refreshDeskInbox()
       }
+    },
+    goToDesk: async (id) => {
+      const convId = deskConv(id) ?? (await api.cowork.desks.get(id).catch(() => null))?.conversation_id
+      if (convId) await get().selectChat(convId)
+    },
+    workAutonomously: async (convId, autonomy, budget) => {
+      set({ deskBusy: true })
+      try {
+        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, budget, start: true })
+        if (position) get().toast(queuedNote(position))
+        bindDesk(convId, desk.id)
+        await get().refreshDesks()
+        await get().openDesk(desk.id)
+        if (run_id) void watchRun(convId, { run_id, seq: seq ?? 0 }, { messageId: null, approvals: 0, attached: true })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    stopWorkingAutonomously: async (convId) => {
+      const id = get().sessions[convId]?.conversation.settings.deskId
+      if (!id) return
+      try {
+        putDesk(await api.cowork.desks.stop(id, true))
+      } catch (e) {
+        return get().toast((e as Error).message, 'error')
+      }
+      bindDesk(convId, '')
+      void get().markDeskSeen(id)
+      if (get().activeDeskId === id) set({ activeDeskId: null, activeDesk: null, deskFiles: [] })
     },
     markDeskSeen: async (deskId) => {
       // Optimistic for the same reason as the single-event version: the badge must not wait on a

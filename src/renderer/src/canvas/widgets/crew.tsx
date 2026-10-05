@@ -5,7 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import Face from '../../components/Face'
 import CrewRing from '../../components/CrewRing'
-import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../components/DeskRail'
+import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../lib/deskStatus'
 import { ParamForm } from '../../components/WorkflowsPanel'
 import type { WidgetDef, WidgetProps } from '../registry'
 

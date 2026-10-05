@@ -1,6 +1,7 @@
 """Live e2e for a cowork desk deliverable. Usage: python backend/tests/e2e_desk.py <port> [token]
 
-Needs a running backend with real models (see the e2e backend helper). Runs two desks:
+Needs a running backend with real models (see the e2e backend helper). Each desk works in a chat: a chat is
+created, then told to work autonomously with the brief. Runs two of them:
  1. plan mode: approve the plan card, wait for review with an output, check the file is a real
     comparison, accept it into a doc and verify the doc holds the same bytes.
  2. 'ask' mode: every change is carded; allow them, expect review with an output again.
@@ -73,8 +74,11 @@ def main() -> int:
     c = C(port, sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != "-" else None)
     for mode in (sys.argv[3:] or ("plan", "ask")):   # optional: rerun just one mode
         print(f"== autonomy={mode}")
-        out = c.req("POST", "/cowork/desks", {"brief": BRIEF, "autonomy": mode, "title": f"e2e {mode}"})
+        chat = c.req("POST", "/conversations", {"title": f"e2e {mode}"})
+        out = c.req("POST", "/cowork/desks", {"conversation_id": chat["id"], "brief": BRIEF, "autonomy": mode})
         did, cid = out["desk"]["id"], out["conversation_id"]
+        check(f"{mode}: the desk works in the chat", cid == chat["id"] and
+              c.req("GET", f"/conversations/{cid}")["settings"].get("deskId") == did, cid)
         check(f"{mode}: desk created and started", bool(out.get("run_id")), f"desk={did} run={out.get('run_id')}")
         d = drive(c, did, cid)
         cards = d.get("_cards", {})

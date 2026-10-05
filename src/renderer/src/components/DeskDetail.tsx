@@ -11,7 +11,7 @@ import { deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval
 import DeskReview from './DeskReview'
 import DeskApprovalCard from './DeskApprovalCard'
 import InlineNote from './InlineNote'
-import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
+import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from '../lib/deskStatus'
 import Face from './Face'
 
 type Tab = DeskTab

@@ -1084,18 +1084,48 @@ def test_a_planning_desk_is_not_offered_desk_done_or_desk_start() -> None:
           "an approved/ask desk is offered desk_done, and still never desk_start")
 
 
-def test_a_chat_is_offered_desk_start_only_while_cowork_is_shown() -> None:
+def test_a_chat_is_offered_desk_start_whatever_views_are_hidden() -> None:
     settings_patch(hiddenViews=["cowork"])
     try:
         script({"text": "ok"})
         _chat_turn(_chat("off"), "start a desk")
-        check("desk_start" not in SCRIPT["tools"][0], "with Cowork hidden a chat is not offered desk_start")
-        settings_patch(hiddenViews=[])
-        script({"text": "ok"})
-        _chat_turn(_chat("off"), "start a desk")
-        check("desk_start" in SCRIPT["tools"][0], "with Cowork shown it is")
+        check("desk_start" in SCRIPT["tools"][0], "a started desk lists among chats, so no hidden view withholds desk_start")
     finally:
         settings_patch(hiddenViews=list(llm.DEFAULT_SETTINGS["hiddenViews"]))
+
+
+def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
+    cid = _chat("auto")
+    script({"text": "Sure, the vendors are A and B."})
+    _chat_turn(cid, "Compare vendor A and vendor B")
+    before = {c["id"] for c in j("GET", "/conversations?include_desks=true")}
+    script({"calls": [call("desk_done", summary="Compared.")]}, {"text": "Done."})
+    made = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "ask", "budget": {"maxTurns": 3}})
+    did = made["desk"]["id"]
+    check(made["conversation_id"] == cid, "the desk works in the chat it was turned on in")
+    check({c["id"] for c in j("GET", "/conversations?include_desks=true")} == before, "and no new conversation is made")
+    conv = j("GET", f"/conversations/{cid}")
+    check(conv["settings"]["deskId"] == did, "settings.deskId binds the chat to its desk")
+    check(conv["settings"]["planMode"] == "auto", "the chat's own plan mode is left alone")
+    check(made["desk"]["brief"] == "Compare vendor A and vendor B", "the brief is what the user last asked")
+    quiet(did)
+    firsts = [m for m in SCRIPT["messages"] if m]
+    check(any(m["role"] == "user" and "Compare vendor A" in str(m.get("content")) for m in firsts[0]),
+          "its first turn sees the chat's history")
+    check("carry on with the task in this conversation" in str(firsts[0][-1].get("content")), "and is told to carry on")
+    j("POST", f"/cowork/desks/{did}/start", expect=409)
+    j("POST", "/cowork/desks", {"conversation_id": cid}, expect=409)
+    j("PATCH", f"/conversations/{cid}", {"settings": {"deskId": "elsewhere"}})
+    check(j("GET", f"/conversations/{cid}")["settings"]["deskId"] == did, "a settings PATCH cannot rebind the chat")
+
+    j("POST", f"/cowork/desks/{did}/stop?detach=true")
+    check(j("GET", f"/conversations/{cid}")["settings"]["deskId"] == "", "turning autonomy off unbinds the chat")
+    check(desk(did)["conversation_id"] == cid, "but the desk row and its workspace stay")
+    again = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "propose", "start": False})
+    check(again["desk"]["id"] == did and again["desk"]["autonomy"] == "propose", "turning it back on binds the same desk")
+    check(j("GET", f"/conversations/{cid}")["settings"]["deskId"] == did, "and deskId round-trips")
+    j("POST", f"/cowork/desks/{did}/stop?detach=true")
+    j("POST", "/cowork/desks", {"conversation_id": "nope"}, expect=404)
 
 
 def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
@@ -1112,7 +1142,8 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
 
 
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
-         test_a_chat_is_offered_desk_start_only_while_cowork_is_shown,
+         test_a_chat_is_offered_desk_start_whatever_views_are_hidden,
+         test_a_chat_works_autonomously_in_its_own_conversation,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
          test_a_desk_is_told_it_is_a_desk,
          test_a_desk_is_told_its_inputs,

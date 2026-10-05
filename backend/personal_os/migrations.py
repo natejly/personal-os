@@ -61,12 +61,22 @@ def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
     c.execute("UPDATE settings SET value = ? WHERE key = 'activity'", (json.dumps(cfg),))
 
 
+def _permissions_store(c: sqlite3.Connection) -> None:
+    """Slot reserved for the permissions consolidation (owner: permissions-consolidation)."""
+
+
+def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
+    """Slot reserved for the meetings + activity on-by-default flip (owner: meetings-activity-digest)."""
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
     (3, "boards_into_todos", _boards_into_todos),
     (4, "activity_record_everything_keys", _activity_record_everything_keys),
+    (5, "permissions_store", _permissions_store),
+    (6, "meetings_activity_defaults", _meetings_activity_defaults),
 ]
 
 

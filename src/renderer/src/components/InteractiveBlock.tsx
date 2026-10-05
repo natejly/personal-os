@@ -431,7 +431,7 @@ export default function InteractiveBlock({ source, streaming }: { source: string
     <figure className="chart-block interactive">
       <div className="code-head">
         <span>{spec.title || 'interactive chart'}</span>
-        <ChartTools view={view} setView={setView} source={source} chartIcon={<SlidersHorizontal size={13} />}>
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<SlidersHorizontal size={13} />} kind="interactive">
           {dirty && (
             <button className="icon-btn ghost" title="Reset controls" onClick={() => setLive({ sig: signature, values: initial })}><RotateCcw size={13} /></button>
           )}

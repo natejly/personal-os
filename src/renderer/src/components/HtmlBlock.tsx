@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Code2, Eye } from 'lucide-react'
 import { buildPreviewDoc, hasScript, PREVIEW_SANDBOX } from '../lib/htmlFence'
 import { CopyButton } from './MarkdownPreview'
+import OpenInPanel from './ShowButton'
 import '../styles/htmlFence.css'
 
 /**
@@ -23,6 +24,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
             <button role="tab" aria-selected={showing === 'code'} className={showing === 'code' ? 'on' : ''} onClick={() => setMode('code')}><Code2 size={11} /> Code</button>
             <button role="tab" aria-selected={showing === 'preview'} className={showing === 'preview' ? 'on' : ''} disabled={streaming} onClick={() => setMode('preview')}><Eye size={11} /> Preview</button>
           </span>
+          {!streaming && <OpenInPanel kind="html" source={source} />}
           <CopyButton text={source} />
         </span>
       </div>
@@ -53,6 +55,7 @@ export function SvgBlock({ source, streaming }: { source: string; streaming: boo
             <button className={!code ? 'on' : ''} disabled={streaming} onClick={() => setCode(false)}><Eye size={11} /> Image</button>
             <button className={code || streaming ? 'on' : ''} onClick={() => setCode(true)}><Code2 size={11} /> Code</button>
           </span>
+          {!streaming && <OpenInPanel kind="svg" source={source} />}
           <CopyButton text={source} />
         </span>
       </div>

@@ -21,7 +21,7 @@ import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
-import type { UploadResult } from '@shared/types'
+import type { ShowItem, UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 
@@ -211,6 +211,10 @@ export interface State {
   sidebarOpen: boolean
   contextOpen: boolean
   contextTab: ContextTab
+  /** The side panel beside each chat (the `show` tool, or "Open in panel" on a fenced block), by conversation id. */
+  shows: Record<string, ShowItem>
+  openShow: (conversationId: string, item: ShowItem) => void
+  closeShow: (conversationId: string) => void
   /**
    * The page agent (⌘I): a chat pinned to whatever view is on screen. `pageContext` is republished
    * by the active view on every change; `pageAgentId` is the thread, created on the first send.
@@ -1512,6 +1516,8 @@ export const useStore = create<State>((set, get) => {
         const kind = chatNotice(before, get().sessions[convId]?.status ?? before, ev)
         if (kind) announce(convId, run.run_id, kind, focused, notified)
         if (ev.event === 'tool_result' && ev.data.name === 'doc_edit') adoptDocProposal(ev.data.result_preview)
+        // The `show` tool: its payload opens (or replaces) this chat's side panel as the result lands.
+        if (ev.event === 'tool_result' && ev.data.show) get().openShow(convId, ev.data.show)
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
@@ -1803,6 +1809,7 @@ export const useStore = create<State>((set, get) => {
     meetingConsentOpen: false,
     sidebarOpen: true,
     sidebarSearchTick: 0,
+    shows: {},
     contextOpen: false,
     contextTab: 'last',
     libraryTab: 'skills',
@@ -1978,6 +1985,13 @@ export const useStore = create<State>((set, get) => {
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
+    openShow: (conversationId, item) => set((s) => ({ shows: { ...s.shows, [conversationId]: item } })),
+    closeShow: (conversationId) => set((s) => {
+      if (!(conversationId in s.shows)) return s
+      const { [conversationId]: _gone, ...shows } = s.shows
+      void _gone
+      return { shows }
+    }),
     togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
     closePageAgent: () => set({ pageAgentOpen: false }),
     resetPageAgent: () => {

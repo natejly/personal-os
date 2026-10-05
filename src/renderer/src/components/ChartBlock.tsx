@@ -6,6 +6,7 @@ import {
 import { parseJsonLoose } from '../lib/chartRepair'
 import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from 'lucide-react'
 import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
+import OpenInPanel from './ShowButton'
 
 /**
  * Renders a ```chart fenced block: a compact JSON spec the model writes (see RENDER_HINT in the backend).
@@ -203,7 +204,7 @@ export function DataTable({ spec }: { spec: Spec }): JSX.Element {
 export type ChartView = 'chart' | 'table' | 'source'
 
 /** The chart/table/source/copy toolbar both chart blocks share; `children` are the block's own actions, before Copy. */
-export function ChartTools({ view, setView, source, chartIcon, children }: { view: ChartView; setView: (v: ChartView) => void; source: string; chartIcon: ReactNode; children?: ReactNode }): JSX.Element {
+export function ChartTools({ view, setView, source, chartIcon, kind, children }: { view: ChartView; setView: (v: ChartView) => void; source: string; chartIcon: ReactNode; kind?: 'chart' | 'interactive'; children?: ReactNode }): JSX.Element {
   const [copied, setCopied] = useState(false)
   const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
   return (
@@ -212,6 +213,7 @@ export function ChartTools({ view, setView, source, chartIcon, children }: { vie
       <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
       <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
       {children}
+      {kind && <OpenInPanel kind={kind} source={source} />}
       <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
     </div>
   )
@@ -237,7 +239,7 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
     <figure className="chart-block">
       <div className="code-head">
         <span>{spec.title || `${spec.type} chart`}</span>
-        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />} />
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />} kind="chart" />
       </div>
       {view === 'chart' && (
         <div className="chart-canvas" style={{ height: spec.type === 'pie' ? 260 : 280 }}>

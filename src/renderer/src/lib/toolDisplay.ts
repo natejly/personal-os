@@ -20,7 +20,7 @@ const VERBS: Record<string, string> = {
   doc_list: 'List files', doc_search: 'Search file text', doc_read: 'Read file', doc_create: 'Create file', doc_edit: 'Edit file', doc_delete: 'Delete file',
   search_memory: 'Search memory', save_memory: 'Save to memory', graph_search: 'Search knowledge graph',
   graph_traverse: 'Explore knowledge graph', graph_add: 'Add to knowledge graph',
-  run_python: 'Run Python', current_time: 'Check the time',
+  run_python: 'Run Python', current_time: 'Check the time', show: 'Show in side panel',
   gmail_search: 'Search Gmail', gmail_read: 'Read email', gmail_draft: 'Draft email', gmail_send: 'Send email',
   gmail_outbox: 'Check send queue', gmail_modify: 'Update email',
   calendar_events: 'List calendar events', calendar_get: 'Read calendar event', calendar_create: 'Create calendar event',
@@ -98,6 +98,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     case 'desk_ask': case 'ask_user': return { verb, subject: clip(str('question'), 80) }
     case 'desk_done': return { verb, subject: clip(str('summary'), 80) }
     case 'view_image': return { verb, subject: str('path') }
+    case 'show': return { verb, subject: str('title') || str('path') || str('kind') }
     case 'convert_document': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
     case 'render_preview': return { verb, subject: str('path') }
     case 'doc_guide': return { verb, subject: str('format') }

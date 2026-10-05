@@ -256,6 +256,12 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   fields, dropdowns and toggles, and plots formulas over them — so you can drag
   an assumption and watch the curve move. It recomputes locally, with no new
   request to the model.
+- **Side panel.** The assistant can open a panel beside the chat on something
+  you should look at: a full-page HTML mock-up, an SVG, a diagram, a chart,
+  markdown, or a file on this Mac (a PDF in the built-in viewer, an image, a
+  text file). Any ```` ```html ````, ```` ```svg ````, ```` ```mermaid ````,
+  ```` ```chart ```` or ```` ```interactive ```` block in a reply has an
+  "Open in side panel" button too. See `docs/side-panel.md`.
 - **Traces.** Every reply records what it did: context assembly, each model
   round with time-to-first-token and token counts, each tool call, and the
   auto-learn pass. Spans stream live into a waterfall in the Context panel.

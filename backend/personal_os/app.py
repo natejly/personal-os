@@ -8,6 +8,7 @@ import html
 import json
 import logging
 import math
+import mimetypes
 import os
 import re
 import secrets
@@ -1457,7 +1458,8 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
 - ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle; inline scripts do not run there. Use it for a mock-up or a formatted layout. ```svg renders as an image.
 Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
-Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
+Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
+The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
 
 # Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
 PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
@@ -3276,6 +3278,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
+                # likewise the side panel's content (the `show` tool): the model keeps only the one-line receipt
+                show = result.pop("show", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
@@ -3292,7 +3296,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None, **edit_info,
+                         "error": err, "images": images or None, "show": show or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
@@ -6873,6 +6877,27 @@ class LinkTitleIn(BaseModel):
 async def doc_link_title(body: LinkTitleIn) -> dict[str, Any]:
     """The page title behind a pasted URL, through the same address guard as fetch_url. {title: null} when unreadable."""
     return {"title": await page_title(body.url, settings())}
+
+
+# Anything that could be a page in the app's origin is served as text: the panel renders HTML and SVG files through
+# the same sandboxed srcdoc frame as a ```html block, never as a document of its own.
+_RAW_AS_TEXT = {"text/html", "image/svg+xml", "application/xhtml+xml", "application/xml", "text/xml", "text/javascript", "application/javascript"}
+
+
+@app.get("/local/raw")
+def local_raw(path: str) -> FileResponse:
+    """Bytes of a file on this Mac for the chat's side panel (the `show` tool). Same guard as read_local_file:
+    the home folder only, no hidden folders, no ~/Library, never the app's own data."""
+    try:
+        p = mac.allowed_path(path)
+    except mac.LocalPathError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+    if mime in _RAW_AS_TEXT:
+        mime = "text/plain"
+    return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
 
 
 # Both declared above /docs/{id} so "assets" is not read as a doc id.

@@ -24,7 +24,8 @@ test('regenerate keeps variants and the switcher moves between them', async ({ g
   const [c0] = await api('/conversations')
   const c = await api(`/conversations/${c0.id}`)
   expect(c.messages.filter((m) => m.role === 'user').length).toBe(1)
-  expect(benign(grain.consoleErrors)).toEqual([])
+  // the second click of a double-click is refused by the backend (409: a reply is already running)
+  expect(benign(grain.consoleErrors).filter((e) => !/status of 409/.test(e))).toEqual([])
 })
 
 test('edit and resend replaces the message and its replies', async ({ grain }) => {
@@ -90,6 +91,7 @@ test('!!fail 500 shows the error row, Retry recovers; next send works; 429 likew
   await say(page, '!!fail 429')
   await expect(page.locator('.msg-error').last()).toBeVisible({ timeout: 120_000 })
   await expect(anyStop(page)).toHaveCount(0, { timeout: 60_000 })
+  await expect(page.getByRole('button', { name: 'Retry' }).last()).toBeVisible()
   await sayAndWait(page, '!!reply recovered again', 'recovered again')
   expect(benign(grain.consoleErrors).filter((e) => !/50[0-9]|429|Failed to load resource/.test(e))).toEqual([])
 })

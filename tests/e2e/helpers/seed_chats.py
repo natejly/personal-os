@@ -13,7 +13,7 @@ ids = []
 for i in range(n):
     cid = uuid.uuid4().hex[:16]
     ids.append(cid)
-    t = now - (n - i) * 60
+    t = now - (n - i) * 3600 - per - 5  # the whole chat is in the past, so a new message sorts last
     db.execute("INSERT INTO conversations(id, project_id, title, model, settings, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
                (cid, None, f"Seed chat {i:03d}", "mock-chat", "{}", t, t))
     for j in range(per):

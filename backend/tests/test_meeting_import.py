@@ -67,7 +67,7 @@ class stt_is:
         stt.transcribe = self.real  # type: ignore[assignment]
         meeting_recorder.RETRY_BACKOFF = self.real_backoff
 
-    def _t(self, path, *, settings, cfg, data_dir, prompt=""):
+    def _t(self, path, *, settings, cfg, data_dir, prompt="", vocab=""):
         self.n += 1
         # Segments are drained in order; a failing segment is retried, so key off the file name.
         k = int(Path(path).stem.split("-")[1])

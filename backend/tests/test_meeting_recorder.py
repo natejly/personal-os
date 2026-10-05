@@ -52,8 +52,8 @@ class transcribes_as:
         meeting_recorder.stt.transcribe = self.real  # type: ignore[assignment]
 
     def _transcribe(self, path: Path, *, settings: dict, cfg: dict, data_dir: Path,
-                    prompt: str = "") -> dict:
-        self.calls.append({"path": path, "prompt": prompt, "model": cfg.get("sttModel")})
+                    prompt: str = "", vocab: str = "") -> dict:
+        self.calls.append({"path": path, "prompt": prompt, "vocab": vocab, "model": cfg.get("sttModel")})
         if self.hold is not None and len(self.calls) == 1:
             self.hold.wait(20)
         i = min(len(self.calls) - 1, len(self.results) - 1)

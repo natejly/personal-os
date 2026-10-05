@@ -126,7 +126,7 @@ def test_the_whisper_prompt_has_the_vocab_and_the_previous_clip_tail() -> None:
     texts = iter(["first clip words", "second clip"])
     real = stt.transcribe
 
-    def fake(path, *, settings, cfg, data_dir, prompt=""):
+    def fake(path, *, settings, cfg, data_dir, prompt="", vocab=""):
         prompts.append(prompt)
         return {"text": next(texts), "detail": {}, "backend": "proxy", "error": "", "ms": 1}
 

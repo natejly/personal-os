@@ -516,6 +516,9 @@ def test_requesting_an_unknown_permission_is_refused_without_prompting() -> None
     assert fda["prompted"] is False and "cannot be requested" in fda["note"]
     assert activity.open_settings("nonsense") is False
     assert activity.SETTINGS_URLS["accessibility"].endswith("Privacy_Accessibility")
+    # The meeting recorder's two extra switches open through the same door.
+    assert activity.SETTINGS_URLS["speech_recognition"].endswith("Privacy_SpeechRecognition")
+    assert activity.SETTINGS_URLS["audio_capture"].endswith("Privacy_AudioCapture")
 
 
 def test_record_everything_mode_turns_everything_on_and_stands_the_gate_down() -> None:

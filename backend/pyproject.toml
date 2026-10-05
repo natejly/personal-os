@@ -37,6 +37,11 @@ activity = [
   # On-device SFSpeechRecognizer, so meetings/activity do not need whisper.cpp.
   "pyobjc-framework-Speech>=10.3; sys_platform == 'darwin'",
 ]
+# Whistle: a 17 MB seven-language speech-to-text model that runs on the CPU in this process
+# (meetings.sttBackend = whistle). Its weights download from Hugging Face on first use.
+whistle = [
+  "cactus-needle>=3.1",
+]
 
 [project.scripts]
 grain-backend = "personal_os.__main__:main"

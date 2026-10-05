@@ -41,7 +41,7 @@ PY="$OUT/python/bin/python3"
 
 # Non-editable install of the backend plus the macOS activity extras. The backend never imports
 # LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled.
-uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[activity]"
+uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[activity,whistle]"
 
 # The standalone build's console scripts carry absolute shebangs into this build dir; nothing uses
 # them (the app runs `python -m personal_os`), so drop them.

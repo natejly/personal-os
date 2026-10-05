@@ -61,10 +61,16 @@ to stdin rather than sending a signal. Every closed segment is checked as a real
 wav (the stdlib `wave` module, then ffprobe if the header is truncated).
 
 **TranscribeWorker** drains a queue on a second thread and calls `stt.py`, which
-has four backends resolved by `sttBackend`:
+has five backends resolved by `sttBackend`:
 
 - `speech` — Apple's on-device Speech framework. Audio never leaves the machine.
   Needs Speech Recognition granted to the app (macOS asks on the first transcribe).
+- `whistle` — Whistle, a 17 MB seven-language (English, German, French, Spanish,
+  Italian, Dutch, Polish) speech model that runs on the CPU inside the backend
+  process via the `cactus-needle` package. Audio never leaves the machine; the
+  weights download from Hugging Face once, into `~/.cache/cactus-needle`. Word
+  timestamps come back, so diarization works with it. The package's anonymous
+  usage telemetry is switched off before it is imported.
 - `proxy` — POSTs the wav to `/v1/audio/transcriptions` on your configured base
   URL. **A default `litellm.yaml` has no model behind that path**, so this fails
   until you add one (see `litellm.yaml`'s commented block).
@@ -72,8 +78,10 @@ has four backends resolved by `sttBackend`:
   never leaves the machine.
 - `off` — keep the notes, produce no transcript. A legitimate choice, not a
   failure state.
-- `auto` — `speech` if the recognizer is authorized, else `local` if the binary
-  and a model are both present, else `proxy`.
+- `auto` — `speech` if the recognizer is authorized, else `whistle` if
+  `cactus-needle` is installed, else `local` if the binary and a model are both
+  present, else `proxy`. With `diarize` on, `whistle` or `local` win over
+  `speech`, because speaker separation needs timed segments.
 
 A transcription failure is a row of data, not an exception: the segment gets an
 `error` string, keeps its wav, and is retried by the 45-second tick (three per
@@ -232,6 +240,15 @@ time you press Test or Record with the Speech backend, macOS asks. Packaged
 builds include the usage string in Info.plist; in development the grant still
 lands on Electron.
 
+The checklist in Settings → Meetings (and the consent modal) reads the stored
+state of each grant without prompting. A row behind a permission carries a
+**Grant** button while macOS can still be asked, and an **Open System Settings**
+link straight into the right pane for the cases where only the hand switch
+works: a refused Microphone grant, Speech Recognition, and System Audio
+Recording (which has no preflight API, so its row can only open the pane). A
+microphone that was never asked for blocks Start too, so the dialog comes from
+the button rather than from the first second of a call.
+
 Capture itself is native (AVAudioEngine / Core Audio tap). ffmpeg is optional:
 it remuxes a truncated wav and is the fallback on a Mac where pyobjc is missing.
 
@@ -239,6 +256,7 @@ it remuxes a truncated wav and is the fallback on a Mac where pyobjc is missing.
 # Optional fallbacks, not required on macOS 14.2+ with the activity extras installed:
 brew install ffmpeg          # truncated-wav repair and the ffmpeg capture path
 brew install whisper-cpp     # if you prefer whisper.cpp over Apple Speech
+cd backend && uv pip install -e '.[whistle]'   # Whistle: 17 MB, seven languages, CPU only
 ```
 
 ### System audio

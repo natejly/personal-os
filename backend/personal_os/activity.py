@@ -476,6 +476,10 @@ SETTINGS_URLS = {
     "automation": _PANE + "Automation",
     "microphone": _PANE + "Microphone",
     "full_disk": _PANE + "AllFiles",
+    # The two the meeting recorder needs beyond the microphone. System audio has no preflight API,
+    # so its row can only open the pane.
+    "speech_recognition": _PANE + "SpeechRecognition",
+    "audio_capture": _PANE + "AudioCapture",
 }
 
 _iokit_lib: Any = None
@@ -683,6 +687,16 @@ def request_permission(pid_: str, browser: str = "") -> dict[str, Any]:
             out["note"] = "macOS is showing the Microphone request."
         except Exception as e:  # noqa: BLE001
             out["note"] = f"Could not ask: {e}. Install pyobjc-framework-AVFoundation or use the pane."
+
+    elif pid_ == "speech_recognition":
+        try:
+            from Speech import SFSpeechRecognizer  # type: ignore[import-not-found]
+
+            SFSpeechRecognizer.requestAuthorization_(lambda st: None)
+            out["prompted"] = True
+            out["note"] = "macOS is showing the Speech Recognition request."
+        except Exception as e:  # noqa: BLE001
+            out["note"] = f"Could not ask: {e}. Install pyobjc-framework-Speech or use the pane."
 
     elif pid_ == "automation":
         name = browser or ""

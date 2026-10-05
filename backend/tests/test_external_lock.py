@@ -83,6 +83,13 @@ def test_external_tools_outside_always_ask_run_on_a_plain_yes() -> None:
     assert tb.gate("fetch_url", "on", {"tainted": True}) == "ask", "a tainted run still asks before reaching the internet"
 
 
+def test_a_reviewed_doc_edit_is_not_carded_on_top_of_its_diff() -> None:
+    assert tb.gate("doc_edit", "on", {"tainted": True, "settings": {}}) == "on", "review mode: the diff is the card"
+    assert tb.gate("doc_edit", "on", {"tainted": True, "settings": {"docEditMode": "review"}}) == "on"
+    assert tb.gate("doc_edit", "on", {"tainted": True, "settings": {"docEditMode": "apply"}}) == "ask", "accept-all writes, so taint asks"
+    assert tb.gate("doc_create", "on", {"tainted": True, "settings": {}}) == "ask", "no diff to accept for a new doc"
+
+
 def test_the_always_ask_setting_moves_the_lock() -> None:
     j("PUT", "/settings", {"alwaysAsk": ["gmail_modify", "gmail_modify", "calendar_propose"]})
     try:
@@ -143,6 +150,15 @@ def test_a_legacy_stored_on_still_shows_a_card_and_always_grants_nothing() -> No
     j("POST", f"/approvals/{card['call_id']}", {"decision": "always_global"})
     _wait(lambda: (r := appmod.run_store.get(rid)) and r["status"] not in ("running", "awaiting_approval"), "the run")
     assert "schedule_task" not in (appmod.settings().get("tools") or {}), "'Always' on a schedules card is one-shot"
+    # The answer is on the tape, right after the card, so a replay settles the card instead of asking again.
+    evs = j("GET", f"/runs/{rid}/events")
+    names = [e["event"] for e in evs]
+    i = names.index("tool_call")
+    assert "tool_decision" in names[i:] and names.index("tool_decision") < names.index("tool_result")
+    dec = next(e for e in evs if e["event"] == "tool_decision")["data"]
+    assert dec["id"] == card["call_id"] and dec["decision"] == "always_global"
+    _text, rows = appmod.run_store.transcript(rid, dec["message_id"])
+    assert all(not r.get("needs_approval") for r in rows), "a rebuilt row is settled"
 
 
 # ---- an approved plan step still stands in for the card, now that external tools top out at ask ----

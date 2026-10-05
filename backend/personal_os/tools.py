@@ -898,7 +898,10 @@ class Toolbox:
         """
         spec = self.specs.get(name)
         cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
-        if spec and mode == "on" and ctx.get("tainted") and (
+        # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
+        # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
+        reviewed = name == "doc_edit" and str((ctx.get("settings") or {}).get("docEditMode") or "review") != "apply"
+        if spec and mode == "on" and ctx.get("tainted") and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"

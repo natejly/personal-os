@@ -1463,6 +1463,8 @@ export type ChatEvent =
   | { event: 'reasoning'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
+  /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
+  | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
   | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason'] } }

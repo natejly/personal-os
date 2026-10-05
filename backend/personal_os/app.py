@@ -2085,7 +2085,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if budget is not None:
                     budget.paused += time.time() - waited_from
                 run.set_status("running")
-            allowed = decision in ("allow", "always_chat", "always_global")
+            allowed = decision != "deny"
             run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
                                         "result_preview": "", "duration_ms": 0,
                                         "error": None if allowed else "Declined by the user", "approval": "allow" if allowed else "deny",
@@ -3061,6 +3061,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         _approvals.pop(uid, None)
                     deny_note = _approval_notes.pop(uid, None)
                     pending_card, awaiting = awaiting, None
+                    if not parked:
+                        # On the tape, so a window that re-attaches while the approved call is still running (or
+                        # another window) sees the card answered rather than open for a second approval.
+                        yield "tool_decision", {"message_id": am["id"], "id": uid, "decision": decision}
                     if decision != "deny" and mine and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
                         # The user rewrote this call on its card. approval_edits validated it in the route and the row's
                         # digest was re-bound to it; from here on the edited arguments are THE call: they run, are

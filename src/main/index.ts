@@ -46,7 +46,7 @@ function createWindow(): void {
     show: false,
     title: 'Grain',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 16, y: 16 },
+    trafficLightPosition: { x: 16, y: 14 },
     vibrancy: isMac ? 'sidebar' : undefined,
     visualEffectState: 'active',
     backgroundColor: '#00000000',

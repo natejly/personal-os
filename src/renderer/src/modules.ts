@@ -49,7 +49,6 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   viewRow('health'),
   { view: 'calendar', label: 'Calendar' },
   { view: 'mail', label: 'Mail' },
-  { view: 'dashboards', label: 'Dashboards' },
   { view: 'library', label: 'Library' },
   { view: 'cowork', label: 'Cowork' },
   // Showing the view records nothing. Recording is `meetings.enabled` plus an acknowledged consent

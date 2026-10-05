@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Gauge, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -51,8 +51,7 @@ function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
 /** Rows shown under a project group before the "View all" link takes over. */
 const PROJECT_ROWS = 4
 /**
- * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Dashboards
- * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
+ * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav').
  * A row without a `view` (Web) exists only as a widget, so it only shows in canvas mode and a click
  * opens its window directly.
  */
@@ -66,7 +65,6 @@ type ProjectRow =
 // Todos, Calendar and Mail live in the title bar instead (AppSwitcher).
 const SHELL_NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'dashboards', label: 'Dashboards', icon: <Gauge size={15} /> },
   { view: 'docs', label: 'Files', icon: <Files size={15} /> },
   // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
   // union would not typecheck — so the row is not a canvas drag source.
@@ -226,7 +224,7 @@ export default function Sidebar(): JSX.Element {
   // fresh array with the same counts does not re-render.
   const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'dashboards' || v === 'activity') return null
+    if (v === 'home' || v === 'activity') return null
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     // Counted off the inbox rather than `desks`, which is only loaded once Cowork has been opened:

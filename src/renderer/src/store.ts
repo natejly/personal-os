@@ -36,10 +36,10 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'automations' | 'connectors'
-export type FilesSection = 'notes' | 'uploads' | 'pages'
+export type FilesSection = 'notes' | 'uploads' | 'pages' | 'dashboards'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -52,7 +52,7 @@ export const readDocMode = (): DocMode => {
   } catch { return 'split' }
 }
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
-export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
+export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
  *  'memory' holds the Memory panel above the learning and search-index controls.
@@ -1717,7 +1717,7 @@ export const useStore = create<State>((set, get) => {
     projects: [],
     view: 'home',
     lastClassicView: 'home',
-    memoryMode: 'split',
+    memoryMode: 'list',
     projectViewId: null,
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
@@ -1885,6 +1885,8 @@ export const useStore = create<State>((set, get) => {
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
     },
     setView: (view) => {
+      // Dashboards moved under Files; a stale 'dashboards' (old canvas state, an old menu) lands there.
+      if ((view as string) === 'dashboards') return get().openFiles('dashboards')
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()

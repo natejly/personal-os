@@ -746,9 +746,10 @@ class Toolbox:
         from . import commands as _commands, workflows as _workflows
         _workflows.register(self)
         _commands.register(self)
-        from . import browser, deliver, envs, vision
+        from . import browser, deliver, envs, imagegen, vision
         browser.register(self)  # browser_*: the agent's own interactive browser
         vision.register(self)   # view_image
+        imagegen.register(self)  # generate_image
         deliver.register(self)  # convert_document / render_preview / doc_guide
         envs.register(self)     # python_install: the shared work environment
 

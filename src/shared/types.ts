@@ -1339,6 +1339,8 @@ export interface Settings {
   deskSelfReview?: boolean
   /** The model pictures are sent to. Empty = the chat model when it reads images. */
   visionModel?: string
+  /** The model generate_image calls; the provider must offer /images/generations. */
+  imageModel?: string
   /** The agent's own browser. */
   browserEnabled?: boolean
   browserMaxTabs?: number

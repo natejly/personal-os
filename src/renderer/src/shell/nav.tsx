@@ -9,6 +9,8 @@ export type NavPlace = 'sidebar' | 'apps'
 export interface NavEntry {
   view: View
   label: string
+  /** One line on what the view is for, shown on hover. */
+  description?: string
   icon: JSX.Element
   /** The canvas widget the entry drags in, where one exists. */
   kind?: WidgetKind
@@ -22,12 +24,12 @@ export interface NavEntry {
  * title-bar apps 110 and 120; a module slots by its `nav.order`, plus 100 when it asks for the title bar.
  */
 const SHELL: NavEntry[] = [
-  { view: 'meetings', label: 'Meetings', icon: <Mic size={15} />, place: 'sidebar', order: 20 },
-  { view: 'cowork', label: 'Cowork', icon: <Users size={15} />, place: 'sidebar', order: 30 },
-  { view: 'library', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
-  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity', place: 'sidebar', order: 50 },
-  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },
-  { view: 'mail', label: 'Mail', icon: <Mail size={15} />, place: 'apps', order: 120 }
+  { view: 'meetings', description: 'Record and transcribe meetings, with summaries and action items', label: 'Meetings', icon: <Mic size={15} />, place: 'sidebar', order: 20 },
+  { view: 'cowork', description: 'Desks: parallel autonomous sessions, each with its own plan and workspace', label: 'Cowork', icon: <Users size={15} />, place: 'sidebar', order: 30 },
+  { view: 'library', description: 'Skills, connectors and everything Grain made for you', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
+  { view: 'activity', description: 'What you did on this Mac, and the habits it suggests automating', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity', place: 'sidebar', order: 50 },
+  { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },
+  { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, place: 'apps', order: 120 }
 ]
 
 // Built on first call, never at import: the registry imports module views, and those views render the
@@ -37,10 +39,13 @@ export function navEntries(): NavEntry[] {
   if (cache) return cache
   const mods: NavEntry[] = MODULES.filter((m) => m.nav && m.view).map((m) => {
     const apps = m.nav!.section === 'apps'
-    return { view: m.view!.id, label: m.label, icon: m.icon, kind: m.widget?.kind, place: apps ? 'apps' : 'sidebar', order: m.nav!.order + (apps ? 100 : 0) }
+    return { view: m.view!.id, label: m.label, description: m.description, icon: m.icon, kind: m.widget?.kind, place: apps ? 'apps' : 'sidebar', order: m.nav!.order + (apps ? 100 : 0) }
   })
   // Array.sort is stable, so on a tie the shell's own entry comes first.
   return (cache = [...SHELL, ...mods].sort((a, b) => a.order - b.order))
 }
+
+/** Hover text for a nav entry: its label, then what it is for. */
+export const navTitle = (e: { label: string; description?: string }): string => (e.description ? `${e.label} — ${e.description}` : e.label)
 
 export const placeOf = (s: Settings, e: NavEntry): NavPlace => s.navPlacement?.[e.view] ?? e.place

@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore, type View } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
-import { navEntries, placeOf } from '../shell/nav'
+import { navEntries, navTitle, placeOf } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
 
 // Read on first render, never at import: the registry imports module views, and those views render
@@ -34,7 +34,7 @@ export default function AppSwitcher(): JSX.Element {
         const n = badgeOf(a.view)
         return (
           <button key={a.view} className={`icon-btn app-switch ${view === a.view ? 'on' : ''}`}
-            title={a.label} aria-label={a.label} aria-pressed={view === a.view}
+            title={navTitle(a)} aria-label={a.label} aria-pressed={view === a.view}
             onClick={() => setView(a.view)}
             {...(a.kind ? dragProps({ kind: 'nav', id: a.kind, label: a.label }) : {})}>
             {a.icon}

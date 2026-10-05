@@ -286,6 +286,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  const tools = useStore((s) => s.tools)
   const lastBrowser = browserSession ? latestBrowserCall(events) : null
   // The context panel only ever shows the main view's chat, so "See why" is offered there alone.
   const inMainChat = useStore((s) => s.view === 'chat' && s.focusedConversationId === conversationId)
@@ -297,7 +298,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
     const d = describeCall(t.name, t.arguments)
     return (
       <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.pending && t.needs_approval ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
-        <button className="tool-head" aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
+        <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
           <span className="tool-name human">{d.verb}</span>

@@ -1031,10 +1031,12 @@ export const useStore = create<State>((set, get) => {
   const putDesk = (d: Desk): void =>
     set((st) => ({
       // A desk archived (or unarchived) leaves the list it no longer belongs to.
+      // A row older than the one held is dropped: a fetch that was in flight when a newer desk_status landed
+      // resolves afterwards, and applying it would put the rail back on a status the desk has already left.
       desks: Boolean(d.archived) !== st.deskShowArchived
         ? st.desks.filter((x) => x.id !== d.id)
-        : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
-      activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
+        : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id && x.updated_at <= d.updated_at ? d : x)) : st.desks,
+      activeDesk: st.activeDesk?.id === d.id && st.activeDesk.updated_at <= d.updated_at ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
   const queuedNote = (position: number): string => `Queued #${position}: it starts when another desk finishes`
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
@@ -1158,10 +1160,17 @@ export const useStore = create<State>((set, get) => {
    */
   let inboxTimer: ReturnType<typeof setTimeout> | null = null
   let todosTickTimer: ReturnType<typeof setTimeout> | null = null
+  let deskListLoading = false
   const onDeskChanged = (d: Desk): void => {
     const st = get()
     const before = (st.activeDesk?.id === d.id ? st.activeDesk : st.desks.find((x) => x.id === d.id))?.status
     putDesk(d)
+    // A desk started outside this window (an agent's desk_start, a scheduled job) is not on the rail yet. putDesk only
+    // updates rows it has, so ask the list, which applies the scope filter itself.
+    if (before === undefined && !deskListLoading) {
+      deskListLoading = true
+      void get().refreshDesks().finally(() => { deskListLoading = false })
+    }
     if (before === d.status) return
     if (st.activeDeskId === d.id) void get().openDesk(d.id)
     if (d.status === 'review') void get().loadDeskFiles(d.id)
@@ -2867,7 +2876,10 @@ export const useStore = create<State>((set, get) => {
 
     refreshDesks: async () => {
       try {
-        set({ desks: await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived) })
+        const fresh = await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived)
+        // A desk_status event can land while this request is in flight; the list was read before it, so a row the
+        // store already holds in a newer state wins, or the rail would sit on the old status until the next event.
+        set((st) => ({ desks: fresh.map((d) => { const cur = st.desks.find((x) => x.id === d.id); return cur && cur.updated_at > d.updated_at ? cur : d }) }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2897,7 +2909,9 @@ export const useStore = create<State>((set, get) => {
         const desk = await api.cowork.desks.get(id)
         // A slower fetch must not clobber a desk the user has since switched away from.
         if (get().activeDeskId !== id) return
-        set({ activeDesk: desk })
+        // The rail may already hold a newer status than this fetch read (see putDesk): the detail pane follows it.
+        const listed = get().desks.find((x) => x.id === id)
+        set({ activeDesk: listed && listed.updated_at > desk.updated_at ? { ...desk, ...listed } : desk })
         putDesk(desk)
         // `retainSession` is the detail pane's own effect pair: the 12-session LRU evicts by
         // `touchedAt`, and a desk pane is never `focusedConversationId`.

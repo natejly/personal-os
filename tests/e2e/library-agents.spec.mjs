@@ -84,7 +84,7 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await box.fill('!!tool agent_spawn {"task": "!!slow 12000 !!reply first draft", "role": "researcher", "background": true}')
   await box.press('Enter')
   // Its face sits on the reply's activity line, no fold to open.
-  await expect(win.locator('.reasoning')).toBeVisible({ timeout: 40_000 })
+  await expect(win.locator('.msg.assistant').last()).toContainText('tool done', { timeout: 60_000 })
   console.log('DEBUG tool_events', JSON.stringify((await api(`/conversations/${c.id}`)).messages.map((m) => m.tool_events)))
   console.log('DEBUG runs', JSON.stringify(await api(`/runs?status=all&conversation_id=${c.id}`)))
   await expect(win.locator('.crew-face')).toHaveCount(1, { timeout: 40_000 })

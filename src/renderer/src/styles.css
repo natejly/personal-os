@@ -2157,48 +2157,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 }
 .cal-loading { position: absolute; top: 60px; right: 20px; font-size: 12px; color: var(--text-faint); }
 
-/* ---------- Dashboards ---------- */
-/* A Files section: the Files header holds the section tabs, this row holds the dashboard controls. */
-.dash-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.dash-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.dw-composer { padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; gap: 8px; }
-.dw-composer textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; outline: 0; font: inherit; resize: vertical; }
-.dw-composer textarea:focus { border-color: var(--accent); }
-.src-picker { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.chip-check { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border-strong); font-size: 12px; cursor: pointer; color: var(--text-muted); }
-/* Same fix as .toggle-row input: hidden, but still focusable and announced. */
-.chip-check input {
-  position: absolute; left: 0; top: 50%;
-  width: 1px; height: 1px; margin: 0;
-  opacity: 0; pointer-events: none;
-}
-.chip-check.on { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.dgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.dwidget { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); display: flex; flex-direction: column; overflow: hidden; }
-.dwidget.w2 { grid-column: span 2; }
-.dwidget.w3 { grid-column: span 3; }
-@media (max-width: 1100px) { .dgrid { grid-template-columns: repeat(2, 1fr); } .dwidget.w3 { grid-column: span 2; } }
-.dwidget > header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
-.dw-title { font-weight: 600; min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.dw-title svg { vertical-align: -2px; margin-right: 6px; }
-.dw-width { font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; }
-/* Opaque and always dark: generated widgets style themselves for a dark surface, and a transparent
-   iframe over the vibrancy window can read as a hole to the desktop while it (re)loads. */
-.dwidget iframe { border: 0; width: 100%; background: #232220; display: block; }
-.dw-empty { padding: 16px; color: var(--text-muted); font-size: 13px; }
-.stat-tile { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 16px 14px; min-height: 120px; }
-.stat-label { font-size: 12px; color: var(--text-muted); }
-.stat-value { font-size: 40px; line-height: 1.1; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.stat-delta { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.stat-delta.up { color: var(--chart-2, var(--text)); }
-.stat-delta.down { color: var(--chart-4, var(--text)); }
-.dw-md { padding: 10px 14px; font-size: 13px; overflow: auto; }
-.dw-code { margin: 0; padding: 10px; font-size: 11px; overflow: auto; max-height: 400px; white-space: pre-wrap; }
-.dw-revise { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.dw-revise input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; outline: 0; }
-.src-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.src-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; }
-.src-main { flex: 1; min-width: 0; }
+/* ---------- Shared bits ---------- */
 .mono { font-family: var(--mono); }
 .small.err, .muted.err { color: var(--danger); }
 

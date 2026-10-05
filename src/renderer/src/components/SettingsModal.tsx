@@ -125,7 +125,7 @@ function PresetFiles(): JSX.Element {
   return (
     <section>
       <h3>Space presets</h3>
-      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes and dashboard widgets travel with it; chats never do.</p>
+      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes travel with it; chats never do.</p>
       {presets.map((p) => (
         <div className="setting-row" key={p.id}>
           <span className="toggle-text"><b>{p.name}</b><small>{p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>

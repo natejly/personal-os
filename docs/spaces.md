@@ -8,8 +8,8 @@ in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
 ## Windows
 
 Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
-`dashboard-widget`, `memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `web`,
-`artifact`, `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
+`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `web`,
+`face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
 desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
@@ -64,9 +64,7 @@ The assistant can add to a space but never close or delete anything on one.
 | Tool | Does |
 |---|---|
 | `space_list` | Lists the spaces and the windows on each. |
-| `space_add_widget` | Puts a view, or an existing chat, note, page, dashboard widget or project, in the next free grid cell of a space. |
+| `space_add_widget` | Puts a view, or an existing chat, note or project, in the next free grid cell of a space. |
 | `space_arrange` | Tiles (`grid`) or stacks (`cascade`) a space's open windows. Moves and resizes only. |
-| `widget_create` | Builds a live chart, stat or table widget from a data source. The layout is generated once; refreshes re-read the source with no model call. |
-| `widget_place` | Puts a widget from `widget_create` on a space (the first one when none is named). |
 
 `space_*` live in `backend/personal_os/space_tools.py`, `widget_*` in `widget_tools.py`.

@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -244,51 +244,6 @@ export const api = {
     reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' }),
     /** Rejects every pending proposal of one job. */
     rejectAll: (jobId: string) => req<{ ok: boolean; rejected: number }>(`/proposals/reject_all?job_id=${encodeURIComponent(jobId)}`, { method: 'POST' })
-  },
-  sources: {
-    list: () => req<{ sources: DataSource[]; internal: string[] }>('/sources'),
-    create: (s: { name: string; kind: string; config: Record<string, unknown>; secret?: string; description?: string }) => req<DataSource>('/sources', { method: 'POST', body: json(s) }),
-    update: (id: string, patch: Record<string, unknown>) => req<DataSource>(`/sources/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/sources/${id}`, { method: 'DELETE' }),
-    fetch: (id: string) => req<unknown>(`/sources/${id}/fetch`)
-  },
-  artifacts: {
-    list: (opts: { conversationId?: string; q?: string } = {}) => {
-      const p = new URLSearchParams()
-      if (opts.conversationId) p.set('conversation_id', opts.conversationId)
-      if (opts.q) p.set('q', opts.q)
-      return req<Artifact[]>(`/artifacts?${p}`)
-    },
-    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
-    create: (a: { title?: string; code: string; prompt?: string; conversation_id?: string; message_id?: string }) =>
-      req<Artifact>('/artifacts', { method: 'POST', body: json(a) }),
-    update: (id: string, patch: { title?: string; code?: string; instruction?: string }) =>
-      req<Artifact>(`/artifacts/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' }),
-    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
-    version: (id: string, n: number) => req<ArtifactVersion>(`/artifacts/${id}/versions/${n}`),
-    restore: (id: string, n: number) => req<Artifact>(`/artifacts/${id}/restore/${n}`, { method: 'POST' }),
-    /** Regenerate the whole document from a plain-language instruction (a model call), saved as a new version. */
-    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
-    /** Absolute URL for the sandboxed iframe; `path` is the signed render_path the backend handed out. */
-    renderUrl: (path: string) => `${base}${path}`
-  },
-  dashboards: {
-    list: () => req<Dashboard[]>('/dashboards'),
-    get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
-    create: (d: { name: string; description?: string }) => req<Dashboard>('/dashboards', { method: 'POST', body: json(d) }),
-    delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
-    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number; spec?: Record<string, unknown> }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
-  },
-  /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
-  widgets: {
-    get: (id: string) => req<Widget>(`/widgets/${id}`),
-    /** A declarative widget's rows: the cache inside its refresh_minutes, a re-bind after. Never a model call. */
-    data: (id: string) => req<Widget>(`/widgets/${id}/data`),
-    update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
-    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }, NO_TIMEOUT),
-    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
-    delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '', list = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}&list_name=${encodeURIComponent(list)}`),
@@ -741,7 +696,7 @@ export const api = {
     /** Bulk geometry write, debounced on pointerup. Returns the rowcount, not the canvas. */
     layout: (id: string, windows: WindowLayout[]) => req<{ ok: boolean; updated: number }>(`/canvases/${id}/layout`, { method: 'PUT', body: json({ windows }) })
   },
-  /** Canvas windows (`/windows/{id}`). Not `api.widgets`, which is an AI dashboard widget. */
+  /** Canvas windows (`/windows/{id}`). */
   windows: {
     get: (id: string) => req<CanvasWindow>(`/windows/${id}`),
     /** `config` merges server-side, so one key is safe to send on its own. */

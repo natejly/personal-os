@@ -64,7 +64,7 @@ def test_constants() -> None:
           "recover() also sweeps awaiting_plan: its card was held open by a run that died with the process")
     check(not set(RECOVER_FROM) & {"paused", "blocked", "draft", "review"},
           "...and nothing the user parked on purpose")
-    check(AUTONOMY == ("plan", "ask", "propose") and len(OUTPUT_KINDS) == 7, "the enums match the spec")
+    check(AUTONOMY == ("plan", "ask", "propose") and len(OUTPUT_KINDS) == 6, "the enums match the spec")
     for frag in (DESK_HINT, DESK_CONTINUE, DESK_RESUME):
         check(frag and frag == frag.strip(), "the prompt fragments are non-empty and unpadded")
     check("desk_deliver" in DESK_HINT and "desk_ask" in DESK_HINT and "desk_done" in DESK_HINT,

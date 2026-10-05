@@ -85,34 +85,6 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     ]
   }
 
-  const widget = async (): Promise<MenuEntry[]> => {
-    const dashboards = await api.dashboards.list()
-    if (!dashboards.length) return [{ label: 'New dashboard…', icon: <Plus size={14} />, run: () => useStore.getState().openFiles('dashboards') }]
-    return dashboards.map((d): MenuEntry => ({
-      kind: 'submenu',
-      label: d.name,
-      items: safe(async () => {
-        const widgets = (await api.dashboards.get(d.id)).widgets ?? []
-        if (!widgets.length) return [{ label: 'No widgets', disabled: true, run: noop }]
-        return widgets.map((w): MenuEntry => ({
-          label: w.title || 'Untitled widget',
-          run: act(() => open('dashboard-widget', w.id, { dashboard_id: d.id }))
-        }))
-      })
-    }))
-  }
-
-  const artifact = async (): Promise<MenuEntry[]> => {
-    const list = (await api.artifacts.list()).slice(0, RECENT_NOTES)
-    if (!list.length) {
-      return [
-        { label: 'No artifacts yet. Ask the chat to make one.', disabled: true, run: noop },
-        { label: 'Open Files → Pages', run: () => useStore.getState().openFiles('pages') }
-      ]
-    }
-    return list.map((a): MenuEntry => ({ label: a.title || 'Untitled', run: act(() => cv().ensureWindow(canvasId, 'artifact', a.id, undefined, at)) }))
-  }
-
   const project = (): MenuEntry[] => {
     const bound = projectOf()
     const projects = useStore.getState().projects
@@ -140,9 +112,7 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
   const pickers: Partial<Record<WidgetKind, () => MenuEntry[] | Promise<MenuEntry[]>>> = {
     chat,
     note,
-    'dashboard-widget': widget,
     project,
-    artifact,
     crew
   }
 

@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, MessageSquare, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, AppWindow, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -38,7 +38,6 @@ const ICONS: Record<string, JSX.Element> = {
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   doc_list: <PenLine size={13} />, doc_search: <PenLine size={13} />, doc_read: <PenLine size={13} />,
   doc_create: <PenLine size={13} />, doc_edit: <PenLine size={13} />,
-  artifact_create: <AppWindow size={13} />, artifact_edit: <AppWindow size={13} />, artifact_update: <AppWindow size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,

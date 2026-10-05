@@ -6,7 +6,6 @@ import sqlite3
 from typing import Any
 
 from .canvas import _INSERT_WINDOW, _RENAMED_DEFAULTS, FALLBACK_NAME, WIDGET_KINDS, Canvases, clamp_opacity
-from .dashboards import Dashboards
 from .db import Database, new_id, now, row_to_dict
 from .notes import Notes
 
@@ -30,8 +29,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_presets_created ON canvas_presets(created_
 """
 PRESET_JSON = ("windows",)
 # needsRef kinds -> the table their ref_id must still exist in. Mirrors `needsRef` in
-# src/renderer/src/canvas/registry.ts (chat, note, dashboard-widget, project, artifact).
-REF_TABLES = {"chat": "conversations", "note": "notes", "dashboard-widget": "widgets", "project": "projects", "artifact": "artifacts"}
+# src/renderer/src/canvas/registry.ts (chat, note, project).
+REF_TABLES = {"chat": "conversations", "note": "notes", "project": "projects"}
 
 
 def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
@@ -57,11 +56,10 @@ def _exists(c: sqlite3.Connection, table: str, rid: str | None) -> bool:
 
 
 class CanvasPresets:
-    def __init__(self, db: Database, canvases: Canvases, notes: Notes | None = None, dashboards: Dashboards | None = None):
+    def __init__(self, db: Database, canvases: Canvases, notes: Notes | None = None):
         self.db = db
         self.canvases = canvases
         self.notes = notes
-        self.dashboards = dashboards
         with db.tx() as c:
             c.executescript(SCHEMA)
             for old, new in _RENAMED_DEFAULTS:
@@ -107,11 +105,11 @@ class CanvasPresets:
             c.execute("DELETE FROM canvas_presets WHERE id=?", (id,))
 
     # ---------- portable files ----------
-    # Notes and dashboard widgets travel with their content; every other referent stays a ref (a chat
-    # must never leave the machine, and projects/artifacts have no body that fits a window).
+    # Notes travel with their content; every other referent stays a ref (a chat must never leave the
+    # machine, and a project has no body that fits a window).
     def export(self, id: str) -> dict[str, Any] | None:
         p = self.get(id)
-        if not p or not self.notes or not self.dashboards:
+        if not p or not self.notes:
             return None
         embedded: dict[str, Any] = {}
         windows = []
@@ -122,11 +120,6 @@ class CanvasPresets:
                 if not n:
                     continue
                 embedded[ref] = {"kind": "note", "body": n["body"], "color": n["color"]}
-            elif kind == "dashboard-widget" and ref:
-                d = self.dashboards.widget(ref)
-                if not d:
-                    continue
-                embedded[ref] = {"kind": "dashboard-widget", **{k: d[k] for k in ("title", "prompt", "code", "output", "width", "height", "refresh_minutes", "spec")}, "widget_kind": d["kind"]}
             windows.append({**w, "project_id": None})
         return {"grain_preset": 1, "name": p["name"], **{k: p[k] for k in ("snap_mode", "grid_size", "zoom", "pan_x", "pan_y", "wallpaper")},
                 "windows": windows, "embedded": embedded}
@@ -134,20 +127,13 @@ class CanvasPresets:
     def import_file(self, data: dict[str, Any], instantiate: bool = True) -> dict[str, Any]:
         """Recreate each embedded referent under a new id, store the preset against the new ids, optionally make its canvas.
         Raises ValueError on a file that is not a preset export."""
-        if data.get("grain_preset") != 1 or not isinstance(data.get("windows"), list) or not self.notes or not self.dashboards:
+        if data.get("grain_preset") != 1 or not isinstance(data.get("windows"), list) or not self.notes:
             raise ValueError("Not a preset file")
         emb = data.get("embedded") or {}
         remap: dict[str, str] = {}
-        dash_id = ""
         for old, e in emb.items():
             if e.get("kind") == "note":
                 remap[old] = self.notes.create(str(e.get("body", "")), str(e.get("color") or "yellow"))["id"]
-            elif e.get("kind") == "dashboard-widget":
-                dash_id = dash_id or self.dashboards.create(f"{data.get('name') or 'Imported'} widgets")["id"]
-                # Data sources are machine-local, so an imported widget starts with none.
-                remap[old] = self.dashboards.create_widget(
-                    dash_id, str(e.get("title", "")), str(e.get("widget_kind", "")), str(e.get("prompt", "")), None, str(e.get("code", "")),
-                    str(e.get("output", "")), int(e.get("width", 1)), int(e.get("height", 280)), int(e.get("refresh_minutes", 60)), e.get("spec") or {})["id"]
         windows = []
         for w in data["windows"]:
             if not isinstance(w, dict) or not all(isinstance(w.get(k), (int, float)) for k in ("x", "y", "w", "h")):

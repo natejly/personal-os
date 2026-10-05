@@ -693,9 +693,6 @@ SURFACE = """\
 - Documents and docs: uploads that get indexed, and docs the user writes that the assistant can
   propose diffs against.
 - Todos, a week calendar, notes.
-- Dashboards: register a data source (HTTP API, RSS, or the app's own todos/calendar/mail) and
-  describe a widget in plain English; the model writes the widget. "AI summary" widgets turn any
-  source into a short briefing.
 - Today screen with a generated daily recap and a one-click brief.
 - Canvas spaces: arranged widget layouts the user can switch between.
 - Memory: facts, preferences and goals, injected into chats; a knowledge graph beside it.
@@ -762,15 +759,14 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
             out.append({
                 "key": _slug(f"batch-{a}-{b}", "sug-"), "kind": "automation",
                 "title": f"Batch the {b} trips instead of {ev['round_trips']} round trips",
-                "detail": f"Make a dashboard widget that summarizes {b} on a schedule you choose, so you read it "
-                          f"once instead of switching out of {a} all day. An AI summary widget over that source "
-                          f"gives you the one-paragraph version.",
+                "detail": f"Have a scheduled task summarize {b} at times you choose, so you read it once "
+                          f"instead of switching out of {a} all day.",
                 "why": f"{ev['round_trips']} round trips between {a} and {b}, median "
                        f"{ev['median_dwell_seconds']}s in {b}.",
                 "impact": f"removes ~{ev['round_trips']} context switches a day",
                 "effort": "low", "confidence": p["confidence"], "evidence": [p["id"]],
                 "action": {"type": "prompt",
-                           "prompt": f"I keep bouncing between {a} and {b} all day. Set up a dashboard widget that "
+                           "prompt": f"I keep bouncing between {a} and {b} all day. Set up a scheduled task that "
                                      f"gives me a short digest of what's waiting in {b}, so I can check it twice a "
                                      f"day instead of every few minutes."},
             })

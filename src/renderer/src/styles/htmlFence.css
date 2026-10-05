@@ -1,0 +1,6 @@
+/* Fenced ```html / ```svg blocks in a reply: the Code | Preview toggle and the sandboxed srcdoc frame. */
+.art-fence-actions { display: flex; align-items: center; gap: 4px; }
+.art-fence .seg button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px; }
+.art-fence-frame { display: block; width: 100%; height: 320px; border: 0; background: #fff; resize: vertical; }
+.art-fence-frame.svg { height: 260px; background: transparent; }
+.art-fence-note { margin: 0; padding: 6px 12px; font-size: 11.5px; color: #adbac7; border-top: 1px solid var(--border); }

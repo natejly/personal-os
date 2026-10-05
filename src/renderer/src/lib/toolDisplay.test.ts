@@ -169,6 +169,5 @@ test('only calls that need the user, refused calls and actionable results stay o
   assert.equal(staysVisible(ev({ pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ name: 'propose_plan', pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ blocked: 'loop' })), true)
-  assert.equal(staysVisible(ev({ name: 'artifact_create' })), true)
   assert.equal(staysVisible(ev({ name: 'doc_edit' })), true)
 })

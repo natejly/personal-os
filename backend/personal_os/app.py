@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import hmac
 import html
 import json
 import logging
@@ -40,12 +39,9 @@ from .memory_index import MemoryIndex
 from .meeting_index import MeetingIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
-from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
-from .artifacts import Artifacts
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
+from .recap import Recaps, generate_recap
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
-from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
@@ -140,51 +136,6 @@ def _token_eq(sent: str, expected: str) -> bool:
         return False
 
 
-WIDGET_TOKEN_TTL = 12 * 3600
-# A widget iframe is a separate browsing context: it inherits none of the renderer's CSP, so the generated code gets
-# its own. connect-src 'self' keeps a widget's data inside the sidecar - it cannot POST anywhere else on the internet.
-WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; "
-              "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
-
-
-ARTIFACT_TOKEN_TTL = 24 * 3600
-
-
-def _artifact_render_token(aid: str, exp: int) -> str:
-    """Capability for one artifact's sandboxed iframe, which cannot send the app token. Binds id + expiry, signed
-    with the app secret, so a render URL cannot be edited to point at another artifact or outlive its TTL."""
-    return hmac.new(AUTH_TOKEN.encode(), f"artifact:{aid}:{exp}".encode(), "sha256").hexdigest()[:32]
-
-
-def _artifact_render_ok(aid: str, rt: str, re_: str) -> bool:
-    try:
-        exp = int(re_)
-    except (TypeError, ValueError):
-        return False
-    return bool(rt) and exp >= time.time() and _token_eq(rt, _artifact_render_token(aid, exp))
-
-
-def _artifact_render_path(aid: str) -> str:
-    exp = int(time.time()) + ARTIFACT_TOKEN_TTL
-    return f"/artifacts/{aid}/render?re={exp}&rt={_artifact_render_token(aid, exp)}"
-
-
-def _widget_fetch_token(wid: str, exp: int) -> str:
-    """Capability handed to one widget's iframe: scoped to that widget's sources, and expiring, because it rides in the URL."""
-    return hmac.new(AUTH_TOKEN.encode(), f"widget:{wid}:{exp}".encode(), "sha256").hexdigest()[:32]
-
-
-def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
-    try:
-        exp = int(we)
-    except ValueError:
-        return False
-    if not (wid and wt) or exp < time.time() or not _token_eq(wt, _widget_fetch_token(wid, exp)):
-        return False
-    w = dashboards.widget(wid)
-    return bool(w and source_id in (w.get("source_ids") or []))
-
-
 # `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
 app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None,
               swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
@@ -223,15 +174,11 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS or _is_artifact_render(request.method, p):
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS:
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
     if _token_eq(sent, AUTH_TOKEN):
-        return await call_next(request)
-    if p.startswith("/sources/") and p.endswith("/fetch") and _widget_fetch_ok(
-            p.split("/")[2], request.query_params.get("w") or "", request.query_params.get("wt") or "",
-            request.query_params.get("we") or ""):
         return await call_next(request)
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
@@ -240,8 +187,8 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
 # Vite's dev server hops to 5174+ when 5173 is taken, so the default covers a small range; auth is
 # the token header either way — CORS here only decides which local origins may even ask.
 ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
-    # Chromium sends Origin: null for a page loaded via file:// (the packaged renderer) and for sandboxed widget iframes,
-    # so "null" must stay allowed or the packaged app cannot reach its own backend. Auth is the token header regardless.
+    # Chromium sends Origin: null for a page loaded via file:// (the packaged renderer), so "null" must stay
+    # allowed or the packaged app cannot reach its own backend. Auth is the token header regardless.
     "null", "file://",
     *(f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in range(5173, 5181))]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
@@ -344,8 +291,7 @@ def settings() -> dict[str, Any]:
 
 jobs = Jobs(db)
 proposals = Proposals(db)
-dashboards = Dashboards(db)
-artifacts = Artifacts(db)
+recaps = Recaps(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
 app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 # sid/wsid are defined further down, so the module context looks them up late.
@@ -537,7 +483,7 @@ docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n
 docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
@@ -1476,8 +1422,7 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
   - Formulas may use `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). There is nothing else — no assignment, no indexing, no other names.
   Reach for it when the interesting part of an answer is an assumption worth playing with (a rate, a price, a threshold, a growth curve); use ```chart for numbers that are already fixed.
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
-- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle and a "Save as artifact" button. Use it for a mock-up, a small interactive demo or a formatted layout. ```svg renders as an image.
-For anything larger or that the user will keep and revise (a calculator, a dashboard-like page, a game, a formatted report), call artifact_create with the full HTML instead; change it with artifact_edit (exact search/replace pairs) for small fixes, or artifact_update (full new HTML) when most of it changes; the chat shows it as a live card and keeps every version. Both run in a sandbox with no network, no external scripts/fonts/images (use data: URIs or inline SVG), no localStorage and no form submits.
+- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle; inline scripts do not run there. Use it for a mock-up or a formatted layout. ```svg renders as an image.
 Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
@@ -2047,7 +1992,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "skip_permissions": skip_permissions,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
-            # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
             "run_id": run.run_id if run else None,
         }
         use_tools = conv["settings"].get("useTools", True)
@@ -2826,7 +2770,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tracer.end(tspan, {"result_chars": len(preview), "invalid": invalid}, error=err)
                     event = {"id": uid, "name": shown, "arguments": {}, "result_preview": preview, "duration_ms": 0,
                              "error": err, "images": None, "undo": None, "approval": None, "plan": None, "forced": False,
-                             "tainted": False, "blocked": None, "breaker": partial, "proposal": None, "artifact": None,
+                             "tainted": False, "blocked": None, "breaker": partial, "proposal": None,
                              "invalid": invalid}
                     tool_events.append(event)
                     yield "tool_result", {"message_id": am["id"], **event}
@@ -3292,11 +3236,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result["permission_note"] = hint
                 denials.record(bool(perm.refusal) or unattended or (asks and decision != "allow"))
                 ms = int((time.time() - t0) * 1000)
-                made = tool_ctx.pop("artifact", None) if decision == "allow" else None
-                if made is None and isinstance(result, dict) and result.get("artifact_id") and c["name"] in ("artifact_create", "artifact_update", "artifact_edit"):
-                    # A journal replay returns the recorded result without running the tool, so ctx carries no note.
-                    made = {"id": result["artifact_id"], "title": result.get("title", ""), "version": result.get("version"),
-                            "action": "created" if result.get("created") else "updated"}
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
@@ -3324,9 +3263,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          **({"repaired": True} if c["_repaired"] else {}),
                          **({"invalid": invalid} if invalid else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
-                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
-                         # Persisted with the tool event, so the card finds its artifact again after a reload.
-                         "artifact": made}
+                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
                 stuck = None
                 if detector is not None and ran:
                     detector.observe(c["name"], args, result)
@@ -3347,8 +3284,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 tool_events.append(event)
                 inflight = None
                 yield "tool_result", {"message_id": am["id"], **event}
-                if made and not err:
-                    yield "artifact", {"message_id": am["id"], "call_id": uid, "conversation_id": conv_id, **made}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 if edit_info and isinstance(for_model, dict):
@@ -6326,57 +6261,9 @@ async def dashboard() -> dict[str, Any]:
     return out
 
 
-# ---------------- dashboards, data sources, widgets, recap ----------------
-class SourceIn(BaseModel):
-    name: str
-    kind: str = "http"
-    config: dict[str, Any] = {}
-    secret: str = ""
-    description: str = ""
-
-
-class SourcePatch(BaseModel):
-    name: str | None = None
-    kind: str | None = None
-    config: dict[str, Any] | None = None
-    secret: str | None = None
-    description: str | None = None
-    clear_secret: bool = False
-
-
-class DashboardIn(BaseModel):
-    name: str
-    description: str = ""
-
-
-class WidgetIn(BaseModel):
-    title: str = ""
-    kind: str = "html"           # html | summary | markdown | chart | stat | table
-    prompt: str = ""
-    source_ids: list[str] = []
-    code: str = ""
-    output: str = ""
-    width: int = 1
-    height: int = 280
-    refresh_minutes: int = 60
-    spec: dict[str, Any] = {}    # chart/stat/table: a ready spec (e.g. inline_rows from a pinned chat chart) skips generation
-
-
-class WidgetPatch(BaseModel):
-    title: str | None = None
-    prompt: str | None = None
-    source_ids: list[str] | None = None
-    code: str | None = None
-    output: str | None = None
-    width: int | None = None
-    height: int | None = None
-    position: int | None = None
-    refresh_minutes: int | None = None
-    spec: dict[str, Any] | None = None
-
-
+# ---------------- recap ----------------
 async def _internal_data() -> dict[str, Any]:
-    """Data for 'internal' sources (and for summaries/recaps)."""
+    """What the recap sees of the app and of Google."""
     st = google.status()
     out: dict[str, Any] = {
         "todos": todos.list("__all__", include_done=False),
@@ -6406,217 +6293,11 @@ async def _internal_data() -> dict[str, Any]:
     return out
 
 
-@app.get("/sources")
-def list_sources() -> dict[str, Any]:
-    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects"]}
-
-
-@app.post("/sources")
-def create_source(body: SourceIn) -> dict[str, Any]:
-    if body.kind in ("http", "rss") and not body.config.get("url"):
-        raise HTTPException(400, "URL required")
-    return dashboards.create_source(body.name, body.kind, body.config, body.secret, body.description)
-
-
-@app.put("/sources/{id}")
-def update_source(id: str, body: SourcePatch) -> dict[str, Any]:
-    s_ = dashboards.update_source(id, body.model_dump(exclude_none=True))
-    if not s_:
-        raise HTTPException(404)
-    return s_
-
-
-@app.delete("/sources/{id}")
-def delete_source(id: str) -> dict[str, bool]:
-    dashboards.delete_source(id)
-    return {"ok": True}
-
-
-@app.get("/sources/{id}/fetch")
-async def fetch_source(id: str) -> Any:
-    try:
-        internal = await _internal_data() if (dashboards.source(id) or {}).get("kind") == "internal" else None
-        return await dashboards.fetch_source(id, internal)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    except tools.UrlBlocked as e:  # the source's own URL, or something it redirected to, is not a public address
-        raise HTTPException(400, f"That source's URL was refused: {e}") from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.get("/dashboards")
-def list_dashboards() -> list[dict[str, Any]]:
-    return dashboards.list()
-
-
-@app.post("/dashboards")
-def create_dashboard(body: DashboardIn) -> dict[str, Any]:
-    return dashboards.create(body.name, body.description)
-
-
-@app.get("/dashboards/{id}")
-def get_dashboard(id: str) -> dict[str, Any]:
-    d = dashboards.get(id)
-    if not d:
-        raise HTTPException(404)
-    return d
-
-
-@app.put("/dashboards/{id}")
-def update_dashboard(id: str, body: DashboardIn) -> dict[str, Any]:
-    d = dashboards.update(id, body.model_dump())
-    if not d:
-        raise HTTPException(404)
-    return d
-
-
-@app.delete("/dashboards/{id}")
-def delete_dashboard(id: str) -> dict[str, bool]:
-    for w in (dashboards.get(id) or {}).get("widgets") or []:
-        canvases.delete_windows_for("dashboard-widget", w["id"])
-    dashboards.delete(id)
-    return {"ok": True}
-
-
-async def _samples(source_ids: list[str]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    internal = None
-    for sid_ in source_ids:
-        try:
-            src = dashboards.source(sid_)
-            if src and src["kind"] == "internal" and internal is None:
-                internal = await _internal_data()
-            out[sid_] = await dashboards.fetch_source(sid_, internal)
-        except Exception as e:  # noqa: BLE001
-            out[sid_] = {"error": str(e)}
-    return out
-
-
-async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool = False) -> dict[str, Any]:
-    cfg = settings()
-    model = cfg.get("extractionModel") or cfg["defaultModel"]
-    srcs = [s_ for s_ in (dashboards.source(i) for i in w["source_ids"]) if s_]
-    if w["kind"] == "html":
-        if regenerate_code or not w["code"]:
-            samples = await _samples(w["source_ids"])
-            base = str(request.base_url).rstrip("/")
-            secrets = [(dashboards.source(s_["id"], with_secret=True) or {}).get("secret", "") for s_ in srcs]
-            try:
-                code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, base, w["width"], w["height"], samples, secrets)
-            except WidgetCodeRejected as e:
-                msg = f"Generated HTML rejected: {e}"
-                return dashboards.update_widget(w["id"], {"code": "", "output": msg, "data_error": msg, "refreshed_at": time.time()}) or w
-            w = dashboards.update_widget(w["id"], {"code": code, "data_error": "", "refreshed_at": time.time()}) or w
-    elif w["kind"] == "summary":
-        data = await _samples(w["source_ids"])
-        text = await generate_summary(cfg, model, w["prompt"], data)
-        w = dashboards.update_widget(w["id"], {"output": text, "refreshed_at": time.time()}) or w
-    elif w["kind"] in widget_spec.KINDS:
-        w = await widget_spec.run_widget(dashboards, w, cfg, model, _widget_fetch, regenerate=regenerate_code)
-    return w
-
-
-async def _widget_fetch(source_id: str) -> Any:
-    internal = await _internal_data() if (dashboards.source(source_id) or {}).get("kind") == "internal" else None
-    return await dashboards.fetch_source(source_id, internal)
-
-
-@app.post("/dashboards/{id}/widgets")
-async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, Any]:
-    if not dashboards.get(id):
-        raise HTTPException(404)
-    title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
-    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes, body.spec)
-    if body.kind in ("html", "summary") + widget_spec.KINDS:
-        try:
-            w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
-        except Exception as e:  # noqa: BLE001
-            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}", "data_error": f"Generation failed: {e}"}) or w
-    return w
-
-
-@app.get("/widgets/{wid}")
-def get_widget(wid: str) -> dict[str, Any]:
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    return w
-
-
-@app.get("/widgets/{wid}/data")
-async def widget_data(wid: str) -> dict[str, Any]:
-    """A declarative widget's bound rows: cached inside its refresh_minutes TTL, otherwise re-bound. Never calls the model."""
-    w = dashboards.widget(wid)
-    if not w or w["kind"] not in widget_spec.KINDS:
-        raise HTTPException(404)
-    return await widget_spec.widget_data(dashboards, w, _widget_fetch)
-
-
-@app.put("/widgets/{wid}")
-def update_widget(wid: str, body: WidgetPatch) -> dict[str, Any]:
-    w = dashboards.update_widget(wid, body.model_dump(exclude_none=True))
-    if not w:
-        raise HTTPException(404)
-    return w
-
-
-@app.post("/widgets/{wid}/refresh")
-async def refresh_widget(wid: str, request: Request, regenerate: bool = False) -> dict[str, Any]:
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    try:
-        return await _run_widget(w, request, regenerate_code=regenerate)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.post("/widgets/{wid}/revise")
-async def revise_widget(wid: str, body: dict[str, str], request: Request) -> dict[str, Any]:
-    """Vibe-code iteration: apply a natural-language change request to an html widget."""
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    cfg = settings()
-    instruction = (body.get("instruction") or "").strip()
-    if not instruction:
-        raise HTTPException(400, "instruction required")
-    new_prompt = f"{w['prompt']}\n\nRevision: {instruction}"
-    w = dashboards.update_widget(wid, {"prompt": new_prompt}) or w
-    try:
-        return await _run_widget(w, request, regenerate_code=True)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.delete("/widgets/{wid}")
-def delete_widget(wid: str) -> dict[str, bool]:
-    dashboards.delete_widget(wid)
-    canvases.delete_windows_for("dashboard-widget", wid)
-    return {"ok": True}
-
-
-@app.get("/widgets/{wid}/render")
-def render_widget(wid: str) -> HTMLResponse:
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    code = w["code"] or "<!doctype html><html><body style='font-family:system-ui;color:#9c9a94;padding:12px'>No code yet.</body></html>"
-    # The iframe cannot set headers (sandbox, no same-origin). Electron attaches the app token to this
-    # URL only; the page then gets a short-lived capability for its own sources, not the app token.
-    exp = int(time.time()) + WIDGET_TOKEN_TTL
-    wt = _widget_fetch_token(wid, exp)
-    body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
-                  lambda m: f"{m.group(1)}?wt={wt}&w={wid}&we={exp}" + ("&" if m.group(2) else ""), code)
-    return HTMLResponse(body, headers={"Content-Security-Policy": WIDGET_CSP, "X-Content-Type-Options": "nosniff"})
-
-
 @app.get("/recap")
 async def recap(force: bool = False) -> dict[str, Any]:
     day = time.strftime("%Y-%m-%d")
     if not force:
-        cached = dashboards.get_recap(day)
+        cached = recaps.get(day)
         if cached:
             return {**cached, "cached": True}
     cfg = settings()
@@ -6643,18 +6324,14 @@ async def recap(force: bool = False) -> dict[str, Any]:
         content = await generate_recap(cfg, cfg.get("extractionModel") or cfg["defaultModel"], facts)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
-    return {**dashboards.save_recap(day, content), "cached": False}
+    return {**recaps.save(day, content), "cached": False}
 
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
 toolbox.canvases = canvases
-from . import widget_tools  # noqa: E402
-widget_tools.register(toolbox, dashboards, canvases, _widget_fetch)
-app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
-                                   sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
-presets = CanvasPresets(db, canvases, notes, dashboards)
+presets = CanvasPresets(db, canvases, notes)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -8460,7 +8137,7 @@ class DeskResumeIn(BaseModel):
 class AcceptItem(BaseModel):
     output_id: str
     # cowork.OUTPUT_KINDS; checked before the claim
-    destination: Literal["doc", "doc_append", "document", "download", "todo", "artifact", "mail_draft"]
+    destination: Literal["doc", "doc_append", "document", "download", "todo", "mail_draft"]
     title: str | None = None
     doc_id: str | None = None
     project_id: str | None = None
@@ -9151,7 +8828,7 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
         # file still in the workspace could have answered.
         return {"ref": rel, "verified": True, "error": None}
     # Only the text destinations read text: a workbook or a PDF goes to `document` as bytes, below.
-    content = _read_whole(desk_id, rel) if dest in ("doc", "doc_append", "todo", "artifact") else ""
+    content = _read_whole(desk_id, rel) if dest in ("doc", "doc_append", "todo") else ""
     if dest == "doc":
         doc = docs.create(title, content, wsid(item.project_id) if item.project_id else None)
         fresh = docs.get(doc["id"])
@@ -9184,13 +8861,6 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
         ok = all((todos.get(t["id"]) or {}).get("title") == line for t, line in zip(made, items))
         return {"ref": ",".join(t["id"] for t in made), "verified": ok,
                 "error": None if ok else "a saved todo does not match its line"}
-    if dest == "artifact":
-        if Path(rel).suffix.lower() not in (".html", ".htm", ".svg"):
-            return {"ref": None, "verified": False, "error": "not an html or svg file"}
-        # An svg is stored as an html artifact: the page renders a bare <svg> document as it is.
-        art = artifacts.create(title, content, project_id=wsid(item.project_id) if item.project_id else None)
-        ok = (artifacts.get(art["id"]) or {}).get("code") == content.strip()
-        return {"ref": art["id"], "verified": ok, "error": None if ok else "the saved page does not match the file"}
     if dest == "mail_draft":
         if Path(rel).suffix.lower() not in (".eml", ".md", ".markdown", ".txt"):
             return {"ref": None, "verified": False, "error": "not an .eml, markdown or text file"}

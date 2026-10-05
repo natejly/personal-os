@@ -40,7 +40,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
-export type FilesSection = 'notes' | 'uploads' | 'pages' | 'dashboards'
+export type FilesSection = 'notes' | 'uploads'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -1936,8 +1936,6 @@ export const useStore = create<State>((set, get) => {
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
     },
     setView: (view) => {
-      // Dashboards moved under Files; a stale 'dashboards' (old canvas state, an old menu) lands there.
-      if ((view as string) === 'dashboards') return get().openFiles('dashboards')
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()

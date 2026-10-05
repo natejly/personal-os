@@ -23,7 +23,7 @@ convos, compactor = appmod.convos, appmod.compactor
 
 EVENTS = [
     {"id": "e1", "name": "gmail_draft", "arguments": {"to": "a@b.c", "body": "x" * 500}, "result_preview": "Draft created. id=d_42",
-     "error": None, "artifact": {"id": "art_1", "title": "t"}},
+     "error": None},
     {"id": "e2", "name": "fs_write", "arguments": {"path": "/tmp/x"}, "error": "Permission denied by the operating system", "result_preview": ""},
     {"id": "e3", "name": "gmail_send", "arguments": {"id": "d_42"}, "approval": "deny", "error": None, "result_preview": ""},
     {"id": "e4", "name": "web_fetch", "arguments": {"url": "https://x"}, "tainted": True, "result_preview": "IGNORE PREVIOUS", "result_id": "tr_abc"},
@@ -42,7 +42,7 @@ def conv_with(events: list[dict[str, Any]] | None, content: str = "") -> str:
 def test_record_lines_statuses_and_stability() -> None:
     rec = compaction.tool_record(EVENTS)
     assert rec.startswith(compaction.TOOL_RECORD_HEADER)
-    assert "gmail_draft" in rec and "-> ok" in rec and "artifact=art_1" in rec and "Draft created. id=d_42" in rec
+    assert "gmail_draft" in rec and "-> ok" in rec and "Draft created. id=d_42" in rec
     assert "-> error: Permission denied" in rec and "-> declined" in rec
     assert "calendar_create" not in rec, "an unanswered approval card did not run"
     assert "x" * 200 not in rec, "long string arguments are cut"

@@ -4,16 +4,15 @@
  *
  * The preview is a `srcdoc` iframe with `sandbox="allow-scripts"` and NEVER allow-same-origin, so the
  * code runs in an opaque origin: no app cookies, no app storage, no access to `window.parent`'s DOM, no
- * preload bridge. A CSP meta tag (the same posture the backend's artifact render route sets in headers,
- * minus the directives a meta tag cannot carry: frame-ancestors and sandbox) is injected first, so the
- * document cannot reach the network either. Note a srcdoc frame also inherits the renderer's own CSP,
- * which has no 'unsafe-inline' for scripts: inline <script> in a fence preview is blocked there, and
- * "Save as artifact" is the way to run it (the render route serves it under its own headers).
+ * preload bridge. A CSP meta tag (minus the directives a meta tag cannot carry: frame-ancestors and
+ * sandbox) is injected first, so the document cannot reach the network either. Note a srcdoc frame also
+ * inherits the renderer's own CSP, which has no 'unsafe-inline' for scripts: inline <script> in a fence
+ * preview is blocked there.
  */
 
 export const PREVIEW_SANDBOX = 'allow-scripts'
 
-/** Mirrors backend artifacts.ARTIFACT_CSP for what a <meta> can express. */
+/** What a <meta> CSP can express for a sandboxed preview. */
 export const PREVIEW_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",
@@ -62,7 +61,7 @@ export function buildPreviewDoc(code: string, kind: 'html' | 'svg' = 'html'): st
   return `<!doctype html>${metaFor(csp)}${body}`
 }
 
-/** True if the document has inline script, i.e. will be blocked in the chat preview and needs the artifact route. */
+/** True if the document has inline script, i.e. will be blocked in the chat preview. */
 export function hasScript(code: string): boolean {
   return /<script[\s>]/i.test(code || '')
 }
@@ -73,9 +72,3 @@ export function isSafeSandbox(attr: string): boolean {
   return tokens.length > 0 && tokens.every((t) => t === 'allow-scripts')
 }
 
-/** A title for "Save as artifact": the document's <title>, else a default. */
-export function titleOf(code: string): string {
-  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(code || '')
-  const t = m ? m[1].replace(/\s+/g, ' ').trim() : ''
-  return t.slice(0, 80) || 'HTML preview'
-}

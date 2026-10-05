@@ -41,7 +41,7 @@ if "pytest" in sys.modules:  # pragma: no cover - collection guard, not behaviou
 
 from personal_os import llm  # noqa: E402
 from personal_os.app import (AUTH_TOKEN, _desk_tasks, _missed_wake, _should_chain, app,  # noqa: E402
-                             artifacts, bus, db, plans, desks, docs, google, run_store, todos, toolbox, workspace)
+                             bus, db, plans, desks, docs, google, run_store, todos, toolbox, workspace)
 from personal_os.app import events as topic  # noqa: E402
 from personal_os.plans import PLAN_SAFE_DANGER  # noqa: E402
 from personal_os.cowork import LIVE, NEEDS_YOU, checklist_items  # noqa: E402
@@ -762,16 +762,6 @@ def test_a_checklist_becomes_one_todo_per_line() -> None:
     check(len(checklist_items("\n".join(f"{n}. step" for n in range(80)))) == 50, "and never more than 50")
 
 
-def test_an_html_file_becomes_a_page_and_markdown_does_not() -> None:
-    page = "<!doctype html><title>Chart</title><svg width='10' height='10'></svg>\n"
-    out = promote(delivering_desk("Chart it", "outputs/chart.html", page), "artifact")
-    check(out["ok"] is True and out["verified"] is True, f"the page was read back and matched, got {out}")
-    check(artifacts.get(out["ref"])["code"] == page.strip(), "and the page holds the file")
-
-    refused = promote(delivering_desk("Not a page"), "artifact")
-    check(refused["ok"] is False and refused["error"] == "not an html or svg file", f"a .md is refused, got {refused}")
-
-
 def test_a_mail_file_becomes_a_gmail_draft_never_a_send() -> None:
     sent: list[Any] = []
     drafted: list[tuple[str, str, str]] = []
@@ -908,7 +898,6 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_download_hands_over_the_file_it_marks_promoted,
          test_doc_append_proposes_a_revision_and_leaves_the_doc_alone,
          test_a_checklist_becomes_one_todo_per_line,
-         test_an_html_file_becomes_a_page_and_markdown_does_not,
          test_a_mail_file_becomes_a_gmail_draft_never_a_send,
          test_delete_keeps_the_workspace_unless_purge,
          test_a_stale_output_is_not_promoted_without_saying_so,

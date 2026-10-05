@@ -81,15 +81,9 @@ them in the sidebar, in the title bar, or out of sight.
   - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
-  - *Pages* — interactive HTML pages (artifacts) the assistant builds and
-    revises with the `artifact_*` tools. A page renders sandboxed with no
-    network access, every version is kept and restorable, and a page can sit
-    on a space as a window.
-  - *Dashboards* — the widgets described under **Dashboards you describe**
-    below.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes,
-  todos, calendar, memory, pages, dashboard widgets and a web browser sit side
+  todos, calendar, memory and a web browser sit side
   by side; drag anything from the sidebar or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
   global shortcut gathers them all. Save a space as a preset, lock it so
@@ -211,15 +205,8 @@ them in the sidebar, in the title bar, or out of sight.
   further runs either; that proposal is yours to accept too. If the machine was
   asleep over a slot the task still runs, once, and is told it is late so it says
   so in its report. A one-off retires itself after it fires.
-- **Dashboards you describe** (Files → Dashboards). Register data sources (an HTTP API with an API
-  key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
-  plain English. The model writes a self-contained HTML widget that runs in a
-  sandboxed iframe and fetches data through the backend (keys never reach the
-  widget). "AI summary" widgets turn any source into a short briefing. Revise a
-  widget by telling it what to change.
 - **Google Workspace.** Sign in once with your own OAuth client; Calendar,
-  Gmail, Tasks, Drive, Docs and Sheets become dashboard widgets and assistant
-  tools. Connecting turns on two-way Tasks sync with your todos and creates a
+  Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos and creates a
   "Grain Todos" calendar that mirrors todos with a due date.
 
 ## Architecture
@@ -629,7 +616,7 @@ src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py
-                    docs.py · dashboards.py · usage.py · trace.py · llm.py
+                    docs.py · recap.py · usage.py · trace.py · llm.py
                     activity.py collectors, privacy gate, rollup, activity.md
                     meetings.py repo + service · meeting_notes.py templates/enhance
                     meeting_recorder.py capture threads · stt.py · audiocap.py · native_audio.py · redact.py

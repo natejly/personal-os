@@ -1,38 +1,18 @@
 import { useMemo, useState } from 'react'
-import { Code2, Eye, Package, Check } from 'lucide-react'
-import { api } from '../lib/api'
-import { useStore } from '../store'
-import { buildPreviewDoc, hasScript, PREVIEW_SANDBOX, titleOf } from '../lib/htmlFence'
+import { Code2, Eye } from 'lucide-react'
+import { buildPreviewDoc, hasScript, PREVIEW_SANDBOX } from '../lib/htmlFence'
 import { CopyButton } from './MarkdownPreview'
-import '../styles/artifacts.css'
+import '../styles/htmlFence.css'
 
 /**
  * A fenced ```html block in an assistant reply. Code | Preview toggle; the preview is a `srcdoc` iframe in an
  * opaque origin (sandbox allow-scripts, never allow-same-origin) with a CSP meta tag injected first. Model
- * output is never executed in the app's origin. "Save as artifact" files it under Files -> Pages, where it
- * is served by the artifact render route and its scripts can run.
+ * output is never executed in the app's origin.
  */
 export default function HtmlBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
   const [mode, setMode] = useState<'code' | 'preview'>('preview')
-  const [saved, setSaved] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const doc = useMemo(() => (streaming ? '' : buildPreviewDoc(source, 'html')), [source, streaming])
   const showing = streaming ? 'code' : mode
-
-  const save = async (): Promise<void> => {
-    if (busy || saved) return
-    setBusy(true)
-    try {
-      const st = useStore.getState()
-      const a = await api.artifacts.create({ title: titleOf(source), code: source, conversation_id: st.focusedConversationId ?? undefined })
-      setSaved(a.id)
-      st.toast('Saved to Files → Pages', 'info', { label: 'Open', run: () => useStore.getState().openFiles('pages') })
-    } catch (e) {
-      useStore.getState().toast((e as Error).message, 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <div className="code-block art-fence">
@@ -43,9 +23,6 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
             <button role="tab" aria-selected={showing === 'code'} className={showing === 'code' ? 'on' : ''} onClick={() => setMode('code')}><Code2 size={11} /> Code</button>
             <button role="tab" aria-selected={showing === 'preview'} className={showing === 'preview' ? 'on' : ''} disabled={streaming} onClick={() => setMode('preview')}><Eye size={11} /> Preview</button>
           </span>
-          <button className="icon-btn ghost" title={saved ? 'Saved to Files → Pages' : 'Save as artifact'} aria-label="Save as artifact" disabled={streaming || busy || !!saved} onClick={() => void save()}>
-            {saved ? <Check size={13} /> : <Package size={13} />}
-          </button>
           <CopyButton text={source} />
         </span>
       </div>
@@ -55,7 +32,7 @@ export default function HtmlBlock({ source, streaming }: { source: string; strea
         <>
           <iframe className="art-fence-frame" title="HTML preview" sandbox={PREVIEW_SANDBOX} srcDoc={doc} />
           {hasScript(source) && (
-            <p className="art-fence-note">Scripts are blocked in this inline preview. Save as artifact to run it.</p>
+            <p className="art-fence-note">Scripts are blocked in this inline preview.</p>
           )}
         </>
       )}

@@ -353,7 +353,7 @@ class McpServers:
                 if row:
                     merged = self._load_secrets(id)
                     for k, v in incoming.items():
-                        if v in (None, ""):  # an empty value means "leave it alone", as in dashboards
+                        if v in (None, ""):  # an empty value means "leave it alone"
                             continue
                         merged[k] = str(v)
                     for k in dropped:

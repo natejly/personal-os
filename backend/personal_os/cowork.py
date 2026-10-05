@@ -145,7 +145,7 @@ def desk_actions(status: str) -> list[str]:
 
 
 AUTONOMY = ("plan", "ask", "propose")
-OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "artifact", "mail_draft")
+OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "mail_draft")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
 
 # The `kind` column's vocabulary. `status` is the fallback; the others let the timeline and the

@@ -25,26 +25,10 @@ def test_health_is_open_and_leaks_nothing():
 
 
 def test_data_routes_reject_a_missing_token():
-    for path in ("/notes", "/memories", "/settings", "/conversations", "/todos", "/docs", "/sources/abc/fetch"):
+    for path in ("/notes", "/memories", "/settings", "/conversations", "/todos", "/docs", "/recap"):
         r = anon.get(path)
         assert r.status_code == 401, path
     assert client.get("/notes", headers={"X-Personal-OS-Token": "nope"}).status_code == 401
-
-
-def test_widget_render_requires_the_token():
-    made = client.post("/dashboards", json={"name": "Secret board"})
-    assert made.status_code == 200, made.text
-    wid = client.post(f"/dashboards/{made.json()['id']}/widgets", json={
-        "title": "Secret", "kind": "markdown", "code": "SECRET-WIDGET-BODY",
-    })
-    assert wid.status_code == 200, wid.text
-    path = f"/widgets/{wid.json()['id']}/render"
-    hidden = anon.get(path)
-    assert hidden.status_code == 401
-    assert "SECRET-WIDGET-BODY" not in hidden.text
-    shown = client.get(path)
-    assert shown.status_code == 200
-    assert "SECRET-WIDGET-BODY" in shown.text
 
 
 def test_google_callback_stays_open_without_completing_sign_in():

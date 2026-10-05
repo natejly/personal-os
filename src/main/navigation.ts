@@ -1,7 +1,7 @@
 import { session, shell } from 'electron'
 import { mainFrameNavigationAllowed } from './appUrl'
-import { backendToken, backendUrl } from './backend'
-import { frameNavigationAllowed, shouldAttachWidgetToken, webviewNavigationBlocked, webviewRequestBlocked } from './navPolicy'
+import { backendUrl } from './backend'
+import { frameNavigationAllowed, webviewNavigationBlocked, webviewRequestBlocked } from './navPolicy'
 import { pageBridgeUrl } from './pagefetch'
 
 const WEB_WIDGET_PARTITION = 'persist:web-widget'
@@ -10,34 +10,8 @@ const openExternal = (url: string): void => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
 }
 
-/**
- * Widget iframes load `/widgets/{id}/render` and cannot send the app token themselves.
- * Attach it on that one path, and only when the renderer opened the frame. A request the
- * widget document starts — including a navigation to another widget — does not get the token.
- */
 function localServices(): string[] {
   return [backendUrl(), pageBridgeUrl()].filter((url): url is string => Boolean(url))
-}
-
-export function attachWidgetRenderAuth(): void {
-  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const headers = { ...details.requestHeaders }
-    try {
-      const base = backendUrl()
-      const token = backendToken()
-      if (token && base && shouldAttachWidgetToken({
-        url: details.url,
-        referrer: details.referrer,
-        frameUrl: details.frame?.url,
-        resourceType: details.resourceType,
-        backendUrl: base,
-        rendererUrl: process.env.ELECTRON_RENDERER_URL
-      })) headers['X-Personal-OS-Token'] = token
-    } catch {
-      /* leave the request unchanged */
-    }
-    callback({ requestHeaders: headers })
-  })
 }
 
 /** The web widget's session is not the app's. It still must not dial the sidecar or the page loader. */
@@ -70,7 +44,7 @@ export function guardNavigation(contents: Electron.WebContents): void {
   })
   contents.on('will-frame-navigate', (details) => {
     if (details.isMainFrame) return // the main frame is handled by will-navigate
-    if (frameNavigationAllowed(details.url, backendUrl(), process.env.ELECTRON_RENDERER_URL)) return
+    if (frameNavigationAllowed(details.url, process.env.ELECTRON_RENDERER_URL)) return
     details.preventDefault()
   })
   contents.setWindowOpenHandler(({ url }) => {

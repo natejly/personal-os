@@ -4,7 +4,6 @@ import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shar
 import { api, saveDownload } from '../lib/api'
 import { defaultDest } from '../lib/deskFiles'
 import { useStore } from '../store'
-import ArtifactViewer from './ArtifactViewer'
 import InlineNote from './InlineNote'
 
 /**
@@ -20,31 +19,23 @@ const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: 
   { value: 'doc_append', label: 'Append to a file', hint: 'Proposes an edit to an existing file; you accept it in Files' },
   { value: 'document', label: 'Upload', hint: 'Adds the file to your uploads' },
   { value: 'todo', label: 'Lists', hint: 'One todo per checklist or list line' },
-  { value: 'artifact', label: 'Page', hint: 'Saves it as a page you can open from here', only: /\.(html?|svg)$/i },
   { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a Gmail draft, never sends. The file starts with To: and Subject: lines, then a blank line' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
 ]
 
 /** Where a promoted copy lives, named and opened the way the rest of the app does. */
 function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; docId?: string }): JSX.Element | null {
-  const [page, setPage] = useState(false)
   const s = useStore.getState
   const go: Record<string, [string, () => void] | undefined> = {
     doc: id ? ['open the note', () => void s().openDoc(id)] : undefined,
     doc_append: docId ? ['open the note', () => void s().openDoc(docId)] : undefined,
     document: ['open uploads', () => s().openFiles('uploads')],
     todo: ['open Lists', () => s().setView('todos')],
-    mail_draft: ['open Mail', () => s().setView('mail')],
-    artifact: id ? ['open the page', () => setPage(true)] : undefined
+    mail_draft: ['open Mail', () => s().setView('mail')]
   }
   const link = go[kind]
   if (!link) return null
-  return (
-    <>
-      {' — '}<button className="link" onClick={link[1]}>{link[0]}</button>
-      {page && id && <ArtifactViewer id={id} onClose={() => setPage(false)} />}
-    </>
-  )
+  return <>{' — '}<button className="link" onClick={link[1]}>{link[0]}</button></>
 }
 
 /** A retried row re-offers the destination that failed (when it still fits the file), so a retry means the

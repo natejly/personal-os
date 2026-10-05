@@ -9,8 +9,8 @@ from .db import Database, new_id, now, row_to_dict
 
 # Mirrors the WidgetKind union in src/shared/types.ts, which is the source of truth.
 WIDGET_KINDS = (
-    "chat", "todos", "calendar", "note", "dashboard-widget",
-    "memory", "graph", "documents", "recap", "project", "usage", "activity", "web", "artifact", "face", "crew",
+    "chat", "todos", "calendar", "note",
+    "memory", "graph", "documents", "recap", "project", "usage", "activity", "web", "face", "crew",
 )
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
 SNAP_MODES = ("off", "grid", "guides", "both")
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS canvas_windows (
   id TEXT PRIMARY KEY,
   canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,                       -- WidgetKind
-  ref_id TEXT,                              -- conversation / dashboard / note id, no foreign key
+  ref_id TEXT,                              -- conversation / note / project id, no foreign key
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   title TEXT NOT NULL DEFAULT '',           -- '' = derive from the underlying object
   x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
@@ -93,6 +93,8 @@ class Canvases:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # Windows of a kind that no longer exists (an older build's widgets) would render as "Unknown".
+            c.execute(f"DELETE FROM canvas_windows WHERE kind NOT IN ({','.join('?' * len(WIDGET_KINDS))})", WIDGET_KINDS)
             # Post-release columns; CREATE TABLE IF NOT EXISTS won't add them to an existing db.
             for table, cols in _ADDED_COLUMNS.items():
                 have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}

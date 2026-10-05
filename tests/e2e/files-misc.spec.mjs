@@ -12,7 +12,7 @@ const tab = (page, name) => page.getByRole('tab', { name, exact: true })
 // 1x1 transparent PNG
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
 
-test('Notes / Uploads / Pages / Dashboards sections switch; scope select only on Uploads', async ({ grain: g }) => {
+test('Notes / Uploads sections switch; scope select only on Uploads', async ({ grain: g }) => {
   const { page } = g
   await openFiles(page)
   await expect(tab(page, 'Notes')).toHaveAttribute('aria-selected', 'true')
@@ -20,15 +20,10 @@ test('Notes / Uploads / Pages / Dashboards sections switch; scope select only on
   await tab(page, 'Uploads').click()
   await expect(page.getByText('No uploads yet')).toBeVisible()
   await expect(page.getByTitle('Filter by project')).toBeVisible()
-  await tab(page, 'Pages').click()
-  await expect(page.getByText('No artifacts yet.')).toBeVisible()
-  await expect(page.getByTitle('Filter by project')).toHaveCount(0)
-  await tab(page, 'Dashboards').click()
-  await expect(page.getByText('No dashboards yet')).toBeVisible()
   await tab(page, 'Notes').click()
   await expect(page.getByPlaceholder('Search files')).toBeVisible()
   // hammer the tabs
-  for (let i = 0; i < 6; i++) for (const n of ['Uploads', 'Pages', 'Dashboards', 'Notes']) await tab(page, n).click()
+  for (let i = 0; i < 6; i++) for (const n of ['Uploads', 'Notes']) await tab(page, n).click()
   await expect(tab(page, 'Notes')).toHaveAttribute('aria-selected', 'true')
   expect(errorsOf(g)).toEqual([])
 })

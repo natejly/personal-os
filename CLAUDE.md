@@ -35,3 +35,5 @@ open -g dist/mac-arm64/Grain.app   # packaged build: -g keeps it from stealing f
 ```
 
 Kill what you started when the check is done, so a stray backend does not stay attached to the data directory.
+
+Using or testing the app: load `.claude/skills/grain/SKILL.md`.

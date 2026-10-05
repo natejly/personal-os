@@ -3,6 +3,7 @@ from personal_os.pim import Pim, active_provider
 
 class _G:
     def status(self): return {"connected": True, "who": "google"}
+    def _me(self): return "g@example.com"
     def gmail_search(self, q, n): return ["g", q, n]
     def tasks_lists(self): return ["google-tasks"]
     def calendar_events(self, *a): return ["g-cal"]
@@ -10,6 +11,7 @@ class _G:
 
 class _M:
     def status(self): return {"connected": True, "who": "microsoft"}
+    def _me(self): return "m@example.com"
     def gmail_search(self, q, n): return ["m", q, n]
     def calendar_events(self, *a): return ["m-cal"]
 
@@ -25,3 +27,12 @@ def test_pim_follows_setting_and_keeps_tasks_on_google():
     assert pim.status()["who"] == "microsoft"
     assert pim.tasks_lists() == ["google-tasks"]  # no Microsoft equivalent in Cut 1
     assert active_provider({"pimProvider": "bogus"}) == "google"
+
+
+def test_pim_forwards_the_identity_helper_to_the_active_client():
+    s = {"pimProvider": "google"}
+    pim = Pim(_G(), _M(), lambda: s)
+    assert pim._me() == "g@example.com"  # the reply tracker asks the mail account who it is
+    s["pimProvider"] = "microsoft"
+    assert pim._me() == "m@example.com"
+    assert not hasattr(pim, "__deepcopy__")

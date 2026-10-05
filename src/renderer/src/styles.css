@@ -1093,6 +1093,23 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .context-drawer { width: var(--context-drawer-w, 340px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
 .context-drawer > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); z-index: 1; }
 .context-drawer h3 { margin: 0; font-size: 14px; }
+/* The side panel beside a chat: what the `show` tool (or "Open in panel" on a block) put there. The reply's own
+   block renderers fill it edge to edge; its resize handle sits inside its own left edge. */
+.show-panel { position: relative; width: var(--show-panel-w, 520px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; min-width: 0; flex-shrink: 0; }
+.show-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 14px; min-height: var(--bar-h, 40px); border-bottom: 1px solid var(--border); }
+.show-panel > header h3 { margin: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.show-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.show-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.show-body > .code-block, .show-body > .chart-block { flex: 1; display: flex; flex-direction: column; margin: 0; border: 0; border-radius: 0; min-height: 0; }
+.show-body .art-fence-frame { flex: 1; height: auto; min-height: 0; resize: none; }
+.show-body .chart-canvas { flex: 0 0 min(420px, 55vh); } /* roomier than inline, never a bar stretched to the floor */
+.show-body .mermaid-svg { flex: 1; overflow: auto; }
+.show-body > .markdown { padding: 12px 16px; }
+.show-pdf { flex: 1; width: 100%; border: 0; background: #fff; }
+.show-image { margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.show-image img { max-width: 100%; height: auto; }
+.show-image figcaption { font-size: 11.5px; color: var(--text-muted); }
+.show-loading, .show-nopreview { padding: 24px; color: var(--text-muted); font-size: 13px; text-align: center; }
 .ctx-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .ctx-section h4, .node-panel h4 { margin: 0 0 8px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .scope-line { display: flex; align-items: center; gap: 8px; }

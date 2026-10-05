@@ -14,6 +14,7 @@ import html
 import ipaddress
 import json
 import logging
+import mimetypes
 import os
 import posixpath
 import re
@@ -295,6 +296,10 @@ def denied(name: str, reason: str) -> dict[str, Any]:
 # Reads that may be called again after a transient network failure (Toolbox._dispatch).
 RETRY_DANGER = ("safe", "network")
 NO_RETRY_GROUPS = ("browser", "shell", "sandbox")  # they hold session state
+# The `show` tool: what the chat's side panel can render, and how much of it travels on one tool event.
+SHOW_KINDS = ("html", "svg", "mermaid", "chart", "interactive", "markdown", "file")
+SHOW_MAX_CHARS = 200_000
+SHOW_MAX_FILE_BYTES = 50 * 1024 * 1024
 TRANSIENT_ERRORS = (httpx.TransportError, asyncio.TimeoutError, ConnectionError)
 
 
@@ -1378,6 +1383,41 @@ class Toolbox:
         async def current_time(ctx: dict[str, Any]) -> Any:
             return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "weekday": time.strftime("%A"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
         R("current_time", ToolSpec("current_time", "Get the current local date and time.", _obj({}, []), current_time, "utility", examples=[{}]))
+
+        async def show(ctx: dict[str, Any], kind: str, content: str = "", path: str = "", title: str = "") -> Any:
+            """Open the chat's side panel on something the user should look at. The payload rides on the tool
+            event under `show` (popped before the model sees the result, like `images`): the model gets a one-line
+            receipt, the UI gets the content."""
+            if kind not in SHOW_KINDS:
+                return tool_error(f"show: kind must be one of {', '.join(SHOW_KINDS)}", field="kind")
+            if kind == "file":
+                try:
+                    p = mac.allowed_path(path)
+                except mac.LocalPathError as e:
+                    return tool_error(redact.scrub_command_output(f"show: {e}"), field="path", expected="a file inside the home folder",
+                                      example={"kind": "file", "path": "~/Documents/Lease 2026.pdf"})
+                if not p.is_file():
+                    return tool_error(redact.scrub_command_output(f"show: {p} is not a file"), field="path")
+                size = p.stat().st_size
+                if size > SHOW_MAX_FILE_BYTES:
+                    return tool_error(f"show: {p.name} is {size // (1024 * 1024)} MB; the panel shows files up to {SHOW_MAX_FILE_BYTES // (1024 * 1024)} MB", field="path")
+                mime = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+                return {"show": {"kind": "file", "title": title or p.name, "path": str(p), "name": p.name, "mime": mime, "size": size},
+                        "shown": title or p.name, "note": "The user now sees this file in the side panel beside the chat."}
+            if not content.strip():
+                return tool_error("show: content is required for this kind", field="content")
+            if len(content) > SHOW_MAX_CHARS:
+                return tool_error(f"show: content is {len(content)} characters; the limit is {SHOW_MAX_CHARS}", field="content")
+            return {"show": {"kind": kind, "title": title or kind, "source": content},
+                    "shown": title or kind, "note": "The user now sees this in the side panel beside the chat."}
+        R("show", ToolSpec("show", "Open the side panel beside the chat on something to look at: a self-contained HTML page (inline CSS/JS, no network), an SVG, a mermaid diagram, a chart or interactive spec (same JSON as the ```chart / ```interactive blocks), markdown, or a file on this Mac (PDF, image, text, markdown, HTML). Use it when the content deserves more room than an inline block, or to pull up a document for the user while you talk about it. The user sees the content; you get a one-line receipt.",
+            _obj({"kind": {"type": "string", "enum": list(SHOW_KINDS)},
+                  "content": {"type": "string", "description": "The HTML / SVG / mermaid / chart JSON / markdown to show (not for kind=file)"},
+                  "path": {"type": "string", "description": "kind=file only: absolute or ~/ path, usually from find_files"},
+                  "title": {"type": "string", "description": "Panel title"}}, ["kind"]), show, "utility",
+            examples=[{"kind": "file", "path": "~/Documents/Lease 2026.pdf", "title": "Lease"},
+                      {"kind": "mermaid", "content": "graph TD\n  A[Order] --> B{Paid?}\n  B -->|yes| C[Ship]", "title": "Order flow"},
+                      {"kind": "html", "content": "<h1>Dashboard</h1><p>...</p>", "title": "Mock-up"}]))
 
         async def propose_plan(ctx: dict[str, Any], steps: Any = None, title: str = "") -> Any:
             """Unreachable from a chat: the plan *is* its approval card, so app.py records the plan at the approval

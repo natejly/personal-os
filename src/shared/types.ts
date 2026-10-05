@@ -188,6 +188,23 @@ export interface ToolInfo {
   ask_locked?: boolean
 }
 
+/**
+ * Something the chat's side panel shows: content the model wrote (the same kinds as the fenced blocks in a reply,
+ * plus markdown), or a file on this Mac the panel fetches by path.
+ */
+export type ShowKind = 'html' | 'svg' | 'mermaid' | 'chart' | 'interactive' | 'markdown' | 'file'
+export interface ShowItem {
+  kind: ShowKind
+  title: string
+  /** Inline kinds: the source text. */
+  source?: string
+  /** kind=file: the resolved path the backend serves at /local/raw, with what it knows about the file. */
+  path?: string
+  name?: string
+  mime?: string
+  size?: number
+}
+
 export interface ToolImage {
   name: string
   mime: string
@@ -474,6 +491,8 @@ export interface ToolEvent {
   error: string | null
   /** Images the tool produced (e.g. matplotlib figures from run_python). */
   images?: ToolImage[] | null
+  /** What the `show` tool put in the chat's side panel; the model only saw a receipt. */
+  show?: ShowItem | null
   pending?: boolean
   needs_approval?: boolean
   approval?: string | null

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { GitBranch, Code2, Copy, Check, AlertCircle } from 'lucide-react'
 import { useStore } from '../store'
+import OpenInPanel from './ShowButton'
 
 /** Renders a ```mermaid fenced block as a diagram. Mermaid is loaded on first use (it is a large dependency). */
 
@@ -71,6 +72,7 @@ export default function MermaidBlock({ source, streaming }: { source: string; st
         <div className="chart-tools">
           <button className={`icon-btn ghost ${view === 'diagram' ? 'on' : ''}`} title="Diagram" onClick={() => setView('diagram')}><GitBranch size={13} /></button>
           <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Source" onClick={() => setView('source')}><Code2 size={13} /></button>
+          {!streaming && <OpenInPanel kind="mermaid" source={source} />}
           <button className="icon-btn ghost" title="Copy source" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
         </div>
       </div>

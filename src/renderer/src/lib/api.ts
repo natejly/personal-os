@@ -112,13 +112,19 @@ export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUE
 
 export const json = (v: unknown): string => JSON.stringify(v)
 
+/** An authed GET of a backend path for callers that want the bytes or text rather than JSON; throws on a non-2xx. */
+export async function fetchRaw(path: string): Promise<Response> {
+  const r = await fetch(`${base}${path}`, { headers: await auth() })
+  if (!r.ok) throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  return r
+}
+
 /**
  * Save a file the backend serves as octet-stream. A bare <a href> 401s (the auth middleware reads the token header
  * only), so the bytes are fetched with the header and handed to the browser through an object URL.
  */
 export async function saveDownload(path: string, name: string): Promise<void> {
-  const r = await fetch(`${base}${path}`, { headers: await auth() })
-  if (!r.ok) throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  const r = await fetchRaw(path)
   const url = URL.createObjectURL(await r.blob())
   const a = document.createElement('a')
   a.href = url

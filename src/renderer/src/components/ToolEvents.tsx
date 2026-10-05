@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, MessageSquare, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, Bot, Eye, FileOutput, PanelRight, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -22,7 +22,7 @@ import '../styles/docs.css'
 import Face from './Face'
 
 const ICONS: Record<string, JSX.Element> = {
-  propose_plan: <ListChecks size={13} />,
+  propose_plan: <ListChecks size={13} />, show: <PanelRight size={13} />,
   agent_spawn: <Bot size={13} />, agent_wait: <Bot size={13} />, agent_stop: <Bot size={13} />, desk_start: <FolderOpen size={13} />,
   calendar_events: <CalendarDays size={13} />, calendar_get: <CalendarDays size={13} />, calendar_free_busy: <CalendarClock size={13} />,
   calendar_find_time: <CalendarSearch size={13} />, calendar_propose: <CalendarDays size={13} />, calendar_create: <CalendarPlus size={13} />,
@@ -321,6 +321,10 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
           </div>
         )}
         {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
+        {/* The panel content rides on the event, so a replayed reply can reopen it after the panel was closed. */}
+        {t.show && !t.pending && !t.error && (
+          <button className="link small" onClick={() => useStore.getState().openShow(conversationId, t.show!)}>Open in side panel</button>
+        )}
         {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
         {t.name === 'desk_start' && !t.pending && !t.error && /"desk_id":\s*"([^"]+)"/.test(t.result_preview ?? '') && (
           <button className="link small" onClick={() => {

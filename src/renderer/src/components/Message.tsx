@@ -8,6 +8,7 @@ import { useStore, useSubagents } from '../store'
 import { api } from '../lib/api'
 import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
+import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
@@ -272,7 +273,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                   single-class rules the cards above are styled with. Its streaming class draws the cursor. */}
               {message.content ? (
                 <div className={streaming ? 'markdown streaming' : 'markdown'}>
-                  <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
+                  <ShowCtx.Provider value={message.conversation_id}>
+                    <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
+                  </ShowCtx.Provider>
                 </div>
               ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) ? (
                 <Thinking />

@@ -10,6 +10,7 @@ import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import PlanPanel from './PlanPanel'
+import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
@@ -52,6 +53,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [editingTitle, setEditingTitle] = useState(false)
+  // The side panel (the `show` tool, or "Open in panel" on a block) belongs to this chat alone.
+  const showKey = convo?.id ?? conversationId ?? ''
+  const showing = useStore((s) => (showKey ? !!s.shows[showKey] : false))
 
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
@@ -144,6 +148,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
+        {showing && <ShowPanel conversationId={showKey} />}
         {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
         {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

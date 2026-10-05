@@ -119,6 +119,10 @@ class Microsoft(MailMixin, CalendarMixin):
     def _endpoint(self, tenant: str, leaf: str) -> str:
         return f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/{leaf}"
 
+    def _me(self) -> str | None:
+        """The signed-in address, from the token settings already held (no API call); the reply tracker reads it."""
+        return ((self.get_settings().get(TOKEN_KEY) or {}).get("email") or None)
+
     def status(self) -> dict[str, Any]:
         tok = self.get_settings().get(TOKEN_KEY) or {}
         cid, tenant, source = self._client()

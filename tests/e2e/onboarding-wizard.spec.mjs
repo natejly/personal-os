@@ -58,7 +58,7 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
     await cont(page).click()
 
     // google: skippable
-    await expect(w.getByRole('heading', { name: 'Connect Google' })).toBeVisible()
+    await expect(w.getByRole('heading', { name: 'Connect your accounts' })).toBeVisible()
     await cont(page, 'Skip for now').click()
 
     // about: skip label flips to Continue once there is text

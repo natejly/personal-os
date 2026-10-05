@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 PROVIDERS = ("google", "microsoft")
 # Attribute prefixes that follow the active provider; anything else is Google-only.
-_SWITCHED = ("calendar", "gmail_", "enabled_calendar_ids", "status", "invalidate", "cache_stats", "forget")
+_SWITCHED = ("calendar", "gmail_", "enabled_calendar_ids", "status", "invalidate", "cache_stats", "forget", "_me")
 
 
 def active_provider(settings: dict[str, Any]) -> str:
@@ -36,7 +36,8 @@ class Pim:
         return self.microsoft if self.provider == "microsoft" else self.google
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
+        # Dunders stay unresolved (copy/pickle probe them); `_me` and friends are the clients' own helpers callers use.
+        if name.startswith("__"):
             raise AttributeError(name)
         target = self.active if name.startswith(_SWITCHED) else self.google
         return getattr(target, name)

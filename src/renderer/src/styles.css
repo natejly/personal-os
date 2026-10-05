@@ -2786,10 +2786,9 @@ select:focus-visible {
 
 /* ---------- Page agent (⌘I) ---------- */
 .page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
-.page-agent > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.page-agent > header h3 { margin: 0; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .page-agent-actions { display: flex; align-items: center; gap: 2px; }
-.page-agent-ctx { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.page-agent-ctx { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.page-agent-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .page-agent-ctx b { color: var(--text); font-weight: 600; }
 .page-agent-ctx em { font-style: normal; color: var(--text-faint); }
 .page-agent-body { flex: 1; overflow-y: auto; padding: 10px 12px; min-height: 0; }

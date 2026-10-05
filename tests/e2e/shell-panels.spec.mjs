@@ -8,7 +8,7 @@ const lastCallText = (llm) => JSON.stringify(llm.calls[llm.calls.length - 1] ?? 
 async function askPageAgent(grain, text = '!!reply noted') {
   const { page, llm } = grain
   const before = llm.calls.length
-  if (!(await panel(page).count())) await menu(grain, 'Ask About This Page')
+  if (!(await panel(page).count())) await menu(grain, 'Page Agent')
   await expect(panel(page)).toBeVisible()
   const box = panel(page).getByRole('textbox').first()
   await box.fill(text)
@@ -71,7 +71,7 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await page.reload()
   await page.waitForSelector('.sidebar')
   await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
-  await menu(grain, 'Ask About This Page')
+  await menu(grain, 'Page Agent')
   const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)
   const h = page.getByRole('separator', { name: 'Page agent width' })

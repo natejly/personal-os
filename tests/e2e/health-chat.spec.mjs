@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { menu } from './helpers/shell.mjs'
 import { enableModules, reload, realErrors } from './helpers/mah.mjs'
 
 test.beforeEach(() => test.setTimeout(240_000))
@@ -50,7 +51,7 @@ test('the page-agent context for Health names today and every metric, so questio
   await reload(page)
   await page.getByRole('button', { name: 'Health', exact: true }).click()
   await expect(page.locator('.hl-tile').first()).toBeVisible()
-  await page.getByRole('button', { name: 'Ask about this page' }).click()
+  await menu(grain, 'Page Agent')
   const box = page.getByRole('textbox', { name: 'Message' }).last()
   await box.fill('how am I doing?')
   await box.press('Enter')

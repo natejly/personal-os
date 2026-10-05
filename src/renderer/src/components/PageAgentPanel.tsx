@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquarePlus, Sparkles, SquareArrowOutUpRight, X } from 'lucide-react'
+import { MessageSquarePlus, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
 import Composer from './Composer'
 import ResizeHandle from './ResizeHandle'
@@ -44,8 +44,10 @@ export default function PageAgentPanel(): JSX.Element {
   return (
     <aside className="page-agent" aria-label="Page agent">
       <ResizeHandle id="page-agent-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={closePageAgent} label="Page agent width" className="at-left" />
-      <header>
-        <h3><Sparkles size={13} /> Ask about this page</h3>
+      <div className="page-agent-ctx" title={ctx?.detail ? `${ctx.detail.slice(0, 600)}…` : undefined}>
+        <span className="page-agent-label">
+          {ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
+        </span>
         <div className="page-agent-actions">
           {convo && (
             <>
@@ -55,10 +57,6 @@ export default function PageAgentPanel(): JSX.Element {
           )}
           <button className="icon-btn" title="Close (⌘I)" aria-label="Close page agent" onClick={closePageAgent}><X size={15} /></button>
         </div>
-      </header>
-
-      <div className="page-agent-ctx" title={ctx?.detail ? `${ctx.detail.slice(0, 600)}…` : undefined}>
-        {ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
       </div>
 
       <div className="page-agent-body" ref={scrollRef} onScroll={onScroll}>

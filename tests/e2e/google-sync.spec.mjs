@@ -98,6 +98,7 @@ failingGmail('a Google API failure on one Today card shows that card as failed, 
 test.describe('agent tool cards', () => {
   test('gmail_draft shows an editable draft card; the edit is what gets saved', async ({ grain }) => {
     const { page } = grain
+    await grain.api('/settings', { method: 'PUT', body: { tools: { gmail_draft: 'ask' } } })
     await sendChat(page, '!!tool gmail_draft {"to":"dana@example.com","subject":"Hello Dana","body":"Hi Dana, lunch?"}')
     const card = page.getByRole('region', { name: 'Email draft' })
     await expect(card).toBeVisible()

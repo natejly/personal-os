@@ -10,6 +10,7 @@ import {
 import { blockAriaLabel, changeAt, classifyBlocks, firstChangeMin, hourRange, LEGEND_LABEL, legendKeys, outcomeFor, weekLabel, type ViewBlock } from '../../lib/calendarProposal'
 import { insertIntoComposer } from '../../lib/composerInsert'
 import { useStore } from '../../store'
+import { PIM_SETTINGS_TAB, pimConnected, pimLabel } from '../../lib/pim'
 import { dayKey, fmtMin, fmtTime } from '../CalendarWeek'
 import { eventColor, primeCalendarMeta } from '../EventEditor'
 import { registerToolCard, type ToolCardProps } from './registry'
@@ -41,11 +42,12 @@ function Details({ event }: { event: ToolEvent }): JSX.Element {
 
 function ConnectNotice(): JSX.Element {
   const openSettings = useStore((s) => s.openSettings)
+  const label = useStore(pimLabel)
   return (
     <div className="ccard-notice" role="status">
       <AlertCircle size={14} />
-      <span>Google Calendar isn&apos;t connected.</span>
-      <button className="ghost-btn sm" onClick={() => openSettings('integrations')}>Connect Google</button>
+      <span>{label} calendar isn&apos;t connected.</span>
+      <button className="ghost-btn sm" onClick={() => openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button>
     </div>
   )
 }
@@ -348,7 +350,7 @@ function ProposalCard({ event, pending, decide, rules }: ToolCardProps): JSX.Ele
   const name = event.name
   const state = cardState(name, event, pending)
   const original = useMemo(() => changesFromArgs(name, argsOf(event)), [name, event])
-  const connected = useStore((s) => !!s.google?.connected)
+  const connected = useStore(pimConnected)
 
   const [draft, setDraft] = useState<Change[]>(original)
   const [enabled, setEnabled] = useState<boolean[]>(() => original.map(() => true))

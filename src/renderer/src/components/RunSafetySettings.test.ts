@@ -28,3 +28,20 @@ test('without snapshot support the switch is disabled and says why', () => {
   assert.match(html, /<input type="checkbox" disabled=""/)
   assert.ok(html.includes('Unavailable on this Mac'))
 })
+
+test('the Permissions tab sections the run-safety block sits beside are exported from one place', async () => {
+  const cowork = await import('./CoworkSettings')
+  for (const name of ['ShellNetwork', 'BrowserAccess', 'DeskGates'] as const) assert.equal(typeof cowork[name], 'function', name)
+  const html = renderToStaticMarkup(createElement(cowork.DeskGates, { draft: { deskDoneGate: false } as Settings, patch: () => {} }))
+  assert.ok(html.includes('Run sandboxed commands without asking'))
+  assert.ok(html.includes('Check before finishing'))
+  assert.match(html, /Check before finishing[\s\S]*?<input type="checkbox"\/>/, 'deskDoneGate off renders unchecked')
+})
+
+test('the shell network block offers one sandbox control: none of its own', async () => {
+  const { ShellNetwork } = await import('./CoworkSettings')
+  const html = renderToStaticMarkup(createElement(ShellNetwork, { draft: { sandboxNetwork: 'proxy' } as Settings, patch: () => {} }))
+  assert.ok(html.includes('Network for commands'))
+  assert.ok(!html.includes('Network for the Linux sandbox'), 'sandboxNetwork is set in SandboxSettings only')
+  assert.ok(html.includes('Allowed hosts'), 'the host list shows while the sandbox uses the proxy')
+})

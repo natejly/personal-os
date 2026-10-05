@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
+import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, slotIso, startOfWeek, withoutTodoEvents, type Slot } from './CalendarWeek'
@@ -55,7 +56,9 @@ function CalendarRail({ calendars, ready, shown, toggle }: {
 }
 
 export default function CalendarView(): JSX.Element {
-  const google = useStore((s) => s.google)
+  // The active calendar account (Google or Microsoft).
+  const google = useStore(pimStatus)
+  const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)
   const { refreshTodos, toast, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
@@ -219,7 +222,7 @@ export default function CalendarView(): JSX.Element {
       </header>
 
       {!google?.connected && (
-        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button></div>
+        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button></div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
@@ -233,6 +236,15 @@ export default function CalendarView(): JSX.Element {
             onMove={google?.connected ? (e, start, end) => void move(e, start, end) : undefined}
             colorOf={eventColor} />
         </div>
+        {/* Over the grid, not instead of it: clicking a slot is still how an event gets made. */}
+        {google?.connected && query && !loading && !error && shown.length === 0 && (
+          <div className="empty-state cal-empty">
+            <CalIcon size={28} />
+            <h2>No events this week</h2>
+            <p>Click any slot to add one, or plan your todos into the free time.</p>
+            <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>
+          </div>
+        )}
       </div>
       {loading && events.length === 0 && <div className="cal-loading">Loading…</div>}
 

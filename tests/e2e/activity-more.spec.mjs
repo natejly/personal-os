@@ -8,6 +8,8 @@ const day = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.
 
 async function openActivity(grain, tab) {
   await enableModules(grain.api)
+  // The monitor ships on; these flows start from off so "Turn on" is the first step.
+  await grain.api('/activity/stop', { method: 'POST' })
   await reload(grain.page)
   await grain.page.locator('.nav-item', { hasText: 'Activity' }).first().click()
   await expect(grain.page.getByRole('heading', { name: 'Activity' }).first()).toBeVisible()

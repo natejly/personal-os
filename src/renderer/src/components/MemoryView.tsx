@@ -105,6 +105,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const memories = useMemo(() => (focus ? allMemories.filter((m) => focus.includes(m.id)) : allMemories), [focus, allMemories])
   const libraryScope = useStore((s) => s.libraryScope)
   const { refreshMemories, addMemory } = useStore()
+  const autoLearn = useStore((s) => s.settings.autoLearn)
   const scope: Scope = projectId ?? libraryScope
   const [draft, setDraft] = useState('')
   const [kind, setKind] = useState('fact')
@@ -201,7 +202,12 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
       </div>
       {focus && <p className="muted small">Showing the {focus.length} memor{focus.length === 1 ? 'y' : 'ies'} from one reply. <button className="link" onClick={() => useStore.setState({ memoryFocus: null })}>Show all</button></p>}
       {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
-      {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories yet.'}</p>}
+      {memories.length === 0 && (query ? <p className="empty-hint big">No memories match.</p> : (
+        <div className="empty-hint big">
+          <p>No memories yet.</p>
+          <p className="muted small">{autoLearn ? 'Grain saves facts and preferences from your chats as you go' : 'Learning from chats is off in Settings'}, or type one in the box above.</p>
+        </div>
+      ))}
       {memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
       {past.map((m) => <HistoryRow key={m.id} m={m} byId={byId} onRestore={() => void restore(m.id)} />)}
     </div>

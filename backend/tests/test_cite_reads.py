@@ -82,3 +82,11 @@ def test_meeting_read_cites_its_part() -> None:
 def test_line_span() -> None:
     assert tools.line_span("a\r\nbb\nccc", 2, 3) == (3, 9)
     assert tools.line_span("a\nb", 5, 9) == (3, 3)
+
+
+def test_activity_block_of_app_names_only_does_not_taint():
+    """The monitor ships on. A block that is just app names (no Accessibility, so no titles, profile or summaries)
+    is the user's own data; one that carries a window title or a distilled summary still taints the turn."""
+    assert context_taints({"activity": "In Terminal for 3m.", "activity_foreign": False}) == []
+    assert context_taints({"activity": "In Safari - Some page title for 3m.", "activity_foreign": True}) == ["activity"]
+    assert context_taints({"activity": "legacy caller without the flag"}) == ["activity"]

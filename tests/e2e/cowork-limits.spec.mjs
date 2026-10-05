@@ -55,7 +55,7 @@ test('a desk lets go of a card nobody answers (parkAfterSeconds) and the answer 
 test('Settings → Autonomy numeric fields clamp, save, and survive a reopen', async ({ grain }) => {
   const { page } = grain
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Tools' }).click()
+  await page.getByRole('tab', { name: 'Autonomy' }).click()
   await expect(page.getByRole('heading', { name: 'Autonomy' })).toBeVisible()
   const turns = page.getByLabel(/Turns per desk/)
   await turns.scrollIntoViewIfNeeded()

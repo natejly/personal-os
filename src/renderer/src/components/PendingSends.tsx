@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Check, Send, Undo2, X } from 'lucide-react'
 import { api, verificationMessage } from '../lib/api'
 import { useStore } from '../store'
+import { pimConnected } from '../lib/pim'
 import type { PendingSend } from '@shared/types'
 
 /** Sits next to the toasts: every email still inside its undo window, counting down.
@@ -14,7 +15,7 @@ export default function PendingSends(): JSX.Element | null {
   const [sends, setSends] = useState<PendingSend[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const toast = useStore((s) => s.toast)
-  const googleConnected = useStore((s) => s.google?.connected ?? false)
+  const connected = useStore(pimConnected)
 
   // `issued` numbers each request and `applied` is the newest one shown, so a slow older response
   // cannot overwrite a newer one; `inflight` lets the 1s tick skip rather than stack requests.
@@ -39,14 +40,14 @@ export default function PendingSends(): JSX.Element | null {
   }, [])
 
   useEffect(() => {
-    if (!googleConnected) return
+    if (!connected) return
     void refresh()
     // Anything that queues mail (Mail's Send, an accepted proposal, the assistant's gmail_send) says so, so the undo
     // countdown shows up at once instead of on the next launch.
     const on = (): void => void refresh()
     window.addEventListener('grain-outbox-changed', on)
     return (): void => window.removeEventListener('grain-outbox-changed', on)
-  }, [googleConnected, refresh])
+  }, [connected, refresh])
 
   // One shared second-tick: counts down locally, and re-reads the server as each hold runs out so
   // the row flips to its real outcome (sent + verified, or a loud warning).

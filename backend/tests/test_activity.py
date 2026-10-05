@@ -391,6 +391,7 @@ def test_activity_tools_are_offered_only_while_the_monitor_is_on() -> None:
     from personal_os.tools import Toolbox
 
     m = _monitor(Path(tempfile.mkdtemp()))
+    m.db.set_settings({"activity": {**m.config(), "enabled": False}})  # on by default; switched off here
     tb = Toolbox(None, None, None, lambda: {}, activity=m)  # type: ignore[arg-type]
     names = [n for n in tb.specs if n.startswith("activity_")]
     assert names and not any(tb.available(n) for n in names)

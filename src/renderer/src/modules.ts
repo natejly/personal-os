@@ -2,7 +2,7 @@
  * The one list of what the shell is made of: which cards the Today screen shows and which views the
  * sidebar offers. Both are user-toggleable (Settings → Views, or the slider button on Today) and
  * persist in settings as exceptions — a missing homeWidgets key means "on".
- * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Views turns them back on.
+ * Every view and card ships shown (see llm.DEFAULT_SETTINGS); Settings → Views hides them.
  */
 import type { View } from './store'
 import { moduleHome } from './shell/registry'
@@ -41,8 +41,8 @@ export const HOME_MODULES: HomeModule[] = [
 
 /**
  * Views that may be hidden or moved between the sidebar and the title bar (shell/nav.tsx). Home, chats
- * and Files are the shell itself and stay. Showing Meetings records nothing: recording is
- * `meetings.enabled` plus an acknowledged consent notice, both off until the user sets them.
+ * and Files are the shell itself and stay. Showing Meetings records nothing: recording needs the
+ * consent notice acknowledged on the first Record, and Activity's probes wait for OS permissions the user grants.
  */
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = navEntries().map(({ view, label }) => ({ view, label }))
 

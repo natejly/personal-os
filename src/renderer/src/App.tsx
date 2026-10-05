@@ -21,6 +21,7 @@ import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
 import CommandPalette from './components/CommandPalette'
+import HelpOverlay from './components/HelpOverlay'
 import ProjectModal from './components/ProjectModal'
 import SubagentPanel from './components/SubagentPanel'
 import { moduleForView } from './shell/registry'
@@ -183,6 +184,7 @@ export default function App(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const settingsOpen = useStore((s) => s.settingsOpen)
   const paletteOpen = useStore((s) => s.paletteOpen)
+  const helpOpen = useStore((s) => s.helpOpen)
   const projectModal = useStore((s) => s.projectModal)
   const openSubagentId = useStore((s) => s.openSubagentId)
   const view = useStore((s) => s.view)
@@ -273,6 +275,7 @@ export default function App(): JSX.Element {
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
       {paletteOpen && <CommandPalette />}
+      {helpOpen && <HelpOverlay />}
       {projectModal && <ProjectModal />}
       {openSubagentId && <SubagentPanel id={openSubagentId} />}
       <BackendBanner />

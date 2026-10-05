@@ -18,7 +18,7 @@ import asyncio
 import re
 from typing import Any
 
-from . import redact
+from . import permissions, redact
 
 from .tools import tool_error
 from .workspace import WorkspaceError
@@ -183,7 +183,7 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
     st = state(tb, desk_id)
     extra: list[str] = []
     forced = False
-    if cfg.get("deskDoneGate", True):
+    if permissions.get(cfg, "deskDoneGate"):
         found = problems(desks=tb.desks, workspace=tb.workspace, desk_id=desk_id, conversation_id=str(ctx.get("conversation_id") or ""),
                          work_plans=tb.work_plans, plans=getattr(tb, "plans", None))
         if found and st["refusals"] < MAX_REFUSALS:
@@ -199,7 +199,7 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
             forced = True
             st["open"] = found
             extra.append("Open items when the desk was closed:\n" + "\n".join(f"- {p}" for p in found))
-    if cfg.get("deskSelfReview", True) and not st["reviewed"] and not forced:
+    if permissions.get(cfg, "deskSelfReview") and not st["reviewed"] and not forced:
         brief = str((tb.desks.get(desk_id) or {}).get("brief") or "")
         files = [o["path"] for o in tb.desks.outputs(desk_id)]
         text = await run_review(tb, ctx, review_task(brief, summary, files))

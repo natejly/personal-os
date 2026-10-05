@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, Menu, powerMonitor, shell, systemPreference
 import { existsSync, statSync, writeFileSync } from 'fs'
 import { basename, join, resolve, sep } from 'path'
 import { isOpenable } from '../shared/openable'
+import { SHORTCUTS, shortcut } from '../shared/shortcuts'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
@@ -164,11 +165,18 @@ const sendWindowMenu = (action: string): void => {
   deliver(target, action)
 }
 
-const SPACES: Electron.MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, i) => ({
-  label: `Space ${i + 1}`,
-  accelerator: `Control+${i + 1}`,
-  click: () => sendMenu(`canvas:space:${i + 1}`)
-}))
+/**
+ * A menu item whose label, accelerator and action come from the shortcut registry (src/shared/shortcuts.ts),
+ * the same table the shortcut overlay lists. An entry with no action (the composer's ⇧⌘P) is shown for
+ * discovery only: registering it would let the menu swallow the key the component binds itself.
+ */
+const item = (id: string): Electron.MenuItemConstructorOptions => {
+  const { label, keys, action, scope } = shortcut(id)
+  if (!action) return { label, accelerator: keys, registerAccelerator: false }
+  return { label, accelerator: keys, click: () => (scope === 'window' ? sendWindowMenu : sendMenu)(action) }
+}
+
+const SPACES = SHORTCUTS.filter((s) => s.id.startsWith('space-')).map((s) => item(s.id))
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -179,7 +187,7 @@ function buildMenu(): void {
             submenu: [
               { role: 'about' as const },
               { type: 'separator' as const },
-              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenu('settings') },
+              item('settings'),
               { type: 'separator' as const },
               { role: 'hide' as const },
               { role: 'quit' as const }
@@ -190,17 +198,17 @@ function buildMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new-chat') },
+        item('new-chat'),
         // Not an OS-global shortcut: nothing outside the app acts. Files gets a doc in the default place.
-        { label: 'New File', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
-        { label: "Today's File", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
-        { label: 'Upload File…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
+        item('new-note'),
+        item('daily-note'),
+        item('upload'),
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
         ...(isMac
           ? []
           : [
               { type: 'separator' as const },
-              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenu('settings') },
+              item('settings'),
               { role: 'quit' as const }
             ])
       ]
@@ -213,9 +221,9 @@ function buildMenu(): void {
         { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
         { type: 'separator' },
-        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => sendWindowMenu('chat:find') },
-        { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-next') },
-        { label: 'Find Previous', accelerator: 'Shift+CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-prev') },
+        item('find'),
+        item('find-next'),
+        item('find-prev'),
         ...(isMac
           ? [{ type: 'separator' }, { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] }] as Electron.MenuItemConstructorOptions[]
           : [])
@@ -224,45 +232,45 @@ function buildMenu(): void {
     {
       label: 'View',
       submenu: [
-        { label: 'Today', accelerator: 'CmdOrCtrl+0', click: () => sendMenu('view:home') },
-        { label: 'Chats', accelerator: 'CmdOrCtrl+1', click: () => sendMenu('view:chat') },
-        { label: 'Lists', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
-        { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
-        { label: 'Files', accelerator: 'CmdOrCtrl+4', click: () => sendMenu('view:docs') },
-        { label: 'Mail', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:mail') },
-        { label: 'Memory…', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
-        { label: 'Activity', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:activity') },
+        item('view-home'),
+        item('view-chat'),
+        item('view-todos'),
+        item('view-calendar'),
+        item('view-docs'),
+        item('view-mail'),
+        item('view-memory'),
+        item('view-activity'),
         // No digit for these: the graph is a mode of Memory (⌘6) and Uploads is a Files section (⌘4, ⌘U).
         { label: 'Knowledge Graph…', click: () => sendMenu('view:graph') },
         { label: 'Uploads', click: () => sendMenu('view:documents') },
         // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
-        { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
+        item('view-meetings'),
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.
-        { label: 'Command Palette…', accelerator: 'CmdOrCtrl+K', click: () => sendMenu('palette') },
+        item('palette'),
         { type: 'separator' },
         // ⌘⇧[ / ⌘⇧] step through chats (⌃⌘[ / ⌃⌘] are pop-out transparency and ⌥⌘arrows are spaces).
-        { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Shift+[', click: () => sendMenu('chat:prev') },
-        { label: 'Next Chat', accelerator: 'CmdOrCtrl+Shift+]', click: () => sendMenu('chat:next') },
-        { label: 'Search Chats', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendMenu('chat:search') },
+        item('chat-prev'),
+        item('chat-next'),
+        item('chat-search'),
         { type: 'separator' },
-        { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
+        item('toggle-sidebar'),
         // ⌘I asks about what is on screen. The chat's context inspector, which used to own it, moves one
         // modifier over.
-        { label: 'Page Agent', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
-        { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
+        item('page-agent'),
+        item('toggle-context'),
         // Shown for discovery only: the composer binds ⇧⌘P itself, so the menu must not swallow it.
-        { label: 'Cycle Plan Mode', accelerator: 'CmdOrCtrl+Shift+P', registerAccelerator: false },
+        item('plan-mode'),
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         // Explicit, because ⌘0 is Today above and resetZoom's default would have been the dead duplicate.
         // These change the uiZoom setting (the renderer writes it and every window follows), not the page directly.
-        { label: 'Actual Size', accelerator: 'CmdOrCtrl+Alt+0', click: () => sendMenu('zoom:reset') },
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => sendMenu('zoom:in') },
-        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => sendMenu('zoom:out') },
+        item('zoom-reset'),
+        item('zoom-in'),
+        item('zoom-out'),
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
@@ -270,20 +278,20 @@ function buildMenu(): void {
     {
       label: 'Spaces',
       submenu: [
-        { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
-        { label: 'New Space', accelerator: 'Control+Command+N', click: () => sendMenu('canvas:new-space') },
+        item('canvas-toggle'),
+        item('canvas-new'),
         { type: 'separator' },
         // ⌥⌘arrows, not ⌃arrows: macOS owns ⌃←/⌃→/⌃↑ and an app accelerator loses to a system one.
-        { label: 'Previous Space', accelerator: 'Alt+Command+Left', click: () => sendMenu('canvas:prev-space') },
-        { label: 'Next Space', accelerator: 'Alt+Command+Right', click: () => sendMenu('canvas:next-space') },
-        { label: 'Overview', accelerator: 'Alt+Command+Up', click: () => sendMenu('canvas:overview') },
+        item('canvas-prev'),
+        item('canvas-next'),
+        item('canvas-overview'),
         { type: 'separator' },
         ...SPACES,
         { type: 'separator' },
-        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') },
+        item('canvas-tidy'),
         // One item, not a checkbox: the menu is built once and the lock belongs to whichever space
         // is active, so the renderer's padlock is the state, and this is only the shortcut.
-        { label: 'Lock / Unlock Space', accelerator: 'Control+Command+L', click: () => sendMenu('canvas:lock') }
+        item('canvas-lock')
       ]
     },
     {
@@ -291,17 +299,17 @@ function buildMenu(): void {
       submenu: [
         // Plain items, never roles: the canvas gets first refusal on ⌘W/⌘M and the renderer falls
         // through to closeSelf()/minimizeSelf() when no canvas window has focus.
-        { label: 'Close Window', accelerator: 'CmdOrCtrl+W', click: () => sendWindowMenu('close-window') },
-        { label: 'Minimize', accelerator: 'CmdOrCtrl+M', click: () => sendWindowMenu('minimize-window') },
+        item('close-window'),
+        item('minimize-window'),
         ...(isMac ? [{ role: 'zoom' as const }, { type: 'separator' as const }, { role: 'front' as const }] : []),
         { type: 'separator' },
-        { label: 'Pop Out', accelerator: 'Control+Command+O', click: () => sendWindowMenu('canvas:popout') },
-        { label: 'Return to Space', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
-        { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
+        item('popout'),
+        item('unpopout'),
+        item('pin'),
         // Transparency is a pop-out's own property, so these ride sendWindowMenu like the pin above:
         // whoever has focus answers, and a widget still on the canvas only stores the level.
-        { label: 'More Transparent', accelerator: 'Control+Command+[', click: () => sendWindowMenu('canvas:opacity:down') },
-        { label: 'Less Transparent', accelerator: 'Control+Command+]', click: () => sendWindowMenu('canvas:opacity:up') },
+        item('opacity-down'),
+        item('opacity-up'),
         {
           label: 'Transparency',
           submenu: OPACITY_LEVELS.map((o) => ({
@@ -310,16 +318,26 @@ function buildMenu(): void {
           }))
         },
         { type: 'separator' },
-        { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() },
+        { ...item('gather-widgets'), click: () => void gather() },
         // No accelerator: the global one is the user's to choose (Settings), and a menu key would shadow it in-app.
         { label: 'Quick Ask', click: toggleAsk },
         {
+          ...item('popouts-front'),
           id: 'popouts-front',
-          label: 'Bring Pop-outs to Front',
           type: 'checkbox',
-          accelerator: 'Alt+Command+F',
-          click: (item) => { item.checked = toggleFront() }
+          click: (mi) => { mi.checked = toggleFront() }
         }
+      ]
+    },
+    {
+      // role 'help' gives the macOS menu search field.
+      label: 'Help',
+      role: 'help',
+      submenu: [
+        item('help'),
+        { label: 'Using Grain', click: () => sendMenu('help:guide') },
+        { type: 'separator' },
+        { label: 'Open Logs', click: () => void (logDir() ? shell.openPath(logDir()) : undefined) }
       ]
     }
   ]

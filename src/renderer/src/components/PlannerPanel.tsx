@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
+import { pimConnected } from '../lib/pim'
 import { blockKey, blockWhen, pickedBlocks } from '../lib/todayCards'
 import type { PlannerBlock, PlannerSuggestion } from '@shared/types'
 
@@ -19,7 +20,7 @@ const fromBlocks = (blocks?: PlannerBlock[]): Plan | null => (blocks?.length ? {
  */
 export default function PlannerPanel({ initial, days = 1, onApplied }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void }): JSX.Element {
   const toast = useStore((s) => s.toast)
-  const google = useStore((s) => s.google)
+  const connected = useStore(pimConnected)
   const [plan, setPlan] = useState<Plan | null>(() => fromBlocks(initial))
   const [picked, setPicked] = useState<Set<string>>(() => new Set((initial ?? []).map(key)))
   const [busy, setBusy] = useState(false)
@@ -31,7 +32,7 @@ export default function PlannerPanel({ initial, days = 1, onApplied }: { initial
     setPlan(fromBlocks(initial)); setPicked(new Set((initial ?? []).map(key)))
   }, [initialKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!google?.connected) return <></>
+  if (!connected) return <></>
 
   const suggest = async (): Promise<void> => {
     setBusy(true)

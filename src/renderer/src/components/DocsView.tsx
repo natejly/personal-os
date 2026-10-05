@@ -99,7 +99,9 @@ export default function DocsView(): JSX.Element {
     try { localStorage.setItem(`grain.docs.${k}`, next ? '1' : '0') } catch { /* private window */ }
   }
   const [linked, setLinked] = useState(true)
-  const [editFrac, setEditFrac] = useState<number | null>(null)
+  // Read by the scroll handler, so toggling the link does not hand the editor a new callback.
+  const linkedRef = useRef(linked)
+  linkedRef.current = linked
   // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
   // window.prompt, so the picker turns into a text input in place rather than asking in a dialog.
   const [folderDraft, setFolderDraft] = useState<string | null>(null)
@@ -170,13 +172,14 @@ export default function DocsView(): JSX.Element {
     useStore.setState({ docFocusId: null })
   }, [docFocusId, activeDoc?.id, docMode])
 
-  // Linked scrolling: the preview follows the editor's fraction of the way down.
-  useEffect(() => {
+  // Linked scrolling: the preview follows the editor's fraction of the way down. Written straight to
+  // the element: a scroll event per frame through state re-rendered this whole view each time.
+  const followEditor = useCallback((f: number): void => {
     const el = previewRef.current
-    if (!linked || el == null || editFrac == null) return
+    if (!linkedRef.current || el == null) return
     const range = el.scrollHeight - el.clientHeight
-    if (range > 0) el.scrollTop = editFrac * range
-  }, [editFrac, linked])
+    if (range > 0) el.scrollTop = f * range
+  }, [])
 
   const dirty = (docDraft !== null && docDraft !== activeDoc?.content) ||
     (docTitleDraft !== null && docTitleDraft !== activeDoc?.title)
@@ -490,7 +493,7 @@ export default function DocsView(): JSX.Element {
                   onChange={editDoc}
                   onSave={() => void flushDoc()}
                   placeholder={'# Title\n\nWrite in markdown. Maths goes in $…$ or $$…$$.'}
-                  onScrollFraction={linked && docMode === 'split' ? setEditFrac : undefined}
+                  onScrollFraction={linked && docMode === 'split' ? followEditor : undefined}
                   slash
                   extraCommands={extraCommands}
                   linkTargets={linkTargets}

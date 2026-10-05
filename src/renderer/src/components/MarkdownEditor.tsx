@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CaretMenu from '../features/notes/CaretMenu'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
@@ -183,6 +183,17 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
   return { value: value.slice(0, from) + next + value.slice(to), start: Math.max(from, s + firstDelta), end: e + (next.length - block.length) }
 }
 
+/** One row per line, re-rendered only when the line count or the caret's line changes, never per caret column. */
+const Gutter = memo(forwardRef<HTMLDivElement, { lineCount: number; cur: number }>(function Gutter({ lineCount, cur }, ref) {
+  return (
+    <div className="md-gutter" ref={ref} aria-hidden>
+      {Array.from({ length: lineCount }, (_, i) => (
+        <div key={i} className={i + 1 === cur ? 'cur' : undefined}>{i + 1}</div>
+      ))}
+    </div>
+  )
+}))
+
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
   slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, previewText = '', typewriter = false, focusMode = false
@@ -194,6 +205,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   const [caret, setCaret] = useState({ line: 1, col: 1 })
   const [sel, setSel] = useState({ start: 0, end: 0 })
   const lineCount = useMemo(() => value.split('\n').length, [value])
+  // Counted once per value, not once per render: a selection drag renders the status bar hundreds of times.
+  const words = useMemo(() => wordCount(value), [value])
+  const selWords = useMemo(() => (richStatus && sel.end > sel.start ? wordCount(value.slice(sel.start, sel.end)) : 0), [richStatus, value, sel.start, sel.end])
   const wikiOn = !!linkTargets
   // Keyed on the paragraph span, not the caret line, so moving within a paragraph does not re-highlight.
   const para = useMemo(() => (focusMode ? paragraphRange(value.split('\n'), caret.line - 1).join(':') : ''), [focusMode, value, caret.line])
@@ -221,15 +235,20 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
 
   // A mouse click moves the caret where the reader pointed; typewriter scrolling waits for typing or keys.
   const clicked = useRef(false)
+  // `select` fires on every pointer move of a drag, so this must cost nothing when nothing moved: no
+  // slice or split of the document, and no new state object unless a number actually changed.
   const trackCaret = useCallback((): void => {
     const el = ta.current
     if (!el) return
-    const upto = el.value.slice(0, el.selectionStart)
-    const nl = upto.lastIndexOf('\n')
-    setCaret({ line: upto.split('\n').length, col: el.selectionStart - nl })
     const start = el.selectionStart
     const end = el.selectionEnd
     setSel((s) => (s.start === start && s.end === end ? s : { start, end }))
+    const v = el.value
+    let line = 1
+    let nl = -1
+    for (let i = v.indexOf('\n'); i !== -1 && i < start; i = v.indexOf('\n', i + 1)) { line++; nl = i }
+    const col = start - nl
+    setCaret((c) => (c.line === line && c.col === col ? c : { line, col }))
   }, [])
 
   // A value swapped in from outside (another doc opened) moves the real caret; re-read it so the
@@ -526,11 +545,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
 
   return (
     <div className={`md-editor ${wrap ? '' : 'nowrap'} ${focusMode ? 'focus' : ''}`}>
-      <div className="md-gutter" ref={gutter} aria-hidden>
-        {Array.from({ length: lineCount }, (_, i) => (
-          <div key={i} className={i + 1 === caret.line ? 'cur' : undefined}>{i + 1}</div>
-        ))}
-      </div>
+      <Gutter ref={gutter} lineCount={lineCount} cur={caret.line} />
       <div className="md-surface" ref={surface}>
         <pre className="md-mirror" ref={mirror} aria-hidden dangerouslySetInnerHTML={{ __html: html }} />
         <textarea
@@ -568,11 +583,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       <div className="md-status">
         <span>Ln {caret.line}, Col {caret.col}</span>
         <span>{lineCount} lines</span>
-        <span>{wordCount(value)} words</span>
-        {richStatus && readingTime(wordCount(value)) && <span>{readingTime(wordCount(value))}</span>}
+        <span>{words} words</span>
+        {richStatus && readingTime(words) && <span>{readingTime(words)}</span>}
         {richStatus && sel.end > sel.start && (
           <span className="md-sel">
-            {wordCount(value.slice(sel.start, sel.end))} words, {sel.end - sel.start} chars selected
+            {selWords} words, {sel.end - sel.start} chars selected
           </span>
         )}
         {notice && <span className="md-sel">{notice}</span>}

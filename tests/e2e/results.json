@@ -6,9 +6,7 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "cowork-workflows",
-      "--grep",
-      "run a workflow|editing"
+      "cowork-restart"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
@@ -70,18 +68,18 @@
   },
   "suites": [
     {
-      "title": "cowork-workflows.spec.mjs",
-      "file": "cowork-workflows.spec.mjs",
+      "title": "cowork-restart.spec.mjs",
+      "file": "cowork-restart.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "run a workflow: propose, review the plan, approve, steps tick off in order and the work happens once",
+          "title": "backend crash while a chat approval waits: card is recorded, answering it is safe and runs nothing twice",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 300000,
+              "timeout": 360000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -91,12 +89,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 11588,
+                  "duration": 85096,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:01:53.652Z",
+                  "startTime": "2026-10-05T05:03:49.572Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -104,18 +102,18 @@
               "status": "expected"
             }
           ],
-          "id": "aae6716e47e073be3e66-01cf36c08311cd9bce40",
-          "file": "cowork-workflows.spec.mjs",
-          "line": 32,
+          "id": "2a7eace91d4d1a81df66-a2b7e142077f02529337",
+          "file": "cowork-restart.spec.mjs",
+          "line": 11,
           "column": 1
         },
         {
-          "title": "editing a workflow withdraws a pending approval; a stale digest cannot be approved; cancel works",
+          "title": "desk mid-run when the backend dies: it is Interrupted, never silently resumed, and Resume finishes it once",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 300000,
+              "timeout": 360000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -125,12 +123,12 @@
                   "workerIndex": 1,
                   "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 10908,
+                  "duration": 95283,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:01:53.753Z",
+                  "startTime": "2026-10-05T05:03:49.519Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -138,9 +136,111 @@
               "status": "expected"
             }
           ],
-          "id": "aae6716e47e073be3e66-71935c544759062ef680",
-          "file": "cowork-workflows.spec.mjs",
-          "line": 80,
+          "id": "2a7eace91d4d1a81df66-ce3180665749c26e56a8",
+          "file": "cowork-restart.spec.mjs",
+          "line": 41,
+          "column": 1
+        },
+        {
+          "title": "desk waiting on a question survives a backend crash; the answer still resumes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 61262,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:05:15.228Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-a29f9332e07fe3d1d889",
+          "file": "cowork-restart.spec.mjs",
+          "line": 71,
+          "column": 1
+        },
+        {
+          "title": "desk waiting on a plan survives a backend crash; approving afterwards carries the plan out",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 59853,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:05:25.336Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-f6201cc13dbd1d769018",
+          "file": "cowork-restart.spec.mjs",
+          "line": 91,
+          "column": 1
+        },
+        {
+          "title": "relaunching Electron mid-run shows the live desk once, and a finished one unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 28152,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:06:17.060Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-d9257fcfbaa638aac8da",
+          "file": "cowork-restart.spec.mjs",
+          "line": 114,
           "column": 1
         }
       ]
@@ -148,9 +248,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:01:50.881Z",
-    "duration": 14463.679000000002,
-    "expected": 2,
+    "startTime": "2026-10-05T05:03:36.125Z",
+    "duration": 189447.007,
+    "expected": 5,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

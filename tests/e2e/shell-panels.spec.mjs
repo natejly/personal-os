@@ -181,9 +181,10 @@ test('sidebar chat pulse shows a reply streaming in another chat, then settles',
   await msg.press('Enter')
   await page.locator('.sidebar .convo-item', { hasText: 'Other chat B' }).click()
   const rowA = page.locator('.sidebar .convo-item', { hasText: 'Slow chat A' })
-  await expect(rowA.locator('.pulse.working')).toBeVisible()
-  await expect(rowA.locator('.pulse.working')).toHaveCount(0, { timeout: 20_000 })
-  // finished while out of sight: unread dot / done pulse until opened
+  // working: the row's face animates (blinks) instead of a dot
+  await expect(rowA.locator('.face .mo-always')).toBeVisible()
+  await expect(rowA.locator('.face .mo-always')).toHaveCount(0, { timeout: 20_000 })
+  // finished while out of sight: unread dot until opened
   await expect(rowA.locator('.pulse')).toHaveCount(1)
   await rowA.click()
   await expect(page.locator('.msg.assistant').last()).toContainText('finally done')

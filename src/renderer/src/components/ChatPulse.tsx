@@ -1,7 +1,8 @@
 import { useChatPulse, useUnread } from '../store'
+import Face from './Face'
 import type { SessionStatus } from '@shared/types'
 
-const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
+const TITLE: Partial<Record<SessionStatus, string>> = {
   working: 'Working…',
   done: 'Just finished',
   error: 'Last reply failed',
@@ -9,13 +10,18 @@ const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
 }
 
 /**
- * Run indicator for one chat row. A component rather than a hook inside `.map`, so a row subscribes
- * to its own status string instead of the whole list re-rendering on every streamed token.
+ * One chat row's face, posed by its run status: a working chat breathes and blinks (Face animates live
+ * statuses), so there is no separate blinking dot. A component rather than a hook inside `.map`, so a
+ * row subscribes to its own status string instead of the whole list re-rendering on every streamed token.
+ * Idle with something to read: a still dot, because the reply finished while this chat was out of sight.
  */
-export default function ChatPulse({ conversationId }: { conversationId: string }): JSX.Element | null {
+export default function ChatPulse({ conversationId, size = 14, face }: { conversationId: string; size?: number; face?: { name: string; hue?: number } }): JSX.Element {
   const status = useChatPulse(conversationId)
   const unread = useUnread(conversationId)
-  // Idle with something to read: the reply finished while this chat was out of sight.
-  if (status === 'idle') return unread > 0 ? <span className="pulse unread" title="Unread reply" /> : null
-  return <span className={`pulse ${status}`} title={TITLE[status]} />
+  return (
+    <>
+      <Face name={face?.name ?? conversationId} hue={face?.hue} status={status} size={size} title={TITLE[status]} />
+      {status === 'idle' && unread > 0 && <span className="pulse unread" title="Unread reply" />}
+    </>
+  )
 }

@@ -36,7 +36,7 @@ const WORDS: Record<string, { text: string; action: BlockerAction }> = {
   enabled: { text: 'Recording is switched off. Turn it on in Settings > Meetings.', action: 'settings' },
   stt: { text: 'No speech to text is set up. Choose one in Settings > Meetings.', action: 'settings' },
   selftest: { text: 'Transcription did not pass its self-test. Check Settings > Meetings.', action: 'settings' },
-  mic: { text: 'No microphone is available. Pick one in Settings > Meetings.', action: 'settings' },
+  mic: { text: 'The microphone is missing or not permitted. Grant it in Settings > Meetings.', action: 'settings' },
   mic_device: { text: 'The chosen microphone has changed. Pick it again in Settings > Meetings.', action: 'settings' },
   ffmpeg: { text: 'Audio capture is not available. See Settings > Meetings.', action: 'settings' },
   platform: { text: 'Recording is only available on macOS.', action: 'none' }

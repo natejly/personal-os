@@ -509,6 +509,32 @@ def test_capabilities_explain_themselves_and_ask_for_no_grants() -> None:
     for c in caps:
         assert isinstance(c["ok"], bool)
         assert c["fix"] or c["ok"]                          # anything not ok says how to fix it
+    # The rows behind a macOS switch carry the pane deep link, so the panel can open it; Grant is
+    # offered only while macOS can still be asked.
+    by_id = {c["id"]: c for c in caps}
+    assert by_id["mic"]["permission"] == "microphone" and by_id["mic"]["settings_url"].endswith("Privacy_Microphone")
+    assert by_id["stt_speech"]["settings_url"].endswith("Privacy_SpeechRecognition")
+    assert isinstance(by_id["mic"]["requestable"], bool)
+    assert "permission" not in by_id["platform"] and "settings_url" not in by_id["platform"]
+
+
+def test_a_refused_or_unasked_microphone_grant_blocks_start_with_a_way_in() -> None:
+    _, svc = _svc(_tmp())
+    real = meetings.activity.microphone_status
+    try:
+        for state, requestable, words in (("denied", False, "refused"), ("unasked", True, "not been asked")):
+            meetings.activity.microphone_status = lambda s=state: s  # type: ignore[assignment]
+            with devices_are("MacBook Pro Microphone"):
+                mic = next(c for c in svc.capabilities() if c["id"] == "mic")
+            assert mic["ok"] is False and words in mic["detail"], state
+            assert mic["requestable"] is requestable and mic["settings_url"]
+            assert mic["id"] in meetings.BLOCKING_CAPABILITIES
+        meetings.activity.microphone_status = lambda: "granted"  # type: ignore[assignment]
+        with devices_are("MacBook Pro Microphone"):
+            mic = next(c for c in svc.capabilities() if c["id"] == "mic")
+        assert mic["ok"] is True and mic["requestable"] is False
+    finally:
+        meetings.activity.microphone_status = real  # type: ignore[assignment]
 
 
 def test_set_config_deep_merges_and_drops_an_unknown_source() -> None:

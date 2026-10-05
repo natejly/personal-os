@@ -83,6 +83,31 @@ function NumberField({ label, hint, value, min, max, step = 1, suffix, onCommit 
   )
 }
 
+/**
+ * The buttons for a row that sits behind a macOS permission. Grant makes the system dialog appear
+ * (macOS asks once per app, ever, so the button only shows while it still can); Open System
+ * Settings deep-links the pane for the cases where only a hand switch works. The check re-runs
+ * after a grant so the row updates once the dialog is answered.
+ */
+export function CapActions({ cap }: { cap: MeetingCapability }): JSX.Element | null {
+  const perm = cap.permission
+  if (!perm || (!cap.settings_url && !(cap.requestable && !cap.ok))) return null
+  const grant = async (): Promise<void> => {
+    await useStore.getState().grantActivityPermission(perm)
+    await useStore.getState().loadMeetingPreflight(true)
+  }
+  return (
+    <div className="act-cap-actions">
+      {cap.requestable && !cap.ok && (
+        <button className="ghost-btn xs" onClick={() => void grant()}><Shield size={11} /> Grant</button>
+      )}
+      {cap.settings_url && (
+        <button className="link xs" onClick={() => void useStore.getState().openActivitySettings(perm)}>Open System Settings</button>
+      )}
+    </div>
+  )
+}
+
 /** One checklist row, with the fix copyable: the fix is usually a shell command. */
 function CapRow({ cap, onCopy }: { cap: MeetingCapability; onCopy: (text: string) => void }): JSX.Element {
   return (
@@ -97,6 +122,7 @@ function CapRow({ cap, onCopy }: { cap: MeetingCapability; onCopy: (text: string
             <button className="icon-btn ghost xs" title="Copy the fix" onClick={() => onCopy(cap.fix)}><Copy size={11} /></button>
           </p>
         )}
+        <CapActions cap={cap} />
       </div>
     </li>
   )
@@ -231,8 +257,9 @@ export default function MeetingSettings(): JSX.Element {
       <label className="act-field">
         <span><b>Backend</b><small>“off” blocks Start rather than recording audio nothing will read</small></span>
         <select value={cfg.sttBackend} onChange={(e) => patch({ sttBackend: e.target.value as MeetingConfig['sttBackend'] })}>
-          <option value="auto">Auto — Speech, then whisper.cpp, then proxy</option>
+          <option value="auto">Auto — Speech, then Whistle, then whisper.cpp, then proxy</option>
           <option value="speech">On-device Speech</option>
+          <option value="whistle">On-device Whistle (seven languages, 17 MB)</option>
           <option value="proxy">Proxy only</option>
           <option value="local">Local whisper.cpp only</option>
           <option value="off">Off</option>

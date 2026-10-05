@@ -1,4 +1,4 @@
-"""Speech to text, swappable: on-device Speech, the LLM proxy, whisper.cpp, or nothing.
+"""Speech to text, swappable: on-device Speech, Whistle, the LLM proxy, whisper.cpp, or nothing.
 
 This module exists because nothing currently serves speech to text. litellm.yaml's model_list
 carries ten chat models and one embedding model and no /v1/audio/transcriptions route, while
@@ -7,13 +7,15 @@ model string reports ok on every machine while every call fails. `selftest` is t
 writes a real wav and does a real round trip, which is exactly the thing a capability probe
 cannot do.
 
-`auto` prefers Apple's on-device Speech framework when it is authorized, then whisper.cpp if
-the binary and a model are both present, then the proxy. ffmpeg is not required to write the
-self-test wav.
+`auto` prefers Apple's on-device Speech framework when it is authorized, then Whistle (the
+cactus-needle package, in-process) if it is installed, then whisper.cpp if the binary and a model
+are both present, then the proxy. ffmpeg is not required to write the self-test wav.
 """
 from __future__ import annotations
 
+import array
 import contextlib
+import importlib.util
 import json
 import logging
 import os
@@ -23,6 +25,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +35,21 @@ from . import audiocap, llm, providers
 
 log = logging.getLogger("personal_os.stt")
 
-BACKENDS = ("auto", "speech", "proxy", "local", "off")
+# cactus-needle (Whistle) posts anonymous usage counts and prints a first-run notice unless told
+# not to. Decide that here, before anything in this process can import it.
+os.environ.setdefault("NEEDLE_TELEMETRY", "0")
+
+BACKENDS = ("auto", "speech", "whistle", "proxy", "local", "off")
+
+# Whistle takes one pass of at most 30 s of 16 kHz mono; longer wavs are fed in windows.
+WHISTLE_MAX_SECONDS = 30
+WHISTLE_RATE = 16000
+# Where cactus-needle keeps the 17 MB weights it downloads on first use.
+WHISTLE_WEIGHTS = Path.home() / ".cache" / "cactus-needle" / "whistle"
+WHISTLE_FIX = "cd backend && uv pip install -e '.[whistle]', then restart the app."
+# One model per process, and it is not thread-safe; the mic and system channels transcribe on
+# separate worker threads.
+_whistle_lock = threading.Lock()
 
 # whisper.cpp renamed its binary twice: `main` in the original tree, `whisper-cpp` in the brew
 # formula, `whisper-cli` since the examples were reorganised. Try the newest name first.
@@ -44,9 +61,13 @@ CLI_NAMES = ("whisper-cli", "whisper-cpp", "main")
 MAX_PROMPT_CHARS = 896
 
 # What to do about it, in both directions, because "off" is a configuration and not a failure.
-OFF_FIX = ("Set meetings.sttBackend to 'speech' for on-device dictation, 'local' after "
-           "brew install whisper-cpp and downloading a model, or 'proxy' after adding a "
-           "/v1/audio/transcriptions route to litellm.yaml.")
+OFF_FIX = ("Set meetings.sttBackend to 'speech' for on-device dictation, 'whistle' after "
+           "installing cactus-needle, 'local' after brew install whisper-cpp and downloading a "
+           "model, or 'proxy' after adding a /v1/audio/transcriptions route to litellm.yaml.")
+
+# The Speech Recognition grant is its own switch in Privacy & Security; meetings.capabilities()
+# turns this id into the pane deep link and the Grant button.
+SPEECH_PERMISSION = "speech_recognition"
 
 MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
 
@@ -69,6 +90,22 @@ def local_model_path(data_dir: Path, cfg: dict[str, Any]) -> str:
     except Exception:  # noqa: BLE001 - a missing or unreadable models dir is just "no model"
         return ""
     return str(found[0]) if found else ""
+
+
+def whistle_installed() -> bool:
+    """cactus-needle is importable. Never imports it: that would load a 17 MB model into a probe."""
+    try:
+        return importlib.util.find_spec("needle") is not None
+    except Exception:  # noqa: BLE001 - a broken sys.path entry is "not installed"
+        return False
+
+
+def whistle_cached() -> bool:
+    """The weights are already on disk, so the first transcribe needs no network."""
+    try:
+        return any(WHISTLE_WEIGHTS.rglob("*.cact"))
+    except OSError:
+        return False
 
 
 def speech_available() -> bool:
@@ -97,19 +134,26 @@ def speech_ready() -> bool:
 def resolve_backend(cfg: dict[str, Any], data_dir: Path) -> str:
     """Which backend a transcription would actually use. Never "auto": that is a request, not an answer."""
     want = str(cfg.get("sttBackend") or "auto").strip().lower()
-    if want in ("speech", "proxy", "local", "off"):
+    if want in ("speech", "whistle", "proxy", "local", "off"):
         return want
+    whistle = whistle_installed()
     local = bool(whisper_cli_path() and local_model_path(data_dir, cfg))
     # Speech returns plain text with no timestamps; diarization needs timed segments, so prefer
-    # whisper.cpp when it is installed and speaker separation is on.
-    if speech_ready() and not (cfg.get("diarize") and local):
+    # Whistle or whisper.cpp when one is installed and speaker separation is on.
+    if speech_ready() and not (cfg.get("diarize") and (whistle or local)):
         return "speech"
+    if whistle:
+        return "whistle"
     return "local" if local else "proxy"
 
 
 def transcribe(path: Path, *, settings: dict[str, Any], cfg: dict[str, Any], data_dir: Path,
-               prompt: str = "") -> dict[str, Any]:
+               prompt: str = "", vocab: str = "") -> dict[str, Any]:
     """One wav in, one result dict out: {text, detail, backend, error, ms}. Never raises.
+
+    `prompt` is the vocabulary plus the previous clip's tail, for the backends that condition on
+    text; `vocab` is the comma-separated vocabulary alone, for Whistle's keyword biasing (feeding
+    it the previous tail would bias it toward repeating the last clip).
 
     `error` and `backend` are both always set: a backend that returned nothing useful still
     reports which one tried, so the segment row can say so and `retranscribe` can replay it once
@@ -121,6 +165,8 @@ def transcribe(path: Path, *, settings: dict[str, Any], cfg: dict[str, Any], dat
     try:
         if backend == "speech":
             text, detail, error = _speech(path)
+        elif backend == "whistle":
+            text, detail, error = _whistle(path, vocab)
         elif backend == "proxy":
             text, detail, error = _proxy(path, settings, str(cfg.get("sttModel") or "whisper-1"), prompt)
         elif backend == "local":
@@ -178,6 +224,10 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
     local_ok = bool(cli and weights)
     speech_ok = speech_available()
     authorized = speech_authorized()
+    whistle_ok = whistle_installed()
+    whistle_detail = ("Whistle (cactus-needle) runs in this process; audio never leaves the machine. "
+                      + ("The weights are cached." if whistle_cached()
+                         else "The 17 MB weights download from Hugging Face on first use."))
     if backend == "off":
         ready = False
         detail = "Transcription is turned off; a meeting keeps your notes and produces no transcript."
@@ -189,6 +239,9 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
             detail = "Set to Speech; macOS has not granted Speech Recognition to this app yet."
         else:
             detail = "On-device Speech Recognition; audio never leaves the machine."
+    elif backend == "whistle":
+        ready = whistle_ok
+        detail = whistle_detail if whistle_ok else "Set to Whistle, but cactus-needle is not installed."
     elif backend == "local":
         ready = local_ok
         detail = (f"whisper.cpp at {cli} with {Path(weights).name}; audio never leaves the machine."
@@ -211,10 +264,12 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
             "fix": "" if ready else (
                 OFF_FIX if backend == "off" else
                 speech_fix if backend == "speech" else
+                WHISTLE_FIX if backend == "whistle" else
                 "brew install whisper-cpp and download a model (see the next row)."
                 if backend == "local" else
                 "add a speech-to-text route to litellm.yaml (nothing answers "
-                "/v1/audio/transcriptions today), point sttBackend at speech, or install whisper.cpp"),
+                "/v1/audio/transcriptions today), point sttBackend at speech, install cactus-needle "
+                "for Whistle, or install whisper.cpp"),
         },
         {
             "id": "stt_speech", "label": "On-device transcription (Speech)", "ok": speech_ok and authorized,
@@ -223,6 +278,14 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
                        if speech_ok else
                        "Apple Speech is unavailable, so auto falls through to whisper.cpp or the proxy."),
             "fix": "" if (speech_ok and authorized) else speech_fix,
+            # macOS can be asked (SFSpeechRecognizer prompts once); after a refusal only the pane works.
+            "permission": SPEECH_PERMISSION, "requestable": speech_ok and not authorized,
+        },
+        {
+            "id": "stt_whistle", "label": "On-device transcription (Whistle)", "ok": whistle_ok,
+            "detail": whistle_detail if whistle_ok else
+            "cactus-needle not installed. Optional; a 17 MB seven-language model that runs on the CPU.",
+            "fix": "" if whistle_ok else WHISTLE_FIX,
         },
         {
             "id": "stt_local", "label": "On-device transcription (whisper.cpp)", "ok": local_ok,
@@ -352,6 +415,47 @@ def _proxy(path: Path, settings: dict[str, Any], model: str,
     if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds > 0:
         llm.audio_usage(model, float(seconds))
     return str(payload.get("text") or ""), {"segments": payload.get("segments") or []}, ""
+
+
+def _whistle(path: Path, vocab: str = "") -> tuple[str, dict[str, Any], str]:
+    """Whistle in-process via cactus-needle: text plus one timed segment per 30 s window.
+
+    The model takes at most 30 s of 16 kHz mono per pass, which every recorder segment and every
+    import clip already is (the recorder writes 16 kHz mono and imports are resegmented to it).
+    A longer wav is fed in 30 s windows with the word times shifted back onto the wav's clock.
+    """
+    try:
+        import needle  # type: ignore[import-not-found]
+    except ImportError:
+        return "", {}, f"cactus-needle is not installed ({WHISTLE_FIX})"
+    with wave.open(str(path), "rb") as w:
+        rate, channels, width = w.getframerate(), w.getnchannels(), w.getsampwidth()
+        if (rate, channels, width) != (WHISTLE_RATE, 1, 2):
+            return "", {}, f"Whistle needs 16 kHz mono 16-bit wav; this one is {rate} Hz, {channels} ch, {width * 8}-bit"
+        pcm = w.readframes(w.getnframes())
+    keywords = [k.strip() for k in vocab.split(",") if k.strip()] or None
+    step = WHISTLE_RATE * WHISTLE_MAX_SECONDS * 2
+    segments: list[dict[str, Any]] = []
+    language = ""
+    # ponytail: a word straddling a 30 s cut is split in two; cut on silence if long wavs show up
+    with _whistle_lock:
+        for off in range(0, len(pcm), step):
+            ints = array.array("h")
+            ints.frombytes(pcm[off:off + step])
+            samples = array.array("f", (v / 32768.0 for v in ints))
+            res = needle.transcribe(samples, keywords=keywords, word_timestamps=True)
+            t0 = off / (WHISTLE_RATE * 2)
+            text = str(res.get("text") or "").strip()
+            language = language or str(res.get("language") or "")
+            if not text:
+                continue
+            words = [wd for wd in (res.get("words") or []) if isinstance(wd, dict)]
+            segments.append({
+                "start": t0 + float(words[0].get("start", 0)) if words else t0,
+                "end": t0 + float(words[-1].get("end", 0)) if words else t0 + len(ints) / WHISTLE_RATE,
+                "text": text,
+            })
+    return " ".join(s["text"] for s in segments), {"segments": segments, "language": language}, ""
 
 
 def _local(path: Path, data_dir: Path, cfg: dict[str, Any], prompt: str = "") -> tuple[str, dict[str, Any], str]:

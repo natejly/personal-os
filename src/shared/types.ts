@@ -2813,7 +2813,7 @@ export interface MeetingConfig {
   /** How long stop() waits for the transcription queue to drain. */
   drainSeconds: number
   /** 'off' blocks Start outright rather than recording audio nothing will read. */
-  sttBackend: 'auto' | 'speech' | 'proxy' | 'local' | 'off'
+  sttBackend: 'auto' | 'speech' | 'whistle' | 'proxy' | 'local' | 'off'
   /** Speech-to-text model on the configured LLM base URL. */
   sttModel: string
   /** whisper.cpp ggml model file, for the local backend. */
@@ -2879,6 +2879,12 @@ export interface MeetingCapability {
   detail: string
   /** Empty when `ok`. */
   fix: string
+  /** The macOS permission behind this row (an id `POST /activity/permissions/*` accepts), when there is one. */
+  permission?: string
+  /** macOS can still be asked: the Grant button makes the system dialog appear. */
+  requestable?: boolean
+  /** Deep link into the right Privacy & Security pane. */
+  settings_url?: string
 }
 
 /** GET /meetings/status. Cheap enough to poll: unlike /activity/status it never spawns a subprocess. */

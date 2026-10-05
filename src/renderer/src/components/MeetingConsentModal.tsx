@@ -5,6 +5,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import { HEADS_UP_MESSAGE } from '../features/docrec/format'
 import { useModal } from '../lib/useModal'
+import { CapActions } from './MeetingSettings'
 
 /**
  * The one-time consent gate, shown before the first recording this install ever makes.
@@ -85,6 +86,7 @@ export default function MeetingConsentModal(): JSX.Element {
                       <b>{c.label}</b>
                       <p>{c.detail}</p>
                       {c.fix && <p className="act-fix">{c.fix}</p>}
+                      <CapActions cap={c} />
                     </div>
                   </li>
                 ))}

@@ -20,6 +20,10 @@ from personal_os import audiocap, llm, stt  # noqa: E402
 SETTINGS = {"baseUrl": "http://localhost:4000", "apiKey": "", "defaultModel": "test-model", "extractionModel": ""}
 CFG = {"sttBackend": "auto", "sttModel": "whisper-1", "whisperModelPath": ""}
 
+# This venv may carry cactus-needle (the `whistle` extra), and what `auto` resolves to is the thing
+# under test, so Whistle is absent unless a test says otherwise with whistle_is(True).
+stt.whistle_installed = lambda: False  # type: ignore[assignment]
+
 VERBOSE_JSON = {
     "task": "transcribe", "language": "en", "duration": 4.25,
     "text": " So the pricing page ships Thursday.",
@@ -117,6 +121,44 @@ class whisper_is:
 
     def __exit__(self, *exc: object) -> None:
         stt.whisper_cli_path = self.real  # type: ignore[assignment]
+
+
+class whistle_is:
+    """Pin whether cactus-needle looks installed, independent of this machine's site-packages."""
+
+    def __init__(self, installed: bool):
+        self.installed = installed
+
+    def __enter__(self) -> None:
+        self.real = stt.whistle_installed
+        stt.whistle_installed = lambda: self.installed  # type: ignore[assignment]
+
+    def __exit__(self, *exc: object) -> None:
+        stt.whistle_installed = self.real  # type: ignore[assignment]
+
+
+class needle_replies:
+    """A fake `needle` module: records every transcribe call and answers one word per window."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def transcribe(self, samples, language=None, keywords=None, word_timestamps=False):  # noqa: ANN001
+        self.calls.append({"n": len(samples), "keywords": keywords, "word_timestamps": word_timestamps})
+        k = len(self.calls)
+        return {"text": f"word{k}", "language": "en",
+                "words": [{"start": 0.5, "end": 1.0, "probability": 0.9}]}
+
+    def __enter__(self) -> needle_replies:
+        self.real = sys.modules.get("needle")
+        sys.modules["needle"] = self  # type: ignore[assignment]
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self.real is None:
+            sys.modules.pop("needle", None)
+        else:
+            sys.modules["needle"] = self.real
 
 
 def _wav(data: bytes = b"RIFF....WAVEfmt ") -> Path:
@@ -238,28 +280,41 @@ def test_a_dead_connection_comes_back_as_an_error_string() -> None:
 
 def test_resolve_backend_prefers_proxy_when_whisper_is_not_installed() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with whisper_is(""), speech_is(False):
+    with whisper_is(""), speech_is(False), whistle_is(False):
         assert stt.resolve_backend(CFG, data_dir) == "proxy"
         _model(data_dir)                                  # a model with no binary is still proxy
         assert stt.resolve_backend(CFG, data_dir) == "proxy"
-    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False):
+    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False), whistle_is(False):
         assert stt.resolve_backend(CFG, data_dir) == "local"
         assert stt.resolve_backend(CFG, Path(tempfile.mkdtemp())) == "proxy"   # binary, no model
 
 
+def test_resolve_backend_puts_whistle_between_speech_and_whisper() -> None:
+    data_dir = Path(tempfile.mkdtemp())
+    _model(data_dir)
+    with speech_is(False), whistle_is(True), whisper_is("/opt/homebrew/bin/whisper-cli"):
+        assert stt.resolve_backend(CFG, data_dir) == "whistle"             # beats an installed whisper.cpp
+    with speech_is(True), whistle_is(True), whisper_is(""):
+        assert stt.resolve_backend(CFG, data_dir) == "speech"              # but not an authorized Speech
+        assert stt.resolve_backend({**CFG, "diarize": True}, data_dir) == "whistle"   # unless timing is needed
+    with speech_is(False), whistle_is(True), whisper_is(""):
+        assert stt.resolve_backend({"sttBackend": "local"}, data_dir) == "local"      # explicit still wins
+
+
 def test_resolve_backend_prefers_speech_when_it_is_authorized() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with speech_is(True), whisper_is("/opt/homebrew/bin/whisper-cli"):
+    with speech_is(True), whisper_is("/opt/homebrew/bin/whisper-cli"), whistle_is(False):
         _model(data_dir)
         assert stt.resolve_backend(CFG, data_dir) == "speech"
-    with speech_is(True, authorized=False), whisper_is(""):
+    with speech_is(True, authorized=False), whisper_is(""), whistle_is(False):
         assert stt.resolve_backend(CFG, data_dir) == "proxy"
 
 
 def test_resolve_backend_honours_an_explicit_setting() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with whisper_is(""), speech_is(False):
+    with whisper_is(""), speech_is(False), whistle_is(False):
         assert stt.resolve_backend({"sttBackend": "local"}, data_dir) == "local"
+        assert stt.resolve_backend({"sttBackend": "whistle"}, data_dir) == "whistle"
         assert stt.resolve_backend({"sttBackend": "off"}, data_dir) == "off"
         assert stt.resolve_backend({"sttBackend": "PROXY"}, data_dir) == "proxy"
         assert stt.resolve_backend({}, data_dir) == "proxy"            # missing key means auto
@@ -306,25 +361,31 @@ def test_off_explains_both_fixes_and_posts_nothing() -> None:
 def test_capability_rows_all_explain_how_to_fix_themselves() -> None:
     data_dir = Path(tempfile.mkdtemp())
     cases = [CFG, {"sttBackend": "off"}, {"sttBackend": "local"}, {"sttBackend": "proxy", "sttModel": ""}, {}]
-    for cfg in cases:
-        with whisper_is(""), speech_is(False):
+    for cfg in cases + [{"sttBackend": "whistle"}]:
+        with whisper_is(""), speech_is(False), whistle_is(False):
             rows = stt.capabilities(cfg, data_dir)
-        assert {r["id"] for r in rows} == {"stt", "stt_speech", "stt_local"}, cfg
+        assert {r["id"] for r in rows} == {"stt", "stt_speech", "stt_whistle", "stt_local"}, cfg
         for r in rows:
             assert isinstance(r["ok"], bool)
             assert r["detail"]
             assert r["fix"] or r["ok"], (cfg, r)      # anything not ok says how to fix it
-    with whisper_is(""), speech_is(False):
+    with whisper_is(""), speech_is(False), whistle_is(False):
         rows = {r["id"]: r for r in stt.capabilities({"sttBackend": "proxy", "sttModel": ""}, data_dir)}
     assert rows["stt"]["ok"] is False
+    assert rows["stt_whistle"]["ok"] is False and "[whistle]" in rows["stt_whistle"]["fix"]
+    assert rows["stt_speech"]["permission"] == "speech_recognition"
     assert "/v1/audio/transcriptions" in rows["stt"]["fix"]
     assert "brew install whisper-cpp" in rows["stt_local"]["fix"]
     assert str(data_dir / "models" / "ggml-base.en.bin") in rows["stt_local"]["fix"]
-    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False):
+    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False), whistle_is(False):
         _model(data_dir)
         rows = {r["id"]: r for r in stt.capabilities(CFG, data_dir)}
     assert rows["stt_local"]["ok"] is True and rows["stt_local"]["fix"] == ""
     assert rows["stt"]["ok"] is True and rows["stt"]["detail"].startswith("whisper.cpp at ")
+    with whisper_is(""), speech_is(False), whistle_is(True):
+        rows = {r["id"]: r for r in stt.capabilities({"sttBackend": "whistle"}, data_dir)}
+    assert rows["stt"]["ok"] is True and rows["stt"]["detail"].startswith("Whistle")
+    assert rows["stt_whistle"]["ok"] is True and rows["stt_whistle"]["fix"] == ""
 
 
 def test_selftest_surfaces_a_proxy_failure() -> None:
@@ -343,7 +404,7 @@ def test_selftest_treats_transcribed_silence_as_a_pass() -> None:
     data_dir = Path(tempfile.mkdtemp())
     # Silence transcribes to "" on every provider; an empty string must not read as a failure.
     with proxy_replies(200, {"text": "", "segments": [], "duration": 0.4}, "") as stub, \
-            whisper_is(""), speech_is(False):
+            whisper_is(""), speech_is(False), whistle_is(False):
         res = stt.selftest(settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["ok"] is True
     assert res["text"] == "" and res["error"] == ""
@@ -357,12 +418,12 @@ def test_selftest_treats_transcribed_silence_as_a_pass() -> None:
 def test_probes_never_raise_and_never_shell_out_to_a_device() -> None:
     data_dir = Path(tempfile.mkdtemp())
     assert stt.whisper_cli_path() in ("", stt.whisper_cli_path())   # must never raise
-    assert stt.BACKENDS == ("auto", "speech", "proxy", "local", "off")
+    assert stt.BACKENDS == ("auto", "speech", "whistle", "proxy", "local", "off")
     assert stt.local_model_path(Path("/does/not/exist"), {}) == ""
     assert stt.local_model_path(Path("/etc/hosts"), {}) == ""       # not a directory
     for cfg in ({}, {"sttBackend": None}, {"sttModel": None}, {"whisperModelPath": None}):
         assert stt.resolve_backend(cfg, data_dir) in stt.BACKENDS
-        assert len(stt.capabilities(cfg, data_dir)) == 3
+        assert len(stt.capabilities(cfg, data_dir)) == 4
 
 
 def test_local_passes_the_prompt_flag_only_when_given() -> None:
@@ -401,3 +462,43 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+# ---------------------------------------------------------------- the Whistle backend
+
+
+def test_whistle_feeds_30s_windows_and_keeps_the_wav_clock() -> None:
+    path = Path(tempfile.mkdtemp()) / "import-00001.wav"
+    assert audiocap.silence_wav(path, 45.0)                      # 16 kHz mono, longer than one pass
+    with needle_replies() as nd:
+        res = stt.transcribe(path, settings=SETTINGS, cfg={"sttBackend": "whistle"}, data_dir=path.parent,
+                             prompt="Acme, Priya the previous clip's tail", vocab="Acme, Priya")
+    assert res["error"] == "" and res["backend"] == "whistle"
+    assert [c["n"] for c in nd.calls] == [16000 * 30, 16000 * 15]  # two windows, nothing dropped
+    assert all(c["keywords"] == ["Acme", "Priya"] and c["word_timestamps"] for c in nd.calls)
+    assert res["text"] == "word1 word2"
+    segs = res["detail"]["segments"]
+    assert [(s["start"], s["end"], s["text"]) for s in segs] == [(0.5, 1.0, "word1"), (30.5, 31.0, "word2")]
+    assert res["detail"]["language"] == "en"
+
+
+def test_whistle_refuses_a_wav_it_cannot_read_and_reports_a_missing_package() -> None:
+    path = Path(tempfile.mkdtemp()) / "odd.wav"
+    assert audiocap.write_pcm16_wav(path, b"\0" * 44100 * 2, rate=44100)
+    with needle_replies() as nd:
+        res = stt.transcribe(path, settings=SETTINGS, cfg={"sttBackend": "whistle"}, data_dir=path.parent)
+    assert nd.calls == [] and "16 kHz mono" in res["error"] and "44100" in res["error"]
+    real = sys.modules.pop("needle", None)
+    sys.modules["needle"] = None  # type: ignore[assignment]   # importing it now raises ImportError
+    try:
+        res = stt.transcribe(_wav(), settings=SETTINGS, cfg={"sttBackend": "whistle"}, data_dir=path.parent)
+    finally:
+        sys.modules.pop("needle", None)
+        if real is not None:
+            sys.modules["needle"] = real
+    assert "cactus-needle is not installed" in res["error"] and "[whistle]" in res["error"]
+
+
+def test_whistle_telemetry_is_off_before_the_package_can_load() -> None:
+    import os
+    assert os.environ.get("NEEDLE_TELEMETRY") == "0"

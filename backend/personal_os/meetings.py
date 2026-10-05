@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt, stt_stream
+from . import activity, audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt, stt_stream
 from .db import Database, new_id, now, row_to_dict
 from .docs import diff_stat, word_count
 from .repos import fts_query
@@ -1481,7 +1481,23 @@ class MeetingService:
             mic_detail = "Default microphone (AVAudioEngine); pick a specific input if you want one."
         else:
             mic_detail = "No audio inputs found."
-        return [
+        mic_fix = "Grant Microphone permission to the app, then reopen this panel."
+        # The stored macOS grant, read without prompting. A device that is visible but not permitted
+        # records silence, so a refusal blocks Start; "never asked" blocks too, so the dialog comes
+        # from the Grant button now rather than from the first second of a call.
+        mic_perm = activity.microphone_status()
+        if mic_perm == activity.DENIED:
+            mic_ok = False
+            mic_detail = "macOS has refused Microphone access for this app, so a recording would be silent."
+            mic_fix = "Open System Settings → Privacy & Security → Microphone, switch the app on, then run the check again."
+        elif mic_perm == activity.UNASKED:
+            mic_ok = False
+            mic_detail = "macOS has not been asked for Microphone access yet."
+            mic_fix = "Press Grant so macOS asks now, not at the start of a call."
+        if native_out:
+            loop_detail += (" macOS asks for System Audio Recording the first time; if that was refused, "
+                            "switch the app on in the pane.")
+        rows = self._permission_rows([
             {
                 "id": "platform", "label": "Supported platform", "ok": audiocap.IS_MAC,
                 "detail": f"Running on {sys.platform}.",
@@ -1497,7 +1513,8 @@ class MeetingService:
             {
                 "id": "mic", "label": "Microphone input", "ok": mic_ok,
                 "detail": mic_detail,
-                "fix": "" if mic_ok else "Grant Microphone permission to the app, then reopen this panel.",
+                "fix": "" if mic_ok else mic_fix,
+                "permission": "microphone", "requestable": mic_perm == activity.UNASKED,
             },
             {
                 "id": "loopback", "label": "System audio capture", "ok": loop_ok,
@@ -1505,10 +1522,23 @@ class MeetingService:
                 "fix": "" if loop_ok else
                 "macOS 14.2+ has a process tap; on older systems install BlackHole "
                 "(brew install blackhole-2ch) and pick it as the output device below.",
+                "permission": "audio_capture" if native_out else "",
             },
             *stt.capabilities(cfg, self.data_dir),
             diarize.capabilities(cfg, self.data_dir),
-        ]
+        ])
+        return rows
+
+    @staticmethod
+    def _permission_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A row that names a macOS permission gets the pane deep link, so the UI can offer
+        Open System Settings next to Grant. Rows without one are passed through untouched."""
+        for r in rows:
+            perm = r.get("permission")
+            if perm:
+                r["settings_url"] = activity.SETTINGS_URLS.get(perm, "")
+                r.setdefault("requestable", False)
+        return rows
 
     def status(self) -> dict[str, Any]:
         """Cheap enough to poll every second or two.

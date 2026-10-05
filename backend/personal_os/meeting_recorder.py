@@ -571,7 +571,8 @@ class TranscribeWorker(_RecorderThread):
         while True:
             attempts += 1
             res = stt.transcribe(path, settings=self.settings_fn(), cfg=self.config_fn(),
-                                 data_dir=self.data_dir, prompt=f"{self.vocab} {self._tail.get(channel, '')}".strip())
+                                 data_dir=self.data_dir, prompt=f"{self.vocab} {self._tail.get(channel, '')}".strip(),
+                                 vocab=self.vocab)
             if not res.get("error") or attempts >= self.max_attempts or self.halt.is_set():
                 break
             self.sleep(RETRY_BACKOFF[min(attempts - 1, len(RETRY_BACKOFF) - 1)])

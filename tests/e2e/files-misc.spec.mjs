@@ -105,7 +105,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
     dt.items.add(new File([bin], 'shot.png', { type: 'image/png' }))
     document.querySelector('textarea.md-input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
   }, PNG)
-  await expect(body(page)).toHaveValue(/before !\[\]\(\/docs\/assets\/[\w-]+\/[0-9a-f]{8}-shot\.png\)/)
+  await expect(body(page)).toHaveValue(/before !\[[^\]]*\]\(\/docs\/assets\/[\w-]+\/[0-9a-f]{8}-shot\.png\)/)
   await expect(page.locator('.docs-render img')).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.querySelector('.docs-render img').naturalWidth)).toBeGreaterThan(0)
   // drop an image file

@@ -391,15 +391,10 @@
 @container docs (max-width: 860px) {
   .docs-body, .docs-body:has(.docs-history) { grid-template-columns: var(--docs-tree-w, 200px) minmax(0, 1fr); }
   .docs-body.tree-hidden, .docs-body.tree-hidden:has(.docs-history) { grid-template-columns: minmax(0, 1fr); }
-  .doc-split-edge { display: none; }
-  /* The side panel (outline, links, history, recordings) floats over the editor rather than vanishing: its
-     toggle stays honest and a doc's history is reachable in a small window. */
-  .docs-history {
-    position: absolute; top: 0; right: 0; bottom: 0; z-index: 5;
-    width: min(var(--docs-history-w, 380px), 80%);
-    background: var(--bg-elev); box-shadow: -8px 0 24px rgb(0 0 0 / 0.18);
-  }
-  .resize-handle.docs-history-edge { right: calc(min(var(--docs-history-w, 380px), 80%) - 4px); z-index: 6; }
+  .docs-history-edge, .doc-split-edge { display: none; }
+  /* The side panel becomes a drawer over the lower part of the editor instead of vanishing: it is the only place
+     Recordings, Outline and History live, and the toolbar (Record, Stop, the panel toggle) must stay reachable above it. */
+  .docs-history { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: min(55%, 360px); border-left: 0; border-top: 1px solid var(--border); background: var(--bg-elev, var(--bg)); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
   .doc-panes.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
 }

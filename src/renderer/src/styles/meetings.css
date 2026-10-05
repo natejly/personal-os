@@ -196,7 +196,13 @@
 
 @media (max-width: 1100px) {
   .mtg-body, .mtg-body:has(.mtg-enhanced) { grid-template-columns: var(--mtg-side-w, 220px) minmax(0, 1fr); }
-  .mtg-enhanced { display: none; }
+  /* A drawer over the lower part of the page instead of vanishing: Accept, Reject and "Add to todos" live only in this
+     column, and the recorder bar and toolbar above it must stay reachable. */
+  .mtg-enhanced {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: min(60%, 380px);
+    border-left: 0; border-top: 1px solid var(--border);
+    background: var(--bg-elev, var(--bg)); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+  }
   .mtg-panes.with-transcript {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);

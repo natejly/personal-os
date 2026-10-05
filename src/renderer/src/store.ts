@@ -3218,19 +3218,31 @@ export const useStore = create<State>((set, get) => {
       }
     },
     startRecording: async (meetingId) => {
-      // Asked once per install, and nothing records until it is acknowledged. The click is
-      // remembered rather than dropped, so accepting the notice finishes what the user pressed.
-      if (!get().meetingStatus?.consented) {
-        consentIntent = meetingId
-        return set({ meetingConsentOpen: true })
-      }
+      // One start at a time: a double click must not create a second meeting that the backend then refuses.
+      if (get().meetingBusy) return
       set({ meetingBusy: true })
       try {
+        // A click that beats the first status load must not read "unknown" as "not consented".
+        if (!get().meetingStatus) await get().refreshMeetingStatus()
+        // Asked once per install, and nothing records until it is acknowledged. The click is
+        // remembered rather than dropped, so accepting the notice finishes what the user pressed.
+        if (!get().meetingStatus?.consented) {
+          consentIntent = meetingId
+          return set({ meetingConsentOpen: true })
+        }
         // Whatever is buffered belongs to the meeting being left behind, so it goes first.
         const outgoing = get().activeMeeting?.id ?? null
         await get().flushMeetingNotes()
+        const createdHere = meetingId === undefined
         const id = meetingId ?? (await api.meetings.create({ title: newMeetingTitle() })).id
-        const m = await api.meetings.start(id)
+        let m: FullMeeting
+        try {
+          m = await api.meetings.start(id)
+        } catch (e) {
+          // A refused start (consent, self-test, mic, busy) must not leave an empty meeting behind for each press.
+          if (createdHere) await api.meetings.del(id).catch(() => undefined)
+          throw e
+        }
         // Typing carried on through create+start; the reset below would otherwise discard it.
         const late = await flushOutgoing(outgoing)
         const same = late !== null && late.id === id
@@ -3752,6 +3764,8 @@ export const useStore = create<State>((set, get) => {
       try {
         const out = await api.activity.applyInsight(id)
         await get().loadActivityInsights()
+        // A second click on a suggestion that already wrote its todo or memory changes nothing.
+        if ((out as { already?: boolean }).already) return
         if (out.type === 'prompt' && out.prompt) {
           // Setting the thing up is a conversation with tool approvals in it, so the suggestion
           // hands the message over rather than acting: a fresh chat with the prompt in its

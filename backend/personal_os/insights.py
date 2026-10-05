@@ -1235,19 +1235,33 @@ class Insights:
         action = s.get("action") or {}
         atype = str(action.get("type") or "none")
         result: dict[str, Any] = {"type": atype}
-        if atype == "todo":
-            todo = self.todos.create(
-                title=_line(action.get("title") or s["title"], 200),
-                notes=_line(f"{s['detail']} Why: {s['why']}", 1500), priority=2, source="activity-insight",
-            )
-            result["todo"] = todo
-            self.set_status(sid, "done", f"todo created: {todo['id']}")
-        elif atype == "memory":
-            content = _line(action.get("content") or s["detail"], 1000)
-            mem = self.memories.create(None, content, kind="preference", source=MEMORY_SOURCE)
-            result["memory"] = mem
-            self.set_status(sid, "done", f"memory created: {mem['id']}")
-        elif atype == "prompt":
+        # A double click (or a retry after a slow answer) must not write a second todo or memory. Two requests
+        # run on separate threads, so the claim is one atomic UPDATE (not a read of the status): only the
+        # request that flips the row to `done` goes on to write. "Put it back" is the way to offer it again.
+        if atype in ("todo", "memory"):
+            with self.db.tx() as c:
+                claimed = c.execute("UPDATE activity_suggestions SET status='done',status_note='applying',updated_at=? "
+                                    "WHERE id=? AND status!='done'", (now(), sid)).rowcount
+            if not claimed:
+                return {**result, "already": True, "suggestion": self.get(sid)}
+            try:
+                if atype == "todo":
+                    todo = self.todos.create(
+                        title=_line(action.get("title") or s["title"], 200),
+                        notes=_line(f"{s['detail']} Why: {s['why']}", 1500), priority=2, source="activity-insight",
+                    )
+                    result["todo"] = todo
+                    self.set_status(sid, "done", f"todo created: {todo['id']}")
+                else:
+                    content = _line(action.get("content") or s["detail"], 1000)
+                    mem = self.memories.create(None, content, kind="preference", source=MEMORY_SOURCE)
+                    result["memory"] = mem
+                    self.set_status(sid, "done", f"memory created: {mem['id']}")
+            except Exception:
+                self.set_status(sid, s["status"], s.get("status_note") or "")   # the write failed: offer it again as it was
+                raise
+            return {**result, "suggestion": self.get(sid)}
+        if atype == "prompt":
             result["prompt"] = _line(action.get("prompt") or f"{s['title']}. {s['detail']}", 1500)
             self.set_status(sid, "accepted", "sent to chat")
         else:

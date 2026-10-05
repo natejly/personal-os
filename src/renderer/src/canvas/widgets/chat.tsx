@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from 'lucide-react'
-import type { Attachment, CanvasWindow, DragKind, DragPayload } from '@shared/types'
+import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
@@ -14,6 +14,8 @@ import { retainSession, useChatFace, useConversation, useIsStreaming, useStore, 
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas, viewport } from '../store'
+import { freeSpot, unfoldRect, type BlobConfig } from '../layout'
+import { visibleRect } from '../snapping'
 import { useRingStatus } from '../useRingStatus'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
@@ -30,21 +32,12 @@ const BLOB_LABEL: Record<string, string> = {
 /** Blob view: the window's own choice, else Settings › Behavior › Compact chats. */
 const isBlob = (win: CanvasWindow, compactOn: boolean): boolean => typeof win.config.blob === 'boolean' ? win.config.blob : compactOn
 
-/**
- * Resize the frame about its centre the way a drag would -- optimistic rect, debounced layout PUT --
- * kept inside the visible plane, and remember something in config alongside. Both writes land in the
- * same render, so a body that mounts on the way (the composer) measures itself in its final frame.
- */
-const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown>): void => {
+/** Move/resize the frame in one write (optimistic rect, debounced layout PUT) and remember something in config alongside. */
+const placeAt = (win: CanvasWindow, r: Rect, config: Record<string, unknown>): void => {
   const st = useCanvas.getState()
-  const v = viewport()
-  const left = -v.panX / v.zoom
-  const top = -v.panY / v.zoom
-  const x = Math.max(left, Math.min(win.x + (win.w - size.w) / 2, left + v.width / v.zoom - size.w))
-  const y = Math.max(top, Math.min(win.y + (win.h - size.h) / 2, top + v.height / v.zoom - size.h))
-  st.patchWindow(win.id, { ...size, x: Math.round(x), y: Math.round(y) })
+  st.patchWindow(win.id, r)
   st.markLayoutDirty([win.id])
-  if (config) void st.setWindowConfig(win.id, config)
+  void st.setWindowConfig(win.id, config)
 }
 
 /** The blob's face with the latest reply's subagents around it; clicking a child opens its transcript. */
@@ -58,10 +51,21 @@ function ChatRing({ convId, status, title }: { convId: string; status: string; t
     kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
 }
 
-/** Fold a chat window to its blob, or grow it back to the size it had. */
+/**
+ * Fold a chat window to its blob (same top-left, old rect remembered), or grow it back: exactly where it was
+ * if the blob stayed put, else at the blob's new spot, nudged clear of neighbours.
+ */
 const setBlob = (win: CanvasWindow, on: boolean): void => {
-  if (on) resizeTo(win, BLOB, { blob: true, full_size: { w: win.w, h: win.h } })
-  else resizeTo(win, (win.config.full_size as Size | undefined) ?? DEFAULT_SIZE, { blob: false })
+  if (on) {
+    placeAt(win, { x: win.x, y: win.y, ...BLOB }, { blob: true, restore: { x: win.x, y: win.y, w: win.w, h: win.h }, blobAt: { x: win.x, y: win.y } })
+    return
+  }
+  const st = useCanvas.getState()
+  const cfg = win.config as BlobConfig & { full_size?: Size }
+  const bounds = visibleRect(viewport())
+  const grown = unfoldRect(win, cfg.restore ? cfg : { ...cfg, restore: undefined }, cfg.full_size ?? DEFAULT_SIZE, bounds)
+  const others = (st.canvases[win.canvas_id]?.windows ?? []).filter((w) => w.id !== win.id && (w.state === 'normal' || w.state === 'maximized'))
+  placeAt(win, freeSpot(grown, others, bounds), { blob: false, restore: null, blobAt: null })
 }
 
 /**

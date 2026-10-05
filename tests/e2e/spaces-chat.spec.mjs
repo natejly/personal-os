@@ -101,6 +101,7 @@ test('a chat window sends a message, streams a reply, and the face view toggles 
   await expect(win.locator('.msg.assistant').last()).toContainText('Hello from a window', { timeout: 40_000 })
 
   // flip to the face view: transcript gone, creature shown; flip back: transcript intact
+  const before = (await windowsOf(grain, s.id))[0]
   await win.getByTitle('Shrink to a face').click()
   await expect(win.locator('.chat-blob .face')).toBeVisible()
   await expect(win.locator('.msg')).toHaveCount(0)
@@ -113,6 +114,11 @@ test('a chat window sends a message, streams a reply, and the face view toggles 
   await win2.locator('.chat-blob').click()
   await expect(win2.locator('.msg.assistant').last()).toContainText('Hello from a window')
   await expect.poll(async () => (await windowsOf(grain, s.id))[0].config.blob).toBe(false)
+  // grows back to exactly the rect it had before folding
+  await expect.poll(async () => {
+    const a = (await windowsOf(grain, s.id))[0]
+    return [a.x, a.y, a.w, a.h]
+  }).toEqual([before.x, before.y, before.w, before.h])
   expect(grain.consoleErrors).toEqual([])
 })
 

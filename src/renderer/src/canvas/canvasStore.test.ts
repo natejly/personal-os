@@ -357,3 +357,29 @@ test('openChat focuses the window a space already has for that chat instead of o
   assert.equal(s.canvases.c2.windows.length, 1)
   assert.ok(!calls.some((c) => c.method === 'POST'))
 })
+
+import { GAP, freeSpot, unfoldRect } from './layout'
+import { tidyLayout } from './snapping'
+
+test('unfoldRect restores the exact old rect when the blob stayed, grows around its new spot when it moved', () => {
+  const bounds = { x: 0, y: 0, w: 1400, h: 900 }
+  const cfg = { restore: { x: 100, y: 80, w: 520, h: 640 }, blobAt: { x: 100, y: 80 } }
+  assert.deepEqual(unfoldRect({ x: 100, y: 80, w: 120, h: 120 }, cfg, { w: 1, h: 1 }, bounds), cfg.restore)
+  assert.deepEqual(unfoldRect({ x: 900, y: 500, w: 120, h: 120 }, cfg, { w: 1, h: 1 }, bounds), { x: 880, y: 260, w: 520, h: 640 })
+})
+
+test('freeSpot nudges right, then down, keeping GAP; leaves a clear rect alone', () => {
+  const bounds = { x: 0, y: 0, w: 1400, h: 900 }
+  const other = { x: 0, y: 0, w: 300, h: 300 }
+  const clear = { x: 400, y: 0, w: 200, h: 200 }
+  assert.equal(freeSpot(clear, [other], bounds), clear)
+  assert.deepEqual(freeSpot({ x: 100, y: 0, w: 200, h: 200 }, [other], bounds), { x: 300 + GAP, y: 0, w: 200, h: 200 })
+  // no room to the right: goes below
+  assert.deepEqual(freeSpot({ x: 100, y: 0, w: 200, h: 200 }, [other], { x: 0, y: 0, w: 400, h: 900 }), { x: 100, y: 300 + GAP, w: 200, h: 200 })
+})
+
+test('tidy packs 3 windows and a blob GAP apart', () => {
+  const r = (id: string, w: number, h: number) => ({ id, x: 0, y: 0, w, h })
+  const out = tidyLayout([r('a', 400, 300), r('b', 400, 300), r('c', 400, 300), r('blob', 120, 120)], { zoom: 1, panX: 0, panY: 0, width: 1000, height: 800 }, 16)
+  assert.deepEqual(out.map((o) => [o.x, o.y]), [[16, 16], [428, 16], [16, 328], [428, 328]])
+})

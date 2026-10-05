@@ -344,3 +344,20 @@ test('820x520 window: canvas bar and windows stay usable', async ({ grain }) => 
   await expect.poll(async () => (await geo(grain, s.id, ws[0].id)).x).toBe(100)
   expect(grain.consoleErrors).toEqual([])
 })
+
+test('folding the left of two adjacent chats and growing it back never overlaps its neighbour', async ({ grain }) => {
+  const c1 = await grain.api('/conversations', { method: 'POST', body: { title: 'Left' } })
+  const c2 = await grain.api('/conversations', { method: 'POST', body: { title: 'Right' } })
+  const { s, ws } = await seed(grain, [
+    { kind: 'chat', ref_id: c1.id, x: 40, y: 40, w: 420, h: 400 },
+    { kind: 'chat', ref_id: c2.id, x: 472, y: 40, w: 420, h: 400 }
+  ])
+  await win(grain.page, ws[0].id).getByTitle('Shrink to a face').click()
+  await expect(win(grain.page, ws[0].id).locator('.chat-blob')).toBeVisible()
+  await win(grain.page, ws[0].id).locator('.chat-blob').click()
+  await expect.poll(async () => (await geo(grain, s.id, ws[0].id)).w).toBe(420)
+  const a = await geo(grain, s.id, ws[0].id)
+  const b = await geo(grain, s.id, ws[1].id)
+  const clear = a.x + a.w + 12 <= b.x || b.x + b.w + 12 <= a.x || a.y + a.h + 12 <= b.y || b.y + b.h + 12 <= a.y
+  expect(clear).toBe(true)
+})

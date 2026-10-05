@@ -7,6 +7,7 @@
  * it is a canvas-space quantity by definition, because positions persist (contract §10).
  */
 import type { Rect, SnapMode } from '@shared/types'
+import { GAP } from './layout'
 
 export const GUIDE_PX = 6
 export const GAP_PX = 2
@@ -27,7 +28,7 @@ export interface WindowRect extends Rect { id: string }
 export interface Viewport { zoom: number; panX: number; panY: number; width: number; height: number }
 
 /** One alignment line, in canvas space. `span` is the producing rect's extent on the other axis. */
-export interface GuideLine { axis: Axis; at: number; id: string | null; span: [number, number] }
+export interface GuideLine { axis: Axis; at: number; id: string | null; span: [number, number]; /** only this edge of the dragged rect may snap to it */ only?: SnapEdge }
 export interface AppliedGuide extends GuideLine { edge: SnapEdge; delta: number }
 /** One equal-gap pill: the run from `from` to `to` along `axis`, drawn at `cross` on the other axis. */
 export interface GapPill { axis: Axis; from: number; to: number; cross: number }
@@ -88,7 +89,12 @@ export const guideLines = (others: WindowRect[], view: Viewport): GuideLine[] =>
       { axis: 'x', at: r.x + r.w, id: r.id, span: vSpan },
       { axis: 'y', at: r.y, id: r.id, span: hSpan },
       { axis: 'y', at: r.y + r.h / 2, id: r.id, span: hSpan },
-      { axis: 'y', at: r.y + r.h, id: r.id, span: hSpan }
+      { axis: 'y', at: r.y + r.h, id: r.id, span: hSpan },
+      // exactly GAP from a neighbour: my start edge past its end, my end edge before its start
+      { axis: 'x', at: r.x + r.w + GAP, id: r.id, span: vSpan, only: 'start' },
+      { axis: 'x', at: r.x - GAP, id: r.id, span: vSpan, only: 'end' },
+      { axis: 'y', at: r.y + r.h + GAP, id: r.id, span: hSpan, only: 'start' },
+      { axis: 'y', at: r.y - GAP, id: r.id, span: hSpan, only: 'end' }
     )
   }
   const v = visibleRect(view)
@@ -103,6 +109,7 @@ export const nearestGuide = (r: Rect, lines: GuideLine[], axis: Axis, tol: numbe
   for (const l of lines) {
     if (l.axis !== axis) continue
     for (const e of edges) {
+      if (l.only && l.only !== e) continue
       const delta = l.at - edgeValue(r, axis, e)
       if (Math.abs(delta) > tol) continue
       if (!best || Math.abs(delta) < Math.abs(best.delta)) best = { ...l, edge: e, delta }
@@ -301,27 +308,24 @@ export const zoneRect = (zone: Zone, view: Viewport, natural: Size): Rect => {
   }
 }
 
-/** Tidy Up: shelf-pack in reading order on the grid pitch, inside the visible rect. */
-export const tidyLayout = (rects: WindowRect[], view: Viewport, pitch: number, gap = 16): WindowRect[] => {
+/** Tidy Up: shelf-pack in reading order, exactly `gap` apart, inside the visible rect (blobs are just small squares). */
+export const tidyLayout = (rects: WindowRect[], view: Viewport, pitch: number, gap = GAP): WindowRect[] => {
   const v = visibleRect(view)
-  const step = Math.max(pitch, 1)
-  const margin = snapValue(gap, step)
-  const limit = v.x + v.w - margin
-  let x = snapValue(v.x + margin, step)
-  let y = snapValue(v.y + margin, step)
+  const left = snapValue(v.x + gap, Math.max(pitch, 1))
+  const limit = v.x + v.w - gap
+  let x = left
+  let y = snapValue(v.y + gap, Math.max(pitch, 1))
   let shelf = 0
   const out: WindowRect[] = []
   for (const r of rects) {
-    const w = snapValue(r.w, step)
-    const h = snapValue(r.h, step)
-    if (x > snapValue(v.x + margin, step) && x + w > limit) {
-      x = snapValue(v.x + margin, step)
-      y += shelf + margin
+    if (x > left && x + r.w > limit) {
+      x = left
+      y += shelf + gap
       shelf = 0
     }
     out.push({ id: r.id, x, y, w: r.w, h: r.h })
-    x += w + margin
-    shelf = Math.max(shelf, h)
+    x += r.w + gap
+    shelf = Math.max(shelf, r.h)
   }
   return out
 }

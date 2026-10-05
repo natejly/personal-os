@@ -3,6 +3,7 @@ import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowSt
 import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
 import { clampOpacity, nextOpacity } from './opacity'
+import { GAP } from './layout'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
 
 /**
@@ -280,7 +281,7 @@ const spawnAt = (windows: CanvasWindow[], size?: Size, vp: Viewport = viewport()
   const v = visibleRect(vp)
   const w = size?.w ?? 420
   const h = size?.h ?? 340
-  const pad = 14
+  const pad = GAP
   const others = windows.filter((x) => x.state === 'normal' || x.state === 'maximized')
   const free = (x: number, y: number): boolean =>
     others.every((o) => x + w + pad <= o.x || o.x + o.w + pad <= x || y + h + pad <= o.y || o.y + o.h + pad <= y)
@@ -780,7 +781,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (!c || blocked(c.id)) return
       const movable = c.windows.filter((w) => w.state === 'normal')
       if (!movable.length) return
-      const laid = tidyLayout(movable.map((w) => ({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h })), viewport(), c.grid_size)
+      const laid = tidyLayout(movable.map((w) => ({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h })), viewport(), c.grid_size, GAP)
       for (const r of laid) s.patchWindow(r.id, { x: r.x, y: r.y })
       s.markLayoutDirty(laid.map((r) => r.id))
     },

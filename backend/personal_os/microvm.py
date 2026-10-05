@@ -41,12 +41,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import egress
+from . import egress, permissions
 from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES, capped_run
 
 WORKSPACE = "/workspace"
 DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
-DEFAULT_IMAGE = "python:3.12-slim"
+DEFAULT_IMAGE = permissions.DEFAULT_IMAGE
 LABEL = "personal-os.sandbox"
 CONV_LABEL = "personal-os.conv"  # which conversation a container belongs to; survives an app restart
 MAX_SANDBOXES = 5           # LRU-reaped: a desktop should not quietly accumulate VMs
@@ -168,7 +168,7 @@ class Sandboxes:
         return {"hard_cap": EXEC_HARD_CAP, "keep": 4 * STDOUT_CAP} if self._run is _run else {}
 
     def _bin(self) -> str:
-        return str(self.settings().get("sandboxRuntime") or "docker")
+        return str(permissions.get(self.settings(), "sandboxRuntime") or "docker")
 
     # ---- availability: cheap enough for Toolbox.schemas() every round ----
     def available(self) -> bool:
@@ -243,7 +243,7 @@ class Sandboxes:
                 return name
             self._reap(binary)
             cfg = self.settings()
-            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), net_mode(cfg.get("sandboxNetwork")),
+            self._create(binary, name, str(permissions.get(cfg, "sandboxImage") or DEFAULT_IMAGE), net_mode(permissions.get(cfg, "sandboxNetwork")),
                          self._desk_mount(conversation_id), conversation_id)
             return name
 
@@ -301,7 +301,7 @@ class Sandboxes:
         sfx = self._sfx(name)
         net, px = NET_PREFIX + sfx, PX_PREFIX + sfx
         token = secrets.token_urlsafe(18)
-        allow = egress.allowed_set(True, self.settings().get("shellAllowedDomains"))
+        allow = egress.allowed_set(True, permissions.get(self.settings(), "shellAllowedDomains"))
         self._run([binary, "rm", "-f", px], timeout=30)  # a leftover from a crash holds an old token
         n = self._run([binary, "network", "create", "--internal", "--label", f"{PROXY_LABEL}=1", net], timeout=30)
         if n.returncode != 0 and b"already exists" not in n.stderr:
@@ -530,7 +530,7 @@ class Sandboxes:
         with self._lock:
             self._rm(binary, name)
             # Networking is decided now, from current settings: a checkpoint cannot re-enable it.
-            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", net_mode(self.settings().get("sandboxNetwork")),
+            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", net_mode(permissions.get(self.settings(), "sandboxNetwork")),
                          self._desk_mount(conversation_id), conversation_id)
         return {"restored": slug}
 

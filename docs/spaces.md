@@ -5,6 +5,13 @@ A space is a desktop of live windows that sits beside the ordinary views. Open o
 ⌃1 … ⌃9 or ⌥⌘← / ⌥⌘→ (⌥⌘↑ shows them all side by side). ⌃⌘N makes a new one. Spaces are stored
 in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
 
+## First run and empty spaces
+
+An empty, unlocked space shows a short explainer with **New chat**, **Add a widget** (the same menu
+as a right-click on the plane) and **Got it**. Dismissing it, or putting the first window on any
+space, sets `grain.spacesIntroSeen` in localStorage; from then on an empty space shows only the
+one-line hint. Only the explainer's buttons take clicks, so pan and right-click still work around it.
+
 ## Windows
 
 Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,

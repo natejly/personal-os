@@ -210,6 +210,13 @@
   font-size: 13px;
   pointer-events: none;
 }
+/* First-run explainer: the backdrop stays click-through (pan, marquee, right-click still reach the plane);
+   only the card takes clicks. */
+.canvas-intro { gap: 8px; }
+.canvas-intro > * { max-width: 46ch; justify-self: center; }
+.canvas-intro strong { color: var(--text); font-size: 16px; }
+.canvas-intro span { color: var(--text-muted); line-height: 1.5; }
+.canvas-intro-actions { display: flex; gap: 8px; justify-content: center; margin-top: 6px; pointer-events: auto; }
 
 /* ---------- window ---------- */
 

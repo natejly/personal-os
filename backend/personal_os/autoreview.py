@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any
 
-from . import llm, redact
+from . import llm, permissions, redact
 
 LEVELS = ("off", "risky", "all-writes")
 RISKY = frozenset({"executes", "external", "writes", "schedules"})  # agent_spawn is executes; workflow_run is writes
@@ -46,7 +46,7 @@ def parse(text: str) -> tuple[str, str]:
 async def review(settings: dict[str, Any], model: str, *, name: str, description: str, args: dict[str, Any],
                  user_text: str, mode: str, tainted: bool, cancel: Any = None) -> dict[str, Any]:
     """One short completion. Never raises: the result is {"verdict", "reason", "model", "ms"}."""
-    model = str(settings.get("autoReviewModel") or settings.get("extractionModel") or model)
+    model = str(permissions.get(settings, "autoReviewModel") or settings.get("extractionModel") or model)
     shown = redact.scrub_command_output(json.dumps(args, default=str, ensure_ascii=False))[:ARGS_CAP]
     body = (f"Latest user request:\n{user_text[:1500]}\n\nTool: {name}\nWhat it does: {description[:600]}\n"
             f"Arguments: {shown}\nTool mode in this chat: {mode}\n"

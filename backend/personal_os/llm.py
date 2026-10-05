@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .microvm import DEFAULT_IMAGE
+from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
@@ -98,24 +98,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fileSnapshotMaxBytes": 5_000_000,
     "fileSnapshotRetainDays": 14,
     "fileSnapshotBudgetMB": 200,
-    # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
-    # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
-    "permissionRules": {"allow": [], "ask": [], "deny": []},
-    # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
-    "unattendedApprovals": "deny",
-    # Review gate (autoreview.py): off | risky | all-writes. A second model looks at a call that would run unasked and may turn it into a card.
-    "autoReview": "off",
-    "autoReviewModel": "",  # "" = the extraction model, else the chat model
-    # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
-    # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
-    # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.
-    "alwaysAsk": ["gmail_send", "calendar_delete", "trash_local_file", "move_local_file", "run_shortcut",
-                  "python_install", "schedule_task"],
+    # Every permission key (tools, alwaysAsk, permissionRules, skipPermissions, ...) and its default: permissions.py.
+    **PERMISSION_DEFAULTS,
     "toolReadRetries": 2,  # extra attempts for a read-only tool after a transient network error (0 = never retry)
     "parallelReads": 4,  # read-only tool calls of one round that run together (1 = one at a time)
-    # Chats with no own skipPermissions follow this. Off: tools that ask still show a card. On: those
-    # cards are skipped. Deny rules, plan cards, desk questions and scheduled jobs are unchanged.
-    "skipPermissions": False,
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
@@ -134,17 +120,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ttsRate": 1.0,
     "voiceLoopMaxTurns": 20,
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
-    # Meetings / Activity ship off (they record); Settings → Modules turns them back on.
-    "homeWidgets": {"meetings": False},
-    "hiddenViews": ["meetings", "activity"],
+    # Meetings / Activity ship shown; showing a view records nothing (consent and OS permissions gate that).
+    "homeWidgets": {},
+    "hiddenViews": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
     "navPlacement": {},
     # Bump when the default-off set changes so existing DBs pick up the change once.
-    "modulesDefault": 4,
-    # tools: {tool_name: bool}; missing = on
-    "tools": {},
-    # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
-    "docEditMode": "review",
+    "modulesDefault": 5,
     "maxToolRounds": 25,
     "snapshotsEnabled": True,
     # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
@@ -226,12 +208,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "selectionToolbar": True,
     # Interface zoom, percent (80-160 in steps of 5); every window applies it as its page zoom factor.
     "uiZoom": 100,
-    # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
-    "planMode": "off",
     "responseStyle": "default",  # what a new chat starts on; see style_presets
     "responseStyleText": "",
-    # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
-    "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
     "gmailSendHold": {"enabled": True, "seconds": 90},
     "braveApiKey": "",
@@ -248,44 +226,20 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
-    # The sandbox_* containers: the image a fresh one starts from, and the CLI that drives them (docker, podman or
-    # nerdctl). Their network is sandboxNetwork below.
-    "sandboxImage": DEFAULT_IMAGE,
-    "sandboxRuntime": "docker",
-    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
-    # own workspace is always granted; anywhere else those tools ask first.
-    "workspaceRoots": [],
     # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
     "sandboxMountDesk": True,
-    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
-    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
-    "sandboxNetwork": "off",
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
-    "shellNetwork": False,       # a networked shell run taints the reply: whatever it prints may be third-party text
     "shellTimeoutSec": 120,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": 4,     # live background jobs at once
-    # Shell network policy while shellNetwork is off: outbound connections go through a local allowlisting proxy
-    # (egress.py). shellRegistryAccess admits the package registries; shellAllowedDomains adds hosts of the user's own.
-    "shellRegistryAccess": True,
-    "shellAllowedDomains": [],
-    # In a desk, a sandboxed shell_run whose working folder is the desk's own workspace runs without a card.
-    "deskShellAuto": True,
-    # desk_done is refused while the plan has open steps or a delivered file is missing or empty (deskgate.py),
-    # and a read-only reviewer checks the result against the brief before the desk may finish.
-    "deskDoneGate": True,
-    "deskSelfReview": True,
     # The model view_image sends pictures to. Empty = the chat model, when the provider says it reads images.
     "visionModel": "",
     # The model generate_image calls (POST /images/generations, OpenAI shape). Empty = the tool says it is not set up.
     "imageModel": "",
     # The agent's own browser (browser.py): interactive pages in a separate cookie jar, driven from a desk or chat.
-    "browserEnabled": True,
     "browserMaxTabs": 4,
     "browserIdleSeconds": 300,
-    # Hosts the agent's browser may open by typed URL once a reply has touched untrusted content.
-    "browserAllowlist": [],
     # Extra packages installed into the shared work environment (envs.py) beside its base set.
     "workEnvPackages": [],
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
@@ -301,10 +255,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "pimProvider": "google",
     # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
     # /activity/config rather than /settings so the merge is a deep one.
-    "activity": {"enabled": False},
+    "activity": {"enabled": True},
     # Meetings. Shape and defaults live in meetings.DEFAULT_CONFIG; patched through
     # /meetings/config rather than /settings so the merge is a deep one.
-    "meetings": {"enabled": False},
+    "meetings": {"enabled": True},
+    # Daily digest (digest.py): one quiet Agent Inbox row a day, never an OS notification.
+    # hour: local hour of day (0-23) it is written at, or the first launch after it.
+    "digest": {"enabled": True, "hour": 8},
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.

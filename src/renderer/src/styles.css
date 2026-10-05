@@ -2912,3 +2912,10 @@ select:focus-visible {
 .research-sources-head { display: flex; align-items: center; gap: 4px; color: var(--text-muted); padding: 2px 0; }
 .research-sources-head:hover { color: var(--text); }
 .research-sources-head svg.rot90 { transform: rotate(90deg); }
+
+/* ---------- Calendar: empty week ---------- */
+/* Floats over the week grid; only its button takes clicks, so every slot stays clickable underneath. */
+.cal-body { position: relative; }
+.cal-empty { position: absolute; inset: 0; padding-top: 80px; pointer-events: none; }
+.cal-empty h2, .cal-empty p { background: var(--bg); padding: 0 6px; }
+.cal-empty .primary-btn { pointer-events: auto; }

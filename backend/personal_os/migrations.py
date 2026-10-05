@@ -62,11 +62,28 @@ def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
 
 
 def _permissions_store(c: sqlite3.Connection) -> None:
-    """Slot reserved for the permissions consolidation (owner: permissions-consolidation)."""
+    """The ~22 top-level permission keys (tools, alwaysAsk, permissionRules, ...) fold into one versioned
+    `permissions` row and are deleted (permissions.py). A fresh database gets {"version": 1}; defaults fill the rest."""
+    from . import permissions
+    permissions.migrate(c)
 
 
 def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
-    """Slot reserved for the meetings + activity on-by-default flip (owner: meetings-activity-digest)."""
+    """Meetings and Activity now ship on. Only a bare `{"enabled": false}` row (nothing but that key, the
+    stub an older whole-settings save could write) is flipped to true. Both services only ever store their
+    FULL config, and only on a user action: a Start/Stop, the consent notice, or any edit in their panels.
+    So a full row with `enabled: false` - even one equal to the defaults, which is what Stop leaves behind -
+    is a user who was in there and left it off, and it stays off. A missing row needs nothing: the new
+    default applies on read. Neither switch records on its own; consent and OS permissions still gate that."""
+    import json
+    for key in ("activity", "meetings"):
+        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        try:
+            cfg = json.loads(row[0]) if row else None
+        except ValueError:
+            continue
+        if cfg == {"enabled": False}:
+            c.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps({"enabled": True}), key))
 
 
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.

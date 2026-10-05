@@ -2,7 +2,7 @@ import type { Settings } from '@shared/types'
 import { HostList } from './CoworkSettings'
 
 /**
- * Three standing safety settings of the Tools tab: which hosts fetch_url may still read after a reply has seen
+ * Three standing safety settings of the Permissions tab: which hosts fetch_url may still read after a reply has seen
  * untrusted content, whether a run nobody is watching asks or refuses, and folder snapshots before a reply edits.
  * It edits the modal's `draft` through `patch`, so nothing is saved until Save.
  */
@@ -13,7 +13,7 @@ export default function RunSafetySettings({ draft, patch }: { draft: Settings; p
   return (
     <>
       <HostList title="Allowed hosts after reading untrusted content"
-        help="Once a reply has read a web page, mail or another outside source, it may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains; chats working autonomously also use the Allowed sites list under Autonomy."
+        help="Once a reply has read a web page, mail or another outside source, it may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains. The agent's browser also uses its own Allowed sites list under Browser below."
         value={draft.fetchAllowlist ?? []} onChange={(fetchAllowlist) => patch({ fetchAllowlist })} />
       <div className="send-hold">
         <span className="toggle-text"><b>Unattended runs</b><small>What a scheduled job or other run with nobody watching does with a call that would ask for approval.</small></span>

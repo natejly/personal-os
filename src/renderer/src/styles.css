@@ -523,13 +523,12 @@ kbd {
 .model-menu-section {
   padding: 8px 8px 2px; font-size: 11px; color: var(--text-faint);
 }
-.model-menu-choice, .model-menu-switch, .model-menu-reset {
+.model-menu-switch, .model-menu-reset {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   width: 100%; padding: 5px 8px; border: 0; border-radius: 6px;
   background: transparent; color: var(--text); font: 13px var(--font); cursor: pointer; text-align: left;
 }
-.model-menu-choice:hover, .model-menu-switch:hover, .model-menu-reset:hover { background: var(--hover); }
-.model-menu-choice svg { color: var(--text-muted); flex-shrink: 0; }
+.model-menu-switch:hover, .model-menu-reset:hover { background: var(--hover); }
 .model-menu-track {
   width: 28px; height: 16px; border-radius: 99px; background: var(--border-strong);
   position: relative; flex-shrink: 0;

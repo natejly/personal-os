@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { EyeOff, MoreHorizontal, Trash2 } from 'lucide-react'
+import { EyeOff, MoreHorizontal } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useStore } from '../store'
@@ -100,7 +100,6 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         </span>
         <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom }) }}><MoreHorizontal size={14} /></button>
-        <button className="icon-btn ghost" aria-label={`Delete chat: ${conv.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(conv.id) }}><Trash2 size={13} /></button>
       </div>
       {menuAt && <ContextMenu at={menuAt} items={entries()} onClose={() => setMenuAt(null)} />}
     </>

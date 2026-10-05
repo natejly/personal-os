@@ -103,8 +103,8 @@ export interface ChatSession {
   runError: { message: string; runId: string | null; interrupted: boolean } | null
   /** Sends the run has not echoed back yet (optimistic bubbles); undefined when none. */
   pendingSends?: PendingSend[]
-  /** Subagents of the current run, by id, for the crew ring around the chat's face. Reset when a run starts. */
-  subagents?: Record<string, SubagentInfo>
+  /** Subagents by id (the `subagent` stream event), each tagged with the message that spawned it. Kept across runs. */
+  subagents?: Record<string, SubagentInfo & { message_id?: string | null }>
 }
 
 /** Where an accepted desk output went, for the toast. */
@@ -1434,7 +1434,6 @@ export const useStore = create<State>((set, get) => {
         ...s,
         conversation,
         streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false },
-        subagents: undefined,
         status: settleApprovals('working', approvals),
         finishedAt: null,
         pendingApprovals: approvals,
@@ -4257,7 +4256,12 @@ export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pic
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)
 const EMPTY_SUBS: Record<string, SubagentInfo> = {}
 /** The current run's subagents, by id (the `subagent` stream event), for the crew ring and the run cards. */
-export const useSubagents = (convId?: string): Record<string, SubagentInfo> => useStore((s) => pick(s, convId)?.subagents ?? EMPTY_SUBS)
+export const useSubagents = (convId?: string): Record<string, SubagentInfo & { message_id?: string | null }> => useStore((s) => pick(s, convId)?.subagents ?? EMPTY_SUBS)
+/** The subagents one reply spawned (stream events carry the spawning message's id), live while they run. Entries are kept after the run. */
+export const useMessageSubagents = (convId: string | undefined, messageId: string): Record<string, SubagentInfo> => {
+  const subs = useSubagents(convId)
+  return useMemo(() => Object.fromEntries(Object.entries(subs).filter(([, v]) => v.message_id === messageId)), [subs, messageId])
+}
 /** The face a chat wears: its agent's (name and colour) when it was opened on one, else its own id. */
 export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings'> | null | undefined): { name: string; hue?: number } => {
   const agent = conv?.settings?.agent

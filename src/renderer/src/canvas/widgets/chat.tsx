@@ -47,10 +47,12 @@ const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown
   if (config) void st.setWindowConfig(win.id, config)
 }
 
-/** The blob's face with the current run's subagents around it; clicking a child opens its transcript. */
+/** The blob's face with the latest reply's subagents around it; clicking a child opens its transcript. */
 function ChatRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
-  const kids = Object.values(useSubagents(convId))
-  const face = useChatFace(useConversation(convId))
+  const conv = useConversation(convId)
+  const latest = [...(conv?.messages ?? [])].reverse().find((m) => m.role === 'assistant')?.id // the store keeps older replies' children too
+  const kids = Object.values(useSubagents(convId)).filter((k) => k.message_id === latest)
+  const face = useChatFace(conv)
   const openSubagent = useStore((s) => s.openSubagent)
   return <CrewRing center={{ name: face.name, hue: face.hue, status, title }}
     kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />

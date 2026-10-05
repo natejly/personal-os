@@ -4,7 +4,7 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
-import { useStore, useSubagents } from '../store'
+import { useStore, useMessageSubagents } from '../store'
 import { api } from '../lib/api'
 import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
@@ -66,10 +66,6 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [reasoning, open, streaming])
   const last = events[events.length - 1]
-  // The subagents this reply started wear their faces on the line itself, so one click reaches a child's
-  // transcript without opening the fold. Live state comes from the stream while the run is on.
-  const subs = useSubagents(conversationId)
-  const kids = useMemo(() => events.filter((t) => t.name === 'agent_spawn' && t.result_preview).flatMap((t) => agentIds(t.result_preview!)), [events])
   const label = [
     reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
     events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
@@ -83,16 +79,44 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
         <span className="reasoning-label">{label}</span>
         {streaming && !answering && <span className="thinking mini"><span /><span /><span /></span>}
       </button>
-      {kids.length > 0 && (
-        <span className="reasoning-kids">
-          {kids.map((id) => (
-            <button key={id} className="crew-face" title={`${subs[id]?.role ?? 'subagent'}: ${subs[id]?.now || subs[id]?.state || 'open'}`} aria-label={`Open subagent ${id.slice(-4)}`}
-              onClick={() => useStore.getState().openSubagent(id)}><Face name={id} status={subs[id]?.state} size={16} /></button>
-          ))}
-        </span>
-      )}
       {open && reasoning && <div className="reasoning-body" ref={body}>{reasoning}</div>}
       {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
+    </div>
+  )
+}
+
+/**
+ * The children a reply spawned, indented under it: live from the stream while they run, and from the spawn
+ * results once they are recorded. Open while any child runs; one click on a row opens its transcript.
+ */
+function SubagentThread({ messageId, conversationId, events }: { messageId: string; conversationId: string; events: ToolEvent[] }): JSX.Element | null {
+  const subs = useMessageSubagents(conversationId, messageId)
+  const ids = useMemo(() => {
+    const out = Object.keys(subs)
+    for (const t of events) if (t.name === 'agent_spawn' && t.result_preview) for (const id of agentIds(t.result_preview)) if (!out.includes(id)) out.push(id)
+    return out
+  }, [subs, events])
+  const running = ids.some((id) => subs[id]?.state === 'running')
+  const [open, setOpen] = useState<boolean | null>(null) // null: follow the children
+  if (!ids.length) return null
+  const shown = open ?? running
+  return (
+    <div className="subagent-thread">
+      <button className="subagent-head" onClick={() => setOpen(!shown)} aria-expanded={shown}>
+        <ChevronRight size={12} className={shown ? 'rot90' : ''} />
+        <span>{ids.length} subagent{ids.length === 1 ? '' : 's'}{running ? ' running' : ''}</span>
+      </button>
+      {shown && ids.map((id) => {
+        const s = subs[id]
+        return (
+          <button key={id} className="subagent-row" aria-label={`Open subagent ${id.slice(-4)}`} onClick={() => useStore.getState().openSubagent(id)}>
+            <Face name={id} status={s?.state ?? 'completed'} size={16} />
+            <span className="subagent-role">{s?.role ?? 'subagent'}</span>
+            <span className="subagent-now">{s ? s.now || s.state : 'finished'}</span>
+            {s && <span className="subagent-meta">{s.rounds} rounds · {s.calls} calls</span>}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -267,6 +291,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
               {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!message.content} browserSession={browserSession} />}
+              {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
               {/* Only the rendered text lives in .markdown: its element rules (p, ul, li) out-rank the
                   single-class rules the cards above are styled with. Its streaming class draws the cursor. */}

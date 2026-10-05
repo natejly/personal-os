@@ -85,9 +85,14 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   // (The mock reads directives off the whole message, so the parent waits the same 8 s before each of its turns.)
   await box.fill('!!tool agent_spawn {"task": "!!slow 8000 !!reply first draft", "role": "researcher", "background": true}')
   await box.press('Enter')
-  // Its face sits on the reply's activity line, no fold to open.
-  await expect(win.locator('.crew-face')).toHaveCount(1, { timeout: 60_000 })
-  await shot(page, 'chat-crew-face')
+  // The child sits indented under the reply while it runs, with its live status.
+  const row = win.locator('.subagent-thread .subagent-row')
+  await expect(row).toHaveCount(1, { timeout: 60_000 })
+  await expect(row).toContainText('researcher')
+  await shot(page, 'chat-subagent-thread')
+  await row.click() // a row opens the child's transcript
+  await expect(page.locator('.subagent-panel')).toBeVisible()
+  await page.locator('.subagent-panel').getByRole('button', { name: 'Close' }).click()
 
   // The ring: fold the window to its face; the orchestrator sits in the middle with one child on the ring.
   await win.getByTitle('Shrink to a face').click()

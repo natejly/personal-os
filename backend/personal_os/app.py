@@ -287,7 +287,11 @@ _seed_hidden_modules()
 
 
 def settings() -> dict[str, Any]:
-    return {**llm.DEFAULT_SETTINGS, **db.get_settings()}
+    out = {**llm.DEFAULT_SETTINGS, **db.get_settings()}
+    if not out.get("workspaceRoots"):  # the one place every shell/file/subagent consumer reads roots from
+        with contextlib.suppress(OSError):
+            out["workspaceRoots"] = [mac.default_workspace()]
+    return out
 
 
 jobs = Jobs(db)

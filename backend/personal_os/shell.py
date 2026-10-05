@@ -48,7 +48,7 @@ FINISHED_KEEP_S = 30 * 60
 SPILL_DAYS = 7
 SAFE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 NO_ROOT = ("shell_run needs a folder to work in: there is no desk workspace and no workspace root. Ask the user to add "
-           "a folder under Settings (Workspace roots), or run it from a desk.")
+           "a folder under Settings (Workspace folders), set the chat's Working folder, or run it from a desk.")
 
 
 class ShellError(Exception):

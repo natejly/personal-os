@@ -114,6 +114,13 @@ def allowed_path(raw: str) -> Path:
     return p
 
 
+def default_workspace() -> str:
+    """~/Grain, created on first use: the workspace folder used while no workspaceRoots are set."""
+    d = home() / "Grain"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
+
+
 def allowed_root(raw: str) -> Path:
     """`allowed_path`, minus the home folder itself and any folder holding the app's data: a granted root is writable
     by the shell and the file tools, and is snapshotted for undo. The home folder holds the rc files, ~/Library and

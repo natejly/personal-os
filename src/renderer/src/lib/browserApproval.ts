@@ -11,6 +11,12 @@ const hostOf = (raw: unknown): string => {
   try { return new URL(s).hostname } catch { return s.replace(/^[a-z]+:\/\//i, '').split(/[/?#]/)[0] }
 }
 
+/** The host a forced card's "Allow <host> from now on" button names, or '' when the call carries no usable URL. */
+export const allowHostOf = (args: unknown): string => {
+  const u = (args as { url?: unknown } | null | undefined)?.url
+  return typeof u === 'string' && /^https?:\/\//i.test(u.trim()) ? hostOf(u) : ''
+}
+
 /** Host and path of an address the user is asked to judge. */
 const shortUrl = (raw: unknown): { host: string; rest: string } => {
   const s = String(raw ?? '').trim()

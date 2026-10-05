@@ -490,7 +490,8 @@ def _allowed_urls(ctx: dict[str, Any]) -> set[str]:
 
 
 TAINTED_HINT = ("Fetch a result URL exactly as web_search returned it, or answer from what you already fetched. "
-                "The user can also paste the link, or add the host under Settings → Tools → Allowed hosts after reading untrusted content.")
+                "Approving the call's card allows that page, and the card's host button allows the host from now on. "
+                "The user can also paste the link, or add the host under Settings → Tools → Allowed hosts.")
 
 
 def _check_url(url: str, ctx: dict[str, Any], settings: dict[str, Any], redirect: bool = False) -> tuple[str, str]:

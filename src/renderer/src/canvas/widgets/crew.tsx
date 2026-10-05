@@ -4,6 +4,7 @@ import type { CrewAgent, CrewView, WorkflowPlanStep, WorkflowStepRow } from '@sh
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import Face from '../../components/Face'
+import CrewRing from '../../components/CrewRing'
 import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../components/DeskRail'
 import { ParamForm } from '../../components/WorkflowsPanel'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -78,6 +79,7 @@ function AgentCard({ a }: { a: CrewAgent }): JSX.Element {
 
 function AgentRow({ a, depth, open, onToggle }: { a: CrewAgent; depth: number; open: boolean; onToggle: () => void }): JSX.Element {
   const status = agentStatus(a)
+  const openSubagent = useStore((s) => s.openSubagent)
   return (
     <>
       <div className={`crew-row ${open ? 'on' : ''}`} style={{ paddingLeft: 7 + depth * 18 }} role="button" tabIndex={0}
@@ -87,6 +89,7 @@ function AgentRow({ a, depth, open, onToggle }: { a: CrewAgent; depth: number; o
         <span className="crew-name">{a.role}</span>
         <span className="crew-what">{agentNow(a)}</span>
         <span className={`crew-state ${tone(status)}`}>{AGENT_LABEL[status] ?? status}</span>
+        <button className="icon-btn ghost xs" title="Open its transcript" onClick={(e) => { e.stopPropagation(); openSubagent(a.id) }}><ExternalLink size={11} /></button>
       </div>
       {open && <div style={{ paddingLeft: depth * 18 }}><AgentCard a={a} /></div>}
     </>
@@ -116,6 +119,8 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [view, setView] = useState<CrewView | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  const [focusId, setFocusId] = useState<string | null>(null)  // the agent the ring is centred on; null = the root
+  const openSubagent = useStore((s) => s.openSubagent)
   const [running, setRunning] = useState(false)
   const [signal, setSignal] = useState<string | null>(null)
   const prev = useRef<string | null>(null)
@@ -168,6 +173,9 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     return m
   }, [view])
 
+  const focus = view?.agents.find((a) => a.id === focusId) ?? null
+  const ringKids = byParent.get(focus?.id ?? null) ?? []
+
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     try { await fn() } catch (e) { toast((e as Error).message, 'error') }
     void load()
@@ -218,7 +226,6 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   return (
     <div className="widget crew">
       <div className="widget-bar crew-head">
-        <Face name={root.id} status={root.status} size={18} title={rootLabel(view)} />
         <span className="crew-title" title={root.title}>{root.title}</span>
         <span className={`crew-state ${tone(root.status)}`}>{rootLabel(view)}</span>
         {signal && (
@@ -246,6 +253,16 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       <div className="widget-scroll">
         {running && workflow && (
           <div className="crew-run-form"><ParamForm wf={workflow} onProposed={() => { setRunning(false); void load() }} /></div>
+        )}
+        {!running && ringKids.length > 0 && (
+          <div className="crew-ring-box">
+            {focus && <button className="crew-up" onClick={() => setFocusId(focus.parent_id && byParent.has(focus.parent_id) ? focus.parent_id : null)}>← {focus.parent_id ? 'Back' : root.title}</button>}
+            <CrewRing
+              center={{ name: focus?.id ?? root.id, status: focus ? agentStatus(focus) : root.status, title: focus ? `${focus.role}: ${agentNow(focus)}` : rootLabel(view) }}
+              kids={ringKids.map((a) => ({ id: a.id, status: agentStatus(a), title: `${a.role}: ${agentNow(a)}` }))}
+              onPick={(id) => (byParent.has(id) ? setFocusId(id) : openSubagent(id))}
+              onCenter={focus ? () => openSubagent(focus.id) : undefined} />
+          </div>
         )}
         {!running && (tree.length > 0
           ? <div className="crew-tree">{tree}</div>

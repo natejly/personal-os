@@ -3048,7 +3048,7 @@ export interface CrewAgent {
   error: string | null
 }
 export interface CrewRoot {
-  kind: 'desk' | 'workflow_run' | 'workflow'
+  kind: 'desk' | 'workflow_run' | 'workflow' | 'chat'
   id: string
   title: string
   /** A DeskStatus, a WorkflowRunStatus, or 'idle' for a workflow that has never run. */

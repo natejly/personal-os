@@ -4029,6 +4029,20 @@ def crew_view(ref_id: str) -> dict[str, Any]:
                 "now": desk.get("headline") or desk.get("status_reason") or "", "run_id": desk.get("run_id"),
                 "ended_at": desk.get("ended_at"), "cost": desk.get("cost")}
         return {"root": root, "run": None, "workflow": None, "agents": [_agent_node(r, turns) for r in agents]}
+    chat = convos.get(ref_id)
+    if chat:  # a chat: its replies' runs are the roots; the subagents they spawned (and theirs) are the agents
+        turns = [r for r in run_store.list(None, ref_id, 500) if r.get("kind") != "subagent"]
+        seen: set[str] = set()
+        agents = []
+        for t in turns:
+            for r in _descendant_runs(t["run_id"]):
+                if r["run_id"] not in seen:
+                    seen.add(r["run_id"])
+                    agents.append(r)
+        agents.sort(key=lambda r: (r.get("started_at") or 0))
+        live = any(r.get("status") == "running" for r in turns)
+        root = {"kind": "chat", "id": ref_id, "title": chat.get("title") or "Chat", "status": "running" if live else "done", "now": ""}
+        return {"root": root, "run": None, "workflow": None, "agents": [_agent_node(r, {t["run_id"] for t in turns}) for r in agents]}
     run = workflow_store.get_run(ref_id)
     wf = None
     if run is None:

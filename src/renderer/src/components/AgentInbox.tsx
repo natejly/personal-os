@@ -19,6 +19,7 @@ import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 import { AUTONOMY } from './DeskRail'
+import Face from './Face'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -102,6 +103,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         <button className="icon-btn sm" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
+        <Face name={r.job} status={r.status} size={18} />
         <span className="inbox-job">{r.job}</span>
         {r.manual && <span className="chip">by hand</span>}
         {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}

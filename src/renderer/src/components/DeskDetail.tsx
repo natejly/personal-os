@@ -12,6 +12,7 @@ import DeskReview from './DeskReview'
 import DeskApprovalCard from './DeskApprovalCard'
 import InlineNote from './InlineNote'
 import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
+import Face from './Face'
 
 type Tab = DeskTab
 const TABS: { key: Tab; label: string }[] = [
@@ -270,6 +271,7 @@ export default function DeskDetail(): JSX.Element | null {
     <section className="cowork-main">
       <header className="desk-head">
         <div className="desk-head-top">
+          <Face name={desk.id} status={desk.status} size={36} title={STATUS_LABEL[desk.status]} />
           <input
             className="desk-title-input"
             aria-label="Desk title"

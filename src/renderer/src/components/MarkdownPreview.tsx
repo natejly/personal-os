@@ -63,13 +63,14 @@ function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HT
 /** A doc's own pasted image: the asset route wants the app token, which an <img> cannot send, so it is fetched into a blob. */
 function DocAsset({ src, alt }: { src: string; alt: string }): JSX.Element {
   const [url, setUrl] = useState('')
+  const [big, setBig] = useState(false)
   useEffect(() => {
     let dead = false
     let made = ''
     fetchBlobUrl(src).then((u) => { made = u; if (dead) URL.revokeObjectURL(u); else setUrl(u) }).catch(() => undefined)
     return () => { dead = true; if (made) URL.revokeObjectURL(made) }
   }, [src])
-  return url ? <img src={url} alt={alt} /> : <span className="muted">{alt || 'image'}</span>
+  return url ? <img src={url} alt={alt} title="Click to enlarge" style={{ maxWidth: big ? 'none' : '100%', cursor: 'zoom-in' }} onClick={() => setBig(!big)} /> : <span className="muted">{alt || 'image'}</span>
 }
 
 function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX.Element {

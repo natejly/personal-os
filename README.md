@@ -50,7 +50,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    trashing files, shortcuts, Python installs and scheduling always ask.
 3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
    ⌘⇧N makes a note, ⌘⇧D opens today's. Record or dictate into any note on
-   macOS, and the transcript stays apart from your text. ⌘I opens the Page agent
+   macOS, and the transcript stays apart from your text. Paste or drop an image into
+   a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
    that one's chat. The assistant can edit a note (you accept each diff) and can
    delete one after asking; Settings → Trash restores it.

@@ -3,7 +3,8 @@ import CaretMenu from '../features/notes/CaretMenu'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
-import { linkTitle, uploadDocAsset } from '../features/notes/api'
+import { pendingImage, withAlt } from '../features/notes/imagePaste'
+import { describeImage, linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { wrapToggle } from '../features/notes/format'
 import { wordCount } from '../features/notes/stats'
@@ -473,9 +474,19 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     uploadDocAsset(imageDocId, files![pick.index]).then(({ url }) => {
       const e = ta.current
       if (!e) return
-      replaceInTextarea(e, e.selectionStart, e.selectionEnd, `![](${url})`)
+      replaceInTextarea(e, e.selectionStart, e.selectionEnd, pendingImage(url))
       trackCaret()
       setNotice('')
+      // The description never blocks the paste: it swaps the alt in when it arrives, wherever the image has moved to.
+      describeImage(imageDocId, url).then(({ alt, notice }) => {
+        const cur = ta.current
+        const swap = cur && withAlt(cur.value, url, alt)
+        if (cur && swap) {
+          const caret = cur.selectionStart
+          replaceInTextarea(cur, swap.start, swap.end, swap.text, caret >= swap.end ? caret + swap.text.length - (swap.end - swap.start) : caret)
+        }
+        if (notice) setNotice(notice)
+      }).catch(() => undefined)
     }).catch((err) => setNotice(`Could not add the image: ${err instanceof Error ? err.message : err}`))
     return true
   }

@@ -4,20 +4,21 @@ import { useStore, type LibraryTab } from '../store'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
-import { AgentsPanel, CommandsPanel } from './DefsPanels'
+import { CommandsPanel } from './DefsPanels'
+import AgentsPanel from './AgentsPanel'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Skills the assistant can reuse, e.g. how you like a weekly review done' },
-  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Saved things the assistant may run: workflows, agent roles and commands' },
+  { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Roles with their own face, instructions, tools and skills; replies delegate to them, and you can chat with one' },
+  { key: 'automations', label: 'Automations', icon: <Zap size={14} />, blurb: 'Saved things the assistant may run: workflows and commands' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' }
 ]
 
-// Automations holds three kinds of saved thing; the filter narrows to one, All stacks them.
+// Automations holds two kinds of saved thing; the filter narrows to one, All stacks them.
 const KINDS = [
   { key: 'workflows', label: 'Workflows', icon: <Workflow size={12} />, blurb: 'Repeatable multi-step plans you approve once, e.g. a Monday inbox triage', panel: <WorkflowsPanel /> },
-  { key: 'agents', label: 'Agents', icon: <Users size={12} />, blurb: 'Agent roles you write; they cannot be spawned until you approve them', panel: <AgentsPanel /> },
   { key: 'commands', label: 'Commands', icon: <Terminal size={12} />, blurb: 'Saved prompts you reuse, e.g. "summarise this thread for my manager"; $ARGUMENTS fills in what you type after the name', panel: <CommandsPanel /> }
 ]
 
@@ -49,6 +50,7 @@ export default function LibraryView(): JSX.Element {
       </div>
       <div className="page-body">
         {tab === 'skills' && <SkillsPanel />}
+        {tab === 'agents' && <AgentsPanel />}
         {tab === 'automations' && (
           <div className="library-panel">
             <div className="seg" role="tablist" aria-label="Kind" style={{ alignSelf: 'flex-start' }}>

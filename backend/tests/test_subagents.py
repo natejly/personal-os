@@ -754,6 +754,94 @@ def test_definitions_need_approval() -> None:
     appmod.agent_defs.delete(row["id"])
 
 
+def test_definitions_carry_face_and_skills() -> None:
+    """A definition names its colour and the approved skills it carries; both round-trip, and a skill reaches the
+    child's prompt only while it is approved."""
+    reset()
+    sk = appmod.skills.propose("Tidy summary", "Three bullets, newest first", "1. Read everything.\n2. Keep three bullets, newest first.\n3. Name the source of each.", source="user")
+    text = "---\nname: tidy\ndescription: Tidy summaries\nhue: 400\ntools: read_local_file\nskills: Tidy summary, Not A Skill\n---\nSummarize tidily."
+    f = sa.parse_def(text)
+    check(f["hue"] == 40 and f["skills"] == ["Tidy summary", "Not A Skill"], "hue wraps to a degree and skills parse as a list")
+    check(sa.parse_def(sa.def_text(f)) == f, "def_text is the inverse of parse_def")
+    row = appmod.agent_defs.save(text)
+    check(row["hue"] == 40 and row["skills"] == ["Tidy summary", "Not A Skill"], "the row keeps hue and skills")
+    appmod.agent_defs.approve(row["id"])
+    role = appmod.agent_defs.role("tidy")
+    check(role.hue == 40 and role.skills == ("Tidy summary", "Not A Skill"), "the role carries them")
+    check("newest first" not in sa.persona_block(role, appmod.skills), "a candidate skill stays out of the prompt")
+    appmod.skills.update(sk["id"], {"status": "approved"})
+    block = sa.persona_block(role, appmod.skills)
+    check("Summarize tidily." in block and "newest first" in block and "Not A Skill" not in block, "an approved skill rides the prompt; unknown names are dropped")
+    SCRIPTS["t"] = [{"text": "done"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "t", "role": "tidy"}, mkctx(new_conv())))
+    sys_msg = next(s for s in SEEN if s["child"])["messages"][0]["content"]
+    check("newest first" in sys_msg, "a spawned child is seeded with its skills")
+    listing = asyncio.run(appmod.list_agent_defs())
+    check(all("hue" in b for b in listing["builtin"]), "built-ins list a hue slot for the face")
+    appmod.agent_defs.delete(row["id"])
+    appmod.skills.delete(sk["id"])
+
+
+def test_steer_reaches_a_running_child() -> None:
+    """A message sent to a running child lands before its next model turn; a finished child cannot be steered."""
+    reset()
+    SCRIPTS["slow"] = [{"text": "first thoughts", "delay": 0.3}]
+    SCRIPTS["and also this"] = [{"text": "answered the steer"}]
+
+    async def go() -> dict[str, Any]:
+        ctx = mkctx(new_conv())
+        out = await appmod.toolbox.call("agent_spawn", {"task": "slow", "background": True}, ctx)
+        ch = mgr.children[out["agent_id"]]
+        await asyncio.sleep(0.1)
+        check(mgr.steer(ch, "and also this"), "a running child takes a message")
+        got = await appmod.toolbox.call("agent_wait", {"ids": [ch.id]}, ctx)
+        check(not mgr.steer(ch, "too late"), "a finished child does not")
+        return {"ch": ch, "got": got}
+
+    r = run(go())
+    ch, got = r["ch"], r["got"]
+    check("answered the steer" in got["agents"][0]["report"], "the child answered the steer, not its first draft")
+    msgs = ch.messages
+    i = next(k for k, m in enumerate(msgs) if m["role"] == "user" and m["content"] == "and also this")
+    check(msgs[i - 1] == {"role": "assistant", "content": "first thoughts"}, "the cut-short turn is kept, and the message follows it")
+    check(any(e == "steer" for _s, e, _d in appmod.run_store.events(ch.id)), "the tape records the steer")
+    tr = mgr.transcript(ch.id)
+    check(tr is not None and tr[-1]["content"] == "answered the steer", "the transcript is readable while the child is in memory")
+    mgr.children.clear()
+    tr2 = mgr.transcript(ch.id)
+    check(tr2 is not None and tr2[-1]["content"] == "answered the steer", "and from the tape once it is not")
+
+
+def test_agent_routes_and_prompt_blocks() -> None:
+    """The subagent panel's routes, the roster the reply sees, and the persona block of a chat opened on an agent."""
+    reset()
+    from fastapi import HTTPException
+    SCRIPTS["t"] = [{"text": "done"}]
+    conv = new_conv()
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "t", "role": "researcher"}, mkctx(conv)))
+    view = asyncio.run(appmod.get_subagent(out["agent_id"]))
+    check(view["run"]["kind"] == "subagent" and view["agent"]["state"] == "completed" and view["messages"][-1]["content"] == "done", "GET /subagents/{id} serves a finished child's history and state")
+    try:
+        asyncio.run(appmod.message_subagent(out["agent_id"], appmod.SteerIn(content="more")))
+        check(False, "a finished child refuses a message")
+    except HTTPException as e:
+        check(e.status_code == 409 and e.detail["finished"] and e.detail["conversation_id"] == conv, "with 409 and the chat to continue it in")
+    try:
+        asyncio.run(appmod.get_subagent("sa_nope"))
+        check(False, "unknown id")
+    except HTTPException as e:
+        check(e.status_code == 404, "an unknown subagent is 404")
+    check(appmod._agents_hint({"agent_spawn": "on"}) == "", "no custom agents, no roster")
+    row = appmod.agent_defs.save("---\nname: planner\ndescription: Plans trips\nhue: 20\ntools: web_search\n---\nPlan trips.")
+    check(appmod._agents_hint({"agent_spawn": "on"}) == "", "an unapproved agent is not in the roster")
+    appmod.agent_defs.approve(row["id"])
+    hint = appmod._agents_hint({"agent_spawn": "on"})
+    check("planner: Plans trips" in hint and "agent_spawn role=<name>" in hint, "an approved agent is listed by description")
+    check(appmod._agents_hint({"agent_spawn": "off"}) == "", "and not when spawning is off")
+    check(appmod.subagent_mgr.role_for("planner") is not None and appmod._persona_text(appmod.subagent_mgr.role_for("planner")).startswith("## You are the agent 'planner'"), "a chat on an agent leads with who it is")
+    appmod.agent_defs.delete(row["id"])
+
+
 # ---- durable runs ----------------------------------------------------------------------------------
 
 def test_runs_record_children_and_recover() -> None:

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
+import { ChevronRight, MessageSquare, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
   Youtube, Github, Rss, Undo2, AppWindow, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
@@ -184,6 +184,7 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
   }, [open, id, status])
   return (
     <div className="tool-doc-diff agent-run">
+      <div className="agent-run-head">
       <button className="tool-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
         <Face name={id} status={status} size={18} />
@@ -191,6 +192,9 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
         <span className={`tag ${status === 'error' ? 'unproven' : ''}`}>{status === 'awaiting_approval' ? 'needs approval' : status}</span>
         {cost !== null && cost > 0 && <span className="tool-ms">${cost.toFixed(3)}</span>}
       </button>
+      <button className="icon-btn ghost agent-talk" aria-label="Open this subagent" title="Read its transcript and message it"
+        onClick={() => useStore.getState().openSubagent(id)}><MessageSquare size={13} /></button>
+      </div>
       {open && (
         <div className="tool-body">
           {!tape ? <p className="muted small">Loading…</p> : tape.filter((e) => e.event === 'tool_call' || e.event === 'tool_result').length === 0

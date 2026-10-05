@@ -4,9 +4,9 @@ import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, useSubagents } from '../store'
 import { api } from '../lib/api'
-import ToolEvents from './ToolEvents'
+import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
@@ -66,6 +66,10 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [reasoning, open, streaming])
   const last = events[events.length - 1]
+  // The subagents this reply started wear their faces on the line itself, so one click reaches a child's
+  // transcript without opening the fold. Live state comes from the stream while the run is on.
+  const subs = useSubagents(conversationId)
+  const kids = useMemo(() => events.filter((t) => t.name === 'agent_spawn' && t.result_preview).flatMap((t) => agentIds(t.result_preview!)), [events])
   const label = [
     reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
     events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
@@ -79,6 +83,14 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
         <span className="reasoning-label">{label}</span>
         {streaming && !answering && <span className="thinking mini"><span /><span /><span /></span>}
       </button>
+      {kids.length > 0 && (
+        <span className="reasoning-kids">
+          {kids.map((id) => (
+            <button key={id} className="crew-face" title={`${subs[id]?.role ?? 'subagent'}: ${subs[id]?.now || subs[id]?.state || 'open'}`} aria-label={`Open subagent ${id.slice(-4)}`}
+              onClick={() => useStore.getState().openSubagent(id)}><Face name={id} status={subs[id]?.state} size={16} /></button>
+          ))}
+        </span>
+      )}
       {open && reasoning && <div className="reasoning-body" ref={body}>{reasoning}</div>}
       {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
     </div>
@@ -220,7 +232,10 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
  *  `browserSession`: the agent browser this transcript drives, passed only to its latest reply that used the browser. */
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string }): JSX.Element {
+/** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
+export type ChatFace = { name: string; hue?: number }
+
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -240,7 +255,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   return (
     <div className={`msg ${message.role}`}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={message.conversation_id} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (

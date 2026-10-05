@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Library, Mic, Users, MonitorDot } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -74,8 +74,7 @@ const SHELL_NAV: NavEntry[] = [
   { view: 'cowork', label: 'Cowork', icon: <Users size={15} /> },
   // No widget kind: the Library is a place to review and author, not something to pin on a canvas.
   { view: 'library', label: 'Library', icon: <Library size={15} /> },
-  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
-  { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
+  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
 ]
 
 /** The shell's own rows take 0, 10, 20… in their listed order; a module's `nav.order` slots between them. */
@@ -312,7 +311,7 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-rows">
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
-                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))}>
+                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))} {...dragProps({ kind: 'doc', id: r.id, label: r.title, projectId: p.id })}>
                         <span className="convo-title">{r.title}</span>
                         <FileText size={12} className="row-kind" />
                       </div>

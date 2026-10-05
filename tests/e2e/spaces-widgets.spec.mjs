@@ -5,7 +5,7 @@ test.describe.configure({ timeout: 300_000 })
 
 const SIMPLE = [
   ['Todos', 'todos'], ['Calendar', 'calendar'], ['Memory', 'memory'], ['Graph', 'graph'], ['Uploads', 'documents'],
-  ['Recap', 'recap'], ['Usage', 'usage'], ['Activity', 'activity'], ['Web', 'web'], ['Face', 'face']
+  ['Recap', 'recap'], ['Usage', 'usage'], ['Activity', 'activity'], ['Face', 'face']
 ]
 
 async function addMenu(page) {
@@ -21,7 +21,7 @@ test('every Add-widget entry opens a window that renders without console errors'
   // the menu lists one entry per registry kind
   const menu = await addMenu(page)
   const labels = (await menu.locator('[role=menuitem]').allInnerTexts()).map((t) => t.trim())
-  for (const l of ['Chat', 'Todos', 'Calendar', 'Sticky note', 'Dashboard widget', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Web', 'Artifact', 'Face']) {
+  for (const l of ['Chat', 'Todos', 'Calendar', 'Sticky note', 'Dashboard widget', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Doc', 'Artifact', 'Face']) {
     expect(labels).toContain(l)
   }
   await page.keyboard.press('Escape')
@@ -131,31 +131,5 @@ test('clicking an artifact widget does not reload its iframe', async ({ grain })
   await sleep(800)
   expect(await frame.evaluate((el) => el.__mark)).toBe('same')
   expect(await page.evaluate(() => window.__loads)).toBe(0)
-  expect(grain.consoleErrors).toEqual([])
-})
-
-test('clicking a web widget does not reload its webview', async ({ grain }) => {
-  const { page, api, backend } = grain
-  const s = (await spaces(grain))[0]
-  const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'web', x: 40, y: 40, w: 500, h: 360, config: { url: backend.url + '/health' } } })
-  const other = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'face', x: 600, y: 40, w: 200, h: 200 } })
-  await page.reload()
-  await enterCanvas(grain)
-  const wv = page.locator(`[data-window-id="${w.id}"] webview`)
-  await expect(wv).toBeAttached()
-  await sleep(2500)
-  await wv.evaluate((el) => {
-    el.__mark = 'same'
-    window.__wvLoads = 0
-    el.addEventListener('did-start-loading', () => window.__wvLoads++)
-  })
-  for (let i = 0; i < 4; i++) {
-    await page.locator(`[data-window-id="${other.id}"]`).click({ position: { x: 20, y: 100 }, force: true })
-    await page.locator(`[data-window-id="${w.id}"] .win-move`).click({ position: { x: 100, y: 3 }, force: true })
-    await wv.click({ force: true })
-  }
-  await sleep(800)
-  expect(await wv.evaluate((el) => el.__mark)).toBe('same')
-  expect(await page.evaluate(() => window.__wvLoads)).toBe(0)
   expect(grain.consoleErrors).toEqual([])
 })

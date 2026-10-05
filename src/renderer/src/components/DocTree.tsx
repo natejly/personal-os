@@ -13,6 +13,7 @@ import {
 } from '../lib/docTree'
 import ProjectChip from './ProjectChip'
 import { rowButton } from '../lib/rowButton'
+import { writeDrag } from '../canvas/dnd'
 
 /**
  * What is being dragged, for the duration of the drag. `dataTransfer` only hands its payload over on
@@ -252,9 +253,10 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       draggable
       onDragStart={(e) => {
         dragging = { kind: 'doc', id: d.id, scope: scopeOf(d), folder: d.folder }
-        e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData(DOC_MIME, d.id)
-        e.dataTransfer.setData('text/plain', d.title)
+        // The same drag also lands on a space (the plane or a sidebar space row) as a doc window.
+        writeDrag(e.dataTransfer, { kind: 'doc', id: d.id, label: d.title || 'Untitled', projectId: d.project_id })
+        e.dataTransfer.effectAllowed = 'copyMove'
       }}
       onDragEnd={endDrag}
     >

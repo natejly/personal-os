@@ -5,7 +5,7 @@ import type { DragKind, DragPayload } from '@shared/types'
 export const DRAG_MIME = 'application/x-personal-os'
 
 const KINDS: ReadonlySet<string> = new Set<DragKind>([
-  'conversation', 'todo', 'document', 'memory', 'project', 'widget', 'note', 'file', 'nav', 'desk', 'workflow', 'workflow_run'
+  'conversation', 'todo', 'document', 'memory', 'project', 'widget', 'note', 'file', 'nav', 'doc', 'desk', 'workflow', 'workflow_run'
 ])
 
 /** Writes the payload plus a `text/plain` mirror of the label, so a drag also drops into a textarea. */
@@ -48,20 +48,6 @@ export const readDrag = (dt: DataTransfer): DragPayload | null => {
 /** `dragover` runs in protected mode where the payload is unreadable, so acceptance goes by `types`. */
 export const hasDrag = (dt: DataTransfer): boolean => dt.types.includes(DRAG_MIME)
 export const hasFiles = (dt: DataTransfer): boolean => dt.types.includes('Files')
-/** A link dragged in from a browser; ours never write `text/uri-list`, so this cannot shadow a payload. */
-export const hasLink = (dt: DataTransfer): boolean => dt.types.includes('text/uri-list')
-
-/** First non-comment line of the uri-list, http(s) only — anything else is '' and falls through. */
-export const readLink = (dt: DataTransfer): string => {
-  let raw = ''
-  try {
-    raw = dt.getData('text/uri-list')
-  } catch {
-    return ''
-  }
-  const url = raw.split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#')) ?? ''
-  return /^https?:\/\//i.test(url) ? url : ''
-}
 
 /** `payload` is null for an OS file drop; read the files off `e.dataTransfer.files`. */
 export type DropHandler = (payload: DragPayload | null, e: DragEvent<HTMLElement>) => void

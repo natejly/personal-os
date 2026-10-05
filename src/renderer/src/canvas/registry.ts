@@ -8,6 +8,7 @@ import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
 import { def as crew } from './widgets/crew'
 import { def as dashboardWidget } from './widgets/dashboardWidget'
+import { def as doc } from './widgets/doc'
 import { def as documents } from './widgets/documents'
 import { def as face } from './widgets/face'
 import { def as graph } from './widgets/graph'
@@ -16,7 +17,6 @@ import { def as note } from './widgets/note'
 import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
 import { def as usage } from './widgets/usage'
-import { def as web } from './widgets/web'
 import { MODULES } from '../shell/registry'
 import '../styles/widgets.css'
 
@@ -80,7 +80,7 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   project,
   usage,
   activity,
-  web,
+  doc,
   artifact,
   face,
   crew

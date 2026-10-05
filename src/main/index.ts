@@ -6,7 +6,7 @@ import { registerBus } from './bus'
 import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
 import { isAppUrl } from './appUrl'
-import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
+import { attachWidgetRenderAuth, guardNavigation } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
 import { startPageBridge, stopPageBridge } from './pagefetch'
@@ -54,8 +54,7 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
-      webviewTag: true // the web widget; guests are stripped in guardNavigation's will-attach-webview
+      sandbox: true
     }
   })
 
@@ -365,7 +364,6 @@ if (gotLock) app.whenReady().then(async () => {
   registerPopouts(() => win)
   registerBus()
   attachWidgetRenderAuth()
-  guardWebWidgetSession()
   buildMenu()
   setFrontListener((on) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById('popouts-front')

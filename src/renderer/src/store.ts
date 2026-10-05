@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
-import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
+import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
@@ -82,7 +82,7 @@ export interface Streaming {
 }
 
 /** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
-export interface PendingSend { key: number; text: string; at: number }
+export interface PendingSend { key: number; text: string; at: number; attachments?: Attachment[] }
 const EMPTY_PENDING: readonly PendingSend[] = Object.freeze([])
 let pendingKeySeq = 0
 
@@ -399,9 +399,10 @@ export interface State {
   /** Open a new chat about an email. The subject is untrusted, so the chat starts tainted. */
   askAboutEmail: (id: string, subject: string | null | undefined) => Promise<boolean>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
-  send: (text: string, conversationId?: string) => Promise<boolean>
+  /** `attachments`: uploaded files going with this turn; the row keeps them and the model reads their text. */
+  send: (text: string, conversationId?: string, attachments?: Attachment[]) => Promise<boolean>
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
-  sendToPageAgent: (text: string) => Promise<boolean>
+  sendToPageAgent: (text: string, attachments?: Attachment[]) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
   /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
   editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
@@ -1395,7 +1396,7 @@ export const useStore = create<State>((set, get) => {
    * ordinary send, which by now is not a steer since the run has stopped answering. A refused send goes back
    * to the front and the queue pauses, so a failure never fires the rest.
    */
-  const sendQueued = (convId: string, done: DoneInfo): void => sendNext(convId, done, (text) => get().send(text, convId))
+  const sendQueued = (convId: string, done: DoneInfo): void => sendNext(convId, done, (text, files) => get().send(text, convId, files))
 
   /**
    * Consume one run's events into a session. `attached` means the run was started by someone else.
@@ -1622,7 +1623,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }, pendingKey?: number): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -2277,8 +2278,9 @@ export const useStore = create<State>((set, get) => {
       return get().send(emailAsk(id, subject))
     },
 
-    send: async (text, conversationId) => {
-      if (!text.trim()) return false
+    send: async (text, conversationId, attachments) => {
+      const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
+      if (!text.trim() && !ids) return false
       // Checked first: an oversized send creates no chat and never reaches the steer-then-409 fallthrough.
       const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
       if (tooLong) {
@@ -2287,7 +2289,7 @@ export const useStore = create<State>((set, get) => {
       }
       const id = conversationId ?? get().focusedConversationId
       // The bubble is on screen before the first await; every refusal below takes it back.
-      const pend: PendingSend = { key: ++pendingKeySeq, text, at: Date.now() }
+      const pend: PendingSend = { key: ++pendingKeySeq, text, at: Date.now(), attachments }
       if (id) {
         if (get().sessions[id]) addPending(id, pend)
         const fail = (): false => {
@@ -2311,7 +2313,7 @@ export const useStore = create<State>((set, get) => {
         if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
         else if (get().sessions[id]?.streaming?.answering) {
           try {
-            const r = await api.steer(id, text)
+            const r = await api.steer(id, text, ids)
             settleSteer(id, r.message)
             dropPending(id, pend.key)
             return true
@@ -2335,14 +2337,14 @@ export const useStore = create<State>((set, get) => {
         }
         // A model or effort change made an instant ago is still in flight: the run reads the row.
         await convWrites.get(id)?.catch(() => undefined)
-        return (await runStream(id, { content: text }, pend.key)) || fail()
+        return (await runStream(id, { content: text, attachments: ids }, pend.key)) || fail()
       }
       // A second send while the draft's row is still being created (a quick follow-up, Enter then a
       // click on Send) used to take this branch too and make a second chat with a second run. It
       // waits for the first chat instead and goes into it as an ordinary follow-up or steer.
       if (draftCreate) {
         const cid = await draftCreate
-        return cid ? get().send(text, cid) : false
+        return cid ? get().send(text, cid, attachments) : false
       }
       set({ draftPendingSend: pend })
       let c: Conversation
@@ -2399,14 +2401,15 @@ export const useStore = create<State>((set, get) => {
       }))
       void get().refreshProjects()
       // Released once the run has started, so a waiting send sees it streaming and steers it.
-      const ok = await runStream(c.id, { content: text }, pend.key)
+      const ok = await runStream(c.id, { content: text, attachments: ids }, pend.key)
       if (!ok) dropPending(c.id, pend.key)
       draftCreate = null
       created(c.id)
       return ok
     },
-    sendToPageAgent: async (text) => {
-      if (!text.trim()) return false
+    sendToPageAgent: async (text, attachments) => {
+      const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
+      if (!text.trim() && !ids) return false
       const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
       if (tooLong) {
         get().toast(tooLong, 'error')
@@ -2424,7 +2427,7 @@ export const useStore = create<State>((set, get) => {
         if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
         else if (get().sessions[id]?.streaming?.answering) {
           try {
-            await api.steer(id, text)
+            await api.steer(id, text, ids)
             return true
           } catch (e) {
             // As in `send`: a hung steer may have landed, and falling through would steer the text twice.
@@ -2479,7 +2482,7 @@ export const useStore = create<State>((set, get) => {
       }
       // Panel toggles write through the same queue as the chat page's: let a change land first.
       await convWrites.get(id)?.catch(() => undefined)
-      return runStream(id, { content: text, page_context: page })
+      return runStream(id, { content: text, page_context: page, attachments: ids })
     },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
@@ -3853,7 +3856,7 @@ export const useStore = create<State>((set, get) => {
         try {
           const doc = (await api.documents.upload(projectId, f)) as UploadResult
           // An older backend says nothing about readability; its files count as readable, as before.
-          const r: UploadOutcome = { name: doc.name || f.name, readable: doc.readable !== false, reason: doc.reason ?? null }
+          const r: UploadOutcome = { id: doc.id, name: doc.name || f.name, mime: doc.mime || f.type, size: doc.size, readable: doc.readable !== false, reason: doc.reason ?? null }
           saved.push(r)
           const t = uploadToast(r)
           get().toast(t.text, t.kind)

@@ -7,9 +7,10 @@
  * persistence (survives a reload, shared with other windows through the `storage` event) for free.
  * Everything above the storage helpers is pure, for the tests.
  */
+import type { Attachment } from '@shared/types'
 import { getDraft, refreshDraft, setDraftNow } from './drafts'
 
-export interface QueuedItem { id: string; text: string }
+export interface QueuedItem { id: string; text: string; files?: Attachment[] }
 export interface FollowQueue { items: QueuedItem[]; paused: boolean }
 
 export const EMPTY_QUEUE: FollowQueue = { items: [], paused: false }
@@ -32,8 +33,9 @@ export function parseQueue(raw: string | undefined): FollowQueue {
 /** An empty queue is stored as nothing, so the drafts store drops the key. */
 export const serializeQueue = (q: FollowQueue): string => (q.items.length ? JSON.stringify(q) : '')
 
-export function enqueue(q: FollowQueue, text: string, id: string): FollowQueue {
-  return text.trim() ? { ...q, items: [...q.items, { id, text }] } : q
+export function enqueue(q: FollowQueue, text: string, id: string, files?: Attachment[]): FollowQueue {
+  if (!text.trim() && !files?.length) return q
+  return { ...q, items: [...q.items, files?.length ? { id, text, files } : { id, text }] }
 }
 
 export function removeQueued(q: FollowQueue, id: string): FollowQueue {
@@ -105,10 +107,10 @@ export function claimNext(conversationId: string, done: DoneInfo): QueuedItem | 
 }
 
 /** Claims the next item and sends it as its own turn; a refused send goes back in front and pauses the queue. */
-export function sendNext(conversationId: string, done: DoneInfo, send: (text: string) => Promise<boolean>): void {
+export function sendNext(conversationId: string, done: DoneInfo, send: (text: string, files?: Attachment[]) => Promise<boolean>): void {
   const item = claimNext(conversationId, done)
   if (!item) return
-  void send(item.text).catch(() => false).then((ok) => {
+  void send(item.text, item.files).catch(() => false).then((ok) => {
     if (!ok) updateQueue(conversationId, (q) => requeueFront(q, item))
   })
 }

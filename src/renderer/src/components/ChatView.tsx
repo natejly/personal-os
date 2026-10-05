@@ -125,8 +125,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                       browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />
                   </Fragment>
                 ))}
-                {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} />)}
-                {draftPending && <PendingUserMessage text={draftPending.text} />}
+                {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}
+                {draftPending && <PendingUserMessage text={draftPending.text} attachments={draftPending.attachments} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
                     A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (

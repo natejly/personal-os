@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Command, Skill } from '@shared/types'
+import type { Attachment, Command, Skill } from '@shared/types'
 import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
-import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import WorkingFolder from './WorkingFolder'
@@ -19,7 +19,7 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { compactNow } from '../lib/compact'
-import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
+import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, setDraftFiles, useDraft, useDraftFiles } from '../lib/drafts'
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
 import QueueTray from './QueueTray'
@@ -31,7 +31,7 @@ interface ComposerProps {
   /** Tightens the padding, for a widget where vertical space is scarce. */
   compact?: boolean
   /** Overrides the store's `send`, for a composer that is not a plain chat — the ⌘I page agent. */
-  onSend?: (text: string) => Promise<boolean>
+  onSend?: (text: string, files?: Attachment[]) => Promise<boolean>
   placeholder?: string
   /** Where the unsent text lives (lib/drafts.ts); derived from the conversation when not given. */
   draftKey?: string
@@ -48,6 +48,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // send can be handed back to the chat it came from, not whichever is showing by then.
   const key = draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: activeId, draftProjectId })
   const [text, setText] = useDraft(key)
+  const files = useDraftFiles(key)
+  const canSend = !!text.trim() || files.length > 0
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
   const hasKey = useStore((s) => hasModelKey(s.settings))
   // A local endpoint (Ollama, a local proxy) needs no key, so it is not "unfinished".
@@ -179,10 +181,10 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   }
 
   /**
-   * The upload note goes to the draft this composer showed when the files were picked, which may no
-   * longer be the one on screen by the time the upload ends. A file with no readable text gets no
-   * note (uploadNote.ts). A draft with no row yet remembers the upload, so the send still creates
-   * the chat marked untrusted, even after a relaunch.
+   * The uploaded files go on the draft this composer showed when they were picked, which may no
+   * longer be the one on screen by the time the upload ends, as chips the next send carries. A file
+   * with no readable text is stored but not attached (uploadNote.ts). A draft with no row yet
+   * remembers the upload, so the send still creates the chat marked untrusted, even after a relaunch.
    */
   const attach = async (files: FileList | File[]): Promise<void> => {
     const list = Array.from(files)
@@ -196,8 +198,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
       useStore.getState().toast((e as Error).message, 'error')
     })
-    const { note } = uploadNote(saved)
-    if (note) appendToDraft(k0, note, { paragraph: true, taint: real ? undefined : 'upload' })
+    const { files: added } = uploadNote(saved)
+    if (added.length) setDraftFiles(k0, (cur) => [...cur, ...added.filter((a) => !cur.some((c) => c.id === a.id))], real ? undefined : 'upload')
   }
 
   /**
@@ -246,7 +248,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const deliver = async (): Promise<void> => {
     const k0 = key
     const t = getDraft(k0)?.text ?? ''
-    if (!t.trim()) return
+    const sent = getDraft(k0)?.files ?? []
+    if (!t.trim() && !sent.length) return
     const client = onSend ? null : clientCommand(t)
     if (client) return runClient(client, k0)
     const entry = getDraft(k0)
@@ -258,18 +261,18 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     recall.current = null
     clearRedirect(k0)
     dropDraft(k0)
-    const ok = await (onSend ? onSend(t) : send(t, conversationId)).catch(() => false)
+    const ok = await (onSend ? onSend(t, sent) : send(t, conversationId, sent)).catch(() => false)
     const k1 = keyNow()
     // The new chat has its row now: anything typed while it was being made follows it.
     if (k0.startsWith('new:') && k1.startsWith('c:')) moveDraft(k0, k1)
-    if (!ok) restoreDraft(k1, t)
+    if (!ok) restoreDraft(k1, t, sent)
   }
 
   /** A queued item sent ahead of its turn: a steer while the reply runs. Refused, it goes back in front. */
   const deliverItem = async (item: QueuedItem): Promise<void> => {
     if (!queueId) return
     updateQueue(queueId, (q) => removeQueued(q, item.id))
-    const ok = await send(item.text, conversationId ?? queueId).catch(() => false)
+    const ok = await send(item.text, conversationId ?? queueId, item.files).catch(() => false)
     if (!ok) updateQueue(queueId, (q) => requeueFront(q, item))
   }
 
@@ -280,11 +283,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
    * not a follow-up parked in a queue the stop has just paused.
    */
   const submit = (mod = false): void => {
-    if (!text.trim()) return
+    if (!canSend) return
     // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
     const action = queueId && !clientCommand(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
     if (action === 'queue' && queueId) {
-      updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID()))
+      updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID(), files))
       clearRedirect(key)
       dropDraft(key)
     } else if (action === 'confirm-steer') setConfirm({})
@@ -300,7 +303,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!queueId) return
     updateQueue(queueId, (q) => ({ ...q, paused: false }))
     // Idle, nothing will finish to pull the next one: it goes now.
-    if (!streaming) sendNext(queueId, {}, (t) => send(t, conversationId ?? queueId))
+    if (!streaming) sendNext(queueId, {}, (t, f) => send(t, conversationId ?? queueId, f))
   }
 
   const confirmSteer = (): void => {
@@ -349,6 +352,17 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <button className="link danger" onClick={confirmSteer}>Decline and send</button>{' '}
           {!confirm.item && <><button className="link" onClick={queueInstead}>Queue instead</button>{' '}</>}
           <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="composer-files" aria-label="Attached files">
+          {files.map((a) => (
+            <span key={a.id} className="file-chip" title={a.name}>
+              <FileText size={12} /><span>{a.name}</span>
+              <button className="file-chip-x" title={`Remove ${a.name}`} aria-label={`Remove ${a.name}`}
+                onClick={() => setDraftFiles(key, (cur) => cur.filter((f) => f.id !== a.id))}><X size={11} /></button>
+            </span>
+          ))}
         </div>
       )}
       <div
@@ -401,7 +415,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
             </button>
           )}
-          <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!text.trim()} onClick={() => submit()}><ArrowUp size={16} /></button>
+          <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!canSend} onClick={() => submit()}><ArrowUp size={16} /></button>
         </div>
       </div>
       {/* The plan-mode toggle binds ⌘⇧P itself, only for the focused conversation, so several mounted

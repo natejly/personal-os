@@ -574,7 +574,9 @@ class Database:
             "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER", "blurb": "TEXT NOT NULL DEFAULT ''"},
             "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
-            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT", "outcome": "TEXT", "error_kind": "TEXT", "superseded_at": "REAL", "variant_of": "TEXT"},
+            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT", "outcome": "TEXT", "error_kind": "TEXT", "superseded_at": "REAL", "variant_of": "TEXT",
+                         # JSON [{id, name, mime, size}]: uploaded files sent with a user turn (the documents rows they point at).
+                         "attachments": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",

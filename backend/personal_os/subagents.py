@@ -110,6 +110,12 @@ class RoleDef:
     id: str | None = None
     hue: int | None = None            # the face colour (0-359); None lets the name pick one
     skills: tuple[str, ...] = ()      # approved skill names folded into the prompt
+    # Scope the user set on the definition (AgentDefs.set_scope): fenced into the prompt, and the folder and tool modes
+    # a chat or routine as this agent runs with.
+    boundaries: str = ""
+    notes: str = ""
+    workspace: str = ""
+    tool_modes: dict[str, str] = field(default_factory=dict)
 
     @property
     def readonly(self) -> bool:
@@ -214,6 +220,11 @@ def persona_block(role: RoleDef, skills: Any = None) -> str:
     """The role's prompt, with the approved skills it names folded in as data. Unapproved or unknown names are skipped:
     only the user's approval can put a procedure in front of a model."""
     parts = [role.prompt]
+    # The user's own words, fenced so a stray ``` cannot close the block and the model reads them as limits, not as task text.
+    for title, text in (("Boundaries (set by the user; ask before anything they say needs asking, never do what they forbid)", role.boundaries),
+                        ("What you should remember (notes from the user)", role.notes)):
+        if text.strip():
+            parts.append(f"## {title}\n```\n{text.strip().replace('```', chr(39) * 3)}\n```")
     if role.skills and skills is not None:
         from .learn import skill_block
         want = {n.lower() for n in role.skills}
@@ -228,11 +239,12 @@ def persona_block(role: RoleDef, skills: Any = None) -> str:
 
 DRAFT_PROMPT = (
     "You write agent definitions for a personal assistant. Reply with one JSON object and nothing else: "
-    '{"name": "lowercase-slug", "description": "one line on when to hand work to this agent", "hue": 0-359, '
-    '"tools": ["tool_name", ...], "skills": ["skill name", ...], "prompt": "the agent\'s instructions"}. '
+    '{"name": "lowercase-slug", "label": "two to four words naming its job", "description": "one line on when to hand work to this agent", "hue": 0-359, '
+    '"tools": ["tool_name", ...], "skills": ["skill name", ...], "boundaries": "limits", "prompt": "the agent\'s instructions"}. '
     "name: letters, digits, - or _, at most 40 characters, not general, researcher, worker or reviewer. description: under 200 "
     "characters, written so another agent can tell from it alone when to delegate. hue: a colour that suits the role. "
     "tools: only names from the list given, the few the role needs. skills: only names from the list given, or []. "
+    "boundaries: 1-4 short lines: what it must ask the user before doing, and what it never does. "
     "prompt: 3-8 sentences in the second person: what the agent does, what it must not do, how it reports back. "
     'If the request is too vague to define a role, reply {"skip": true, "reason": "..."}.'
 )
@@ -262,7 +274,12 @@ async def draft_def(settings: dict[str, Any], model: str, intent: str, tools: se
     if len(f["body"]) < 40:
         return {"text": None, "reason": "The draft came back too thin to be worth reviewing. Try again with more detail."}
     text = def_text(f)
-    return {"text": text, "def": parse_def(text)}  # a draft the editor cannot save is not a draft
+    # label and boundaries are scope, not frontmatter: they ride beside the text and are saved with it.
+    return {"text": text, "def": {**parse_def(text), "label": _one_line(data.get("label"), 80),
+                                  "boundaries": str(data.get("boundaries") or "").strip()[:SCOPE_LIMITS["boundaries"]]}}  # a draft the editor cannot save is not a draft
+
+
+SCOPE_LIMITS = {"label": 80, "boundaries": 2000, "notes": 4000, "workspace": 500}
 
 
 class AgentDefs:
@@ -277,6 +294,7 @@ class AgentDefs:
         d = dict(r)
         d["tools"] = json.loads(d.get("tools") or "[]")
         d["skills"] = json.loads(d.get("skills") or "[]")
+        d["tool_modes"] = json.loads(d.get("tool_modes") or "{}")
         d["hidden"], d["approved"] = bool(d["hidden"]), bool(d["approved"])
         return d
 
@@ -291,7 +309,31 @@ class AgentDefs:
             r = c.execute("SELECT * FROM agent_defs WHERE id=? OR name=?", (key, key)).fetchone()
         return self._row(r) if r else None
 
-    def save(self, text: str, def_id: str | None = None) -> dict[str, Any]:
+    def routines(self, def_id: str) -> list[dict[str, Any]]:
+        """The jobs that run as this agent."""
+        with self.db.tx() as c:
+            return [dict(r) for r in c.execute("SELECT id, name, enabled, next_due_at, last_fired_at, last_error FROM jobs "
+                                                "WHERE agent_id=? ORDER BY name", (def_id,)).fetchall()]
+
+    def set_scope(self, def_id: str, scope: dict[str, Any]) -> dict[str, Any] | None:
+        """Write the scope fields (label, boundaries, notes, workspace, tool_modes, skills) named in `scope`. These are the
+        user's own words and switches, not the model-written prompt, so unlike an edit of the prompt they keep the approval."""
+        cols: dict[str, Any] = {}
+        for k, cap in SCOPE_LIMITS.items():
+            if k in scope:
+                v = str(scope[k] or "")
+                cols[k] = _one_line(v, cap) if k in ("label", "workspace") else v.strip()[:cap]
+        if "tool_modes" in scope:
+            tm = scope["tool_modes"] or {}
+            cols["tool_modes"] = json.dumps({str(k): v for k, v in tm.items() if v in ("on", "ask", "off")})
+        if "skills" in scope:
+            cols["skills"] = json.dumps([str(s) for s in scope["skills"] or []])
+        if cols:
+            with self.db.tx() as c:
+                c.execute(f"UPDATE agent_defs SET {', '.join(f'{k}=?' for k in cols)}, updated_at=? WHERE id=?", (*cols.values(), now(), def_id))
+        return self.get(def_id)
+
+    def save(self, text: str, def_id: str | None = None, scope: dict[str, Any] | None = None) -> dict[str, Any]:
         f = parse_def(text)
         t = now()
         with self.db.tx() as c:
@@ -310,7 +352,7 @@ class AgentDefs:
                           "VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)",
                           (rid, f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
                            int(f["hidden"]), t, t))
-        return self.get(rid) or {}
+        return (self.set_scope(rid, scope) if scope else self.get(rid)) or {}
 
     def approve(self, def_id: str, approved: bool = True) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -329,7 +371,8 @@ class AgentDefs:
         if not row or not row["approved"]:
             return None
         return RoleDef(row["name"], row["description"], row["body"], tuple(row["tools"]), row["model"], row["steps"],
-                       row["hidden"], builtin=False, id=row["id"], hue=row.get("hue"), skills=tuple(row["skills"]))
+                       row["hidden"], builtin=False, id=row["id"], hue=row.get("hue"), skills=tuple(row["skills"]),
+                       boundaries=row["boundaries"], notes=row["notes"], workspace=row["workspace"], tool_modes=row["tool_modes"])
 
 
 # ---- accounting ------------------------------------------------------------------------------------

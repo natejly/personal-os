@@ -840,13 +840,15 @@ class Toolbox:
             return "off"
         return v if v in ("on", "ask", "off") else None
 
-    def effective(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None) -> dict[str, str]:
-        """Resolve chat override → project override → global setting → tool default, alwaysAsk tools capped at ask."""
+    def effective(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
+                  agent_tools: dict[str, str] | None = None) -> dict[str, str]:
+        """Resolve chat override → agent override → project override → global setting → tool default, alwaysAsk tools capped at ask."""
         out: dict[str, str] = {}
         locked = self.always_ask()
         for name, spec in self.specs.items():
             v = self._norm(global_tools.get(name)) or self.default_mode(spec)
             v = self._norm((project_tools or {}).get(name)) or v
+            v = self._norm((agent_tools or {}).get(name)) or v
             v = self._norm((chat_tools or {}).get(name)) or v
             out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER and name in locked else v
         return out
@@ -1496,6 +1498,7 @@ class Toolbox:
                 return tool_error(f"Give one schedule, not {len(given)} ({', '.join(given)}).",
                                   expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
             pid = ctx.get("project_id")
+            aid = ctx.get("agent_id")  # a task scheduled from an agent's chat keeps running as that agent
             if watch_dir:
                 if when or in_minutes:
                     return tool_error("A folder-watching task runs when files change, not at one time.",
@@ -1509,14 +1512,14 @@ class Toolbox:
                     return tool_error(f"I can't watch that folder: {e}", field="watch_dir",
                                       expected="a folder under the home folder, not a hidden one, e.g. ~/Downloads")
                 job = self.jobs.create(name.strip(), cron or "", prompt, kind="watch", timezone=tz, enabled=True,
-                                       project_id=pid, watch_dir=folder)
+                                       project_id=pid, watch_dir=folder, agent_id=aid)
             elif cron:
                 if not valid_cron(cron):
                     return tool_error(redact.scrub_command_output(f"'{cron}' is not a cron expression I can read."), field="cron",
                                       expected="five fields: minute hour day-of-month month day-of-week",
                                       example={"name": "Weekly review", "prompt": "Write my weekly review…",
                                                "cron": "0 17 * * 5"})
-                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid)
+                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid, agent_id=aid)
             else:
                 if in_minutes is not None:
                     run_at = time.time() + max(1, int(in_minutes)) * 60
@@ -1533,7 +1536,7 @@ class Toolbox:
                                       expected="a time in the future",
                                       alternative="do it now instead of scheduling it")
                 job = self.jobs.create(name.strip(), "", prompt, kind="once", run_at=run_at, timezone=tz,
-                                       enabled=True, project_id=pid)
+                                       enabled=True, project_id=pid, agent_id=aid)
             return {**_row(job), "scheduled": True,
                     "note": "It will run on its own, with nobody watching. It can read and write inside Grain; "
                             "anything that leaves the app (mail, calendar, Docs) comes back to the user as a "

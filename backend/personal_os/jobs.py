@@ -321,7 +321,7 @@ class Jobs:
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
               "allowed_tools", "watch_dir", "notify", "model", "budget", "mail_query", "target", "desk_autonomy",
-              "desk_budget")
+              "desk_budget", "agent_id")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled", "mail_query"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
@@ -370,7 +370,8 @@ class Jobs:
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
                watch_dir: str | None = None, notify: str = "problems", model: str | None = None,
                budget: dict[str, Any] | None = None, mail_query: str | None = None, target: str = "run",
-               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None) -> dict[str, Any]:
+               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None,
+               agent_id: str | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -382,13 +383,13 @@ class Jobs:
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
                       "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget, "
-                      "mail_query, target, desk_autonomy, desk_budget) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "mail_query, target, desk_autonomy, desk_budget, agent_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
                        json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
                        json.dumps(budget) if budget else None, mail_query, target,
                        (desk_autonomy or "plan") if target == "desk" else desk_autonomy,
-                       json.dumps(desk_budget) if desk_budget else None))
+                       json.dumps(desk_budget) if desk_budget else None, agent_id or None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -411,6 +412,8 @@ class Jobs:
             cols["model"] = cols["model"] or None
         if "desk_budget" in cols:
             cols["desk_budget"] = json.dumps(cols["desk_budget"]) if cols["desk_budget"] else None
+        if "agent_id" in cols:
+            cols["agent_id"] = cols["agent_id"] or None
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None

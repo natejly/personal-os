@@ -84,6 +84,12 @@ skills; those stay anti-goals.
     activity line.
 13. **Takeover in the agent browser**: a card that pauses the run, brings up the live browser for a login or 2FA, and a
     "Hand back" that resumes; nothing typed by the user enters the transcript.
+14. **Agents as scoped teammates** (asked for during the build): an agent definition gains a label, boundaries, its own
+    tool-mode overrides and notes; routines (jobs) bind to an agent and run with its prompt, skills and boundaries; an
+    agent home in the Library lists its chats, routines (with Run now and New routine), skills, notes and last runs;
+    `@name` in the composer addresses an agent. No cloud computer: delegation stays with subagents and crews.
+15. **Default zoom** in Settings → Appearance (80–160 %), with View menu zoom items, so the UI is easier to read without
+    a hard-coded size change.
 
 Left out on purpose: cloud computers and screen-recording teach-a-task (pixel control is an anti-goal), the approval
 trio (already shipped), X search (no social feed in Grain), companions and adult modes, share links (local app),

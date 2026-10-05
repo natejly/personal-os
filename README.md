@@ -27,24 +27,91 @@ instructions, files, memories and graph.
 
 Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
 every view; Meetings and Activity ship hidden. Settings → Modules puts any of
-them in the sidebar, in the title bar, or out of sight.
+them in the sidebar, in the title bar, or out of sight. Bars are 40 px and
+sidebar rows 26 px, so more fits on screen.
+
+## How to use
+
+A first-run walkthrough. Each step stands alone, so skip to the one you need.
+
+1. **Install and launch.** Open the packaged app (or `./scripts/dev.sh`, see
+   Development). The setup wizard asks which model provider to use and for its
+   key, then a few lines about you, which become a pinned memory so the first
+   reply already knows who you are. Connect Google from Settings (⌘,) →
+   Integrations; Calendar, Mail and the first-prompt suggestions wait for it.
+2. **Chat.** ⌘N opens a new chat. The model and effort pickers sit under the
+   composer. Type `/` for slash commands: `/skill`, `/schedule`, `/loop`,
+   `/compact`, `/skills`, `/commands` and `/plan` (⌘⇧P also cycles plan mode).
+   Drop or paste a file to attach it: it rides on the message as a chip, and its
+   text is given to the model up to a size cap. Set a **Working folder** for the
+   chat if the assistant should read or write files there; with none set, it
+   uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
+   reply with an approve/deny card. Mail sends, calendar deletes, moving or
+   trashing files, shortcuts, Python installs and scheduling always ask.
+3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
+   ⌘⇧N makes a note, ⌘⇧D opens today's. Record or dictate into any note on
+   macOS, and the transcript stays apart from your text. ⌘I opens the Page agent
+   panel; a note has its own chat there, and opening another note switches to
+   that one's chat. The assistant can edit a note (you accept each diff) and can
+   delete one after asking; Settings → Trash restores it.
+4. **Lists, Calendar, Mail.** These are apps at the top right of the title bar
+   (⌘2, ⌘3, ⌘5). Lists holds your todos in a rail of lists, with a one-line add
+   row. With Google connected, todos sync both ways with Google Tasks, and todos
+   that have a due date also appear on a "Grain Todos" calendar. Double-click the
+   calendar to add an event; Mail drafts and sends with a 90 s undo.
+5. **Projects and memory.** In the sidebar, **+** next to Projects makes a
+   project: instructions, knowledge files, and memories that apply only inside
+   it. Auto-learn saves memories and graph links after replies, and when it sees
+   you repeating yourself it suggests a skill. Review it all in Settings →
+   Memory (⌘6), which also holds **Voice**, the profile of how you write.
+6. **Spaces.** ⌘⇧C opens Spaces, a desktop of live windows. Use **Add widget**
+   or right-click the plane to add a chat, lists, calendar, note, memory, graph,
+   uploads, recap, project, usage, activity, face or crew window; drag a chat, a
+   Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
+   its own OS window. Save a layout as a preset from the Spaces bar, and lock a
+   Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
+7. **Agents and crews.** Library → Agents lists roles. Describe one and the
+   model drafts its hue, skills and prompt; edit it, then approve it. Start a
+   chat as an agent, or let a reply hand work to subagents with `agent_spawn`.
+   Subagents appear as indented rows under the reply that started them, with
+   live status; click one to open and message it. A crew window shows the
+   delegating agent as a big face with its subagents around it. Longer jobs go
+   to a Cowork desk (⌘⇧K, shown once enabled in Settings → Modules), and Library
+   → Automations holds workflows, which you approve once. `/schedule` or the
+   `schedule_task` tool books a run for later; its results arrive in the Agent
+   inbox on Today as proposals.
+8. **Settings you will touch.** Tools: each tool's mode (on, ask, off), Allowed
+   hosts, and Workspace folders. When a reply that read the web wants to fetch a
+   page, approve the card or click **Allow <host> from now on**. Modules: which
+   views appear, and whether each sits in the sidebar, the title bar or nowhere.
+   Data: daily backups (the newest 7 plus one a week), **Back up now**, restore
+   on next start, and **Export all data** as a zip.
 
 ## Features
 
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
+  Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/compact`,
+  `/skills`, `/commands` and `/plan`. Attachments ride on the message as chips,
+  and their text is given to the model under a size cap. Chat rows show a face
+  that blinks while the chat works.
 - **Tools with permissions.** The assistant can search your uploaded files, read and
   revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing
   style before drafting as you, search the web and
-  read pages, run Python in a sandbox, manage todos (list or board view), and (once
+  read pages, run Python in a sandbox, manage your todo lists, and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
   manage Google Tasks. Each tool has a mode: **on** (runs automatically),
   **ask** (pauses the reply with an inline approve/deny card) or **off**.
-  In-app tools default to on; anything that acts outside the app (email,
-  calendar events, Google Tasks) defaults to ask. Override globally, per
-  project, or per chat. Tool calls render inline with arguments, results and
-  timing, and every reply carries an execution trace.
+  Tools default to on, and a few always ask, whatever their mode: Gmail send,
+  calendar delete, trash or move a file, run a shortcut, install a Python
+  package and schedule a task. Override modes globally, per project, or per
+  chat. Web search retries a failed key, then falls back to keyless engines
+  rather than failing. Fetching a URL after the reply read untrusted content
+  asks once; the card can also add the host to Settings → Tools → Allowed hosts.
+  Hovering a tool row or a title-bar app button shows what it does. Tool calls
+  render inline with arguments, results and timing, and every reply carries an
+  execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
 - **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
@@ -66,11 +133,12 @@ them in the sidebar, in the title bar, or out of sight.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Files.** One view with four sections:
+- **Files.** One view with two sections:
   - *Notes* — writing of your own, in an editor rather than an upload box:
     markdown and LaTeX, a line-numbered editor beside a live preview, folders
     per project, and full revision history. The assistant can read and revise
-    a note. By default its edits are *proposed*: each one arrives as a diff you
+    a note, or delete one after asking (undo from Settings → Trash). Each note
+    has its own chat in the Page agent panel (⌘I). By default its edits are *proposed*: each one arrives as a diff you
     accept or reject, so you can point a model at prose you care about.
     Settings → Tools → **File edits** → *Accept all* writes them straight
     in instead, still showing the diff and still undoable from the history.
@@ -82,9 +150,10 @@ them in the sidebar, in the title bar, or out of sight.
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
-  space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes,
-  todos, calendar, memory and docs sit side
-  by side; drag anything from the sidebar or right-click to add. A window can
+  space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
+  notes, memory, graph, uploads, recap, project, usage, activity, face and crew
+  windows sit side by side. Drag anything from the sidebar, or a Files note
+  (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
   global shortcut gathers them all. Save a space as a preset, lock it so
   neither you nor the assistant can rearrange it, and let the assistant add
@@ -124,7 +193,7 @@ them in the sidebar, in the title bar, or out of sight.
   them. Calendar events happening now offer a Record button; action items become
   todos on a click. Nothing is recorded until you acknowledge a modal naming the
   exact directory the audio lands in. Transcription prefers on-device Speech,
-  then whisper.cpp, then your LLM proxy. Meetings never expire, are unreachable
+  then whisper.cpp or the Whistle local backend, then your LLM proxy. Meetings never expire, are unreachable
   from the activity monitor's purge, and never reach auto-learn. See
   [docs/meetings.md](docs/meetings.md).
 - **Cowork desks** (the view starts hidden; turn it on in Settings → Modules). A desk that needs you shows up in the Agent inbox on Today, next to approvals and proposals.
@@ -140,7 +209,7 @@ them in the sidebar, in the title bar, or out of sight.
   it: it works in `cowork/<desk>/` and nominates files for review, and every
   promotion is read back before it counts. An accepted output goes where you
   send it: a new note or an append to one, an upload, a download, todos (one per
-  checklist line), a page (an HTML or SVG file), or a Gmail draft (a file with
+  checklist line), or a Gmail draft (a file with
   To and Subject headers; drafted, never sent). A card nobody is watching parks after a
   few minutes — the run lets go, the card stays pending and decidable, and answering
   it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
@@ -155,9 +224,10 @@ them in the sidebar, in the title bar, or out of sight.
   to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
   opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
-  the procedures it can be asked to repeat; **Automations**, which holds
-  workflows (multi-step jobs you approve once), agents and commands (the roles
-  and prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
+  the procedures it can be asked to repeat; **Agents**, roles with their own
+  face, instructions, tools and skills (describe one and the model drafts it; you
+  edit and approve); **Automations**, which holds workflows (multi-step jobs you
+  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -166,6 +236,14 @@ them in the sidebar, in the title bar, or out of sight.
   candidate — there is no tool that approves one, and a revision of an approved
   procedure is forked beside it rather than overwriting the text in use. The
   preview shows the real injected block, assembled by the function the chat uses.
+  Skills can be imported by URL, and a Popular skills catalog offers presets.
+  The memory extractor turns repeated friction in a chat into one suggested skill.
+- **Agents and subagents.** A reply can delegate to subagents (`agent_spawn`).
+  They show as indented rows under that reply with live status; click one to open
+  and message it. A crew window shows the delegating agent as a big face with its
+  subagents around it. Subagents get the chat's tools minus asking, planning and
+  scheduling, there is no per-subagent cost cap, and workflow steps see the
+  chat's working folder. A chat can also speak as an approved agent.
 - **Context management.** Per-chat toggles for memory, graph, files, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
@@ -181,16 +259,19 @@ them in the sidebar, in the title bar, or out of sight.
 - **Traces.** Every reply records what it did: context assembly, each model
   round with time-to-first-token and token counts, each tool call, and the
   auto-learn pass. Spans stream live into a waterfall in the Context panel.
+- **Backups.** Settings → Data takes a daily backup (the newest 7, plus one per
+  week for four weeks) and manual ones with **Back up now**. A restore is staged
+  and applied on the next start. **Export all data** writes a zip.
 - **Usage and cost.** Each model call is logged locally with tokens, latency and
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, todos, calendar.** A Today screen with a generated daily
+- **Today, lists, calendar.** A Today screen with a generated daily
   recap, calendar, unread inbox, todos, projects and recently learned memories,
-  plus a one-click brief. A native todo list, a week calendar (Google events
+  plus a one-click brief. Lists is a native todo view with a rail of lists and a
+  one-line add row, a week calendar (Google events
   plus due todos, double-click to add), and a board view of the same todos (columns by status or by list, drag and
-  drop to move). Boards from older versions were migrated into todos: each board
-  is now a list, each card a todo with the column as its status.
+  drop to move). Each older board is now a list, each card a todo with the column as its status.
   The assistant can drive all of them through tools.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
@@ -240,7 +321,7 @@ The packaged app (`npm run package`, see [docs/releasing.md](docs/releasing.md))
 is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
 wizard asks a few things about you and has you pick a model provider (Fireworks
 AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
-OpenAI-compatible endpoint). Google is connected from Settings → Integrations.
+OpenAI-compatible endpoint). Google is connected from Settings → Integrations. With no workspace folder set, file and shell tools work in `~/Grain`.
 
 ## Development
 
@@ -382,7 +463,7 @@ and its verdict is kept on the row.
 | ⌘F | Find in this chat |
 | ⌘⇧P | Cycle plan mode in the composer |
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
-| ⌘I | Ask about this page |
+| ⌘I | Page agent panel |
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |

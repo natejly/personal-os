@@ -30,7 +30,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 - Projects group chats with their own instructions, files and memories. Spaces are a desktop of live windows.
 
 ## Views and the title bar
-- Sidebar: New chat, Today, Files, then Spaces, Projects and Recents. Library, Meetings, Cowork and Activity are sidebar rows too (Meetings, Cowork and Activity start hidden).
+- Sidebar: New chat, Today, Files, then Spaces, Projects and Recents. Library, Meetings and Activity are sidebar rows too (Meetings and Activity start hidden).
 - Title bar, top right of every view: Lists, Calendar, Mail and Health. Hover any of them to see what it is for.
 - Settings -> Modules moves each view to the sidebar, the title bar, or hides it (nav placement). If a view seems missing, look there.
 - Today: the day's recap, calendar, unread mail, todos, and the Agent inbox (everything an agent left for you: approvals, desks waiting, scheduled-run proposals, review queues).
@@ -89,7 +89,9 @@ Type / in the composer:
 - Approvals: an inline Approve/Deny card. A card nobody answers waits; answering later resumes the run.
 - Needs you: anything waiting on you shows in the Agent inbox on Today, with a count on the sidebar Today row.
 - Scheduled and background runs can only propose anything that leaves the app (mail, calendar, Docs). Proposals land in the Agent inbox; accepting sends them once.
-- Cowork desks (Cmd+Shift+K, enable in Settings -> Modules): a task handed over with its own conversation, folder and approved plan. Output reaches the app only when you accept it.
+- Work autonomously (beside plan mode in any chat): the chat keeps working on its task in bounded turns, in its own folder, until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (a card per change) or Work and propose (it only proposes anything external), and optionally a turn limit.
+- A strip above the composer shows the state, turns used and what needs you, with Start, Pause, Resume and Stop; it opens a side panel with Files, Changes and Review. Questions, parked cards and the plan appear at the end of the transcript. Output reaches the app only when you accept it in Review. Files you attach land in its inputs folder.
+- Autonomous chats list with other chats, with a status dot; the Chats header counts what needs you. Turn the control off to stop; the chat answers normally again. Caps live in Settings -> Autonomy.
 
 ## Subagents and crews
 - A reply can delegate to subagents. They show as indented rows under that reply with live status; click one to open and message it.
@@ -105,7 +107,7 @@ Type / in the composer:
 
 ## Keyboard shortcuts
 - Cmd+N new chat, Cmd+K command palette, Cmd+, settings, Cmd+B sidebar, Cmd+I Page agent, Ctrl+Cmd+I Context panel.
-- Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory, 7 Activity. Cmd+Shift+M Meetings, Cmd+Shift+K Cowork.
+- Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory, 7 Activity. Cmd+Shift+M Meetings.
 - Cmd+Shift+[ and ] previous and next chat. Cmd+F find, Cmd+Shift+F search chats.
 - Cmd+Shift+C Spaces; the Spaces shortcuts are above.
 

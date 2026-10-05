@@ -13,8 +13,7 @@ instructions, files, memories and graph.
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today      2 │  ┌ Calendar ─────┐ ┌ Lists ────────┐ │  ☑ Memory    │
 │ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Cowork       │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
-│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ Library      │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
 │ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
 │ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
 │ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │
@@ -75,8 +74,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    chat as an agent, or let a reply hand work to subagents with `agent_spawn`.
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
-   delegating agent as a big face with its subagents around it. Longer jobs go
-   to a Cowork desk (⌘⇧K, shown once enabled in Settings → Modules), and Library
+   delegating agent as a big face with its subagents around it. Longer jobs: turn on **Work
+   autonomously** under the composer, pick Plan first, Ask as it goes or Work and
+   propose, and watch the strip above the composer; its side panel holds the
+   workspace files, changes and review. Library
    → Automations holds workflows, which you approve once. `/schedule` or the
    `schedule_task` tool books a run for later; its results arrive in the Agent
    inbox on Today as proposals.
@@ -196,27 +197,30 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   then whisper.cpp or the Whistle local backend, then your LLM proxy. Meetings never expire, are unreachable
   from the activity monitor's purge, and never reach auto-learn. See
   [docs/meetings.md](docs/meetings.md).
-- **Cowork desks** (the view starts hidden; turn it on in Settings → Modules). A desk that needs you shows up in the Agent inbox on Today, next to approvals and proposals.
-  A desk is a task you hand over: its own conversation, its own
-  folder, and one plan you approve before it acts. Several run at once. Long
-  autonomy is bought by chaining bounded replies, never by a longer leash — each
+- **Work autonomously** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
+  working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
+  once. Long autonomy is bought by chaining bounded replies, never by a longer leash: each
   turn is an ordinary reply with an ordinary budget, and the desk chains another
   only while the approved plan still has steps left and the last turn actually
-  consumed one. Three modes: plan first (nothing consequential runs until you
+  consumed one, up to a turn limit you can tighten per chat (the caps are in Settings → Autonomy). Three modes: Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
-  ask as it goes (one card per change), and propose only (it may plan an external
-  action and never perform one). Nothing it writes reaches the app until you accept
+  Ask as it goes (one card per change), and Work and propose (it may plan an external
+  action and never perform one). A strip above the composer shows the state, turns used and
+  how many things need you, with Start, Pause, Resume and Stop, and opens a side panel
+  with Files, Changes and Review tabs. Questions, parked cards, the plan and interruption notices appear at the
+  end of the transcript. Autonomous chats are listed with the other chats with a status dot, and the Chats header
+  carries the Needs-you count. Nothing it writes reaches the app until you accept
   it: it works in `cowork/<desk>/` and nominates files for review, and every
   promotion is read back before it counts. An accepted output goes where you
   send it: a new note or an append to one, an upload, a download, todos (one per
   checklist line), or a Gmail draft (a file with
   To and Subject headers; drafted, never sent). A card nobody is watching parks after a
-  few minutes — the run lets go, the card stays pending and decidable, and answering
-  it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
-  A chat can hand work to a desk (`desk_start`) along with the docs it needs, which
-  are copied into the desk's `inputs/` folder. When the desk finishes, fails or
-  waits for review, its report is posted back into that chat, so the chat's
-  assistant picks the result up on its next reply.
+  few minutes: the run lets go, the card stays pending and decidable, and answering
+  it wakes the desk. Files attached to an autonomous chat land in its `inputs/` folder.
+  Turning autonomy off detaches the desk and the chat answers as a plain chat again; the workspace is kept.
+  Another chat can also hand work to a desk (`desk_start`) along with the docs it needs; when the desk
+  finishes, fails or waits for review, its report is posted back into that chat.
+  A desk that needs you also shows up in the Agent inbox on Today. See [docs/cowork-design.md](docs/cowork-design.md).
 - **Agent inbox.** Everything agents left for you, in one list on Today, with the
   total on the sidebar's Today row: approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
@@ -463,7 +467,6 @@ and its verdict is kept on the row.
 | ⌘U | Upload file (Files → Uploads) |
 | ⌘0 … ⌘7 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory / Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
-| ⌘⇧K | Cowork |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |

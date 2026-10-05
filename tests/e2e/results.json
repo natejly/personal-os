@@ -6,10 +6,9 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "cowork-lifecycle",
+      "cowork-workflows",
       "--grep",
-      "desk_ask:|delete:",
-      "--workers=2"
+      "run a workflow|editing"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
@@ -71,13 +70,13 @@
   },
   "suites": [
     {
-      "title": "cowork-lifecycle.spec.mjs",
-      "file": "cowork-lifecycle.spec.mjs",
+      "title": "cowork-workflows.spec.mjs",
+      "file": "cowork-workflows.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "desk_ask: the desk waits on the question and the answer resumes it",
+          "title": "run a workflow: propose, review the plan, approve, steps tick off in order and the work happens once",
           "ok": true,
           "tags": [],
           "tests": [
@@ -92,12 +91,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 26952,
+                  "duration": 11588,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T04:56:21.595Z",
+                  "startTime": "2026-10-05T05:01:53.652Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -105,13 +104,13 @@
               "status": "expected"
             }
           ],
-          "id": "0ae59ffa24bf550aca61-fea71988b399255183e1",
-          "file": "cowork-lifecycle.spec.mjs",
-          "line": 8,
+          "id": "aae6716e47e073be3e66-01cf36c08311cd9bce40",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 32,
           "column": 1
         },
         {
-          "title": "delete: only offered once the desk is stopped; confirm dialogs gate it; workspace purge optional",
+          "title": "editing a workflow withdraws a pending approval; a stale digest cannot be approved; cancel works",
           "ok": true,
           "tags": [],
           "tests": [
@@ -126,12 +125,12 @@
                   "workerIndex": 1,
                   "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 24623,
+                  "duration": 10908,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T04:56:21.445Z",
+                  "startTime": "2026-10-05T05:01:53.753Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -139,9 +138,9 @@
               "status": "expected"
             }
           ],
-          "id": "0ae59ffa24bf550aca61-8c2654858b686b71dbfb",
-          "file": "cowork-lifecycle.spec.mjs",
-          "line": 71,
+          "id": "aae6716e47e073be3e66-71935c544759062ef680",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 80,
           "column": 1
         }
       ]
@@ -149,8 +148,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T04:56:14.749Z",
-    "duration": 34059.189,
+    "startTime": "2026-10-05T05:01:50.881Z",
+    "duration": 14463.679000000002,
     "expected": 2,
     "skipped": 0,
     "unexpected": 0,

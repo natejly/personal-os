@@ -93,6 +93,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
   const [showPrompt, setShowPrompt] = useState(false)
+  const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
@@ -102,9 +103,9 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         ~{ctx.tokens_estimate} tokens of context
         {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
         {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} tools loaded on demand</span>}
-        <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
+        {devTools && <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>}
       </div>
-      {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
+      {devTools && showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
       {!has && <p className="muted">Nothing from memory, graph, or files was relevant.</p>}
       {ctx.page && (
         <section>
@@ -187,7 +188,10 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const openProject = useStore((s) => s.openProject)
   const induceSkill = useStore((s) => s.induceSkill)
   const setTab = useStore((s) => s.setContextTab)
-  const tab = useStore((s) => s.contextTab)
+  // Preview and Trace are developer tools; with them off, the drawer only shows Last reply.
+  const devTools = useStore((s) => s.settings.devTools === true)
+  const storeTab = useStore((s) => s.contextTab)
+  const tab = devTools ? storeTab : 'last'
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)
   const [query, setQuery] = useState('')
@@ -284,8 +288,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
 
       <div className="ctx-tabs">
         <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
-        <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>
-        <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>
+        {devTools && <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>}
+        {devTools && <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>}
       </div>
 
       {tab === 'last' ? (

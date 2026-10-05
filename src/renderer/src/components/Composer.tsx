@@ -229,11 +229,13 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   /**
    * Enter (and the send button) while a reply runs queues the text as the next turn; ⌘Enter steers the
    * live reply. A steer while a card waits declines that card, so it asks first (lib/followQueue.ts).
+   * Once Stop is pressed the run is ending: a message then is a new turn (`send` waits for the stop to land),
+   * not a follow-up parked in a queue the stop has just paused.
    */
   const submit = (mod = false): void => {
     if (!text.trim()) return
     // "/compact" runs now, never queued: it is not a message for the reply.
-    const action = queueId && compactCommand(text) === null ? enterAction({ busy: streaming, mod, cardPending, desk }) : 'send'
+    const action = queueId && compactCommand(text) === null ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
     if (action === 'queue' && queueId) {
       updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID()))
       clearRedirect(key)

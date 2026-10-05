@@ -67,7 +67,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "propose_times_draft",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_export_file", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
-    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
+    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete",
     "activity_recent", "activity_pause", "activity_access", "activity_insights", "activity_report",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",

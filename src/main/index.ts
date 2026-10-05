@@ -75,6 +75,19 @@ function createWindow(): void {
   })
   guardNavigation(win.webContents)
 
+  // Right-click on selected text offers the same four verbs as the floating toolbar.
+  win.webContents.on('context-menu', (_e, params) => {
+    if (!params.selectionText.trim() || !win || win.isDestroyed()) return
+    const verbs = ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
+      label,
+      click: () => sendMenu(`selection:${label.replace('…', '').toLowerCase()}`)
+    }))
+    const edit: Electron.MenuItemConstructorOptions[] = params.isEditable
+      ? [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }]
+      : [{ role: 'copy' }]
+    Menu.buildFromTemplate([...edit, { type: 'separator' }, ...verbs]).popup({ window: win })
+  })
+
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {

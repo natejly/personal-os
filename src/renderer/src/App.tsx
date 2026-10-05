@@ -14,6 +14,7 @@ import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
+import SelectionToolbar from './components/SelectionToolbar'
 import LibraryView from './components/LibraryView'
 import CoworkView from './components/CoworkView'
 import RenderBoundary from './components/RenderBoundary'
@@ -280,6 +281,7 @@ export default function App(): JSX.Element {
       {wizardOpen && <Onboarding />}
       <DeskNotifier />
       <JobNotifier />
+      <SelectionToolbar />
       <Toasts />
     </div>
   )

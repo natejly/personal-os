@@ -89,6 +89,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 
 ## Features
 
+- **Selection verbs.** Select text in a chat, a file, an email or the page agent
+  (or right-click it) for Explain, Summarize, Verify and Ask. Each opens the ⌘I
+  panel with the quote fenced as data; Verify checks claims against opened pages
+  and cites sources. The floating bubble can be turned off in Settings → Chat.
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
   Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/compact`,

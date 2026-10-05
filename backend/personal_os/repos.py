@@ -264,7 +264,7 @@ class Conversations:
                     "SELECT * FROM messages WHERE conversation_id=?\n"
                     "AND superseded_at IS NULL\n"
                     "ORDER BY created_at, rowid", (id,)).fetchall()
-                d["messages"] = [row_to_dict(m, ("context_used", "tool_events", "trace", "attachments")) for m in rows]
+                d["messages"] = [row_to_dict(m, ("context_used", "tool_events", "trace", "attachments", "followups")) for m in rows]
                 self._attach_variants(c, id, d["messages"])
         return d
 
@@ -419,7 +419,7 @@ class Conversations:
                 "variants": variants}
 
     def _hydrated_row(self, c: Any, conv_id: str, mid: str) -> dict[str, Any]:
-        row = row_to_dict(c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone(), ("context_used", "tool_events", "trace", "attachments")) or {}
+        row = row_to_dict(c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone(), ("context_used", "tool_events", "trace", "attachments", "followups")) or {}
         self._attach_variants(c, conv_id, [row])
         return row
 
@@ -475,6 +475,10 @@ class Conversations:
                 (content, error, json.dumps(context_used) if context_used else None, json.dumps(tool_events) if tool_events else None,
                  json.dumps(trace) if trace else None, reasoning or None, outcome, error_kind, mid),
             )
+
+    def set_followups(self, mid: str, items: list[str]) -> None:
+        with self.db.tx() as c:
+            c.execute("UPDATE messages SET followups=? WHERE id=?", (json.dumps(items), mid))
 
     def set_trace(self, mid: str, trace: list[dict[str, Any]]) -> None:
         with self.db.tx() as c:

@@ -607,6 +607,8 @@ export interface Message {
   /** Regenerate group: id of the first answer; the active member carries the group's ids. */
   variant_of?: string | null
   variants?: string[] | null
+  /** Up to 3 suggested next questions, written after the reply; shown under the newest reply only. */
+  followups?: string[] | null
   /** Set on a user message that replaced an earlier one (edit-and-resend). */
   edited_from?: string | null
 }
@@ -1251,6 +1253,8 @@ export interface Settings {
   meetingEmbeddings?: boolean
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
+  /** Suggest up to 3 next questions as chips under the latest reply (uses the extraction model). */
+  followUps: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
@@ -1536,6 +1540,8 @@ export interface Learned {
  */
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
+  /** Suggested next questions for a finished reply, written off the run. */
+  | { event: 'followups'; data: { conversation_id: string; message_id: string; followups: string[] } }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   /** Auto tidy-up queued memory proposals. `count` is only the new ones: re-read the pending list for the badge. */
   | { event: 'proposals'; data: { count: number } }

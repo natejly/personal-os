@@ -1233,6 +1233,9 @@ export const useStore = create<State>((set, get) => {
           if (ev.seq !== null) eventsSince = ev.seq
           if (ev.event === 'learned') {
             get().onLearned(ev.data)
+          } else if (ev.event === 'followups') {
+            const d = ev.data
+            patchSession(d.conversation_id, (s) => (s.conversation ? { ...s, conversation: { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => (m.id === d.message_id ? { ...m, followups: d.followups } : m)) } } : s))
           } else if (ev.event === 'proposals') {
             const n = ev.data.count
             get().toast(`${n} memory tidy-up suggestion${n === 1 ? '' : 's'}`, 'learned', reviewMemories)
@@ -1766,7 +1769,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true },
     models: [],
     modelsError: null,
     tools: [],

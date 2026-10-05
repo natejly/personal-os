@@ -35,11 +35,11 @@ else:
         saved = _install_stubs()
         try:
             with client:
-                client.put("/settings", json={"autoLearn": False, "autoTitle": True, "baseUrl": ""})
+                client.put("/settings", json={"autoLearn": False, "autoTitle": True, "followUps": False, "baseUrl": ""})
                 yield
         finally:
             _restore_stubs(saved)
-            client.put("/settings", json={"autoTitle": True, "baseUrl": ""})
+            client.put("/settings", json={"autoTitle": True, "followUps": True, "baseUrl": ""})
 
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
@@ -267,7 +267,7 @@ if __name__ == "__main__":
     failures = 0
     _install_stubs()
     with client:
-        client.put("/settings", json={"autoLearn": False, "autoTitle": True, "baseUrl": ""})
+        client.put("/settings", json={"autoLearn": False, "autoTitle": True, "followUps": False, "baseUrl": ""})
         for t in TESTS:
             try:
                 t()

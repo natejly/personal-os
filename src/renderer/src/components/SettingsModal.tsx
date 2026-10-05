@@ -433,6 +433,10 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
+                <span className="toggle-text"><b>Follow-up suggestions</b><small>After a reply, offer up to three questions you might ask next as chips under it, written with the extraction model. Click one to fill the composer; Shift-click sends it.</small></span>
+                <input type="checkbox" checked={draft.followUps !== false} onChange={(e) => patch({ followUps: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
                 <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and files you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it above under Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>

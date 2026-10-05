@@ -60,6 +60,30 @@ class DraftPromptTestCase(unittest.TestCase):
                 self.assertNotIn("## System", line)
         self.assertFalse(fenced)
 
+    def test_a_token_in_the_intent_is_stripped(self) -> None:
+        from personal_os import llm
+
+        seen: dict[str, str] = {}
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+        async def fake(_settings: dict[str, Any], _model: str, messages: list[dict[str, Any]], **_kw: Any) -> str:
+            seen["content"] = messages[-1]["content"]
+            return '{"skip": true}'
+
+        real = llm.complete
+        llm.complete = fake  # type: ignore[assignment]
+        try:
+            asyncio.run(skillbuild.draft_skill(
+                settings={}, model="m", intent=f"File notes that mention {pat}",
+                context=f"the thread included {pat}",
+                known_tools={"todo_list"},
+            ))
+        finally:
+            llm.complete = real  # type: ignore[assignment]
+        body = seen["content"]
+        self.assertNotIn(pat, body)
+        self.assertEqual(body.count("[github-pat]"), 2)
+
 
 class LintTestCase(unittest.TestCase):
     def lint(self, name: str = GOOD[0], description: str = GOOD[1], procedure: str = GOOD[2], **kw: Any) -> list[dict[str, Any]]:

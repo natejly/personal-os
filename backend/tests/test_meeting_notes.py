@@ -134,6 +134,16 @@ def test_the_prompt_carries_the_template_and_the_meeting_facts() -> None:
     assert "three tiers works" in payload["transcript"]
 
 
+def test_a_token_in_the_transcript_is_stripped_for_the_model() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    res, calls = _enhance(GOOD_REPLY, notes=f"key {pat}", transcript=f"[them] the key is {pat}")
+    sent = calls[0]["messages"][1]["content"]
+    assert pat not in sent and sent.count("[github-pat]") == 2
+    assert res["degraded"] is False
+    failed, _ = _enhance("__raise__", notes=f"key {pat}", transcript=f"[them] the key is {pat}")
+    assert pat in failed["markdown"]
+
+
 def test_an_unknown_template_falls_back_to_general() -> None:
     res, calls = _enhance(GOOD_REPLY, template="nonsense")
     assert res["degraded"] is False

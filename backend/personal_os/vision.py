@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import llm, mac
+from . import llm, mac, redact
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_EDGE = 1568                 # long edge sent to the model
@@ -144,7 +144,7 @@ async def describe(settings: dict[str, Any], data: bytes, question: str = "", ch
     model = model_for(settings, chat_model)
     if model:
         url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-        ask = (question or "").strip() or "Describe this image."
+        ask = redact.scrub_command_output((question or "").strip()) or "Describe this image."
         messages = [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": [
@@ -152,10 +152,10 @@ async def describe(settings: dict[str, Any], data: bytes, question: str = "", ch
                 {"type": "image_url", "image_url": {"url": url}},
             ]},
         ]
-        text = await llm.complete(settings, model, messages, kind="vision")
-        return {"description": text.strip()[:MAX_DESCRIPTION], "model": model, "width": w, "height": h}
+        text = redact.scrub_command_output((await llm.complete(settings, model, messages, kind="vision")).strip())
+        return {"description": text[:MAX_DESCRIPTION], "model": model, "width": w, "height": h}
     if ocr_available():
-        text = await _ocr(jpeg)
+        text = redact.scrub_command_output(await _ocr(jpeg))
         return {"text": text[:MAX_DESCRIPTION], "ocr": True, "note": "no vision model is configured; this is OCR text only",
                 "width": w, "height": h}
     return {"error": "no vision model is configured and tesseract is not installed"}
@@ -192,25 +192,32 @@ def register(tb: Any) -> None:
     async def view_image(ctx: dict[str, Any], path: str = "", question: str = "") -> Any:
         fix = dict(field="path", expected="a PNG, JPEG, GIF, WebP, BMP or TIFF file: a desk path like outputs/chart.png, or a path under your home folder",
                    example={"path": "outputs/chart.png", "question": "what does the y axis show?"})
+
+        def fail(msg: str, alternative: str | None = None) -> dict[str, Any]:
+            kw = dict(fix)
+            if alternative:
+                kw["alternative"] = alternative
+            return tool_error(redact.scrub_command_output(msg), **kw)
+
         try:
             p = resolve(ctx, path)
         except (mac.LocalPathError, OSError) as e:
-            return tool_error(f"view_image: {e}", alternative="list the folder (desk_list_files or find_files) and use a path it returned", **fix)
+            return fail(f"view_image: {e}", "list the folder (desk_list_files or find_files) and use a path it returned")
         if p.suffix.lower() == ".svg":
-            return tool_error("view_image: SVG is a text format, not a picture file", alternative="read it with desk_read_file or read_local_file, "
-                              "or render it to PNG first", **fix)
+            return fail("view_image: SVG is a text format, not a picture file", "read it with desk_read_file or read_local_file, "
+                        "or render it to PNG first")
         if p.suffix.lower() not in IMAGE_EXT:
-            return tool_error(f"view_image: {p.suffix or 'this file'} is not an image type view_image reads",
-                              alternative="read documents with desk_read_file or read_local_file", **fix)
+            return fail(f"view_image: {p.suffix or 'this file'} is not an image type view_image reads",
+                        "read documents with desk_read_file or read_local_file")
         try:
             st = p.stat()
         except OSError:
-            return tool_error(f"view_image: {path} does not exist", **fix)
+            return fail(f"view_image: {path} does not exist")
         if not p.is_file():
-            return tool_error(f"view_image: {path} is not a file", **fix)
+            return fail(f"view_image: {path} is not a file")
         if st.st_size > MAX_FILE_BYTES:
-            return tool_error(f"view_image: the file is {st.st_size // (1024 * 1024)} MB; the limit is {MAX_FILE_BYTES // (1024 * 1024)} MB",
-                              alternative="downscale it first (run_python with Pillow)", **fix)
+            return fail(f"view_image: the file is {st.st_size // (1024 * 1024)} MB; the limit is {MAX_FILE_BYTES // (1024 * 1024)} MB",
+                        "downscale it first (run_python with Pillow)")
         q = (question or "").strip()
         key = (str(p), st.st_mtime_ns, q)
         cache: dict[Any, Any] = ctx.setdefault("_view_image_cache", {})
@@ -224,12 +231,12 @@ def register(tb: Any) -> None:
             data = await asyncio.to_thread(p.read_bytes)
             out = await describe(cfg(ctx), data, q, chat_model(ctx))
         except ImageError as e:
-            return tool_error(f"view_image: {e}", **fix)
+            return fail(f"view_image: {e}")
         except llm.LLMError as e:
-            return tool_error(f"view_image: the vision model failed ({str(e)[:200]})",
-                              alternative="try again, or set another model under Settings (Vision model)")
+            return fail(f"view_image: the vision model failed ({str(e)[:200]})",
+                        "try again, or set another model under Settings (Vision model)")
         if out.get("error"):
-            return tool_error(f"view_image: {out['error']}", alternative="set a Vision model in Settings, or install tesseract (brew install tesseract)")
+            return fail(f"view_image: {out['error']}", "set a Vision model in Settings, or install tesseract (brew install tesseract)")
         cache[key] = out
         return out
 

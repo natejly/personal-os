@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 from email.utils import parseaddr
 from typing import Any, Callable
 
+from . import redact
 from .db import Database, now as _now
 
 STATUSES = ("to_reply", "awaiting_reply", "fyi", "actioned")
@@ -129,8 +130,9 @@ def _llm_payload(thread: dict[str, Any]) -> dict[str, str]:
     domain = frm.split("@", 1)[1] if "@" in frm else ""
     # Subject and snippet are someone else's text. One line each, so a newline cannot open a new section
     # if a model is later shown this payload.
-    return {"subject": _line(thread.get("subject") or ""), "domain": _line(domain, 80),
-            "snippet": _line(last.get("snippet") or "", 300)}
+    return {"subject": _line(redact.scrub_command_output(str(thread.get("subject") or ""))),
+            "domain": _line(redact.scrub_command_output(domain), 80),
+            "snippet": _line(redact.scrub_command_output(str(last.get("snippet") or "")), 300)}
 
 
 def refine(items: list[tuple[dict[str, Any], dict[str, Any]]], llm_fn: Callable[[list[dict[str, str]]], Any], me: str) -> list[dict[str, Any]]:

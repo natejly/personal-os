@@ -231,6 +231,26 @@ def test_a_window_title_cannot_open_the_insight_prompt() -> None:
     assert not fenced
 
 
+def test_a_token_in_a_pattern_is_stripped_for_the_model() -> None:
+    token = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    pat = {
+        "window": {"days": 1, "first_day": "2026-10-01", "last_day": "2026-10-01"},
+        "totals": {},
+        "patterns": [{"id": "recurring_window:x", "confidence": 0.9,
+                      "title": f"Saw {token}", "detail": f"the window showed {token}"}],
+        "apps": [{"app": "Terminal", "seconds": 60}],
+        "hosts": [],
+        "categories": [],
+    }
+    text = insights.digest(pat)
+    assert token not in text and text.count("[github-pat]") == 2
+    m = _monitor()
+    m.store.set_profile(f"uses {token} daily")
+    prompt = m.insights._user_prompt(pat, set())
+    assert token not in prompt and "[github-pat]" in prompt
+    assert token in m.store.profile()["content"]
+
+
 def test_a_fallback_prompt_cannot_add_a_second_line() -> None:
     out = insights.fallback({"patterns": [
         {"kind": "site_habit", "id": "site_habit:x", "confidence": 0.8,
@@ -491,6 +511,26 @@ def test_the_cadence_only_fires_when_it_is_due() -> None:
     m.set_config({"insights": {"enabled": False}})
     m.insights.last_run = 0
     assert asyncio.run(m.insights.maybe_refresh()) is None          # switched off
+
+
+def test_a_token_in_an_insight_brief_is_stripped() -> None:
+    m = _monitor()
+    token = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    def overview() -> dict:
+        return {
+            "habits": [{"statement": f"uses {token}", "confidence": 0.9}],
+            "patterns": [{"title": f"Saw {token}", "detail": f"window {token}", "confidence": 0.8}],
+            "suggestions": [{"id": "s1", "status": "new", "kind": "automation", "title": "Make a digest",
+                             "why": "saves time", "impact": "a few minutes", "detail": "build it", "action": {}}],
+        }
+
+    m.insights.overview = overview  # type: ignore[method-assign]
+    brief = m.insights.brief()
+    assert token not in json.dumps(brief)
+    assert brief["habits"][0]["statement"].count("[github-pat]") == 1
+    assert brief["patterns"][0]["what"].count("[github-pat]") == 1
+    assert brief["patterns"][0]["detail"].count("[github-pat]") == 1
 
 
 def test_brief_is_read_only_and_says_so() -> None:

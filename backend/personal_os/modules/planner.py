@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from ..todos import UNTRUSTED_SOURCES
 
 from .. import planner as pl
+from .. import redact
 from ..google import GoogleNotConnected
 from ..todos import Todos
 from ..tools import ToolSpec, _obj, tool_error
@@ -145,9 +146,13 @@ class PlannerModule(Module):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("schedule_suggest")
             titles = {b["todo_id"]: b["title"] for b in plan["blocks"]}
-            blocks = [{"todo_id": b["todo_id"], "title": b["title"], "start": b["start"], "end": b["end"], "part": b["part"],
+
+            def _title(value: Any) -> Any:
+                return redact.scrub_command_output(str(value)) if value else value
+
+            blocks = [{"todo_id": b["todo_id"], "title": _title(b["title"]), "start": b["start"], "end": b["end"], "part": b["part"],
                        "why": "due {due}, priority {priority}, energy {energy}, time {time} (weighted)".format(**b["why"])} for b in plan["blocks"]]
-            return {"proposed_blocks": blocks, "unplaced": [{**u, "title": titles.get(u["id"])} for u in plan["unplaced"]],
+            return {"proposed_blocks": blocks, "unplaced": [{**u, "title": _title(titles.get(u["id"]))} for u in plan["unplaced"]],
                     "note": "Proposals only; nothing was added to the calendar. Present them and let the user press Plan my day, then Add selected to calendar."}
         box.specs["schedule_suggest"] = ToolSpec(
             "schedule_suggest",

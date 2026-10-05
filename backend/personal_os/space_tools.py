@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from . import redact
 from .canvas import WIDGET_KINDS
 from .presets import REF_TABLES, _exists
 
@@ -34,8 +35,10 @@ def register(box: Any) -> None:
         return c, None
 
     async def space_list(ctx: dict[str, Any]) -> Any:
-        return {"spaces": [{"canvas_id": c["id"], "name": c["name"], "locked": bool(c.get("locked")),
-                            "windows": [{"window_id": w["id"], "kind": w["kind"], "ref_id": w["ref_id"], "title": w["title"],
+        return {"spaces": [{"canvas_id": c["id"], "name": redact.scrub_command_output(str(c["name"] or "")),
+                            "locked": bool(c.get("locked")),
+                            "windows": [{"window_id": w["id"], "kind": w["kind"], "ref_id": w["ref_id"],
+                                         "title": redact.scrub_command_output(str(w["title"] or "")),
                                          "state": w["state"]} for w in c["windows"]]} for c in box.canvases.list()]}
     box.specs["space_list"] = ToolSpec("space_list", "List the user's spaces (canvases) and the windows on each.",
                                        _obj({}, []), space_list, "spaces", "safe")

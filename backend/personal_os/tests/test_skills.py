@@ -6,6 +6,7 @@ not be able to reach a later system prompt until a human moved it there by hand.
 """
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,6 +145,40 @@ class SkillsTestCase(unittest.TestCase):
         self.assertIsNone(missing)
         self.assertEqual(why, "That reply is not in this chat.")
 
+    def test_a_token_in_a_listed_procedure_is_stripped(self) -> None:
+        from personal_os.tools import Toolbox
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        row = self.approved(name="Weekly review", procedure=f"1. Read the todos.\n2. The key is {pat}.")
+        box = Toolbox(None, None, None, lambda: {}, skills=self.skills)  # type: ignore[arg-type]
+        out = asyncio.run(box.call("skill_list", {}, {"project_id": None}))
+        shown = next(p for p in out["procedures"] if p["skill_id"] == row["id"])
+        self.assertNotIn(pat, shown["procedure"])
+        self.assertIn("[github-pat]", shown["procedure"])
+        self.assertIn(pat, self.skills.get(row["id"])["procedure"])
+
+    def test_a_token_in_a_drafted_skill_name_is_stripped(self) -> None:
+        import asyncio
+
+        from personal_os.tools import Toolbox
+
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        box = Toolbox(None, None, None, lambda: {}, skills=self.skills)  # type: ignore[arg-type]
+        out = asyncio.run(box.call("skill_draft", {
+            "name": f"Review {pat}",
+            "description": "when the user asks for a weekly review",
+            "procedure": "1. todo_list for what closed this week.\n2. calendar_events for what slipped.\n3. Draft the summary as bullets.",
+        }, {"project_id": None, "conversation_id": "c1"}))
+        self.assertNotIn(pat, str(out))
+        self.assertIn("[github-pat]", out["name"])
+        self.assertIn(pat, self.skills.get(out["skill_id"])["name"])
+        row = self.approved(name=f"View {pat}", procedure=f"1. Read the todos.\n2. The key is {pat}.")
+        self.skills.update(row["id"], {"description": f"key {pat}", "status": "approved"})
+        viewed = asyncio.run(box.call("skill_view", {"skill": row["id"]}, {"project_id": None}))
+        self.assertNotIn(pat, viewed["name"])
+        self.assertNotIn(pat, viewed["description"])
+        self.assertNotIn(pat, viewed["procedure"])
+        self.assertIn("[github-pat]", viewed["name"])
+
     def test_a_token_in_a_procedure_is_stripped_for_the_model(self) -> None:
         pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
         row = self.approved(procedure=f"1. Read the todos.\n2. The key is {pat}.")
@@ -154,6 +189,29 @@ class SkillsTestCase(unittest.TestCase):
         index = skill_manifest([{"id": row["id"], "name": "Weekly review", "description": f"key {pat}"}])
         self.assertNotIn(pat, index)
         self.assertIn("[github-pat]", index)
+
+    def test_a_token_in_a_transcript_is_stripped_before_a_skill_is_drafted(self) -> None:
+        import asyncio
+
+        from personal_os import learn
+
+        seen: dict[str, str] = {}
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+        async def fake(_settings: dict[str, Any], _model: str, messages: list[dict[str, Any]], **_kw: Any) -> str:
+            seen["content"] = messages[-1]["content"]
+            return '{"skip": true}'
+
+        real = learn.llm.complete
+        learn.llm.complete = fake  # type: ignore[assignment]
+        transcript = f"We filed the notes using {pat}. " + ("step " * 20)
+        try:
+            asyncio.run(learn.induce_skill(settings={}, skills=self.skills, project_id=None, conversation_id="c1",
+                                           transcript=transcript, model="m"))
+        finally:
+            learn.llm.complete = real  # type: ignore[assignment]
+        self.assertNotIn(pat, seen["content"])
+        self.assertIn("[github-pat]", seen["content"])
 
     def test_a_transcript_cannot_open_a_section(self) -> None:
         import asyncio

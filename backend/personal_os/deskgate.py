@@ -18,6 +18,8 @@ import asyncio
 import re
 from typing import Any
 
+from . import redact
+
 from .tools import tool_error
 from .workspace import WorkspaceError
 
@@ -142,8 +144,9 @@ def _one_line(text: str, limit: int = 300) -> str:
 
 def review_task(brief: str, summary: str, files: list[str]) -> str:
     """The reviewer's task. The brief and the summary are quotes, so neither can open a new section."""
-    brief_body, summary_body = brief.strip(), summary.strip()
-    names = [line for f in files if (line := _one_line(f))]
+    brief_body = redact.scrub_command_output(brief.strip())
+    summary_body = redact.scrub_command_output(summary.strip())
+    names = [line for f in files if (line := _one_line(redact.scrub_command_output(f)))]
     listing = "\n".join(f"- {name}" for name in names) or "- (no files were delivered)"
     brief_block = _fence(brief_body) if brief_body else "(none recorded)"
     summary_block = _fence(summary_body) if summary_body else "(none)"
@@ -186,7 +189,8 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
         if found and st["refusals"] < MAX_REFUSALS:
             st["refusals"] += 1
             left = MAX_REFUSALS - st["refusals"]
-            return (tool_error("desk_done refused: this desk is not finished yet.\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(found, 1)),
+            return (tool_error(redact.scrub_command_output(
+                               "desk_done refused: this desk is not finished yet.\n" + "\n".join(f"{i}. {p}" for i, p in enumerate(found, 1))),
                                expected="every problem above resolved",
                                alternative=("fix these, then call desk_done again" +
                                             (f" ({left} more refusal(s) before it goes through with these listed as open items)" if left
@@ -204,7 +208,8 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
             verdict, gaps = parse_verdict(text)
             if verdict == "fail":
                 st["notes"] = gaps or "(the reviewer gave no detail)"
-                return (tool_error("desk_done refused by the independent review. Gaps against the brief:\n" + st["notes"],
+                return (tool_error(redact.scrub_command_output(
+                                   "desk_done refused by the independent review. Gaps against the brief:\n" + st["notes"]),
                                    expected="each gap addressed",
                                    alternative="fix these, then call desk_done again; a second call will finish the desk"), "")
     if st["notes"]:

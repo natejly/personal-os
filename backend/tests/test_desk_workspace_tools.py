@@ -26,6 +26,40 @@ from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 from personal_os.working import ToolResults  # noqa: E402
 
+def test_a_token_in_a_trashed_desk_path_is_stripped(tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    box = Box(tmp_path)
+    note = f"work/note-{pat}.md"
+    box.run("desk_write_file", path=note, content="hello")
+    trashed = box.run("desk_trash_file", path=note)
+    assert pat not in trashed["path"] and pat not in trashed["trashed_to"]
+    assert "[github-pat]" in trashed["path"] and "[github-pat]" in trashed["trashed_to"]
+    assert any(pat in p.name for p in (box.root / ".trash").rglob("*") if p.is_file())
+
+
+def test_a_token_in_a_missing_desk_path_is_stripped(box: Box) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    missing = box.run("desk_read_file", path=f"work/{pat}.md")
+    assert pat not in str(missing) and "[github-pat]" in missing["error"]
+    box.run("desk_write_file", path=f"work/{pat}.md", content="hi")
+    refused = box.run("desk_deliver", path=f"work/{pat}.md", title="Notes")
+    assert pat not in str(refused) and "[github-pat]" in refused["error"]
+    assert (box.root / "work" / f"{pat}.md").read_text() == "hi"
+
+
+def test_a_token_in_a_desk_path_is_stripped(tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    box = Box(tmp_path)
+    name = f"work/note-{pat}.md"
+    wrote = box.run("desk_write_file", path=name, content="hello")
+    assert pat not in wrote["path"] and "[github-pat]" in wrote["path"]
+    listed = box.run("desk_list_files")
+    paths = [row["path"] for row in listed["files"]]
+    assert all(pat not in path for path in paths)
+    assert any("[github-pat]" in path for path in paths)
+    assert (box.root / "work" / f"note-{pat}.md").is_file()
+
+
 HAVE_SEATBELT = sys.platform == "darwin" and bool(shutil.which("sandbox-exec"))
 needs_seatbelt = pytest.mark.skipif(not HAVE_SEATBELT, reason="sandbox-exec is not available: Seatbelt assertions skipped")
 DESK = "desk1"
@@ -449,6 +483,44 @@ def test_fetch_obeys_the_tainted_run_rule(box: Box, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({"https://example.com/x.pdf": httpx.Response(200, content=b"%PDF")}))
     assert box.run("desk_fetch_file", url="https://example.com/x.pdf")["path"].endswith("x.pdf")
     assert box.ctx["tainted"] is True  # the download is third-party content
+
+
+def test_a_token_in_a_desk_download_url_is_stripped(box: Box) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    box.keep_taint = True
+    box.ctx["tainted"] = True
+    r = box.run("desk_fetch_file", url=f"https://example.com/{pat}.pdf")
+    assert pat not in str(r) and "refused" in r["error"] and "[github-pat]" in r["error"]
+
+
+def test_a_token_in_a_sandbox_import_path_is_stripped(tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    class Sb:
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def read_file(self, cid: str, path: str, off: int, length: int) -> dict[str, Any]:
+            self.seen.append(path)
+            if path.endswith(".png"):
+                return {"path": path, "bytes": 4}
+            return {"text": f"hello {pat}", "path": path}
+
+        def networked(self, cid: str) -> bool:
+            return False
+
+        def holds_import(self, cid: str) -> bool:
+            return False
+
+    sb = Sb()
+    box = Box(tmp_path, sandboxes=sb)
+    err = box.run("desk_import_sandbox", sandbox_path=f"shot-{pat}.png", path="work/x.md")
+    assert sb.seen == [f"shot-{pat}.png"]
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+    ok = box.run("desk_import_sandbox", sandbox_path=f"note-{pat}.md", path=f"work/{pat}.md")
+    assert pat not in str(ok)
+    assert "[github-pat]" in ok["path"] and "[github-pat]" in ok["from_sandbox"]
+    assert (box.root / "work" / f"{pat}.md").read_text() == f"hello {pat}"
 
 
 def test_a_networked_sandbox_import_stays_untrusted_after_clear(tmp_path: Path) -> None:

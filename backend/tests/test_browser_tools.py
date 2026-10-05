@@ -127,6 +127,14 @@ def test_scroll_payload(env) -> None:
     assert env.run("browser_scroll", direction="sideways").get("error")
 
 
+def test_a_token_in_a_browser_error_is_stripped(env) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    env.fake.replies["snapshot"] = {"ok": False, "error": f"navigation failed {pat}", "code": "timeout"}
+    out = env.run("browser_snapshot")
+    assert pat not in str(out)
+    assert "[github-pat]" in out["error"] and "browser_snapshot" in out["try_instead"]
+
+
 @pytest.mark.parametrize("code,needle", [("stale_ref", "new snapshot"), ("dialog_open", "action='dialog'"), ("busy", "wait"),
                                          ("timeout", "browser_snapshot"), ("blocked_host", "cannot be opened"),
                                          ("too_many_tabs", "close_tab"), ("too_many_sessions", "desk"), ("no_session", "browser_open")])
@@ -179,6 +187,19 @@ def test_open_rules(env) -> None:
     # a private host stays refused even on the allowlist
     env.settings["browserAllowlist"] = ["127.0.0.1"]
     assert env.run("browser_open", ctx=t, url="http://127.0.0.1:1/").get("error")
+
+
+def test_a_token_in_a_browser_refusal_is_stripped(env) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    private = f"http://127.0.0.1/{pat}"
+    err = env.run("browser_open", url=private)
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+    assert env.cards == [] and env.fake.calls == []
+    url = f"https://third.example/?k={pat}"
+    env.answers.append(False)
+    err = env.run("browser_open", ctx=env.ctx(tainted=True), url=url)
+    assert pat not in str(err) and "[github-pat]" in err["error"] and "restricted" in err["error"]
+    assert env.cards[-1]["url"] == url and env.fake.calls == []
 
 
 def test_click_preview_gate(env) -> None:
@@ -254,6 +275,29 @@ def test_upload_containment_and_ask(env, tmp_path: Path) -> None:
     assert env.run("browser_manage", action="upload", paths=["outputs/r.txt"])["error"]
 
 
+def test_a_token_in_a_browser_upload_path_is_stripped(env) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    env.ws.ensure("d1")
+    err = env.run("browser_manage", action="upload", ref="e9", paths=[f"outputs/{pat}.pdf"])
+    assert pat not in str(err)
+    assert "[github-pat]" in err["error"] and "not a file" in err["error"]
+    assert env.fake.calls == [] and env.cards == []
+
+
+def test_a_token_in_a_browser_screenshot_is_stripped(env) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    png = b"\x89PNG\r\n\x1a\nfake"
+    env.fake.replies["manage"] = page(
+        pngBase64=base64.b64encode(png).decode(), width=800, height=600,
+        url=f"https://example.com/watch?v={pat}", title=f"Talk {pat}",
+    )
+    out = env.run("browser_manage", action="screenshot")
+    assert pat not in str(out)
+    assert "[github-pat]" in out["url"] and "[github-pat]" in out["title"]
+    assert out["bytes"] == len(png) and out["width"] == 800
+    assert (env.ws.desk_root("d1") / out["path"]).read_bytes() == png
+
+
 def test_screenshot_saved_not_returned(env) -> None:
     png = b"\x89PNG\r\n\x1a\nfake"
     env.fake.replies["manage"] = page(pngBase64=base64.b64encode(png).decode(), width=800, height=600)
@@ -300,6 +344,25 @@ def test_handoff_order(env) -> None:
     assert [c[1].get("action") for c in env.fake.calls] == ["show", "hide"]
     env.fake.calls.clear()
     assert env.run("browser_manage", ctx=env.ctx(approve=None), action="handoff")["error"] and env.fake.calls == []
+
+
+def test_a_token_in_a_browser_page_is_stripped(env) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    root = env.ws.ensure("d1")
+    env.fake.replies["open"] = page(
+        url=f"https://example.com/watch?v={pat}",
+        title=f"Talk {pat}",
+        notes=[f"landed {pat}", f"downloaded: {root / 'work' / 'downloads' / f'{pat}.pdf'}"],
+        tabList=[{"tab": 1, "url": f"https://example.com/?k={pat}", "title": "ok", "active": True}],
+    )
+    out = env.run("browser_open", url="https://example.com/a")
+    assert pat not in str(out)
+    assert "[github-pat]" in out["url"] and "[github-pat]" in out["title"]
+    assert "[github-pat]" in out["notes"][0]
+    assert out["downloaded"] == ["work/downloads/[github-pat].pdf"]
+    assert "[github-pat]" in out["tab_list"][0]["url"]
+    assert out["tab_list"][0]["title"] == "ok" and out["tab_list"][0]["tab"] == 1
+    assert env.fake.calls[0][1]["url"] == "https://example.com/a"
 
 
 def test_redaction_and_cap(env) -> None:

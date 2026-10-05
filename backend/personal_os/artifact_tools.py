@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import redact
 from .artifact_patch import PatchError, apply_patch
 from .artifacts import Artifacts, _clean_html, blocked_capabilities
 
@@ -30,7 +31,8 @@ def register(box: Any, store: Artifacts) -> None:
         ctx["artifact"] = {"id": a["id"], "title": a["title"], "version": a["version"], "action": action}
 
     def _result(a: dict[str, Any], action: str, code: str) -> dict[str, Any]:
-        out: dict[str, Any] = {"artifact_id": a["id"], "title": a["title"], "version": a["version"], action: True,
+        out: dict[str, Any] = {"artifact_id": a["id"], "title": redact.scrub_command_output(str(a["title"] or "")),
+                               "version": a["version"], action: True,
                                "note": "Shown to the user in the chat as a live preview; they can open it full size from the card."}
         blocked = blocked_capabilities(code)
         if blocked:
@@ -87,7 +89,7 @@ def register(box: Any, store: Artifacts) -> None:
         try:
             code = apply_patch(a["code"], edits)
         except PatchError as e:
-            near = f" Nearest line in the document: {e.snippet!r}." if e.snippet else ""
+            near = f" Nearest line in the document: {redact.scrub_command_output(e.snippet)!r}." if e.snippet else ""
             return {"error": f"artifact_edit: {e.reason} (edit {e.index}); nothing was changed.{near}",
                     "hint": "quote the current text exactly (artifact_read shows it), or use artifact_update"}
         try:
@@ -111,18 +113,25 @@ def register(box: Any, store: Artifacts) -> None:
     async def artifact_read(ctx: dict[str, Any], artifact_id: str, version: int | None = None) -> Any:
         a = store.get(artifact_id)
         if not a:
-            return {"error": f"No artifact {artifact_id}", "artifacts": [{"artifact_id": x["id"], "title": x["title"]} for x in store.list()[:10]]}
+            return {"error": f"No artifact {artifact_id}",
+                    "artifacts": [{"artifact_id": x["id"], "title": redact.scrub_command_output(str(x["title"] or ""))}
+                                  for x in store.list()[:10]]}
         if version is not None:
             v = store.version(artifact_id, int(version))
             if not v:
                 return {"error": f"No version {version}", "versions": [x["version"] for x in store.versions(artifact_id)]}
-            return {"artifact_id": a["id"], "title": a["title"], "version": v["version"], "latest": a["version"], "html": v["code"]}
-        return {"artifact_id": a["id"], "title": a["title"], "version": a["version"], "latest": a["version"], "html": a["code"]}
+            return {"artifact_id": a["id"], "title": redact.scrub_command_output(str(a["title"] or "")),
+                    "version": v["version"], "latest": a["version"],
+                    "html": redact.scrub_command_output(str(v["code"] or ""))}
+        return {"artifact_id": a["id"], "title": redact.scrub_command_output(str(a["title"] or "")),
+                "version": a["version"], "latest": a["version"],
+                "html": redact.scrub_command_output(str(a["code"] or ""))}
     R("artifact_read", ToolSpec(
         "artifact_read", "Read an artifact's current (or a given version's) HTML source, e.g. before revising it with artifact_update.",
         _obj({"artifact_id": {"type": "string"}, "version": {"type": "integer"}}, ["artifact_id"]), artifact_read, "artifacts"))
 
     async def artifact_list(ctx: dict[str, Any], query: str = "") -> Any:
-        return [{"artifact_id": a["id"], "title": a["title"], "version": a["version"]} for a in store.list(q=query)[:30]]
+        return [{"artifact_id": a["id"], "title": redact.scrub_command_output(str(a["title"] or "")), "version": a["version"]}
+                for a in store.list(q=query)[:30]]
     R("artifact_list", ToolSpec("artifact_list", "List the user's artifacts (newest first) to find an artifact_id.",
         _obj({"query": {"type": "string"}}, []), artifact_list, "artifacts"))

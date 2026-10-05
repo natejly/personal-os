@@ -215,7 +215,22 @@ def test_a_token_in_the_page_is_stripped(box: Toolbox) -> None:
     Net.routes["https://a.com/secret"] = FakeResp("https://a.com/secret", html.encode(), "text/html")
     out = fetch(box, url="https://a.com/secret")
     assert pat not in out["text"] and "[github-pat]" in out["text"]
+    assert pat not in out["excerpt"] and "[github-pat]" in out["excerpt"]
     assert "Widgets are small" in out["text"]
+
+
+def test_a_token_in_a_fetched_address_is_stripped(box: Toolbox) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    url = f"https://a.com/{pat}"
+    html = ("<html><body><article><p>Hello. "
+            + "Widgets are small useful things we make every day. " * 20 + "</p></article></body></html>")
+    Net.routes[url] = FakeResp(url, html.encode(), f"text/html; note={pat}")
+    out = fetch(box, url=url)
+    assert pat not in str(out)
+    assert "[github-pat]" in out["url"] and "[github-pat]" in out["content_type"]
+    assert "Hello" in out["text"]
+    err = fetch(box, {"tainted": True, "allowed_urls": set()}, url=url)
+    assert pat not in str(err) and "restricted" in err["error"] and "[github-pat]" in err["error"]
 
 
 def test_second_fetch_is_cached_and_fresh_bypasses(box: Toolbox) -> None:

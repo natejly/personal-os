@@ -78,6 +78,31 @@ def test_glob_skips_and_caps(home: Path, tmp_path: Path) -> None:
     assert call(tb, "fs_glob", pattern="../*", root=str(p))["error"]
 
 
+def test_a_token_in_a_glob_path_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    p = home / "proj"
+    (p / f"note-{pat}.txt").write_text("x")
+    out = call(tb, "fs_glob", pattern="note-*.txt", root=str(p))
+    assert out["total"] == 1
+    row = out["files"][0]
+    assert pat not in row["path"] and pat not in row["rel"]
+    assert "[github-pat]" in row["path"] and "[github-pat]" in row["rel"]
+    assert (p / f"note-{pat}.txt").is_file()
+
+
+def test_a_token_in_a_grep_path_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    p = home / "proj"
+    (p / f"note-{pat}.txt").write_text("needle\n")
+    out = call(tb, "fs_grep", {"conversation_id": "c1"}, pattern="needle", root=str(p))
+    assert out["count"] == 1
+    shown = out["matches"][0]["path"]
+    assert pat not in shown and "[github-pat]" in shown
+    assert (p / f"note-{pat}.txt").is_file()
+
+
 def _grep_fixture(p: Path) -> None:
     (p / "a.py").write_text("one\nTODO fix this\nthree\n")
     (p / "b.md").write_text("TODO docs\n")
@@ -126,6 +151,19 @@ def test_edit_exact_diff_and_errors(home: Path, tmp_path: Path) -> None:
     assert f.read_text() == "a = 9\nb = 2\nb = 2\n"
     allr = call(tb, "fs_edit", ctx, path=str(f), old="b = 2", new="b = 3", replace_all=True)
     assert allr["replacements"] == 2 and f.read_text() == "a = 9\nb = 3\nb = 3\n"
+
+
+def test_a_token_in_an_edit_diff_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    f = home / "proj" / f"m-{pat}.py"
+    f.write_text(f"token = {pat!r}\n")
+    ctx = {"conversation_id": "c1"}
+    call(tb, "read_local_file", ctx, path=str(f))
+    out = call(tb, "fs_edit", ctx, path=str(f), old=f"token = {pat!r}", new='token = "ok"')
+    assert pat not in out["path"] and pat not in out["diff"]
+    assert "[github-pat]" in out["path"] and "[github-pat]" in out["diff"]
+    assert pat in f.name and 'token = "ok"' in f.read_text()
 
 
 def test_edit_fuzzy_matchers() -> None:
@@ -274,6 +312,47 @@ def test_symlink_out_of_a_root_is_outside(home: Path, tmp_path: Path) -> None:
     assert "needs their approval" in call(tb, "fs_edit", ctx, path=str(link), old="a", new="b")["error"]
     assert target.read_text() == "a"
     assert not mac.in_roots(link, [home / "proj"]) and mac.in_roots(home / "proj" / "x", [home / "proj"])
+
+
+def test_a_token_in_a_file_tool_error_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    p = home / "proj"
+    missing = p / f"missing-{pat}.txt"
+    out = call(tb, "fs_copy", {"conversation_id": "c1"}, src=str(missing), dst=str(p / "out.txt"))
+    assert "error" in out
+    assert pat not in out["error"] and "[github-pat]" in out["error"]
+    assert not missing.exists()
+
+
+def test_a_token_in_a_repeated_read_path_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    f = home / "proj" / f"note-{pat}.txt"
+    f.write_text("hello\n")
+    ctx = {"conversation_id": "c1"}
+    for _ in range(2):
+        call(tb, "read_local_file", ctx, path=str(f))
+    stub = call(tb, "read_local_file", ctx, path=str(f))
+    assert stub.get("unchanged") is True
+    assert pat not in stub["path"] and "[github-pat]" in stub["path"]
+    refused = call(tb, "read_local_file", ctx, path=str(f))
+    assert pat not in refused["error"] and "[github-pat]" in refused["error"]
+    assert f.read_text() == "hello\n"
+
+
+def test_a_token_in_a_copied_path_is_stripped(home: Path, tmp_path: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    tb, _ = make(home, tmp_path)
+    p = home / "proj"
+    (p / "a.txt").write_text("A")
+    ctx = {"conversation_id": "c1"}
+    copied = call(tb, "fs_copy", ctx, src=str(p / "a.txt"), dst=str(p / f"b-{pat}.txt"))
+    assert pat not in copied["path"] and "[github-pat]" in copied["path"]
+    assert (p / f"b-{pat}.txt").read_text() == "A"
+    made = call(tb, "fs_mkdir", ctx, path=str(p / f"dir-{pat}"))
+    assert pat not in made["path"] and "[github-pat]" in made["path"]
+    assert (p / f"dir-{pat}").is_dir()
 
 
 def test_copy_and_mkdir(home: Path, tmp_path: Path) -> None:

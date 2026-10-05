@@ -283,6 +283,16 @@ def test_manual_run_with_a_live_run_is_409() -> None:
     appmod.jobs.delete(jb["id"])
 
 
+def test_a_token_in_a_job_prompt_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    job = {"prompt": f"check {pat}"}
+    on_time = appmod._job_prompt(job, {"late": False})
+    late = appmod._job_prompt(job, {"late": True, "due_at": 1, "fired_at": 2, "late_seconds": 90, "missed_slots": 0})
+    assert pat not in on_time and "[github-pat]" in on_time
+    assert pat not in late and "[github-pat]" in late
+    assert job["prompt"] == f"check {pat}"
+
+
 def test_max_retries_is_editable_and_bounded() -> None:
     jb = client.post("/jobs", json={"name": "r", "prompt": "p", "cron": "0 * * * *", "max_retries": 2}).json()
     assert jb["max_retries"] == 2

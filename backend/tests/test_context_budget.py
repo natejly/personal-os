@@ -103,4 +103,12 @@ documents.set_pinned(glob["id"], False)
 sys_, used = build(project_id=proj["id"])
 check("Pinned documents" not in sys_ and used["pinned"] == [], "unpin removes it")
 
+pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+secret = documents.create(proj["id"], f"notes-{pat}.txt", "text/plain", 5, "/x", f"the key is {pat}")
+documents.set_pinned(secret["id"], True)
+sys_, used = build(project_id=proj["id"])
+check(pat not in sys_ and sys_.count("[github-pat]") == 2, "a token in a pinned file is stripped")
+check(any(pat in p["name"] for p in used["pinned"]), "the recorded pin keeps the stored name")
+documents.set_pinned(secret["id"], False)
+
 print(f"{passed} checks passed")

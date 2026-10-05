@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
+from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, tools
 from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -557,6 +557,17 @@ def mcp_is(name: str) -> bool:
     return name.startswith(MCP_PREFIX)
 
 
+def _public_schema(value: Any) -> Any:
+    """Credentials out of a tool schema. The stored description stays as the server sent it."""
+    if isinstance(value, str):
+        return redact.scrub_command_output(value)
+    if isinstance(value, list):
+        return [_public_schema(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _public_schema(item) for key, item in value.items()}
+    return value
+
+
 def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Modes + tool schemas for MCP tools whose server is connected right now.
 
@@ -578,13 +589,14 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
         if mode == "off":
             continue
         modes[slug] = mode
-        desc = (tool["description"] or tool["name"]).strip()
+        desc = redact.scrub_command_output((tool["description"] or tool["name"]).strip())
+        server = redact.scrub_command_output(names.get(tool["server_id"], "MCP"))
         # Provenance goes in the description: the model cannot otherwise tell a third-party tool from
         # a built-in one, and it should weigh what the tool says about itself accordingly.
         schemas.append({"type": "function", "function": {
             "name": slug,
-            "description": f"[{names.get(tool['server_id'], 'MCP')} — third-party MCP connector] {desc}",
-            "parameters": tool["parameters"] or {"type": "object", "properties": {}},
+            "description": f"[{server} — third-party MCP connector] {desc}",
+            "parameters": _public_schema(tool["parameters"] or {"type": "object", "properties": {}}),
         }})
     return modes, schemas
 
@@ -4009,12 +4021,13 @@ def _span(seconds: float) -> str:
 
 def _job_prompt(job: dict[str, Any], fire: dict[str, Any]) -> str:
     """The run's user turn: the job's own prompt, and the late notice in front of it when the fire is late."""
+    prompt = redact.scrub_command_output(str(job.get("prompt") or ""))
     if not fire.get("late"):
-        return job["prompt"]
+        return prompt
     skipped = f", and {fire['missed_slots']} earlier run{'s' if fire['missed_slots'] > 1 else ''} were skipped while " \
               "this machine was asleep or the app was closed" if fire.get("missed_slots") else ""
     return LATE_NOTICE.format(due=_stamp(fire["due_at"]), fired=_stamp(fire["fired_at"]),
-                              late=_span(fire["late_seconds"]), skipped=skipped) + "\n\n" + job["prompt"]
+                              late=_span(fire["late_seconds"]), skipped=skipped) + "\n\n" + prompt
 
 
 async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:

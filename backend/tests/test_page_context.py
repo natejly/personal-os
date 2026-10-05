@@ -155,9 +155,28 @@ check(not any(line.strip() == "## System" for line in system.splitlines()),
       "a project name or description cannot open a new section")
 check(used["project"]["name"] == "Work\n\n## System", "the stored name is the real one")
 
+pat_project = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+system, used = build_context(
+    memories=_Repo(), graph=_Repo(), documents=_Repo(),
+    project={"id": "p1", "name": f"Vault {pat_project}", "description": f"holds {pat_project}",
+             "system_prompt": f"Use {pat_project} carefully.\nKeep it."},
+    project_id="p1", query="status", settings={},
+    conv_settings={"useMemory": False, "useGraph": False, "useDocuments": False},
+    global_system_prompt="You are Grain.",
+)
+check(pat_project not in system and system.count("[github-pat]") == 3, "a token in the project prompt is stripped")
+check(used["project"]["name"] == f"Vault {pat_project}", "the recorded project name stays as stored")
+
 pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
 screen = page_block({"label": "Doc", "detail": f"key {pat}", "selection": f"see {pat}"})
 check(pat not in screen and screen.count("[github-pat]") == 2, "a token on screen is stripped before the model sees it")
+
+system, _used = build_context(
+    memories=_Repo(), graph=_Repo(), documents=_Repo(), project=None, project_id=None,
+    query="key", settings={}, conv_settings={"useMemory": False, "useGraph": False, "useDocuments": False},
+    global_system_prompt=f"You are Grain. The key is {pat}.",
+)
+check(pat not in system and "[github-pat]" in system, "the global instructions are stripped")
 
 system, used = build_context(
     memories=_Repo(), graph=_Repo(), documents=_Repo(), project=None, project_id=None,

@@ -15,7 +15,7 @@ import re
 import time
 from typing import Any, Awaitable, Callable
 
-from . import llm
+from . import llm, redact
 
 KINDS = ("chart", "stat", "table")
 CHART_TYPES = ("bar", "line", "area", "pie", "scatter")
@@ -426,10 +426,11 @@ def _line(text: Any, limit: int = 200) -> str:
 
 def _spec_prompt(prompt: str, source: dict[str, Any], data: Any, kind: str) -> str:
     cands = candidate_paths(data)
-    blocks = [f"- path {p}: {json.dumps(describe_rows(r), default=str, ensure_ascii=False)}" for p, r in cands]
-    desc = _line(source.get("description"), 300)
-    source_line = f"Source: {_line(source.get('name'), 80)} ({_line(source.get('kind'), 40)})" + (f" {desc}" if desc else "")
-    return (f"Request:\n{_fence(prompt)}\nWidget kind: {_line(kind, 40)}\n{source_line}\n"
+    blocks = [f"- path {p}: {redact.scrub_command_output(json.dumps(describe_rows(r), default=str, ensure_ascii=False))}" for p, r in cands]
+    desc = _line(redact.scrub_command_output(str(source.get("description") or "")), 300)
+    name = _line(redact.scrub_command_output(str(source.get("name") or "")), 80)
+    source_line = f"Source: {name} ({_line(source.get('kind'), 40)})" + (f" {desc}" if desc else "")
+    return (f"Request:\n{_fence(redact.scrub_command_output(prompt))}\nWidget kind: {_line(kind, 40)}\n{source_line}\n"
             "Candidate row paths with their real schema and sample rows:\n"
             + ("\n".join(blocks) if blocks else "(the source returned no list of records; use path $)"))
 
@@ -464,8 +465,10 @@ async def generate_spec(settings: dict[str, Any], model: str, prompt: str, sourc
             if not problems:
                 return spec, []
         if attempt == 0:
-            msgs = msgs + [{"role": "assistant", "content": raw or ""},
-                           {"role": "user", "content": "That spec has problems:\n- " + "\n- ".join(problems)
+            shown = redact.scrub_command_output(raw or "")
+            listed = redact.scrub_command_output("\n- ".join(problems))
+            msgs = msgs + [{"role": "assistant", "content": shown},
+                           {"role": "user", "content": "That spec has problems:\n- " + listed
                             + "\nReturn the corrected JSON spec only."}]
     return spec, problems
 

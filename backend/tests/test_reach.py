@@ -169,6 +169,25 @@ def test_web_search_falls_back_to_duckduckgo_when_exa_fails(monkeypatch: pytest.
     assert out["results"][0]["url"] == "https://d.example/"
 
 
+def test_a_token_in_a_web_search_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_search(*_a: Any, **_k: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        return ([{"title": "t", "url": "https://d.example/", "snippet": "s"}],
+                {"failed": {"exa": f"rejected {pat}"}})
+
+    original = tools.websearch.search
+    tools.websearch.search = fake_search  # type: ignore[method-assign]
+    try:
+        out = call(make_toolbox(), "web_search", query="widgets")
+    finally:
+        tools.websearch.search = original  # type: ignore[method-assign]
+    assert pat not in str(out) and "[github-pat]" in out["failed"]["exa"]
+    assert out["results"][0]["url"] == "https://d.example/"
+    bad = call(make_toolbox(), "web_search", query=pat, time_range="nope")
+    assert pat not in str(bad) and "[github-pat]" in bad["example"]["query"]
+
+
 def test_youtube_video_refuses_other_hosts_and_tainted_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_video(url: str, lang: str = "en") -> dict[str, Any]:
         return {"title": "v", "transcript": "x" * 5000}
@@ -183,10 +202,179 @@ def test_youtube_video_refuses_other_hosts_and_tainted_urls(monkeypatch: pytest.
     assert out["title"] == "v" and len(out["transcript"]) == 2000 and out["transcript_truncated"]
 
 
+def test_a_token_in_a_github_issue_author_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_read(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"repo": f"acme/{pat}", "title": "Bug", "author": pat, "body": "ok",
+                "comments": [{"author": pat, "body": "lgtm", "date": "2026-01-01"}]}
+
+    monkeypatch.setattr(reach, "github_read", fake_read)
+    monkeypatch.setattr(reach, "gh_token", lambda _s: "")
+    out = call(make_toolbox(), "github_read", repo="acme/x", number=1)
+    assert pat not in str(out)
+    assert "[github-pat]" in out["repo"] and "[github-pat]" in out["author"]
+    assert "[github-pat]" in out["comments"][0]["author"]
+    assert out["comments"][0]["body"] == "lgtm"
+
+
+def test_a_token_in_a_github_search_result_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_search(kind: str, query: str, n: int, token: str = "") -> list[dict[str, Any]]:
+        return [{"repo": f"acme/{pat}", "url": "https://github.com/acme/x", "description": f"uses {pat}",
+                 "title": f"Bug {pat}", "path": f"src/{pat}.py", "stars": 1}]
+
+    monkeypatch.setattr(reach, "github_search", fake_search)
+    monkeypatch.setattr(reach, "gh_token", lambda _s: "")
+    out = call(make_toolbox(), "github_search", query="sync")
+    row = out["results"][0]
+    assert pat not in str(row)
+    assert "[github-pat]" in row["repo"] and "[github-pat]" in row["description"]
+    assert "[github-pat]" in row["title"] and "[github-pat]" in row["path"]
+    assert row["url"] == "https://github.com/acme/x"
+
+
+def test_a_token_in_a_github_branch_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_read(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"repo": "acme/x", "language": pat, "license": f"SEE {pat}", "default_branch": pat,
+                "state": f"open {pat}", "readme": "hi"}
+
+    async def fake_search(kind: str, query: str, n: int, token: str = "") -> list[dict[str, Any]]:
+        return [{"repo": "acme/x", "url": "https://github.com/acme/x", "language": pat, "updated": "2026-01-01"}]
+
+    monkeypatch.setattr(reach, "github_read", fake_read)
+    monkeypatch.setattr(reach, "github_search", fake_search)
+    monkeypatch.setattr(reach, "gh_token", lambda _s: "")
+    tb = make_toolbox()
+    read = call(tb, "github_read", repo="acme/x")
+    assert pat not in str(read)
+    assert read["language"] == "[github-pat]" and read["default_branch"] == "[github-pat]"
+    assert "[github-pat]" in read["license"] and "[github-pat]" in read["state"]
+    assert read["readme"] == "hi"
+    found = call(tb, "github_search", query="sync")
+    row = found["results"][0]
+    assert row["language"] == "[github-pat]" and row["updated"] == "2026-01-01"
+    assert row["url"] == "https://github.com/acme/x"
+
+
+def test_a_token_in_a_youtube_title_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_video(url: str, lang: str = "en") -> dict[str, Any]:
+        return {"title": f"Talk {pat}", "channel": f"Chan {pat}", "description": "notes", "transcript": f"said {pat}"}
+
+    async def fake_search(query: str, n: int) -> list[dict[str, Any]]:
+        return [{"title": f"Talk {pat}", "url": "https://www.youtube.com/watch?v=ok",
+                 "channel": f"Chan {pat}", "duration_seconds": 10}]
+
+    monkeypatch.setattr(reach, "youtube_video", fake_video)
+    monkeypatch.setattr(reach, "youtube_search", fake_search)
+    tb = make_toolbox()
+    video = call(tb, "youtube_video", url="https://www.youtube.com/watch?v=ok")
+    assert pat not in video["title"] and pat not in video["channel"] and pat not in video["transcript"]
+    assert "[github-pat]" in video["title"] and "[github-pat]" in video["channel"]
+    found = call(tb, "youtube_search", query="talk")
+    row = found["results"][0]
+    assert pat not in row["title"] and pat not in row["channel"] and "[github-pat]" in row["title"]
+
+
+def test_a_token_in_a_youtube_snippet_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake_video(url: str, lang: str = "en") -> dict[str, Any]:
+        return {"title": "Talk", "channel": "Chan", "description": "notes", "transcript": "hi",
+                "url": f"https://www.youtube.com/watch?v=ok&list={pat}", "upload_date": pat}
+
+    async def fake_search(query: str, n: int) -> list[dict[str, Any]]:
+        return [{"title": "Talk", "url": "https://www.youtube.com/watch?v=ok", "channel": "Chan",
+                 "snippet": f"about {pat}", "duration_seconds": 10}]
+
+    monkeypatch.setattr(reach, "youtube_video", fake_video)
+    monkeypatch.setattr(reach, "youtube_search", fake_search)
+    tb = make_toolbox()
+    video = call(tb, "youtube_video", url="https://www.youtube.com/watch?v=ok")
+    assert pat not in str(video)
+    assert video["upload_date"] == "[github-pat]" and "[github-pat]" in video["url"]
+    assert video["transcript"] == "hi" and video["title"] == "Talk"
+    row = call(tb, "youtube_search", query="talk")["results"][0]
+    assert "[github-pat]" in row["snippet"] and row["url"] == "https://www.youtube.com/watch?v=ok"
+
+    async def boom(url: str, lang: str = "en") -> dict[str, Any]:
+        raise reach.ReachError(f"caption track {pat}")
+
+    monkeypatch.setattr(reach, "youtube_video", boom)
+    err = call(tb, "youtube_video", url="https://www.youtube.com/watch?v=ok")
+    assert pat not in str(err) and "[github-pat]" in err["error"]
+
+
+def test_a_token_in_a_youtube_refusal_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    url = f"https://www.youtube.com/watch?v={pat}"
+    err = call(make_toolbox(), "youtube_video", {"tainted": True}, url=url)
+    assert pat not in str(err)
+    assert "[github-pat]" in err["error"] and "restricted" in err["error"]
+
+
+def test_a_token_in_a_non_youtube_host_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    err = call(make_toolbox(), "youtube_video", url=f"https://{pat}.example.com/watch")
+    assert pat.lower() not in str(err).lower()
+    assert "[github-pat]" in err["error"] and "not YouTube" in err["error"]
+
+
 def test_github_errors_are_tool_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reach, "gh_token", lambda s: "")
     out = call(make_toolbox(), "github_read", repo="not a repo")
     assert "not an owner/name" in out["error"] and out["try_instead"]
+
+
+def test_a_token_in_a_feed_title_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    monkeypatch.setattr(tools, "_check_url", lambda *_a, **_k: None)
+
+    async def fake_guarded(*_a: Any, **_k: Any) -> Any:
+        import httpx
+        return httpx.Response(200, content=b"ok")
+
+    monkeypatch.setattr(tools, "guarded_request", fake_guarded)
+    monkeypatch.setattr(reach, "parse_feed", lambda _content, _n: {
+        "feed": f"Blog {pat}", "site": f"https://b.example/?key={pat}",
+        "items": [{"title": f"One {pat}", "url": "https://b.example/1", "published": "", "summary": "Hi"}],
+        "total_items": 1,
+    })
+    out = call(make_toolbox(), "read_feed", url="https://b.example/feed")
+    assert pat not in out["feed"] and "[github-pat]" in out["feed"]
+    assert pat not in out["items"][0]["title"] and "[github-pat]" in out["items"][0]["title"]
+    assert pat not in out["site"]
+
+
+def test_a_token_in_a_feed_date_is_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    monkeypatch.setattr(tools, "_check_url", lambda *_a, **_k: None)
+
+    async def ok(*_a: Any, **_k: Any) -> Any:
+        import httpx
+        return httpx.Response(200, content=b"ok")
+
+    async def missing(*_a: Any, **_k: Any) -> Any:
+        import httpx
+        return httpx.Response(404, content=b"")
+
+    monkeypatch.setattr(tools, "guarded_request", ok)
+    monkeypatch.setattr(reach, "parse_feed", lambda _content, _n: {
+        "feed": "Blog", "site": "https://b.example/",
+        "items": [{"title": "One", "url": "https://b.example/1", "published": pat, "summary": "Hi"}],
+        "total_items": 1,
+    })
+    tb = make_toolbox()
+    out = call(tb, "read_feed", url="https://b.example/feed")
+    assert out["items"][0]["published"] == "[github-pat]" and out["items"][0]["summary"] == "Hi"
+    monkeypatch.setattr(tools, "guarded_request", missing)
+    err = call(tb, "read_feed", url=f"https://b.example/{pat}")
+    assert pat not in str(err) and "[github-pat]" in err["error"]
 
 
 def test_read_feed_applies_the_taint_rule() -> None:

@@ -60,6 +60,23 @@ class WiringTestCase(unittest.TestCase):
                           "the model should be told where a tool came from")
             self.assertEqual(s["function"]["parameters"], PARAMS)
 
+    def test_a_token_in_a_tool_description_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        app.mcp_store.sync_tools(self.server["id"], [
+            {"name": "search", "description": f"Search using {pat}", "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string", "description": f"query {pat}"}},
+            }},
+        ])
+        _modes, schemas = app._mcp_tooling(None, None)
+        search = next(s for s in schemas if s["function"]["name"] == self.slug)
+        self.assertNotIn(pat, search["function"]["description"])
+        self.assertIn("[github-pat]", search["function"]["description"])
+        self.assertNotIn(pat, search["function"]["parameters"]["properties"]["q"]["description"])
+        self.assertIn("[github-pat]", search["function"]["parameters"]["properties"]["q"]["description"])
+        stored = next(t for t in app.mcp_store.tools() if t["slug"] == self.slug)
+        self.assertIn(pat, stored["description"])
+
     def test_a_tool_whose_server_is_down_is_not_offered(self) -> None:
         self._ready = []
         self.assertEqual(app._mcp_tooling(None, None), ({}, []))

@@ -13,7 +13,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import llm
+from . import llm, redact
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def pick_texts(user_texts: list[str]) -> list[str]:
 
 
 async def generate(settings: dict[str, Any], model: str, user_texts: list[str], cancel: asyncio.Event | None = None) -> str:
-    texts = [" ".join(t.split())[:_CLIP] for t in user_texts if t and t.strip()]
+    texts = [" ".join(redact.scrub_command_output(t).split())[:_CLIP] for t in user_texts if t and t.strip()]
     if not texts:
         return ""
     body = "\n\n".join(f"Message {i + 1}: {t}" for i, t in enumerate(texts))

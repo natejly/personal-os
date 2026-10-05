@@ -34,6 +34,7 @@ from typing import Any, Callable
 
 from .db import Database, new_id, now, row_to_dict
 from .workspace import Workspace
+from . import redact
 
 # These tables are owned here, not by db.py: Database._migrate runs inside Database.__init__,
 # before Desks(db) exists, so a _migrate entry for them would PRAGMA an absent table. Post-release
@@ -263,11 +264,11 @@ def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str
     lines: list[str] = []
     for a in rows:
         ok = a.get("status") == "approved"
-        note = _line(a.get("note"), 400)
+        note = redact.scrub_command_output(_line(a.get("note"), 400))
         tool = _line(a.get("tool"), 80) or "a tool"
         if tool == "propose_plan":
             plan = plan_for(a["call_id"]) or {}
-            title = _line(plan.get("title"), 120) or "your plan"
+            title = redact.scrub_command_output(_line(plan.get("title"), 120) or "your plan")
             if ok:
                 lines.append(f"- The user approved the plan \"{title}\". It is the approved plan at the end of "
                              "your context; carry it out.")
@@ -275,14 +276,14 @@ def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str
                 lines.append(f"- The user rejected the plan \"{title}\". Run none of its steps; draft a different "
                              "one or ask what they want instead.")
         elif tool == "desk_ask":
-            q = _line((a.get("args") or {}).get("question"), 300)
+            q = redact.scrub_command_output(_line((a.get("args") or {}).get("question"), 300))
             if ok and note:
                 lines.append(f"- You asked: {q}\n  The user answered: {note}")
             else:
                 lines.append(f"- You asked: {q}\n  The user dismissed the question without answering; use your "
                              "best judgement and say what you assumed.")
         else:
-            args = json.dumps(a.get("args") or {}, ensure_ascii=False, default=str)
+            args = redact.scrub_command_output(json.dumps(a.get("args") or {}, ensure_ascii=False, default=str))
             if len(args) > 600:
                 args = args[:600] + "…"
             if ok:

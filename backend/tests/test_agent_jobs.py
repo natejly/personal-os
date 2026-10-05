@@ -679,6 +679,28 @@ def test_schedule_task_books_a_one_off_and_a_repeating_job() -> None:
     assert "error" in both and "one schedule" in both["error"]
 
 
+def test_a_token_in_a_scheduled_task_name_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    mine = tool("schedule_task", {"name": f"Check {pat}", "prompt": "nothing", "when": iso_in(5 * HOUR)})
+    assert pat not in mine["name"] and "[github-pat]" in mine["name"]
+    assert pat in jobs.get(mine["id"])["name"]
+    listed = tool("scheduled_tasks", {})
+    row = next(t for t in listed["tasks"] if t["id"] == mine["id"])
+    assert pat not in row["name"] and "[github-pat]" in row["name"]
+    jobs.delete(mine["id"])
+
+
+def test_a_token_in_a_schedule_error_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    bad_cron = tool("schedule_task", {"name": "x", "prompt": "y", "cron": pat})
+    assert pat not in str(bad_cron) and "[github-pat]" in bad_cron["error"] and bad_cron["field"] == "cron"
+    bad_tz = tool("schedule_task", {"name": "x", "prompt": "y", "when": iso_in(HOUR), "timezone": pat})
+    assert pat not in str(bad_tz) and "[github-pat]" in bad_tz["error"] and bad_tz["field"] == "timezone"
+    missing = tool("cancel_scheduled_task", {"id": pat})
+    assert pat not in str(missing) and "[github-pat]" in missing["error"]
+    assert jobs.get(pat) is None
+
+
 def test_listing_and_cancelling_scheduled_tasks() -> None:
     mine = tool("schedule_task", {"name": "Cancel me", "prompt": "nothing", "when": iso_in(5 * HOUR)})
     listed = tool("scheduled_tasks", {})

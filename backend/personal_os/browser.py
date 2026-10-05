@@ -60,9 +60,20 @@ def _clip(text: str) -> tuple[str, bool]:
     return (text[:SNAPSHOT_CAP], True) if len(text) > SNAPSHOT_CAP else (text, False)
 
 
+def _shown(value: Any) -> Any:
+    """Strings in a page result the model reads. Numbers and flags stay."""
+    if isinstance(value, str):
+        return redact.scrub_command_output(value)
+    if isinstance(value, list):
+        return [_shown(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _shown(item) for key, item in value.items()}
+    return value
+
+
 def _fail(name: str, res: dict[str, Any]) -> dict[str, Any]:
     code = str(res.get("code") or "")
-    msg = str(res.get("error") or "the browser call failed")[:400]
+    msg = redact.scrub_command_output(str(res.get("error") or "the browser call failed"))[:400]
     return tool_error(f"{name}: {msg}", alternative=FORWARD.get(code))
 
 
@@ -110,7 +121,7 @@ def register(tb: Any) -> None:
             notes[i] = DOWNLOADED + " " + rel
         if files:
             out["downloaded"] = files
-        return out
+        return _shown(out)
 
     async def call(name: str, route: str, payload: dict[str, Any], ctx: dict[str, Any], timeout: float = 45.0) -> dict[str, Any]:
         res = await mac.page_bridge.browser(route, {"session": session_of(ctx), **payload}, timeout)
@@ -140,7 +151,8 @@ def register(tb: Any) -> None:
             cur, host = tools._check_url(url, {**ctx, "tainted": False}, merged)  # SSRF and scheme rules, no taint rule
             await tools._resolve(host)
         except UrlBlocked as e:
-            return tool_error(f"browser_open refused {url}: {str(e).replace('fetch_url', 'browser_open')}", field="url",
+            return tool_error(redact.scrub_command_output(
+                f"browser_open refused {url}: {str(e).replace('fetch_url', 'browser_open')}"), field="url",
                               alternative=e.alternative or "fetch_url for a plain read, or ask the user for a different link")
         try:
             tools._check_url(url, ctx, merged)  # now the taint rule
@@ -148,7 +160,8 @@ def register(tb: Any) -> None:
             # A tainted run may not navigate to an address the model composed. Unlike fetch_url, ask instead of refusing:
             # the user can see the address on the card.
             if not await ask(ctx, {"action": "open", "url": cur, "why": UNTYPED}):
-                return tool_error(f"browser_open refused {url}: {str(e).replace('fetch_url', 'browser_open')}", field="url",
+                return tool_error(redact.scrub_command_output(
+                    f"browser_open refused {url}: {str(e).replace('fetch_url', 'browser_open')}"), field="url",
                                   alternative=e.alternative or tools.TAINTED_HINT)
         root = desk_root(ctx)
         payload: dict[str, Any] = {"url": cur, "newTab": bool(new_tab), "timeoutMs": 30000,
@@ -289,7 +302,7 @@ def register(tb: Any) -> None:
                 if not p.is_file():
                     raise fsx.FsError("it is not a file")
             except fsx.FsError as e:
-                return tool_error(f"browser_manage(upload): {raw}: {e}", field="paths",
+                return tool_error(redact.scrub_command_output(f"browser_manage(upload): {raw}: {e}"), field="paths",
                                   alternative="desk_list_files to find the file, or desk_write_file to create it first")
             out.append(p)
         return out
@@ -310,9 +323,9 @@ def register(tb: Any) -> None:
         f = d / f"{int(time.time() * 1000)}.png"
         f.write_bytes(raw)
         shown = os.path.relpath(f, root) if root is not None else str(f)
-        return {"path": shown, "bytes": len(raw), "width": res.get("width"), "height": res.get("height"),
-                "url": res.get("url") or "", "title": res.get("title") or "",
-                "note": "view_image can look at this file; the image itself is not returned here"}
+        return _shown({"path": shown, "bytes": len(raw), "width": res.get("width"), "height": res.get("height"),
+                       "url": res.get("url") or "", "title": res.get("title") or "",
+                       "note": "view_image can look at this file; the image itself is not returned here"})
 
     async def browser_manage(ctx: dict[str, Any], action: str, tab: int | None = None, ms: int = 1000, text: str = "", accept: bool = True,
                              prompt_text: str = "", full_page: bool = False, ref: str = "", paths: list[str] | None = None,

@@ -4,6 +4,7 @@ Run: uv run --project backend --with pytest pytest backend/tests/test_board_clai
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -33,6 +34,54 @@ def env():
 
 def kinds(b, cid):
     return [(e["kind"], e["payload"].get("reason")) for e in b.events(cid)]
+
+
+def test_a_token_in_a_missing_board_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    db = Database(Path(tempfile.mkdtemp(prefix="bc-")) / "t.db")
+    boards = Boards(db)
+    boards.create(pat)
+    box = Toolbox(None, None, None, lambda: {}, boards=boards)  # type: ignore[arg-type]
+    hinted = asyncio.run(box.call("board_list", {"board": "Nope"}, {"project_id": None}))
+    assert pat not in str(hinted)
+    assert "Nope" in hinted["error"] and hinted["example"]["board"] == "[github-pat]"
+    assert boards.list()[0]["name"] == pat
+    missed = asyncio.run(box.call("board_move_card", {"board": pat, "card": pat, "column": "Done"}, {"project_id": None}))
+    assert pat not in str(missed)
+    assert "[github-pat]" in missed["error"] and missed["example"]["card"] == "[github-pat]"
+    assert boards.list()[0]["name"] == pat
+
+
+def test_a_token_in_a_card_title_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    db = Database(Path(tempfile.mkdtemp(prefix="bc-")) / "t.db")
+    boards = Boards(db)
+    board = boards.create("Work")
+    boards.add_card(board["id"], None, f"Send {pat}")
+    box = Toolbox(None, None, None, lambda: {}, boards=boards)  # type: ignore[arg-type]
+    out = asyncio.run(box.call("board_list", {"board": "Work"}, {"project_id": None}))
+    assert pat not in out["cards"][0]["title"]
+    assert "[github-pat]" in out["cards"][0]["title"]
+    assert pat in boards.find_board("Work")["cards"][0]["title"]
+
+
+def test_a_token_in_a_new_card_title_is_stripped() -> None:
+    from personal_os.tools import Toolbox
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    db = Database(Path(tempfile.mkdtemp(prefix="bc-")) / "t.db")
+    boards = Boards(db)
+    boards.create("Work")
+    box = Toolbox(None, None, None, lambda: {}, boards=boards)  # type: ignore[arg-type]
+    added = asyncio.run(box.call("board_add_card", {"board": "Work", "title": f"Send {pat}"}, {"project_id": None}))
+    assert pat not in added["added"] and "[github-pat]" in added["added"]
+    assert pat in boards.find_board("Work")["cards"][0]["title"]
+    made = asyncio.run(box.call("board_create", {"name": f"Board {pat}", "columns": [f"Col {pat}"]}, {"project_id": None}))
+    assert pat not in made["created"] and pat not in "".join(made["columns"])
+    assert "[github-pat]" in made["created"] and "[github-pat]" in made["columns"][0]
+    stored = next(b for b in boards.list() if pat in b["name"])
+    assert pat in stored["name"]
 
 
 def test_concurrent_claims_one_winner(env):

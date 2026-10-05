@@ -25,6 +25,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
+from . import redact
 from .db import Database, new_id, now, row_to_dict
 from .runs import args_digest
 
@@ -37,6 +38,17 @@ MAX_WHY = 200
 def _line(text: Any, limit: int) -> str:
     """One line. A plan is re-sent as prompt text, so a newline in a label cannot open a new section."""
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _shown(value: Any) -> Any:
+    """A copy of plan arguments with credentials removed. The stored plan is left as approved."""
+    if isinstance(value, str):
+        return redact.scrub_command_output(value)
+    if isinstance(value, list):
+        return [_shown(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _shown(item) for key, item in value.items()}
+    return value
 
 PLAN_TOOL = "propose_plan"
 # What may still run while a plan is being drafted: reading and thinking, never acting. 'plan' is
@@ -437,23 +449,23 @@ class Plans:
         if not plan or plan.get("status") != "approved":
             return ""
         marks = {"approved": "[ ]", "consumed": "[~]", "done": "[x]", "failed": "[!]", "dropped": "[-]", "rejected": "[-]"}
-        title = _line(plan.get("title"), MAX_TITLE) or "untitled"
+        title = redact.scrub_command_output(_line(plan.get("title"), MAX_TITLE) or "untitled")
         lines = [f"## Approved plan: {title}"]
-        intent = _line(plan.get("intent"), MAX_TITLE)
+        intent = redact.scrub_command_output(_line(plan.get("intent"), MAX_TITLE))
         if intent:
             lines.append(intent)
         lines.append("Each open step [ ] is authorised once, with exactly these arguments; [x] is done, [!] failed, "
                      "[~] ran with an unknown outcome, [-] is not authorised.")
         for s in plan.get("steps") or []:
-            args = json.dumps(s.get("arguments") or {}, ensure_ascii=False, default=str)
+            args = redact.scrub_command_output(json.dumps(s.get("arguments") or {}, ensure_ascii=False, default=str))
             if len(args) > 600:
                 args = args[:600] + "…"
-            step_title = _line(s.get("title") or s["tool"], MAX_TITLE) or s["tool"]
+            step_title = redact.scrub_command_output(_line(s.get("title") or s["tool"], MAX_TITLE) or s["tool"])
             line = f"{marks.get(s.get('status'), '[ ]')} {int(s['idx']) + 1}. {step_title} - {s['tool']}({args})"
             if s.get("status") == "failed" and s.get("result_error"):
-                line += f" -> failed: {_line(s['result_error'], 160)}"
+                line += f" -> failed: {redact.scrub_command_output(_line(s['result_error'], 160))}"
             lines.append(line)
-        note = _line(plan.get("note"), MAX_WHY)
+        note = redact.scrub_command_output(_line(plan.get("note"), MAX_WHY))
         if note:
             lines.append(f"The user's note on approval: {note}")
         return "\n".join(lines)
@@ -465,12 +477,14 @@ class Plans:
 
         if plan.get("status") == "rejected":
             e = tool_error(REJECTED_ERROR, alternative="ask the user what they would like instead")
-            return {**e, "plan_id": plan["plan_id"], "status": "rejected", **({"user_note": plan["note"]} if plan.get("note") else {})}
+            return {**e, "plan_id": plan["plan_id"], "status": "rejected",
+                    **({"user_note": redact.scrub_command_output(str(plan["note"]))} if plan.get("note") else {})}
         ok = [s for s in plan.get("steps") or [] if s["status"] in ("approved", "consumed")]
         dropped = [s for s in plan.get("steps") or [] if s["status"] == "dropped"]
         out: dict[str, Any] = {
             "plan_id": plan["plan_id"], "status": plan.get("status") or "pending", "approved": len(ok),
-            "steps": [{"idx": s["idx"], "tool": s["tool"], "arguments": s["arguments"], "edited": s["edited"]} for s in ok],
+            "steps": [{"idx": s["idx"], "tool": s["tool"], "arguments": _shown(s.get("arguments") or {}),
+                       "edited": s["edited"]} for s in ok],
             "note": APPROVED_NOTE,
         }
         if any(s["edited"] for s in ok):
@@ -479,7 +493,7 @@ class Plans:
             out["dropped"] = [{"idx": s["idx"], "tool": s["tool"]} for s in dropped]
             out["dropped_note"] = DROPPED_NOTE
         if plan.get("note"):
-            out["user_note"] = plan["note"]
+            out["user_note"] = redact.scrub_command_output(str(plan["note"]))
         if not ok:
             out["note"] = "The user approved nothing from this plan. Do not run any of its steps; ask what they want instead."
         return out

@@ -50,6 +50,50 @@ def test_a_meeting_todo_taints_and_a_local_one_does_not() -> None:
         assert ctx3.get("tainted") is True, source
 
 
+def test_a_token_in_a_todo_is_stripped_for_the_model() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    store = Todos(Database(tempfile.mkdtemp()))
+    row = store.create(f"Send {pat}", notes=f"the key is {pat}", source="email")
+    out = asyncio.run(_box(store).call("todo_list", {}, {"project_id": None}))
+    shown = out["todos"][0]
+    assert pat not in shown["title"] and pat not in shown["notes"]
+    assert "[github-pat]" in shown["title"] and "[github-pat]" in shown["notes"]
+    kept = store.get(row["id"])
+    assert pat in kept["title"] and pat in kept["notes"]
+
+
+def test_a_token_in_a_new_todo_title_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    store = Todos(Database(tempfile.mkdtemp()))
+    box = _box(store)
+    ctx: dict = {"project_id": None}
+    added = asyncio.run(box.call("todo_add", {"title": f"Send {pat}", "notes": f"key {pat}"}, ctx))
+    assert pat not in added["title"] and "[github-pat]" in added["title"]
+    assert pat in store.get(added["id"])["title"]
+    updated = asyncio.run(box.call("todo_update", {"id": added["id"], "notes": f"still {pat}"}, ctx))
+    assert pat not in updated["title"] and pat not in updated["notes"]
+    assert "[github-pat]" in updated["notes"]
+    assert pat in store.get(added["id"])["notes"]
+    deleted = asyncio.run(box.call("todo_delete", {"id": added["id"]}, ctx))
+    assert pat not in deleted["deleted"] and "[github-pat]" in deleted["deleted"]
+
+
+def test_a_token_in_a_missing_todo_id_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    store = Todos(Database(tempfile.mkdtemp()))
+    kept = store.create("buy milk", source="local")
+    box = _box(store)
+    ctx: dict = {"project_id": None}
+    missing = asyncio.run(box.call("todo_update", {"id": pat, "done": True}, ctx))
+    assert pat not in str(missing) and "[github-pat]" in missing["error"]
+    gone = asyncio.run(box.call("todo_delete", {"id": pat}, ctx))
+    assert pat not in str(gone) and "[github-pat]" in gone["error"]
+    assert store.get(kept["id"])["title"] == "buy milk"
+
+
 if __name__ == "__main__":
     test_a_meeting_todo_taints_and_a_local_one_does_not()
+    test_a_token_in_a_todo_is_stripped_for_the_model()
+    test_a_token_in_a_new_todo_title_is_stripped()
+    test_a_token_in_a_missing_todo_id_is_stripped()
     print("ok")

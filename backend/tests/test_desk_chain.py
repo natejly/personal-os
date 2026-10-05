@@ -150,6 +150,23 @@ def test_parked_report_cannot_open_a_section() -> None:
           "an ordinary parked note is unchanged")
 
 
+def test_a_token_in_a_parked_report_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    rows = [
+        {"status": "approved", "tool": "desk_ask", "call_id": "c2",
+         "args": {"question": f"Use {pat}?"}, "note": f"yes {pat}"},
+        {"status": "approved", "tool": "gmail_send", "call_id": "c3",
+         "args": {"to": pat}, "note": "send it"},
+    ]
+    text = parked_report(rows, lambda _cid: None)
+    check(pat not in text, "the token is gone from the report")
+    check("You asked: Use [github-pat]?" in text and "The user answered: yes [github-pat]" in text,
+          "the question and the answer are stripped")
+    check('"[github-pat]"' in text and "send it" in text, "the approved arguments are stripped and the note stays")
+    check(rows[0]["args"]["question"] == f"Use {pat}?" and rows[1]["note"] == "send it",
+          "the stored cards stay as written")
+
+
 def test_plan_hint_and_footer() -> None:
     check("desk_done" in DESK_PLAN_HINT and "does not need a step" in DESK_PLAN_HINT and "exact arguments" in DESK_PLAN_HINT,
           "plan hint explains binding and what needs no step")
@@ -159,7 +176,7 @@ def test_plan_hint_and_footer() -> None:
 
 
 def main() -> None:
-    for t in (test_every_budget_stop_chains_on_progress, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_plan_hint_and_footer):
+    for t in (test_every_budget_stop_chains_on_progress, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_a_token_in_a_parked_report_is_stripped, test_plan_hint_and_footer):
         t()
     test_continue_message(Path(tempfile.mkdtemp()))
     print(f"inner totals: {passed} passed")

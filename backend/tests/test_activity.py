@@ -316,6 +316,21 @@ def test_context_block_carries_now_profile_and_recent_periods() -> None:
         assert len(m.context_block(max_chars=200)) <= 200   # respects the budget
 
 
+def test_a_token_in_an_activity_summary_is_stripped() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    m.store.set_profile(f"Uses {pat} in the terminal")
+    m.store.add_summary("2026-09-29", time.time() - 3600, time.time() - 1800,
+                        f"Saw {pat}", f"They had {pat} on screen.\n\nMore detail.", ["Terminal"], 4)
+    block = m.context_block()
+    assert pat not in block and block.count("[github-pat]") == 3
+    assert pat in m.store.profile()["content"]
+    cfg = m.config()
+    cfg["redact"] = False
+    m.db.set_settings({"activity": cfg})
+    assert pat in m.context_block()
+
+
 def test_a_token_in_the_live_window_title_is_stripped() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.running = True
@@ -550,6 +565,22 @@ def test_rollup_quotes_observed_activity() -> None:
         if "## System" in line:
             assert fenced
     assert not fenced
+
+
+def test_a_token_in_observed_activity_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    m = _monitor(Path(tempfile.mkdtemp()), '{"headline": "Looked at a terminal", "summary": "A shell."}')
+    m.store.add("focus", app="Terminal", title=f"export {pat}", duration_ms=60_000, ts=time.time() - 60)
+    assert asyncio.run(m.rollup_once(force=True)) is not None
+    sent = m.llm_calls[0]["messages"][1]["content"]  # type: ignore[attr-defined]
+    assert pat not in sent and "[github-pat]" in sent
+    m.store.set_profile(f"uses {pat}")
+    m.store.add_summary("2026-10-02", time.time() - 60, time.time(), f"Saw {pat}",
+                        f"the window showed {pat}", ["Terminal"], 1)
+    m.llm_calls.clear()  # type: ignore[attr-defined]
+    asyncio.run(m.refresh_profile())
+    sent = m.llm_calls[0]["messages"][1]["content"]  # type: ignore[attr-defined]
+    assert pat not in sent and sent.count("[github-pat]") == 3
 
 
 def test_profile_refresh_quotes_stored_periods() -> None:

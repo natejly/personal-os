@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from . import redact
+
 RESUME_NOTE = """## Resuming an interrupted reply
 {reason}This is what it had already done.
 {body}
@@ -117,4 +119,5 @@ def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], e
     if not parts:
         parts.append("It had not done anything yet.")
     tag = reason or reason_tag(run) or "interrupted"
-    return RESUME_NOTE.format(reason=REASONS.get(tag, REASONS["interrupted"]), body="\n\n".join(parts))
+    return redact.scrub_command_output(
+        RESUME_NOTE.format(reason=REASONS.get(tag, REASONS["interrupted"]), body="\n\n".join(parts)))

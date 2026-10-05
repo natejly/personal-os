@@ -118,6 +118,39 @@ def test_empty_source_names_are_ignored_rather_than_treated_as_unpredicted() -> 
 # ---------------------------------------------------------------- the plan tool itself
 
 
+def test_a_token_in_an_approved_plan_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    text = Plans.block({
+        "status": "approved",
+        "title": f"Send {pat}",
+        "intent": f"use {pat}",
+        "note": f"ok {pat}",
+        "steps": [{
+            "idx": 0, "tool": "gmail_send", "status": "failed", "title": f"Mail {pat}",
+            "arguments": {"body": pat}, "result_error": f"rejected {pat}",
+        }],
+    })
+    check(pat not in text and text.count("[github-pat]") == 6, "the replayed plan strips a token")
+    check("gmail_send" in text, "the tool name stays so the step can still be matched")
+
+
+def test_a_token_in_an_approved_plan_result_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    args = {"body": pat, "nested": [{"note": pat}]}
+    plan = {
+        "plan_id": "p1", "status": "approved", "note": f"ok {pat}",
+        "steps": [{"idx": 0, "tool": "gmail_send", "status": "approved", "edited": False, "arguments": args}],
+    }
+    out = Plans.model_result(plan)
+    shown = out["steps"][0]["arguments"]
+    check(pat not in shown["body"] and pat not in shown["nested"][0]["note"] and "[github-pat]" in shown["body"],
+          "the approved arguments are stripped")
+    check(pat not in out["user_note"] and "[github-pat]" in out["user_note"], "the approval note is stripped")
+    check(args["body"] == pat, "the stored arguments stay unchanged")
+    rejected = Plans.model_result({"plan_id": "p1", "status": "rejected", "note": f"no {pat}", "steps": []})
+    check(pat not in rejected["user_note"] and "[github-pat]" in rejected["user_note"], "a rejection note is stripped")
+
+
 def test_the_plan_tool_is_named_once() -> None:
     """app.py, tools.py and mcp_servers.py all key off this, so it is worth pinning."""
     check(PLAN_TOOL == "propose_plan", f"got {PLAN_TOOL!r}")

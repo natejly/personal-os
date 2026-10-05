@@ -56,6 +56,19 @@ def test_taint_and_toggle_win() -> None:
     assert STYLE_HEADER not in system and tool({"useStyle": False, "draftMode": True})["profile"] is None
 
 
+def test_a_token_in_the_voice_profile_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    A.style.save_profile(None, {"summary": f"Direct. The key is {pat}.", "guidelines": [f"never paste {pat}"]})
+    try:
+        got = tool({"useStyle": True, "draftMode": True})
+        assert pat not in got["summary"] and pat not in got["guidelines"][0]
+        assert "[github-pat]" in got["summary"] and "[github-pat]" in got["guidelines"][0]
+        stored = A.style.for_context(None)
+        assert pat in stored["summary"] and pat in stored["guidelines"][0]
+    finally:
+        A.style.save_profile(None, {"summary": FIXTURE, "guidelines": ["open with the ask"]})
+
+
 def test_pure_function() -> None:
     assert voice_wanted({}, draft=True, tainted=False)
     assert not voice_wanted({}, draft=False, tainted=False)

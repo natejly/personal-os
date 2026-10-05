@@ -159,6 +159,20 @@ check(made["doc_id"] and made["created"] == "Derivation", "doc_create makes a do
 hits = call("doc_search", {"query": "Derivation"})
 check(any(h["title"] == "Derivation" for h in hits["results"]), f"doc_search finds it: {hits}")
 
+pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+secret = call("doc_create", {"title": f"Notes {pat}", "content": f"the key is {pat}\n", "folder": f"vault/{pat}"})
+listed = call("doc_list", {"query": "Notes"})
+row = next(r for r in listed if r["doc_id"] == secret["doc_id"])
+check(pat not in row["title"] and pat not in (row["folder"] or "") and "[github-pat]" in row["title"], "doc_list strips a token")
+found = call("doc_search", {"query": "key"})
+hit = next(h for h in found["results"] if h["doc_id"] == secret["doc_id"])
+check(pat not in hit["title"] and pat not in hit["snippet"] and "[github-pat]" in hit["snippet"], "doc_search strips a token")
+stored = docs.get(secret["doc_id"])
+check(pat in stored["title"] and pat in stored["content"], "the saved doc stays unchanged")
+check(pat not in secret["created"] and pat not in secret["filed_under"] and "[github-pat]" in secret["created"], "doc_create strips a token")
+held_edit = call("doc_edit", {"doc": secret["doc_id"], "append": "more\n", "summary": "note"})
+check(pat not in held_edit["title"] and "[github-pat]" in held_edit["title"], "doc_edit strips a token in the title")
+
 # a find that matches nothing, or twice, is refused with a usable hint rather than guessed at
 docs.save(made["doc_id"], content="dup\ndup\n", coalesce=False)
 miss = call("doc_edit", {"doc": "Derivation", "edits": [{"find": "nowhere", "replace": "x"}]})

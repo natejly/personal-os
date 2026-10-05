@@ -50,6 +50,15 @@ def test_record_lines_statuses_and_stability() -> None:
     assert compaction.tool_record([]) == "" and compaction.tool_record(None) == ""
 
 
+def test_a_token_in_a_replayed_tool_preview_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    rec = compaction.tool_record([
+        {"name": "gmail_read", "arguments": {"query": pat}, "result_preview": f"the key is {pat}", "error": None},
+        {"name": "fs_read", "arguments": {}, "error": f"failed {pat}", "result_preview": ""},
+    ], True)
+    assert pat not in rec and rec.count("[github-pat]") == 3
+
+
 def test_tainted_preview_is_withheld_until_the_conversation_is_tainted() -> None:
     assert "IGNORE PREVIOUS" not in compaction.tool_record(EVENTS, False)
     assert compaction.WITHHELD in compaction.tool_record(EVENTS, False) and "result_id=tr_abc" in compaction.tool_record(EVENTS, False)

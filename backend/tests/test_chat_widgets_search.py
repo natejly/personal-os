@@ -69,6 +69,29 @@ def test_widget_create_and_place_never_leak_the_secret(monkeypatch: pytest.Monke
     assert bad["field"] == "source"
 
 
+def test_a_token_in_a_missing_widget_is_stripped(tmp_path: Any) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    db = Database(str(tmp_path / "w.db"))
+    store, canvases = Dashboards(db), Canvases(db)
+    kept = store.create_source("Sales API", "http", {"url": "https://api.example/sales"})
+    dash = store.create("Chat widgets")
+    widget = store.create_widget(dash["id"], "Sales", "chart", "sales", [kept["id"]])
+
+    async def fetch(_sid: str) -> Any:
+        return {}
+
+    box = SimpleNamespace(specs={}, settings=lambda: {"defaultModel": "m"})
+    widget_tools.register(box, store, canvases, fetch)
+    missing = run(box.specs["widget_create"].fn({}, kind="chart", source=pat, prompt="x"))
+    assert pat not in str(missing) and "[github-pat]" in missing["error"]
+    assert store.source(kept["id"])["name"] == "Sales API"
+    gone = run(box.specs["widget_place"].fn({}, widget_id=pat))
+    assert pat not in str(gone) and "[github-pat]" in gone["error"]
+    space = run(box.specs["widget_place"].fn({}, widget_id=widget["id"], space=pat))
+    assert pat not in str(space) and "[github-pat]" in space["error"]
+    assert store.widget(widget["id"])["title"] == "Sales"
+
+
 ROWS = [{"title": "Docs", "url": "https://docs.sqlite.org/wal", "snippet": ""},
         {"title": "Blog", "url": "https://blog.example.com/p", "snippet": ""},
         {"title": "Main", "url": "https://sqlite.org/", "snippet": ""}]

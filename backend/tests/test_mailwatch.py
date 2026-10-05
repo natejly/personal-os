@@ -231,6 +231,20 @@ class RefineTests(unittest.TestCase):
         self.assertNotIn("\n", row["subject"])
         self.assertNotIn("\n", row["snippet"])
 
+    def test_a_token_in_a_subject_or_snippet_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        seen: list[Any] = []
+        row = thread("t", msg("1", "al@y.com", 1, f"please look at {pat}", to="bo@y.com"),
+                     subject=f"Re: {pat}")
+        mw.refine([(row, {"status": "fyi", "reason": "x", "age_days": 1, "last_from": "al@y.com"})],
+                  lambda p: seen.append(p) or ["fyi"], ME)
+        sent = seen[0][0]
+        self.assertNotIn(pat, sent["subject"])
+        self.assertNotIn(pat, sent["snippet"])
+        self.assertIn("[github-pat]", sent["subject"])
+        self.assertIn("[github-pat]", sent["snippet"])
+        self.assertEqual(sent["domain"], "y.com")
+
 
 class StubGoogle:
     """Only the two reads the module may use; touching anything else fails the test."""
@@ -317,6 +331,23 @@ class ModuleTests(unittest.TestCase):
         self.assertEqual([t["thread_id"] for t in out["threads"]], ["b"])
         self.assertEqual(out["threads"][0]["subject"], "Quote")
         self.assertIn("error", asyncio.run(spec.fn({}, kind="bogus")))
+
+    def test_a_token_in_a_followup_subject_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        self.google.threads = [thread("b", msg("1", ME, 5, "Let me know when", to="bo@y.com"), subject=f"Quote {pat}")]
+
+        class Box:
+            specs: dict = {}
+
+        box = Box()
+        self.mod.register_tools(box)  # type: ignore[arg-type]
+        out = asyncio.run(box.specs["mail_followups"].fn({}, kind="awaiting_reply"))
+        shown = out["threads"][0]["subject"]
+        self.assertNotIn(pat, shown)
+        self.assertIn("[github-pat]", shown)
+        self.client.post("/mail/watch/refresh")
+        stored = next(t for t in self.client.get("/mail/watch").json()["threads"] if t["thread_id"] == "b")
+        self.assertIn(pat, stored["subject"])
 
     def test_snooze_route(self) -> None:
         self.client.post("/mail/watch/refresh")

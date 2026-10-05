@@ -32,7 +32,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from . import mac
+from . import mac, redact
 
 SKIP_DIRS = frozenset({"node_modules", ".git", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache", "dist", "build"})
 GLOB_CAP = 500
@@ -769,7 +769,10 @@ def register(box: Any) -> None:
         return bool(box.settings().get("requireReadBeforeWrite", True))
 
     def fail(name: str, e: Exception, **kw: Any) -> dict[str, Any]:
-        return tool_error(f"{name}: {e}", alternative=ALTERNATIVE.get(name), **kw)
+        out = tool_error(f"{name}: {e}", alternative=ALTERNATIVE.get(name), **kw)
+        if isinstance(out.get("error"), str):
+            out["error"] = redact.scrub_command_output(out["error"])
+        return out
 
     ALTERNATIVE.update({
         "fs_glob": "find_files for a Spotlight search, or read_local_file on a folder to list it",
@@ -806,7 +809,14 @@ def register(box: Any) -> None:
         except (FsError, mac.LocalPathError) as e:
             return fail("fs_glob", e, field="pattern", example={"pattern": "**/*.md"})
         total = len(rows)
-        return {"root": str(base), "pattern": pattern, "files": rows[:GLOB_CAP], "total": total,
+        shown = []
+        for r in rows[:GLOB_CAP]:
+            item = dict(r)
+            for key in ("path", "rel"):
+                if isinstance(item.get(key), str):
+                    item[key] = redact.scrub_command_output(item[key])
+            shown.append(item)
+        return {"root": redact.scrub_command_output(str(base)), "pattern": pattern, "files": shown, "total": total,
                 "truncated": truncated or total > GLOB_CAP, "note": "newest first; dot-folders, node_modules and .git are skipped"}
     R("fs_glob", ToolSpec("fs_glob", "List files and folders under a root that match a glob (`**` crosses folders; a pattern with no slash matches at any depth), newest first, at most 500. Skips dot-folders, node_modules and .git. Root defaults to the desk workspace or the first workspace folder.",
         _obj({"pattern": {"type": "string", "description": "e.g. **/*.py or src/*.ts"},
@@ -849,9 +859,16 @@ def register(box: Any) -> None:
             return fail("fs_grep", e, field="pattern", example={"pattern": "TODO", "glob": "**/*.py"})
         await asyncio.to_thread(record_grep, conv_of(ctx), rows)
         hits = sum(1 for r in rows if not r.get("context"))
-        from . import redact
-        shown = [{**r, "text": redact.scrub_command_output(r["text"])} if isinstance(r.get("text"), str) else r for r in rows]
-        return {"root": str(base), "pattern": pattern, "matches": shown, "count": hits, "truncated": truncated,
+        shown = []
+        for r in rows:
+            item = dict(r)
+            if isinstance(item.get("text"), str):
+                item["text"] = redact.scrub_command_output(item["text"])
+            if isinstance(item.get("path"), str):
+                item["path"] = redact.scrub_command_output(item["path"])
+            shown.append(item)
+        return {"root": redact.scrub_command_output(str(base)), "pattern": pattern, "matches": shown, "count": hits,
+                "truncated": truncated,
                 **({"note": f"stopped at {GREP_CAP} matches; narrow the pattern or pass glob"} if truncated else {})}
     R("fs_grep", ToolSpec("fs_grep", "Search file contents under a root with a regular expression. Returns path, line number and the line (cut at 400 characters), at most 200 matches; binary files and secret files are skipped. glob narrows the files (e.g. **/*.py); context adds lines around each match. Read a match's file with read_local_file, change it with fs_edit.",
         _obj({"pattern": {"type": "string", "description": "Regular expression"},
@@ -915,6 +932,10 @@ def register(box: Any) -> None:
             out["syntax_error"] = err
             out["note"] = "the file was written, but it does not parse; fix it with another fs_edit"
         carry_desk_copies(box, ctx, g, [p])
+        out["path"] = redact.scrub_command_output(out["path"])
+        out["diff"] = redact.scrub_command_output(out["diff"])
+        if isinstance(out.get("syntax_error"), str):
+            out["syntax_error"] = redact.scrub_command_output(out["syntax_error"])
         return out
     R("fs_edit", ToolSpec("fs_edit", "Change a file by replacing exact text: old must match once (or pass replace_all). If the exact text is not found it also tries matching ignoring each line's indentation, then matching by a block's first and last line. Returns a unified diff and which matcher applied. Read the part you are changing first. Python, JSON, TOML and YAML files are syntax-checked afterwards. Outside the desk workspace and the user's workspace folders it asks first.",
         _obj({"path": {"type": "string"}, "old": {"type": "string", "description": "Text to replace, copied exactly"},
@@ -979,6 +1000,9 @@ def register(box: Any) -> None:
         if d.is_dir():
             copied = [Path(dirpath) / name for dirpath, _dirs, names in os.walk(d) for name in names]
         carry_desk_copies(box, ctx, g, copied)
+        for key in ("from", "path"):
+            if isinstance(out.get(key), str):
+                out[key] = redact.scrub_command_output(out[key])
         return out
     R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files are not copied. Writing outside the desk workspace and the user's workspace folders asks first.",
         _obj({"src": {"type": "string"}, "dst": {"type": "string"}}, ["src", "dst"]), fs_copy, "files", "writes",
@@ -995,7 +1019,7 @@ def register(box: Any) -> None:
             return fail("fs_mkdir", e, field="path")
         except OSError as e:
             return fail("fs_mkdir", e.strerror or e, field="path")
-        return {"path": str(p), "created": not existed}
+        return {"path": redact.scrub_command_output(str(p)), "created": not existed}
     R("fs_mkdir", ToolSpec("fs_mkdir", "Create a folder, with any missing parents. Succeeds quietly if it already exists. Outside the desk workspace and the user's workspace folders it asks first.",
         _obj({"path": {"type": "string"}}, ["path"]), fs_mkdir, "files", "writes",
         examples=[{"path": "~/Documents/project/reports/2026"}]))

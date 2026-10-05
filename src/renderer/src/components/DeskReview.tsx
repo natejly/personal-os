@@ -19,7 +19,7 @@ const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: 
   { value: 'doc', label: 'New file', hint: 'Creates a new file, searchable immediately' },
   { value: 'doc_append', label: 'Append to a file', hint: 'Proposes an edit to an existing file; you accept it in Files' },
   { value: 'document', label: 'Upload', hint: 'Adds the file to your uploads' },
-  { value: 'todo', label: 'Todos', hint: 'One todo per checklist or list line' },
+  { value: 'todo', label: 'Lists', hint: 'One todo per checklist or list line' },
   { value: 'artifact', label: 'Page', hint: 'Saves it as a page you can open from here', only: /\.(html?|svg)$/i },
   { value: 'mail_draft', label: 'Gmail draft', hint: 'Saves a Gmail draft, never sends. The file starts with To: and Subject: lines, then a blank line' },
   { value: 'download', label: 'Download', hint: 'Hands you the file; nothing enters the app' }
@@ -33,7 +33,7 @@ function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; do
     doc: id ? ['open the note', () => void s().openDoc(id)] : undefined,
     doc_append: docId ? ['open the note', () => void s().openDoc(docId)] : undefined,
     document: ['open uploads', () => s().openFiles('uploads')],
-    todo: ['open Todos', () => s().setView('todos')],
+    todo: ['open Lists', () => s().setView('todos')],
     mail_draft: ['open Mail', () => s().setView('mail')],
     artifact: id ? ['open the page', () => setPage(true)] : undefined
   }

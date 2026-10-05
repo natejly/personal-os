@@ -55,3 +55,18 @@ def test_status_moves_complete_and_reopen() -> None:
         assert t["done"] == 0 and t["status"] == "In progress" and t["position"] < b["position"]
         assert todos.update(a["id"], {"done": True})["status"] == "Done"  # ticking it off drops the custom column
         assert [x["title"] for x in todos.list(list_name="Work")] == ["b"]
+
+
+def test_lists_outlive_their_items_and_rename_moves_them() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        todos = Todos(Database(tmp))
+        assert todos.create_list("Groceries") == ["Groceries"]  # an empty list survives on its own
+        a = todos.create("milk", list_name="Groceries")
+        b = todos.create("read", list_name="Books")  # a todo written with a name registers the list
+        assert todos.lists() == ["Books", "Groceries"]
+        todos.delete(b["id"])
+        assert todos.lists() == ["Books", "Groceries"]
+        assert todos.rename_list("Groceries", "Shopping") == ["Books", "Shopping"]
+        assert todos.get(a["id"])["list_name"] == "Shopping"
+        assert todos.delete_list("Shopping") == ["Books"]
+        assert todos.get(a["id"])["list_name"] is None  # kept, back on the default list

@@ -4,7 +4,7 @@ import { enterCanvas, sleep, spaces, windowsOf } from './helpers/spaces.mjs'
 test.describe.configure({ timeout: 300_000 })
 
 const SIMPLE = [
-  ['Todos', 'todos'], ['Calendar', 'calendar'], ['Memory', 'memory'], ['Graph', 'graph'], ['Uploads', 'documents'],
+  ['Lists', 'todos'], ['Calendar', 'calendar'], ['Memory', 'memory'], ['Graph', 'graph'], ['Uploads', 'documents'],
   ['Recap', 'recap'], ['Usage', 'usage'], ['Activity', 'activity'], ['Web', 'web'], ['Face', 'face']
 ]
 
@@ -21,7 +21,7 @@ test('every Add-widget entry opens a window that renders without console errors'
   // the menu lists one entry per registry kind
   const menu = await addMenu(page)
   const labels = (await menu.locator('[role=menuitem]').allInnerTexts()).map((t) => t.trim())
-  for (const l of ['Chat', 'Todos', 'Calendar', 'Sticky note', 'Dashboard widget', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Web', 'Artifact', 'Face']) {
+  for (const l of ['Chat', 'Lists', 'Calendar', 'Sticky note', 'Dashboard widget', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Web', 'Artifact', 'Face']) {
     expect(labels).toContain(l)
   }
   await page.keyboard.press('Escape')

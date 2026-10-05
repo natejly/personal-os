@@ -11,7 +11,7 @@ instructions, files, memories and graph.
 ```
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
-│ Today      2 │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
+│ Today      2 │  ┌ Calendar ─────┐ ┌ Lists ────────┐ │  ☑ Memory    │
 │ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
 │ Cowork       │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
 │ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
@@ -25,9 +25,9 @@ instructions, files, memories and graph.
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
-Todos, Calendar, Mail and Health are apps in the title bar, at the top right of
-every view. Meetings and Activity join the sidebar once turned on in
-Settings → Modules.
+Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
+every view; Meetings and Activity ship hidden. Settings → Modules puts any of
+them in the sidebar, in the title bar, or out of sight.
 
 ## Features
 
@@ -387,7 +387,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘7 | Today / Chats / Todos / Calendar / Files / Mail / Settings → Memory / Activity |
+| ⌘0 … ⌘7 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory / Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
 | ⌘⇧K | Cowork |
 | ⌘⇧F | Search chats |

@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS todo_event_tombstones (
   calendar_id TEXT,
   deleted_at REAL NOT NULL
 );
+
+-- A list exists on its own, so an empty one survives (a list whose last item is deleted, or one just made).
+CREATE TABLE IF NOT EXISTS todo_lists (
+  name TEXT PRIMARY KEY,
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -323,6 +329,7 @@ class Todos:
                 (tid, project_id, title.strip(), notes, due or None, int(priority), int(is_done), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None,
                  json.dumps(self.clean_tags(tags)), parent_id or None, (list_name or "").strip() or None, (status or "").strip() or None, t, t if is_done else None),
             )
+            self._register_list(c, list_name)
         if notify:
             self._changed()
         return self.get(tid)  # type: ignore[return-value]
@@ -371,6 +378,7 @@ class Todos:
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
             c.execute(f"UPDATE todos SET {sets} WHERE id=?", (*fields.values(), id))
+            self._register_list(c, fields.get("list_name"))
             if relink and before and before.get("calendar_event_id") not in (None, fields["calendar_event_id"]):
                 self._tombstone(c, {"calendar_event_id": before["calendar_event_id"], "calendar_id": before.get("calendar_id")})
             if completing:
@@ -392,10 +400,44 @@ class Todos:
                 pos = c.execute("SELECT COALESCE(MAX(position),0)+1 FROM todos").fetchone()[0]
         return self.update(id, {"status": status, "position": pos})
 
+    @staticmethod
+    def _register_list(c: Any, name: str | None) -> None:
+        if name := (name or "").strip():
+            c.execute("INSERT OR IGNORE INTO todo_lists(name, created_at) VALUES(?, ?)", (name, now()))
+
     def lists(self) -> list[str]:
-        """The list names in use, for the board's list picker."""
+        """Every list: the ones made on purpose plus any name a todo carries (the agent or a sync may name one)."""
         with self.db.tx() as c:
-            return [r[0] for r in c.execute("SELECT DISTINCT list_name FROM todos WHERE list_name IS NOT NULL AND deleted_at IS NULL ORDER BY list_name")]
+            return [r[0] for r in c.execute(
+                "SELECT name FROM todo_lists UNION SELECT DISTINCT list_name FROM todos WHERE list_name IS NOT NULL AND deleted_at IS NULL ORDER BY 1")]
+
+    def create_list(self, name: str) -> list[str]:
+        name = name.strip()
+        if not name:
+            raise ValueError("A list needs a name")
+        with self.db.tx() as c:
+            self._register_list(c, name)
+        return self.lists()
+
+    def rename_list(self, old: str, new: str) -> list[str]:
+        """Rename the list and move its todos along; renaming onto an existing list merges into it."""
+        new = new.strip()
+        if not new:
+            raise ValueError("A list needs a name")
+        with self.db.tx() as c:
+            c.execute("DELETE FROM todo_lists WHERE name=?", (old,))
+            self._register_list(c, new)
+            c.execute("UPDATE todos SET list_name=?, updated_at=? WHERE list_name=?", (new, now(), old))
+        self._changed()
+        return self.lists()
+
+    def delete_list(self, name: str) -> list[str]:
+        """Drop the list; its todos are kept and go back to the default (unlisted) list."""
+        with self.db.tx() as c:
+            c.execute("DELETE FROM todo_lists WHERE name=?", (name,))
+            c.execute("UPDATE todos SET list_name=NULL, updated_at=? WHERE list_name=?", (now(), name))
+        self._changed()
+        return self.lists()
 
     def _spawn_next(self, row: dict[str, Any], completed_on: date) -> dict[str, Any]:
         """Next instance of a just-completed repeating todo. source='local' so Tasks sync makes it a fresh

@@ -10,7 +10,7 @@ import WidgetBoundary from './WidgetBoundary'
 /** Placeholder catalog. Wave 3 reads `WIDGETS[kind].label` / `.icon` instead. */
 export const KIND_LABEL: Record<WidgetKind, string> = {
   chat: 'Chat',
-  todos: 'Todos',
+  todos: 'Lists',
   calendar: 'Calendar',
   note: 'Sticky note',
   'dashboard-widget': 'Dashboard widget',

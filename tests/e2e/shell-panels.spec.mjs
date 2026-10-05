@@ -27,12 +27,12 @@ test('page agent carries each view\'s content to the model', async ({ grain }) =
   await page.waitForSelector('.sidebar')
 
   // Todos
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Todos' }).click()
-  await heading(page, /Todos/)
+  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+  await heading(page, /Lists/)
   await expect(page.getByText('Zanzibar quarterly taxes').first()).toBeVisible()
   let body = await askPageAgent(grain)
   expect(body).toContain('Zanzibar quarterly taxes')
-  await expect(panel(page).locator('.page-agent-ctx')).toContainText('Todos')
+  await expect(panel(page).locator('.page-agent-ctx')).toContainText('Lists')
   // The panel follows the view: switch to Calendar, context label changes
   await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Calendar' }).click()
   await expect(panel(page).locator('.page-agent-ctx')).toContainText('Calendar')
@@ -70,7 +70,7 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await api('/todos', { method: 'POST', body: { title: 'Hint probe todo' } })
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Todos' }).click()
+  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
   await menu(grain, 'Ask About This Page')
   const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)
@@ -163,7 +163,7 @@ test('find bar: matches count, steps with Enter, wraps, Esc closes, clears on ch
   await expect(bar).toHaveCount(0)
   expect(await page.evaluate(() => CSS.highlights.has('chat-find'))).toBe(false)
   // not available outside a chat
-  await menu(grain, 'Todos')
+  await menu(grain, 'Lists')
   await menu(grain, 'Find…')
   await expect(page.getByRole('search')).toHaveCount(0)
   expect(grain.consoleErrors).toEqual([])

@@ -5,8 +5,9 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
-import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
+import { HOME_MODULES } from '../modules'
 import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
+import { navEntries, placeOf, type NavPlace } from '../shell/nav'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
 import { chatModelIds } from '../lib/modelLabel'
@@ -292,8 +293,11 @@ export default function SettingsModal(): JSX.Element {
   }
 
   const hidden = draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]
-  const toggleView = (v: string): void =>
-    patch({ hiddenViews: hidden.includes(v) ? hidden.filter((x) => x !== v) : [...hidden, v] })
+  const setPlace = (v: string, p: NavPlace | 'hidden'): void => {
+    const shown = hidden.filter((x) => x !== v)
+    if (p === 'hidden') patch({ hiddenViews: [...shown, v] })
+    else patch({ hiddenViews: shown, navPlacement: { ...(draft.navPlacement ?? {}), [v]: p } })
+  }
   const homeOn = (k: string): boolean => homeModuleOn(draft, k)
   const toggleHome = (k: string): void =>
     patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
@@ -578,15 +582,22 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'modules' && <section>
               <h3>Modules</h3>
-              <p className="muted">Pick which views the app offers (sidebar, title-bar apps and menu shortcuts) and which cards Today shows. Everything can be turned back on here later.</p>
+              <p className="muted">Where each view lives: a row in the sidebar, an icon at the right of every title bar, or hidden. Menu shortcuts and ⌘K still reach a hidden view, and everything can be changed back here later.</p>
               <h4>Views</h4>
               <div className="setting-list">
-                {OPTIONAL_VIEWS.map((v) => (
-                  <label key={v.view} className="toggle-row">
-                    <span className="toggle-text"><b>{v.label}</b></span>
-                    <input type="checkbox" checked={!hidden.includes(v.view)} onChange={() => toggleView(v.view)} /><span className="switch" />
-                  </label>
-                ))}
+                {navEntries().map((e) => {
+                  const place: NavPlace | 'hidden' = hidden.includes(e.view) ? 'hidden' : placeOf(draft, e)
+                  return (
+                    <div key={e.view} className="place-row">
+                      <span className="toggle-text"><b>{e.label}</b></span>
+                      <div className="seg" role="group" aria-label={`Where ${e.label} shows`}>
+                        {([['sidebar', 'Sidebar'], ['apps', 'Title bar'], ['hidden', 'Hidden']] as const).map(([p, label]) => (
+                          <button key={p} aria-pressed={place === p} onClick={() => setPlace(e.view, p)}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
               <h4>Today screen</h4>
               <div className="setting-list">

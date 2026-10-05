@@ -6,7 +6,8 @@ test('open from switcher and menu shortcut; add, reject blank, no duplicate on d
   await openTodos(page)
   await expect(page.getByText('Nothing open')).toBeVisible()
   await addBox(page).fill('   ')
-  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
+  // The Add button only appears once there is something to add.
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0)
   await addBox(page).press('Enter')
   expect(await grain.api('/todos')).toHaveLength(0)
   await addBox(page).fill('Buy milk')
@@ -21,12 +22,12 @@ test('open from switcher and menu shortcut; add, reject blank, no duplicate on d
   await page.waitForTimeout(500)
   expect(await grain.api('/todos')).toHaveLength(2)
   await page.getByRole('button', { name: 'Calendar', exact: true }).first().click()
-  await expect(page.getByPlaceholder('Add a todo…')).toHaveCount(0)
+  await expect(page.getByPlaceholder('Add to Todos…')).toHaveCount(0)
   await grain.app.evaluate(({ Menu }) => {
-    const find = (items) => { for (const i of items) { if (i.label === 'Todos' && i.accelerator === 'CmdOrCtrl+2') return i; const r = i.submenu && find(i.submenu.items); if (r) return r } }
+    const find = (items) => { for (const i of items) { if (i.label === 'Lists' && i.accelerator === 'CmdOrCtrl+2') return i; const r = i.submenu && find(i.submenu.items); if (r) return r } }
     find(Menu.getApplicationMenu().items).click()
   })
-  await expect(page.getByPlaceholder('Add a todo…')).toBeVisible()
+  await expect(page.getByPlaceholder('Add to Todos…')).toBeVisible()
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })
 
@@ -91,6 +92,7 @@ test('due date set/clear and sections incl. overdue styling', async ({ grain }) 
   await expect.poll(async () => (await grain.api('/todos')).find((t) => t.title === 'Some one').due).toBe(dayStr(2))
   await page.getByLabel('Due date for Some one').fill('')
   await expect.poll(async () => (await grain.api('/todos')).find((t) => t.title === 'Some one').due).toBeNull()
+  await page.getByRole('button', { name: 'Due date, priority, repeat' }).click()
   await page.getByLabel('Due date (optional)').fill(dayStr(1))
   await addBox(page).fill('With due'); await addBox(page).press('Enter')
   await expect.poll(async () => (await grain.api('/todos')).find((t) => t.title === 'With due')?.due).toBe(dayStr(1))

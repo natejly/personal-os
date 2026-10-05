@@ -210,7 +210,7 @@ function buildMenu(): void {
       submenu: [
         { label: 'Today', accelerator: 'CmdOrCtrl+0', click: () => sendMenu('view:home') },
         { label: 'Chats', accelerator: 'CmdOrCtrl+1', click: () => sendMenu('view:chat') },
-        { label: 'Todos', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
+        { label: 'Lists', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
         { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
         { label: 'Files', accelerator: 'CmdOrCtrl+4', click: () => sendMenu('view:docs') },
         { label: 'Mail', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:mail') },

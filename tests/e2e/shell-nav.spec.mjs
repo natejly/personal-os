@@ -24,14 +24,14 @@ test('every sidebar nav item opens its view and is marked current; Today brings 
   })
 })
 
-test('app switcher icons open Todos, Calendar, Mail and the page agent; one is pressed at a time', async ({ grain }) => {
+test('app switcher icons open Lists, Calendar, Mail and the page agent; one is pressed at a time', async ({ grain }) => {
   const { page } = grain
   const sw = page.getByRole('toolbar', { name: 'Apps' })
-  for (const [name, h] of [['Todos', /Todos/], ['Calendar', /Calendar/], ['Mail', /Mail/]]) {
+  for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/]]) {
     await sw.getByRole('button', { name }).click()
     await heading(page, h)
     await expect(sw.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true')
-    for (const other of ['Todos', 'Calendar', 'Mail'].filter((x) => x !== name)) {
+    for (const other of ['Lists', 'Calendar', 'Mail'].filter((x) => x !== name)) {
       await expect(sw.getByRole('button', { name: other })).toHaveAttribute('aria-pressed', 'false')
     }
   }
@@ -146,7 +146,7 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await expect(pal).toHaveCount(0)
   await heading(page, /Calendar/)
   // Go-to commands
-  for (const [q, h] of [['Today', /Today/], ['Files', /Files/], ['Todos', /Todos/], ['Mail', /Mail/], ['Library', /Library/]]) {
+  for (const [q, h] of [['Today', /Today/], ['Files', /Files/], ['Lists', /Lists/], ['Mail', /Mail/], ['Library', /Library/]]) {
     await menu(grain, 'Command Palette…')
     await pal.getByPlaceholder('Go to, create, open…').fill(q)
     await pal.getByRole('option').first().click()
@@ -170,7 +170,7 @@ test('command palette: opens, fuzzy filters, arrows + Enter run, every command e
   await page.keyboard.press('Enter')
   await expect(page.locator('.sidebar .nav-item.active')).toContainText('Files')
   // every settings entry opens the modal (leave the editor first: inside it the palette chord is ⌘K insert-link)
-  await menu(grain, 'Todos')
+  await menu(grain, 'Lists')
   await menu(grain, 'Command Palette…')
   await expect(pal.getByRole('option').first()).toBeVisible()
   const settingsRows = await pal.getByRole('option').filter({ has: page.locator('small', { hasText: /^Settings$/ }) }).count()
@@ -204,7 +204,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
   expect(acc['Toggle Spaces']).toMatch(/Shift\+C$/)
   expect(acc['Command Palette…']).toMatch(/\+K$/)
-  const digits = ['Today', 'Chats', 'Todos', 'Calendar', 'Files', 'Mail', 'Memory…', 'Activity']
+  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…', 'Activity']
   digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i}$`)))
   // no two items share an accelerator
   const seen = new Map()
@@ -219,7 +219,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   }
 
   // View items
-  await menu(grain, 'Todos'); await heading(page, /Todos/)
+  await menu(grain, 'Lists'); await heading(page, /Lists/)
   await menu(grain, 'Calendar'); await heading(page, /Calendar/)
   await menu(grain, 'Files'); await heading(page, /Files/)
   await menu(grain, 'Mail'); await heading(page, /Mail/)
@@ -241,7 +241,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   // New Chat / New File / Today's File
-  await menu(grain, 'Todos')
+  await menu(grain, 'Lists')
   await menu(grain, 'New Chat'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   await menu(grain, 'New File'); await heading(page, /Files/)
   await menu(grain, "Today's File"); await heading(page, /Files/)
@@ -309,7 +309,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       await sidebarItem(page, n).click()
       await check(n)
     }
-    for (const n of ['Todos', 'Calendar', 'Mail']) {
+    for (const n of ['Lists', 'Calendar', 'Mail']) {
       await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: n }).click()
       await check(n)
     }

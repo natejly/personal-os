@@ -34,7 +34,7 @@ test.describe('tasks sync and the Today cards', () => {
     await page.getByRole('button', { name: 'Sync now' }).first().click()
     await expect(page.getByText(/^Synced /).first()).toBeVisible()
     await page.keyboard.press('Escape')
-    await openApp(page, 'Todos')
+    await openApp(page, 'Lists')
     for (let i = 0; i < 9; i++) await expect(page.getByText(`Task ${i}`, { exact: true }).first()).toBeVisible()
     // a todo made here goes up on the next sync
     await grain.api('/todos', { method: 'POST', body: { title: 'Pushed from Grain' } })
@@ -168,7 +168,7 @@ testDisconnected.describe('Google not connected (default harness)', () => {
     await expect(page.locator('.home-connect')).toBeVisible()
     await expect(page.locator('section.widget header', { hasText: 'Mail inbox' })).toHaveCount(0)
 
-    await openApp(page, 'Todos')
+    await openApp(page, 'Lists')
     await expect(page.getByRole('button', { name: 'Sync with Google Tasks now' })).toHaveCount(0)
 
     await openSettingsTab(page, 'Integrations')

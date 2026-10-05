@@ -293,6 +293,9 @@ export const api = {
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '', list = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}&list_name=${encodeURIComponent(list)}`),
     lists: () => req<string[]>('/todo-lists'),
+    createList: (name: string) => req<string[]>('/todo-lists', { method: 'POST', body: json({ name }) }),
+    renameList: (from: string, name: string) => req<string[]>(`/todo-lists/${encodeURIComponent(from)}`, { method: 'PUT', body: json({ name }) }),
+    deleteList: (name: string) => req<string[]>(`/todo-lists/${encodeURIComponent(name)}`, { method: 'DELETE' }),
     move: (id: string, status: string, before_id: string | null = null) => req<Todo>(`/todos/${id}/move`, { method: 'POST', body: json({ status, before_id }) }),
     filters: () => req<TodoFilter[]>('/todo-filters'),
     saveFilter: (f: { name: string; tag?: string; q?: string; project_id?: string | null }) => req<TodoFilter>('/todo-filters', { method: 'POST', body: json(f) }),

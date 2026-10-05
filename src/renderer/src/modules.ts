@@ -5,7 +5,8 @@
  * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Views turns them back on.
  */
 import type { View } from './store'
-import { moduleHome, moduleForView } from './shell/registry'
+import { moduleHome } from './shell/registry'
+import { navEntries } from './shell/nav'
 
 export interface HomeModule {
   key: string
@@ -17,11 +18,6 @@ function homeRow(key: string): HomeModule {
   const h = moduleHome(key)?.home
   if (!h) throw new Error(`modules: no module owns the Today card "${key}"`)
   return { key: h.key, label: h.label }
-}
-function viewRow(view: View): { view: View; label: string } {
-  const m = moduleForView(view)
-  if (!m?.view) throw new Error(`modules: no module owns the view "${view}"`)
-  return { view: m.view.id, label: m.label }
 }
 
 /** Each label is its card's title on Today, word for word, so the toggle and the thing it hides read the same. */
@@ -43,18 +39,11 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'chats', label: 'Recent chats' }
 ]
 
-/** Views that may be removed from the sidebar. Home and chats are the shell itself and stay. */
-export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
-  viewRow('todos'),
-  viewRow('health'),
-  { view: 'calendar', label: 'Calendar' },
-  { view: 'mail', label: 'Mail' },
-  { view: 'library', label: 'Library' },
-  { view: 'cowork', label: 'Cowork' },
-  // Showing the view records nothing. Recording is `meetings.enabled` plus an acknowledged consent
-  // notice, both off until the user sets them, so this toggle only decides whether the row is there.
-  { view: 'meetings', label: 'Meetings' },
-  { view: 'activity', label: 'Activity' }
-]
+/**
+ * Views that may be hidden or moved between the sidebar and the title bar (shell/nav.tsx). Home, chats
+ * and Files are the shell itself and stay. Showing Meetings records nothing: recording is
+ * `meetings.enabled` plus an acknowledged consent notice, both off until the user sets them.
+ */
+export const OPTIONAL_VIEWS: { view: View; label: string }[] = navEntries().map(({ view, label }) => ({ view, label }))
 
 export { homeModuleOn, viewHidden } from './moduleToggles'

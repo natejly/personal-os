@@ -2,14 +2,16 @@
   "config": {
     "argv": [
       "/Users/natejly/.nvm/versions/node/v20.16.0/bin/node",
-      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/node_modules/.bin/playwright",
+      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e/node_modules/.bin/playwright",
       "test",
       "-c",
       "playwright.config.mjs",
-      "smoke"
+      "artifacts-core",
+      "-g",
+      "Pages view|2 MB html"
     ],
-    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/playwright.config.mjs",
-    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e/playwright.config.mjs",
+    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": true,
@@ -20,20 +22,20 @@
     "grepInvert": null,
     "maxFailures": 0,
     "metadata": {
-      "actualWorkers": 1
+      "actualWorkers": 2
     },
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/out/e2e",
+        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/out/e2e",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 1
+          "actualWorkers": 2
         },
         "id": "",
         "name": "",
-        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e",
         "testIgnore": [],
         "testMatch": [
           "/.*\\.spec\\.mjs/"
@@ -68,13 +70,13 @@
   },
   "suites": [
     {
-      "title": "smoke.spec.mjs",
-      "file": "smoke.spec.mjs",
+      "title": "artifacts-core.spec.mjs",
+      "file": "artifacts-core.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "app boots, a chat round-trips through the provider",
+          "title": "Pages view lists it; open, view source, copy, download, delete",
           "ok": true,
           "tags": [],
           "tests": [
@@ -89,12 +91,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4292,
+                  "duration": 51039,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T03:26:47.549Z",
+                  "startTime": "2026-10-05T04:35:50.784Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -102,9 +104,43 @@
               "status": "expected"
             }
           ],
-          "id": "c3460f1d697aa8671d63-277f9579f120ad1c183c",
-          "file": "smoke.spec.mjs",
-          "line": 3,
+          "id": "c27fd601c8cee5a82561-d9c520eebd44385867e2",
+          "file": "artifacts-core.spec.mjs",
+          "line": 51,
+          "column": 1
+        },
+        {
+          "title": "a 2 MB html fence in a reply survives (code view, copy), and Save as artifact reports the limit",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 59011,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:35:50.790Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c27fd601c8cee5a82561-e7e59a923def56dc478e",
+          "file": "artifacts-core.spec.mjs",
+          "line": 158,
           "column": 1
         }
       ]
@@ -112,9 +148,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T03:26:47.111Z",
-    "duration": 4779.176,
-    "expected": 1,
+    "startTime": "2026-10-05T04:35:47.048Z",
+    "duration": 64015.10400000001,
+    "expected": 2,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

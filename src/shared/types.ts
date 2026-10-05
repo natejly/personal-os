@@ -482,6 +482,14 @@ export interface McpServerDraft {
   description: string
 }
 
+/** The trail a deep_research call leaves on its tool event (never shown to the model). */
+export interface ResearchTrail {
+  plan: string[]
+  steps: { q: string; status: string; sources: { url: string; title: string }[]; claims: number }[]
+  sources_considered: { url: string; title: string; n?: number }[]
+  dropped: number
+}
+
 export interface ToolEvent {
   id: string
   name: string
@@ -493,6 +501,8 @@ export interface ToolEvent {
   images?: ToolImage[] | null
   /** What the `show` tool put in the chat's side panel; the model only saw a receipt. */
   show?: ShowItem | null
+  /** deep_research's plan, steps and sources considered. */
+  research?: ResearchTrail | null
   pending?: boolean
   needs_approval?: boolean
   approval?: string | null

@@ -86,7 +86,7 @@ _SLASH = re.compile(r"^/([a-z0-9][a-z0-9_-]{0,39})(?:\s+([\s\S]*))?$")
 # Built-in slash commands the backend fills. They shadow a saved command of the same name; the composer
 # lists them beside the saved ones (lib/slashCommands.ts). /compact, /skills, /commands and /plan act in
 # the UI and never reach a run.
-BUILTIN = ("skill", "schedule", "loop")
+BUILTIN = ("skill", "schedule", "loop", "research")
 
 _SCHEDULE_NOTE = ("\n\n[The user ran /schedule: they want this done later, unattended. Call schedule_task once — work out the time "
                   "from what they typed (call current_time first if you are unsure of today's date) and write `prompt` as a "
@@ -94,6 +94,9 @@ _SCHEDULE_NOTE = ("\n\n[The user ran /schedule: they want this done later, unatt
 _LOOP_NOTE = ("\n\n[The user ran /loop: they want this repeated on an interval. Call schedule_task once with a five-field `cron` "
               "matching the interval they typed (every 5 minutes → */5 * * * *, every weekday at 9 → 0 9 * * 1-5) and `prompt` "
               "as a self-contained instruction for each run. Then tell them the schedule and that Scheduled in the inbox lists it.]")
+
+_RESEARCH_NOTE = ("\n\n[The user ran /research: call deep_research once with their question as `question` (add depth \"deep\" only if they "
+                  "asked for a thorough or exhaustive pass), then give the answer it returns, keeping its [n] source numbers.]")
 
 
 def _skill_key(name: str) -> str:
@@ -136,6 +139,8 @@ def expand(text: str, store: "Commands | None", skills: Any = None) -> str:
         return text + _SCHEDULE_NOTE
     if name == "loop":
         return text + _LOOP_NOTE
+    if name == "research":
+        return text + _RESEARCH_NOTE
     cmd = store.get(name) if store is not None else None
     if not cmd or cmd["name"] != name:
         return text

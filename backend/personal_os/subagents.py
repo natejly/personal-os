@@ -51,7 +51,7 @@ CHILD_BLOCK = frozenset({
     "save_memory", "graph_add", "save_writing_sample", "todo_write", "todo_add", "todo_update", "todo_delete", "doc_delete",
     "propose_plan", "desk_ask", "ask_user", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
     "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",
-    "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify",
+    "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify", "deep_research",
 })
 # Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's
 # stream, and the always-ask list is gated the same way as for the parent.

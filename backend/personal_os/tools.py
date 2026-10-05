@@ -740,6 +740,8 @@ class Toolbox:
             self._register_meetings()
         from . import subagents
         subagents.register(self)
+        from . import research
+        research.register(self)  # deep_research: planned fan-out over read-only subagents
         from . import opencode, shell
         shell.register(self)
         opencode.register(self)  # opencode_run: a coding agent in the shell sandbox
@@ -3749,7 +3751,7 @@ Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined
 # so a plain question never costs a search round. Everything else waits for tool_search.
 CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view", "writing_style"})  # writing_style: the prompt's voice hint tells the model to call it
+                        "skill_list", "skill_view", "writing_style", "deep_research"})  # writing_style: the prompt's voice hint tells the model to call it
 
 
 def is_core(spec: ToolSpec) -> bool:

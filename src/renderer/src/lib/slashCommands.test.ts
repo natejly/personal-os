@@ -17,6 +17,11 @@ test('a bare slash lists the built-ins first, then saved commands, without a sha
   assert.deepEqual(rows.slice(BUILTIN.length).map((r) => r.insert), ['/standup '])
 })
 
+test('/research is a server-side built-in', () => {
+  assert.ok(BUILTIN.some((b) => b.name === 'research' && !b.client))
+  assert.deepEqual(slashItems('/res', [], [])!.map((r) => r.insert), ['/research '])
+})
+
 test('typing narrows across both kinds, and a slash later in the draft opens nothing', () => {
   assert.deepEqual(slashItems('/sc', [cmd('scan')], [])!.map((r) => r.insert), ['/schedule ', '/scan '])
   assert.equal(slashItems('hello /sc', [cmd('scan')], []), null)

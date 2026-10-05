@@ -47,6 +47,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 Type / in the composer:
 - /skill <name> [message]: run an approved skill on this message.
 - /schedule: book a run for later. /loop: repeat something on an interval.
+- /research <question>: plan, search in parallel, and answer with sources and a visible trail.
 - /compact: summarize the chat so far to free room.
 - /skills and /commands: list what you have. /plan: plan mode (Cmd+Shift+P cycles it).
 - Your own saved commands (Library -> Automations) appear in the same menu.

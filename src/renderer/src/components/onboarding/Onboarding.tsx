@@ -15,7 +15,7 @@ const TITLES: Record<WizardState['step'], string> = {
   provider: 'Choose your AI provider',
   key: 'Connect your account',
   test: 'Testing the connection',
-  google: 'Connect Google',
+  google: 'Connect your accounts',
   about: 'Tell Grain about you',
   done: 'You are all set'
 }
@@ -29,7 +29,8 @@ export default function Onboarding(): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const closeWizard = useOnboarding((s) => s.closeWizard)
   const google = useStore((s) => s.google)
-  const { refreshGoogle, connectGoogle } = useStore()
+  const microsoft = useStore((s) => s.microsoft)
+  const { refreshGoogle, connectGoogle, refreshMicrosoft, connectMicrosoft } = useStore()
 
   const [state, rawDispatch] = useReducer(
     (s: WizardState, a: WizardAction & { provider_?: ProviderInfo }) => reduce(s, a, a.provider_),
@@ -77,7 +78,12 @@ export default function Onboarding(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.step])
 
-  useEffect(() => { if (state.step === 'google') void refreshGoogle() }, [state.step, refreshGoogle])
+  useEffect(() => { if (state.step === 'google') { void refreshGoogle(); void refreshMicrosoft() } }, [state.step, refreshGoogle, refreshMicrosoft])
+  // Mail and Calendar read the active provider; if Microsoft is the only account, make it that one.
+  useEffect(() => {
+    const { settings, saveSettings } = useStore.getState()
+    if (microsoft?.connected && !google?.connected && settings.pimProvider !== 'microsoft') void saveSettings({ pimProvider: 'microsoft' })
+  }, [microsoft?.connected, google?.connected])
 
   const save = useCallback(async (): Promise<void> => {
     if (!provider) return
@@ -110,7 +116,7 @@ export default function Onboarding(): JSX.Element {
   const canNext = !blocker && state.step !== 'done'
   // Leaving the Google step unconnected, or the about step empty, is a skip, and the one forward button
   // says so: it steps back to a quiet style so the step's own action stays the main one.
-  const skipping = (state.step === 'google' && !google?.connected) || (state.step === 'about' && !state.about.trim())
+  const skipping = (state.step === 'google' && !google?.connected && !microsoft?.connected) || (state.step === 'about' && !state.about.trim())
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
@@ -218,14 +224,19 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'google' && (
           <>
-            <p className="muted">Optional. Connecting Google lets the assistant read your Calendar, Gmail, Tasks and Drive. You can skip this and do it later in Settings.</p>
-            <p className="muted">Connecting also turns on two-way sync between Todos and Google Tasks, and creates a &ldquo;Grain Todos&rdquo; calendar that shows todos with a due date. Both can be switched off in Settings → Integrations.</p>
+            <p className="muted">Optional. Connecting Google or Microsoft lets the assistant read your Calendar and mail. Google also adds Tasks and Drive. You can skip this and do it later in Settings.</p>
+            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, and creates a &ldquo;Grain Todos&rdquo; calendar that shows todos with a due date. Both can be switched off in Settings → Integrations.</p>
             {google?.connected ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (
               <button type="button" className="primary-btn" data-autofocus onClick={() => void connectGoogle()}>Sign in with Google</button>
             ) : (
               <p className="muted">Google sign-in needs a Google Cloud OAuth client today, which takes about two minutes to create. Settings → Integrations walks you through it whenever you are ready.</p>
+            )}
+            {microsoft?.connected ? (
+              <p className="ob-ok"><Check size={15} /> Signed in as {microsoft.email}</p>
+            ) : microsoft?.configured && (
+              <button type="button" className="ghost-btn" onClick={() => void connectMicrosoft()}>Sign in with Microsoft</button>
             )}
           </>
         )}

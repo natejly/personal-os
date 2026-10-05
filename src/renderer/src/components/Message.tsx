@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents } from '../store'
 import { api } from '../lib/api'
@@ -55,7 +55,7 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
         void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
       }}
     >
-      <GraduationCap size={11} /> {busy ? 'Saving…' : 'Save as skill'}
+      <GraduationCap size={11} /> {busy ? 'Saving…' : 'Save as skill…'}
     </button>
   )
 }
@@ -347,6 +347,12 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
             {!isUser && (message.tool_events?.length ?? 0) > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
+            )}
+            {!isUser && !streaming && message.content.trim() && (
+              <button type="button" className="ctx-chip" title="Repeat this on a schedule. It starts switched off, and you can test-run it first."
+                onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
+                <CalendarClock size={11} /> Schedule as routine…
+              </button>
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}

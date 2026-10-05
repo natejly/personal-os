@@ -8,6 +8,7 @@
  * its card, but no number, badge or state is read out of that text.
  */
 import { splitReport } from '../lib/report'
+import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -206,7 +207,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
         <span className="inbox-line" title={line}>{line}</span>
-        {r.manual && <span className="chip">by hand</span>}
+        {r.test ? <span className="chip">test</span> : r.manual && <span className="chip">by hand</span>}
         {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
         {r.late && (
           <span className="chip warn" title={r.due_at ? `Due ${fmtWhen(r.due_at)}, ran ${fmtWhen(r.fired_at)}` : undefined}>
@@ -246,7 +247,7 @@ const STATUS_CHIP: Record<JobRunRecord['status'], string> = {
   running: 'working', done: 'ok', error: 'bad', interrupted: 'bad', timed_out: 'bad'
 }
 
-/** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
+/** A job's last 20 runs from rows (the backend keeps no more): a success-rate strip, then one line per run with a link to its transcript. */
 function JobHistory({ job }: { job: Job }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const [runs, setRuns] = useState<(JobRunRecord | JobSkipRecord)[] | null>(null)
@@ -256,7 +257,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
 
   useEffect(() => {
     let live = true
-    Promise.all([api.jobs.runs(job.id, 50), api.jobs.stats(job.id, 30)])
+    Promise.all([api.jobs.runs(job.id, 20), api.jobs.stats(job.id, 30)])
       .then(([r, s]) => { if (live) { setRuns(r); setStats(s) } })
       .catch((e: Error) => { if (live) setErr(e.message) })
     return () => { live = false }
@@ -304,7 +305,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
-          {r.dry_run ? <span className="chip">preview</span> : r.manual && <span className="chip">by hand</span>}
+          {r.dry_run ? <span className="chip">preview</span> : r.test ? <span className="chip">test</span> : r.manual && <span className="chip">by hand</span>}
           {r.unchanged && <span className="chip" title="Same result as the run before; not announced">unchanged</span>}
           {r.late && (
             <span className="chip warn" title={r.due_at ? `Due ${fmtDate(r.due_at)}` : undefined}>
@@ -358,6 +359,18 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       const r = await api.jobs.dryRun(job.id)
       if (r.conversation_id) await selectChat(r.conversation_id)
       else toast('Preview did not start', 'error')
+    } catch (e) {
+      toast(`Jobs: ${(e as Error).message}`, 'error')
+    }
+  }
+  const [tested, setTested] = useState(false)
+  const testRun = async (): Promise<void> => {
+    try {
+      const r = await api.jobs.runNow(job.id, true)
+      if (!r.run_id && !r.desk_id) return toast('Test run did not start', 'error')
+      setTested(true)
+      toast('Test run started. Its result shows under “While you were away”, labelled test.', 'info')
+      void refreshJobs()
     } catch (e) {
       toast(`Jobs: ${(e as Error).message}`, 'error')
     }
@@ -461,6 +474,12 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         aria-expanded={history} onClick={() => setHistory((v) => !v)}>
         <History size={12} />
       </button>
+      {!job.enabled && !spent && (
+        <button className="ghost-btn sm" title="Run once as a test: proposal-only, the schedule is untouched" onClick={() => void testRun()}>Test run</button>
+      )}
+      {tested && !job.enabled && !spent && (
+        <button className="primary-btn sm" title="Turn the schedule on" onClick={() => void setJobEnabled(job.id, true)}>Enable</button>
+      )}
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
       </button>
@@ -584,12 +603,12 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
  * watch: a typed path the backend refuses outside home or hidden, and the toast says why, or a Gmail search to run on
  * as matching mail arrives), or, given `job`, edit that
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
-function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
-  const { createJob, updateJob } = useStore()
+function NewTask({ onDone, job, draft }: { onDone: () => void; job?: Job; draft?: RoutineDraft | null }): JSX.Element {
+  const { createJob, updateJob, clearRoutineDraft } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
     ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : job.kind === 'calendar' ? 'calendar' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: (job.kind === 'calendar' ? job.calendar_query : job.mail_query) ?? '', mins: String(job.minutes_before ?? 15), onlyChange: !!job.only_on_change }
-    : BLANK)
+    : draft ? { ...BLANK, name: draft.name, prompt: draft.prompt, mode: 'repeat' as const } : BLANK)
   const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -623,12 +642,13 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       setErr(refused)
       ok = refused === null
     } else {
-      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
+      ok = await createJob({ ...common, ...schedule, enabled: !draft, allowed_tools: f.onlyTools && !f.desk ? picked : null,
         ...(f.desk ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}) })
     }
     setBusy(false)
     if (ok) {
       if (!job) setF(BLANK)
+      if (draft) clearRoutineDraft()
       onDone()
     }
   }
@@ -678,6 +698,7 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
         <input type="checkbox" checked={f.onlyChange} onChange={(e) => setF({ ...f, onlyChange: e.target.checked })} />
         <span>Notify only when the result changes</span>
       </label>
+      {draft && <p className="muted small">It starts switched off. Pick when it repeats, save, then use Test run on its row and Enable once the result looks right.</p>}
       {!job && (
         <label className="chip-check-row small">
           <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
@@ -705,8 +726,10 @@ export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
   const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
-  const [showJobs, setShowJobs] = useState(false)
-  const [adding, setAdding] = useState(false)
+  const draft = useStore((s) => s.routineDraft)
+  const [showJobs, setShowJobs] = useState(!!draft)
+  const [adding, setAdding] = useState(!!draft)
+  useEffect(() => { if (draft) { setShowJobs(true); setAdding(true) } }, [draft])
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
 
   if (!box) return null
@@ -775,7 +798,7 @@ export default function AgentInbox(): JSX.Element | null {
             <button className={`icon-btn sm ${adding ? 'on' : ''}`} title="Schedule a task" aria-label="Schedule a task"
               onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
           </h5>
-          {adding && <NewTask onDone={() => setAdding(false)} />}
+          {adding && <NewTask key={draft?.prompt ?? ''} draft={draft} onDone={() => setAdding(false)} />}
           {jobs.length === 0 ? <p className="muted">None yet.</p> : <ul>{jobs.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
           <p className="muted small">A scheduled task can read, search and write inside Grain. Anything that leaves the
             app — mail, calendar, Docs — comes back here as a proposal; accepting it is what sends it. You can also just

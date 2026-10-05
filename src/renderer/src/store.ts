@@ -1,3 +1,4 @@
+import { routineDraftFrom, type RoutineDraft } from './lib/routine'
 import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
@@ -178,6 +179,10 @@ export interface State {
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
   agentInbox: AgentInbox | null
   jobs: Job[]
+  /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
+  routineDraft: RoutineDraft | null
+  scheduleAsRoutine: (conversationId: string, messageId: string) => void
+  clearRoutineDraft: () => void
 
   projects: Project[]
 
@@ -1800,6 +1805,15 @@ export const useStore = create<State>((set, get) => {
     recapLoading: false,
     agentInbox: null,
     jobs: [],
+    routineDraft: null,
+    scheduleAsRoutine: (conversationId, messageId) => {
+      const msgs = get().sessions[conversationId]?.conversation.messages ?? []
+      const draft = routineDraftFrom(msgs, msgs.findIndex((m) => m.id === messageId))
+      if (!draft) return get().toast('Nothing to schedule from this reply', 'info')
+      set({ routineDraft: draft })
+      get().setView('home')
+    },
+    clearRoutineDraft: () => set({ routineDraft: null }),
     projects: [],
     view: 'home',
     lastClassicView: 'home',
@@ -3261,6 +3275,8 @@ export const useStore = create<State>((set, get) => {
         if (candidate) {
           set((st) => ({ skills: [candidate, ...st.skills] }))
           get().toast(`Candidate skill “${candidate.name}” is waiting for your review`, 'learned')
+          get().setLibraryTab('skills')
+          get().setView('library')
         } else get().toast(reason ?? 'Nothing reusable to propose', 'info')
       } catch (e) {
         get().toast((e as Error).message, 'error')

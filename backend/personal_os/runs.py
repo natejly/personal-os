@@ -34,6 +34,8 @@ KEEPALIVE_S = 15.0
 # How long a finished run stays in memory, for a window that opens just after it ended. Past that the
 # stream is served from run_events instead.
 RETAIN_S = 300.0
+# A job keeps this many runs; the next insert drops the oldest finished ones.
+JOB_RUNS_KEEP = 20
 # How long a finished run keeps its event tape. The agent_runs row, approvals and executed_calls stay.
 EVENTS_RETAIN_S = 14 * 86400
 
@@ -146,6 +148,16 @@ class RunStore:
         self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at, parent_run_id) "
                    "VALUES(?,?,?,?,?,?,?,?,?,?)",
                    (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t, parent_run_id))
+        if kind == "job" and (input or {}).get("job_id"):
+            self.prune_job((input or {})["job_id"])
+
+    def prune_job(self, job_id: str, keep: int = JOB_RUNS_KEEP) -> None:
+        """A job's history is its newest `keep` runs: older finished ones go, with their event tapes."""
+        old = ("SELECT run_id FROM agent_runs WHERE kind='job' AND json_extract(input,'$.job_id')=? AND ended_at IS NOT NULL "
+               "AND run_id NOT IN (SELECT run_id FROM agent_runs WHERE kind='job' AND json_extract(input,'$.job_id')=? "
+               "ORDER BY started_at DESC, rowid DESC LIMIT ?)")
+        self._exec(f"DELETE FROM run_events WHERE run_id IN ({old})", (job_id, job_id, keep))
+        self._exec(f"DELETE FROM agent_runs WHERE run_id IN ({old})", (job_id, job_id, keep))
 
     def children(self, run_id: str) -> list[dict[str, Any]]:
         """Runs started by `run_id` (subagents), oldest first."""

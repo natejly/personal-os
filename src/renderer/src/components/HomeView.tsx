@@ -196,6 +196,7 @@ export default function HomeView(): JSX.Element {
 
   const on = (key: string): boolean => homeModuleOn(settings, key)
   const inboxNew = useStore((s) => inboxBadge(s.agentInbox))
+  const routineDraft = useStore((s) => s.routineDraft)
   const toggleModule = (key: string): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
   }
@@ -332,7 +333,7 @@ export default function HomeView(): JSX.Element {
         </div>
 
         {/* The sidebar badge points here, so a hidden inbox still shows while it has something to show. */}
-        {(on('agent') || inboxNew > 0) && <AgentInbox />}
+        {(on('agent') || inboxNew > 0 || routineDraft) && <AgentInbox />}
 
         {on('recap') && !hasModelKey(settings) && (
           <p className="muted widget-connect">The daily recap needs a model API key. <button className="link" onClick={() => openSettings('provider')}>Add a key</button></p>

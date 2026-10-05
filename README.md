@@ -95,7 +95,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    to a Cowork desk (⌘⇧K, shown once enabled in Settings → Modules), and Library
    → Automations holds workflows, which you approve once. `/schedule` or the
    `schedule_task` tool books a run for later; its results arrive in the Agent
-   inbox on Today as proposals.
+   inbox on Today as proposals. A good reply climbs a ladder: **Save as skill…**
+   turns it into a candidate procedure (steps, decision rules, failure handling,
+   output, boundaries) for you to approve, and **Schedule as routine…** opens the
+   task editor switched off; **Test run** it, check the result labelled test, then
+   Enable. Each task keeps its last 20 runs.
 8. **Settings you will touch.** Tools: each tool's mode (on, ask, off), Allowed
    hosts, and Workspace folders. When a reply that read the web wants to fetch a
    page, approve the card or click **Allow <host> from now on**. Modules: which

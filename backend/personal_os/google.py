@@ -437,6 +437,7 @@ class Google:
             ids = [c["id"] for c in self.calendars() if not c["hidden"]][:15]
         svc = self._svc("calendar", "v3")
         out: list[dict[str, Any]] = []
+        failures: list[Exception] = []
         try:
             for cid in ids:
                 try:
@@ -444,7 +445,10 @@ class Google:
                 except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
                     if len(ids) == 1:
                         raise
+                    failures.append(e)
                     log.warning("calendar %s skipped: %s", cid, e)
+            if failures and len(failures) == len(ids):
+                raise failures[0]  # every calendar failed: an empty grid would read as "no events"
         finally:
             self._reads.flush()
         out.sort(key=lambda e: e["start"] or "")

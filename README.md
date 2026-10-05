@@ -64,6 +64,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    it. Auto-learn saves memories and graph links after replies, and when it sees
    you repeating yourself it suggests a skill. Review it all in Settings →
    Memory (⌘6), which also holds **Voice**, the profile of how you write.
+   Under each reply, "Used N memories" and "Learned M" chips show what it read
+   and saved (with Undo), and a chat's menu has **Don't learn from this chat**.
 6. **Spaces.** ⌘⇧C opens Spaces, a desktop of live windows. Use **Add widget**
    or right-click the plane to add a chat, lists, calendar, note, memory, graph,
    uploads, recap, project, usage, activity, face or crew window; drag a chat, a
@@ -122,6 +124,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     project scope, forget, see a memory's past versions, and export or import
     a scope as a JSON file. It lives in Settings → Memory, next to
     the auto-learn switches.
+    **Don't learn from this chat** (chat menu or Context panel) keeps a chat in
+    history but out of auto-learn, skill drafts and the graph; **Forget what was
+    learned here** trashes the memories, draft skills and relations it produced.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
     into chats.

@@ -220,7 +220,7 @@ events = Topic()
 consolidator = Consolidator(db, memories, graph)
 title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
-                     alive=lambda cid: convos.get(cid, with_messages=False) is not None, style=style)
+                     alive=lambda cid: (c := convos.get(cid, with_messages=False)) is not None and c["settings"].get("learn") is not False, style=style)
 
 
 def queue_style_relearn(project_id: str | None, model: str | None = None) -> None:
@@ -8178,12 +8178,34 @@ class InduceIn(BaseModel):
     message_id: str | None = None
 
 
+@app.post("/conversations/{id}/forget-learned")
+def forget_learned(id: str) -> dict[str, int]:
+    """Undo what this chat taught: its memories (to the trash, restorable), its candidate skills, and the graph
+    relations extracted from its messages (kept as invalidated history). Approved skills are the user's and stay."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    with db.tx() as c:
+        mids = [r["id"] for r in c.execute("SELECT id FROM memories WHERE source_conversation_id=? AND deleted_at IS NULL", (id,)).fetchall()]
+        eids = [r["id"] for r in c.execute(
+            "SELECT id FROM kg_edges WHERE invalid_at IS NULL AND source_message_id IN (SELECT id FROM messages WHERE conversation_id=?)", (id,)).fetchall()]
+    for m in mids:
+        trash.trash("memory", m)
+    for e in eids:
+        graph.invalidate_edge(e)
+    cands = [s["id"] for s in skills.list(status="candidate") if s["source_conversation_id"] == id]
+    for s in cands:
+        skills.delete(s)
+    return {"memories": len(mids), "skills": len(cands), "edges": len(eids)}
+
+
 @app.post("/conversations/{id}/skills/induce")
 async def induce_conversation_skill(id: str, body: InduceIn | None = None) -> dict[str, Any]:
     """Distil this conversation, or one reply, into a candidate procedure for review. Never enables anything."""
     conv = convos.get(id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    if conv["settings"].get("learn") is False:
+        return {"candidate": None, "reason": "This chat is set not to be learned from."}
     transcript, reason = run_transcript(conv["messages"], (body.message_id if body else None))
     if reason or not transcript:
         return {"candidate": None, "reason": reason or "Not enough of a conversation to learn a procedure from."}

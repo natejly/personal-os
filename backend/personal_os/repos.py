@@ -248,6 +248,8 @@ class Conversations:
         d["settings"] = {**DEFAULT_CONV_SETTINGS, **(d.get("settings") or {})}
         if d["settings"].get("private"):
             d["settings"].update(PRIVATE_OFF)
+        elif d["settings"].get("learn") is False:  # stays in history and search; only what it teaches is off
+            d["settings"]["autoLearn"] = False
         return d
 
     def get(self, id: str, with_messages: bool = True) -> dict[str, Any] | None:

@@ -23,6 +23,9 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   const archiveChat = useStore((s) => s.archiveChat)
   const moveChat = useStore((s) => s.moveChat)
   const projects = useStore((s) => s.projects)
+  const setChatSettings = useStore((s) => s.setChatSettings)
+  const forgetLearned = useStore((s) => s.forgetLearned)
+  const noLearn = conv.settings?.learn === false
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState(false)
   /** Enter commits and the unmount's blur commits again: the first one settles, Escape settles it empty. */
@@ -41,6 +44,10 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
     },
     { label: 'Export as Markdown', run: () => void exportMd(false) },
     { label: 'Copy as Markdown', run: () => void exportMd(true) },
+    ...(conv.settings?.private ? [] : [
+      { label: noLearn ? 'Learn from this chat again' : 'Don’t learn from this chat', run: () => void setChatSettings({ learn: noLearn }, conv.id) },
+      ...(noLearn ? [{ label: 'Forget what was learned here', run: () => void forgetLearned(conv.id) }] : [])
+    ] as MenuEntry[]),
     { label: 'Archive', run: () => void archiveChat(conv.id, true) },
     { kind: 'separator' },
     { label: 'Delete', danger: true, run: () => void deleteChat(conv.id) }

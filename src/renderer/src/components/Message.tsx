@@ -16,6 +16,7 @@ import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
+import MemoryChips from './MemoryChips'
 import { statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
@@ -338,6 +339,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
               </button>
             )}
+            {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
             {!isUser && (message.tool_events?.length ?? 0) > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}

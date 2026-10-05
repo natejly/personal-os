@@ -2110,6 +2110,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-loading { position: absolute; top: 60px; right: 20px; font-size: 12px; color: var(--text-faint); }
 
 /* ---------- Dashboards ---------- */
+/* A Files section: the Files header holds the section tabs, this row holds the dashboard controls. */
+.dash-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dash-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .dw-composer { padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; gap: 8px; }
 .dw-composer textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; outline: 0; font: inherit; resize: vertical; }
 .dw-composer textarea:focus { border-color: var(--accent); }

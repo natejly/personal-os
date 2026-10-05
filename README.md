@@ -12,16 +12,16 @@ instructions, files, memories and graph.
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today      2 │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Dashboards   │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Files        │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
-│ Cowork       │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ Library      │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ SPACES     + │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ ▦ Space 1    │  └───────────────┘ └───────────────┘ │   run python │
-│ PROJECTS   + │                                      │   gmail send │
-│ ■ Grain      │  [Brief me]                          │  Last reply… │
-│ RECENTS      │                                      │              │
+│ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Cowork       │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
+│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
+│ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │
+│ ■ Grain      │                                      │   gmail send │
+│ RECENTS      │  [Brief me]                          │  Last reply… │
 │ · …          │                                      │              │
+│              │                                      │              │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
@@ -209,7 +209,7 @@ Settings → Modules.
   further runs either; that proposal is yours to accept too. If the machine was
   asleep over a slot the task still runs, once, and is told it is late so it says
   so in its report. A one-off retires itself after it fires.
-- **Dashboards you describe.** Register data sources (an HTTP API with an API
+- **Dashboards you describe** (Files → Dashboards). Register data sources (an HTTP API with an API
   key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
   plain English. The model writes a self-contained HTML widget that runs in a
   sandboxed iframe and fetches data through the backend (keys never reach the
@@ -435,7 +435,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘3, ⌘5 | Today / Chats / Todos / Calendar / Dashboards |
+| ⌘0 … ⌘3 | Today / Chats / Todos / Calendar |
 | ⌘6 / ⌘7 | Settings → Memory / its knowledge graph |
 | ⌘8 | Files → Uploads |
 | ⌘9 | Activity |

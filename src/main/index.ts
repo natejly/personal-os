@@ -212,7 +212,6 @@ function buildMenu(): void {
         { label: 'Chats', accelerator: 'CmdOrCtrl+1', click: () => sendMenu('view:chat') },
         { label: 'Todos', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
         { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
-        { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
         { label: 'Memory…', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
         { label: 'Knowledge Graph…', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
         { label: 'Uploads', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },

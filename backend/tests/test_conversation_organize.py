@@ -92,7 +92,10 @@ class RouteTests(unittest.TestCase):
             self.appmod.bus.live = orig  # type: ignore[method-assign]
         # desk-owned
         d = self.j("POST", "/conversations", {"project_id": None})
+        # deskId is bound by the cowork route only; a settings PATCH carrying it is ignored
         self.j("PATCH", f"/conversations/{d['id']}", {"settings": {"deskId": "d1"}})
+        self.assertNotEqual(self.j("GET", f"/conversations/{d['id']}")["settings"].get("deskId"), "d1")
+        self.j("POST", "/cowork/desks", {"conversation_id": d["id"], "start": False})
         self.j("PATCH", f"/conversations/{d['id']}", {"project_id": proj["id"]}, 409)
         # archive list
         self.j("PATCH", f"/conversations/{c['id']}", {"archived": True})

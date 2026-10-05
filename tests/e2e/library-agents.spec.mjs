@@ -106,7 +106,9 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await expect(panel.locator('.sa-msg.user').last()).toContainText('and also check the weather', { timeout: 30_000 })
   await expect(panel.locator('.sa-msg.assistant').last()).toContainText('MOCK: and also check the weather', { timeout: 40_000 })
   await shot(page, 'subagent-panel')
-  const view = await api(`/subagents/${(await api(`/runs?status=all&conversation_id=${c.id}`)).find((r) => r.kind === 'subagent').run_id}`)
+  const parent = (await api(`/runs?status=all&conversation_id=${c.id}`)).find((r) => r.kind === 'chat')
+  const child = (await api(`/runs/${parent.run_id}/children`))[0]
+  const view = await api(`/subagents/${child.run_id}`)
   expect(view.run.status).toBe('done')
   expect(view.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['!!slow 8000 !!reply first draft', 'and also check the weather'])
 

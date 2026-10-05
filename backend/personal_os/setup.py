@@ -141,7 +141,7 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
         # extractionModel is cleared: one left over from another provider (a LiteLLM alias) would fail every
         # background call. Empty means "use the default model".
         patch = {"provider": body.provider, "baseUrl": base, "apiKey": key, "defaultModel": model,
-                 "extractionModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                 "extractionModel": "", "fastModel": "", "onboardedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         # No key for the endpoint the saved key belongs to means "unchanged", as in PUT /settings; an empty
         # value would delete it from the secret store. A different endpoint never inherits the old key.
         if not key and _same_base(base, get_settings().get("baseUrl")):

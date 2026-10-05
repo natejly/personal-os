@@ -1,4 +1,5 @@
 import type { MessageStatus } from '@shared/types'
+import { modelLabel } from './modelLabel'
 
 const CAUSE: Record<NonNullable<MessageStatus['reason']>, string> = {
   rate_limit: 'The provider is rate-limiting.',
@@ -9,6 +10,7 @@ const CAUSE: Record<NonNullable<MessageStatus['reason']>, string> = {
 /** The one line shown under a streaming reply that has nothing to show yet. `nowMs` is passed in so the countdown is testable. */
 export const statusText = (status: MessageStatus, nowMs: number): string => {
   if (status.kind === 'compacting') return 'Summarizing earlier messages to make room…'
+  if (status.kind === 'route') return `Auto → ${modelLabel(status.model ?? '')}: ${status.why ?? ''}`
   const left = status.until ? Math.ceil((status.until - nowMs) / 1000) : 0
   if (left <= 0) return 'Retrying now…'
   const of = status.attempt && status.max ? ` (attempt ${status.attempt} of ${status.max})` : ''

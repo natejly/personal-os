@@ -2,6 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { chatModelIds, modelChoices, modelLabel, showsEffort } from './modelLabel'
 
+test('the auto model is labelled Auto', () => {
+  assert.equal(modelLabel('auto'), 'Auto')
+})
+
 test('model labels drop the fireworks routing path', () => {
   assert.equal(modelLabel('accounts/fireworks/models/kimi-k3'), 'kimi-k3')
   assert.equal(modelLabel('fireworks_ai/accounts/fireworks/models/deepseek-v4-pro'), 'deepseek-v4-pro')

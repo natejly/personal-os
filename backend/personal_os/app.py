@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
-from . import compaction, otel_export, titles
+from . import compaction, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -1373,7 +1373,7 @@ async def retitle_conversation(id: str) -> dict[str, Any]:
     texts = [m["content"] for m in c["messages"] if m["role"] == "user"]
     cfg = settings()
     try:
-        new = await titles.generate(cfg, c["model"] or cfg["defaultModel"], titles.pick_texts(texts))
+        new = await titles.generate(cfg, router.concrete(c["model"], cfg), titles.pick_texts(texts))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Could not generate a title: {e}") from None
     if not new:
@@ -1833,6 +1833,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         return
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
+    # Auto: the model for this turn is chosen from the message (router.py). The chat keeps `auto`; the reply row and
+    # the trace record what was used. An explicit pick for a regenerated variant arrives as body.model and wins.
+    routed: tuple[str, str] | None = None
+    if router.wanted(model, body.model or "", cfg):
+        msgs_ = conv["messages"]
+        last_user = next((m for m in reversed(msgs_) if m["role"] == "user"), None)
+        last_asst = next((m for m in reversed(msgs_) if m["role"] == "assistant"), None)
+        routed = router.route(
+            body.content if body.content is not None else str((last_user or {}).get("content") or ""),
+            attachments=bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
+            prior_tools=bool(last_asst and last_asst.get("tool_events")),
+            effort=str(conv["settings"].get("effort") or "default"),
+            plan_mode=str(conv["settings"].get("planMode") or cfg.get("planMode") or "off") in ("auto", "always"),
+            fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
+        model = routed[0]
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
     regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
     placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
@@ -1930,7 +1945,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     llm.usage_context.set(_ucx)
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
-    cspan = tracer.start("context", "Assemble context", {"model": model})
+    cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
     # A follow-up is searched with the turn before it in view; the model still sees user_text as typed.
     # On the new-message path conv["messages"] is the history before this turn; on resume and regenerate it ends
     # with this turn's user message (and the reply being replaced), so the history is cut before that message.
@@ -2314,6 +2329,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "span", {"message_id": am["id"], "span": cspan}
         if compact_span:
             yield "span", {"message_id": am["id"], "span": compact_span}
+        if routed:  # the line under the reply until text arrives; the chosen model's tag stays on the finished message
+            yield "status", {"id": am["id"], "kind": "route", "model": model, "why": routed[1]}
 
         budget = Budget(_job_caps(cfg, conv["settings"].get("job_budget")) if proposal_only(run) else cfg)
         tool_ctx["budget"] = budget  # children are charged to it
@@ -8216,7 +8233,7 @@ async def induce_conversation_skill(id: str, body: InduceIn | None = None) -> di
         return {"candidate": None, "reason": reason or "Not enough of a conversation to learn a procedure from."}
     cfg = settings()
     cand = await induce_skill(settings=cfg, skills=skills, project_id=conv["project_id"], conversation_id=id,
-                              transcript=transcript, model=conv["model"] or cfg["defaultModel"])
+                              transcript=transcript, model=router.concrete(conv["model"], cfg))
     return {"candidate": cand, "reason": None if cand else "Nothing reusable enough to propose."}
 
 

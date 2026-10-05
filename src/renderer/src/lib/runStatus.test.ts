@@ -15,6 +15,10 @@ test('statusText: once the time has passed it says retrying now; compacting has 
   assert.equal(statusText({ kind: 'compacting' }, 0), 'Summarizing earlier messages to make room…')
 })
 
+test('statusText: a routed reply says which model Auto chose and why', () => {
+  assert.equal(statusText({ kind: 'route', model: 'accounts/fireworks/models/kimi-k3', why: 'short follow-up' }, 0), 'Auto → kimi-k3: short follow-up')
+})
+
 test('statusTicks only while a retry countdown is still running', () => {
   assert.equal(statusTicks({ kind: 'retry', until: 5_000 }, 1_000), true)
   assert.equal(statusTicks({ kind: 'retry', until: 5_000 }, 6_000), false)

@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from . import llm, redact
+from .router import concrete
 from .context import estimate_tokens
 from .db import Database, now
 
@@ -461,7 +462,7 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
     async def compact_now(conv_id: str, body: CompactIn | None = None) -> dict[str, Any]:
         conv = _conv(conv_id)
         cfg = settings_fn()
-        model = str(cfg.get("extractionModel") or conv.get("model") or cfg.get("defaultModel") or "")
+        model = str(cfg.get("extractionModel") or concrete(conv.get("model"), cfg))
         try:
             res = await compactor.compact(cfg, model, conv_id, convos.history_rows(conv_id), focus=(body.focus if body else None),
                                           include_untrusted=_tainted(convos, conv_id))

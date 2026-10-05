@@ -6,7 +6,7 @@ export const openFiles = async (page) => {
 export const body = (page) => page.locator('textarea.md-input')
 export const titleBox = (page) => page.getByLabel('Title', { exact: true })
 export const waitSaved = async (page) => {
-  await page.waitForFunction(() => document.querySelector('.doc-save-state')?.textContent === 'Saved', null, { timeout: 60_000 })
+  await page.waitForFunction(() => !document.querySelector('.doc-save-state'), null, { timeout: 60_000 })
 }
 export const smallWindow = (g) => g.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 520))
 export const mkDoc = (g, d = {}) => g.api('/docs', { method: 'POST', body: { title: 'Untitled', content: '', folder: '', project_id: null, ...d } })

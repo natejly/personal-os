@@ -7,7 +7,6 @@ import type { WidgetDef, WidgetProps } from '../registry'
 
 const ACCEPTS: DragKind[] = ['file']
 
-const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const inScope = (d: Document, s: Scope): boolean =>
   s === 'all' ? true : s === 'personal' ? d.project_id === null : d.project_id === s
 
@@ -20,7 +19,7 @@ function Row({ d }: { d: Document }): JSX.Element {
         <div className="widget-title" title={d.name}>{d.name}</div>
         <div className="widget-sub">{d.preview || '(no text extracted)'}</div>
       </div>
-      <span className="widget-meta">{fmtSize(d.size)} · {d.chunk_count}</span>
+      <span className="widget-meta">{new Date(d.created_at * 1000).toLocaleDateString()}</span>
       <button className="icon-btn danger" title="Delete" onClick={() => void deleteDocument(d.id)}><Trash2 size={13} /></button>
     </div>
   )

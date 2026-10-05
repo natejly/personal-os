@@ -11,7 +11,6 @@ import {
   buildGroups, canDropDoc, canDropFolder, flattenGroups, folderKey, groupShutKey, joinPath, nameOf,
   parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group, type Row, type TreeNode
 } from '../lib/docTree'
-import ProjectChip from './ProjectChip'
 import { rowButton } from '../lib/rowButton'
 import { writeDrag } from '../canvas/dnd'
 
@@ -27,15 +26,6 @@ let dragging:
 
 const DOC_MIME = 'application/x-grain-doc'
 const FOLDER_MIME = 'application/x-grain-folder'
-
-const fmtWhen = (ts: number): string => {
-  const d = new Date(ts * 1000)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return d.getTime() >= today.getTime()
-    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
 
 /** Can what is being dragged land here? A group row is its scope's root, which takes anything else. */
 const accepts = (scope: string, path: string): boolean => {
@@ -271,10 +261,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             </span>
           )}
         </span>
-        <span className="doc-row-meta">
-          {showScope && <ProjectChip projectId={d.project_id} showPersonal />}
-          {showScope && d.folder ? `${d.folder} · ` : ''}{d.words} words · {fmtWhen(d.updated_at)}
-        </span>
+        {showScope && d.folder && <span className="doc-row-meta">{d.folder}</span>}
       </span>
       <button className={`icon-btn ghost xs ${d.pinned ? 'starred' : ''}`} title={d.pinned ? 'Unpin' : 'Pin'}
         onClick={(e) => { e.stopPropagation(); void setDocPin(d.id, !d.pinned) }}>
@@ -315,7 +302,6 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
         <button className="doc-group-name" onClick={() => toggleFolder(shut)} title={g.orphan ? 'This project no longer exists; its files are personal now' : g.name}>
           {g.name}
         </button>
-        <span className="count">{g.deep || ''}</span>
         <button className="icon-btn ghost xs" title={`New file in ${g.name}`} aria-label={`New file in ${g.name}`}
           onClick={(e) => { e.stopPropagation(); void createDoc({ project_id: g.scope || null }) }}>
           <Plus size={13} />
@@ -374,7 +360,6 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             {f.name}
           </button>
         )}
-        <span className="count">{f.deep || ''}</span>
         <button className="icon-btn ghost xs" title="Folder actions" aria-label={`Actions for ${f.name}`}
           onClick={(e) => { e.stopPropagation(); setMenu(menu === key ? null : key) }}>
           <MoreHorizontal size={13} />
@@ -403,7 +388,6 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
             <ChevronRight size={11} className={open ? 'rot90' : undefined} />
           </button>
           <button className="doc-group-name" onClick={() => toggleTop(key)}>{title}</button>
-          <span className="count">{list.length}</span>
         </div>
         {open && list.map((d) => docRow(d, 1, true))}
       </div>

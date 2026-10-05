@@ -58,7 +58,6 @@
   letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .doc-group-row .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: none; }
-.doc-group-row .count { color: var(--text-faint); font-size: 10.5px; flex: none; }
 .doc-group-row .icon-btn.xs { opacity: 0; flex: none; }
 .doc-group-row:hover .icon-btn.xs, .doc-group-row.menu-open .icon-btn.xs { opacity: 1; }
 /* While a folder is being named it does not exist yet, so nothing about it is draggable or clickable. */
@@ -84,7 +83,6 @@
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px;
   padding: 2px 6px; color: var(--text); outline: 0;
 }
-.doc-folder-row .count { color: var(--text-faint); font-size: 10.5px; flex: none; }
 .doc-folder-row .icon-btn.xs { opacity: 0; flex: none; }
 .doc-folder-row:hover .icon-btn.xs, .doc-folder-row.menu-open .icon-btn.xs { opacity: 1; }
 .doc-folder-menu {
@@ -171,7 +169,6 @@
 }
 .doc-title-input:hover { border-color: var(--border); }
 .doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
-.doc-save-state { color: var(--text-faint); font-size: 11px; }
 
 /* .model-picker pins every svg to the right; this picker leads with a folder icon on the left. */
 .doc-folder-pick svg:first-child { right: auto; left: 8px; }
@@ -403,3 +400,4 @@
 .doc-tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
 .doc-tag-chip:hover { color: var(--text); }
 .doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }
+.doc-save-state { background: var(--warn); }

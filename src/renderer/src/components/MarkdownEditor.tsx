@@ -6,7 +6,7 @@ import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPast
 import { linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { wrapToggle } from '../features/notes/format'
-import { readingTime, wordCount } from '../features/notes/stats'
+import { wordCount } from '../features/notes/stats'
 import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
 import { TAG_BODY } from '../features/notes/tags'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
@@ -256,7 +256,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   const [sel, setSel] = useState({ start: 0, end: 0 })
   const lineCount = useMemo(() => value.split('\n').length, [value])
   // Counted once per value, not once per render: a selection drag renders the status bar hundreds of times.
-  const words = useMemo(() => wordCount(value), [value])
   const selWords = useMemo(() => (richStatus && sel.end > sel.start ? wordCount(value.slice(sel.start, sel.end)) : 0), [richStatus, value, sel.start, sel.end])
   const wikiOn = !!linkTargets
   // Keyed on the paragraph span, not the caret line, so moving within a paragraph does not re-highlight.
@@ -633,10 +632,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
         )}
       </div>
       <div className="md-status">
-        <span>Ln {caret.line}, Col {caret.col}</span>
-        <span>{lineCount} lines</span>
-        <span>{words} words</span>
-        {richStatus && readingTime(words) && <span>{readingTime(words)}</span>}
         {richStatus && sel.end > sel.start && (
           <span className="md-sel">
             {selWords} words, {sel.end - sel.start} chars selected

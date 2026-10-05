@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home } from 'lucide-react'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -356,7 +356,7 @@ export default function Sidebar(): JSX.Element {
       <div className="convo-list">
         {pinned.length > 0 && (
           <section>
-            <h4 className="pinned-head"><Pin size={11} /> Pinned</h4>
+            <h4>Pinned</h4>
             {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         )}

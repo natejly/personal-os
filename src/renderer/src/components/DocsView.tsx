@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, Files, PanelRight, X, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
+  Sparkles, FolderTree, SlidersHorizontal
 } from 'lucide-react'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
@@ -49,9 +49,28 @@ const flagOn = (key: string): boolean => {
   try { return localStorage.getItem(key) === '1' } catch { return false }
 }
 
+/** Writing-view toggles, folded into one menu so the toolbar stays quiet. */
+function ViewMenu({ children }: { children: React.ReactNode }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const away = (e: MouseEvent): void => { if (!root.current?.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [open])
+  return (
+    <div className="newdoc" ref={root}>
+      <button className="icon-btn ghost" title="View options" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}><SlidersHorizontal size={14} /></button>
+      {open && <div className="notes-menu right" role="menu">{children}</div>}
+    </div>
+  )
+}
+
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
-  const docFolders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
   const activeDoc = useStore((s) => s.activeDoc)
   const docDraft = useStore((s) => s.docDraft)
@@ -65,7 +84,7 @@ export default function DocsView(): JSX.Element {
   const libraryScope = useStore((s) => s.libraryScope)
   const { openFiles, setLibraryScope } = useStore()
   const {
-    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
+    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc,
     setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote
   } = useStore()
   // Select the status itself, not `liveDoc(status)`: that builds a new object on every call, and a
@@ -102,7 +121,6 @@ export default function DocsView(): JSX.Element {
   linkedRef.current = linked
   // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
   // window.prompt, so the picker turns into a text input in place rather than asking in a dialog.
-  const [folderDraft, setFolderDraft] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { void refreshDocs() }, [refreshDocs])
@@ -152,17 +170,6 @@ export default function DocsView(): JSX.Element {
   )
   const scope = activeDoc ? scopeOf(activeDoc) : ''
   const projectName = projects.find((p) => p.id === scope)?.name
-  // Every folder of the doc's own project, plus the one it is in: the list may be filtered, and an
-  // empty folder is a real destination the docs themselves cannot vouch for.
-  const folders = useMemo(() => {
-    const set = new Set([
-      ...docFolders.filter((f) => f.scope === scope).map((f) => f.path),
-      ...docs.filter((d) => scopeOf(d) === scope).map((d) => d.folder).filter(Boolean)
-    ])
-    if (activeDoc?.folder) set.add(activeDoc.folder)
-    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-  }, [docFolders, docs, activeDoc, scope])
-
   // A doc just made by New or Today's note gets the caret, at its end, so typing can start at once.
   useEffect(() => {
     if (!docFocusId || docFocusId !== activeDoc?.id) return
@@ -382,56 +389,7 @@ export default function DocsView(): JSX.Element {
                 onBlur={() => void flushDoc()}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
-              <label className="model-picker doc-folder-pick" title="Project">
-                <FolderKanban size={13} />
-                <select
-                  value={scope}
-                  onChange={(e) => { setFolderDraft(null); void moveDoc(activeDoc.id, e.target.value, '') }}
-                >
-                  <option value="">Personal</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <ChevronDown size={12} />
-              </label>
-              <label className="model-picker doc-folder-pick" title="Folder">
-                <Folder size={13} />
-                {folderDraft !== null ? (
-                  <input
-                    autoFocus
-                    value={folderDraft}
-                    placeholder="Folder name"
-                    onChange={(e) => setFolderDraft(e.target.value)}
-                    onBlur={() => {
-                      const name = folderDraft.trim()
-                      if (name) void moveDoc(activeDoc.id, scope, name)
-                      setFolderDraft(null)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') e.currentTarget.blur()
-                      if (e.key === 'Escape') setFolderDraft(null)
-                    }}
-                  />
-                ) : (
-                  <>
-                    <select
-                      value={activeDoc.folder || ''}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        if (v === '__new__') setFolderDraft('')
-                        else void moveDoc(activeDoc.id, scope, v)
-                      }}
-                    >
-                      <option value="">No folder</option>
-                      {folders.map((f) => <option key={f} value={f}>{f}</option>)}
-                      <option value="__new__">New folder…</option>
-                    </select>
-                    <ChevronDown size={12} />
-                  </>
-                )}
-              </label>
-              <span className="doc-save-state">
-                {docSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
-              </span>
+              {(docSaving || dirty) && <span className="dr-dot doc-save-state" title={docSaving ? 'Saving…' : 'Unsaved changes'} aria-label="Unsaved changes" />}
               <span className="spacer" />
               <div className="seg">
                 <button className={docMode === 'edit' ? 'on' : ''} title="Editor only" onClick={() => setDocMode('edit')}><Pencil size={13} /></button>
@@ -439,17 +397,12 @@ export default function DocsView(): JSX.Element {
                 <button className={docMode === 'preview' ? 'on' : ''} title="Preview only" onClick={() => setDocMode('preview')}><Eye size={13} /></button>
               </div>
               {docMode !== 'preview' && (
-                <>
-                  <button className={`icon-btn ghost ${writeFlags.focus ? 'on' : ''}`} title="Focus mode: dim all but the current paragraph" aria-pressed={writeFlags.focus} onClick={() => toggleFlag('focus')}><Focus size={14} /></button>
-                  <button className={`icon-btn ghost ${writeFlags.typewriter ? 'on' : ''}`} title="Typewriter scrolling: keep the caret line mid-height" aria-pressed={writeFlags.typewriter} onClick={() => toggleFlag('typewriter')}><AlignVerticalSpaceAround size={14} /></button>
-                </>
+                <ViewMenu>
+                  <button role="menuitemcheckbox" aria-checked={writeFlags.focus} className="notes-menu-row" title="Dim all but the current paragraph" onClick={() => toggleFlag('focus')}>{writeFlags.focus ? '✓ ' : ''}Focus mode</button>
+                  <button role="menuitemcheckbox" aria-checked={writeFlags.typewriter} className="notes-menu-row" title="Keep the caret line mid-height" onClick={() => toggleFlag('typewriter')}>{writeFlags.typewriter ? '✓ ' : ''}Typewriter scrolling</button>
+                  {docMode === 'split' && <button role="menuitemcheckbox" aria-checked={linked} className="notes-menu-row" onClick={() => setLinked((l) => !l)}>{linked ? '✓ ' : ''}Link scrolling</button>}
+                </ViewMenu>
               )}
-              {docMode === 'split' && (
-                <button className="icon-btn ghost" title={linked ? 'Unlink scrolling' : 'Link scrolling'} onClick={() => setLinked((l) => !l)}>
-                  {linked ? <Link2 size={14} /> : <Link2Off size={14} />}
-                </button>
-              )}
-              <button className="icon-btn ghost" title="Save now (⌘S) — it autosaves anyway" onClick={() => void flushDoc()}><Save size={14} /></button>
               <DocRecordButton docId={activeDoc.id} />
               <ExportMenu title={title} content={body} />
               {/* One toggle for the whole panel; the tab strip inside picks what it shows. The dot

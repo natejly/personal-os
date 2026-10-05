@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, MessageSquare, MessagesSquare, Pencil } from 'lucide-react'
+import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from 'lucide-react'
 import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
+import Face from '../../components/Face'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
@@ -13,6 +14,7 @@ import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas } from '../store'
 import { useRingStatus } from '../useRingStatus'
+import { sessionMood } from './face'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
 
@@ -69,7 +71,7 @@ const ChatSwitcher = ({ win, convId }: { win: CanvasWindow; convId: string }): J
 }
 
 /** The window has no title bar, so the chat names itself. Double-click or the pencil renames it. */
-const ChatTitle = ({ convId, title, switcher }: { convId: string; title: string; switcher?: JSX.Element }): JSX.Element => {
+const ChatTitle = ({ convId, title, actions }: { convId: string; title: string; actions?: JSX.Element }): JSX.Element => {
   const renameChat = useStore((s) => s.renameChat)
   const [editing, setEditing] = useState<string | null>(null)
   const commit = (): void => {
@@ -92,12 +94,12 @@ const ChatTitle = ({ convId, title, switcher }: { convId: string; title: string;
     <div className="chat-head">
       <span className="chat-title" title={title} onDoubleClick={() => setEditing(title)}>{title || 'Untitled chat'}</span>
       <button className="icon-btn ghost xs chat-rename" title="Rename chat" onClick={() => setEditing(title)}><Pencil size={11} /></button>
-      {switcher}
+      {actions}
     </div>
   )
 }
 
-function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
+function ChatWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element {
   const convId = win.ref_id ?? ''
   const root = useRef<HTMLDivElement>(null)
   const scroll = useRef<HTMLDivElement>(null)
@@ -111,6 +113,9 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
+  // Blob view: the window shows only this chat's creature, posed by this chat's own state.
+  const blob = win.config.blob === true
+  const mood = useStore((s) => sessionMood(s.sessions[convId]))
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -227,6 +232,26 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     )
   }
 
+  const actions = (
+    <>
+      <button className="icon-btn ghost xs" title={blob ? 'Show chat' : 'Show as face'} aria-pressed={blob}
+        onClick={() => onConfig({ blob: !blob })}>
+        {blob ? <MessageSquare size={11} /> : <Smile size={11} />}
+      </button>
+      <ChatSwitcher win={win} convId={convId} />
+    </>
+  )
+  if (blob) {
+    return (
+      <div className="widget">
+        <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
+        <button className="face-widget chat-face" title="Show chat" onClick={() => onConfig({ blob: false })}>
+          <Face name={convId} status={mood} size="fill" title={convo?.title || 'Chat'} />
+        </button>
+      </div>
+    )
+  }
+
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
   const onScroll = (): void => {
@@ -235,7 +260,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
   return (
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
-      <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
+      <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
           {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
@@ -258,6 +283,7 @@ export const def: WidgetDef = {
   chrome: 'full',
   statusful: true,
   needsRef: true,
+  defaultConfig: { blob: false },
   accepts: ACCEPTS,
   Component: ChatWidget
 }

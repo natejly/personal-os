@@ -17,7 +17,9 @@ each with a status ring. A chat window can also shrink to a blob: the face butto
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
 frame, drag the creature to move it, click it (or **Open chat** in the menu) to grow the chat back, and
 Settings › Behavior › Spaces › **Compact chats** makes the blob the default for windows that have not
-chosen. A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
+chosen. While a blob's chat is answering, a small speech bubble beside the creature says what it is
+doing: the tool call in flight, the subagents it is waiting on, or the latest line of its thinking
+(the same line the chat's activity row shows). A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
 onto the plane or onto a space row in the sidebar. Sticky notes exist only here.
 
 Windows move, resize, minimize and maximize. The Spaces bar holds the space tabs (drag to reorder),

@@ -2,6 +2,7 @@
 //   "!!reply <text>"            → the assistant answers <text> (streamed in word chunks)
 //   "!!tool <name> <json args>" → the assistant makes one tool call, then answers "MOCK: tool done" on the next turn
 //   "!!slow <ms>"               → wait before answering (for Stop / steer / queue tests)
+//   "!!think <text>"            → stream <text> as reasoning first; with !!slow the wait sits between thinking and answer
 //   "!!fail <status>"           → answer with that HTTP status once per request (retry paths)
 //   anything else               → "MOCK: <last user message>"
 // Set E2E_LLM=real to skip this and use the LiteLLM proxy on :4000 instead (slow, costs money).
@@ -39,7 +40,10 @@ export function startMockLLM() {
       const slow = text.match(/!!slow (\d+)/)
       const tool = text.match(/!!tool (\S+) (\{.*\})/s)
       const reply = text.match(/!!reply ([\s\S]*)/)
-      if (slow) await new Promise((r) => setTimeout(r, Number(slow[1])))
+      // "!!think <text>" streams that text as reasoning first; with !!slow the wait then falls between the thinking and the answer.
+      const think = text.match(/!!think ((?:(?!!!)[\s\S])*)/)
+      const wait = () => slow && new Promise((r) => setTimeout(r, Number(slow[1])))
+      if (!(think && body.stream)) await wait()
       if (fail && !body.__failed) {
         res.statusCode = Number(fail[1])
         return res.end(JSON.stringify({ error: { message: `mock failure ${fail[1]}` } }))
@@ -56,6 +60,10 @@ export function startMockLLM() {
       res.setHeader('Content-Type', 'text/event-stream')
       const send = (delta, finish = null) => res.write(`data: ${JSON.stringify({ id: 'mock', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`)
       send({ role: 'assistant' })
+      if (think) {
+        send({ reasoning_content: think[1].trim() })
+        await wait()
+      }
       if (toolCall) {
         send({ tool_calls: [{ index: 0, id: toolCall.id, type: 'function', function: { name: toolCall.function.name, arguments: '' } }] })
         send({ tool_calls: [{ index: 0, function: { arguments: toolCall.function.arguments } }] })

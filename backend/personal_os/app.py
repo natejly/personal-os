@@ -3923,6 +3923,76 @@ async def run_events(run_id: str, since: int = 0, limit: int = 500) -> list[dict
     return evs[:max(1, min(limit, 2000))]
 
 
+# ---------------- the crew tree (Spaces' crew widget) ----------------
+def _agent_node(r: dict[str, Any], roots: set[str]) -> dict[str, Any]:
+    """One subagent run as a tree node: the row, with the live child's state and 'now' line laid over it while it runs.
+    A parent that is a root (the desk's turn run, the workflow run) reads as None: the node hangs off the root."""
+    inp = r.get("input") or {}
+    b = r.get("budget") or {}
+    parent = r.get("parent_run_id")
+    node = {"id": r["run_id"], "parent_id": parent if parent and parent not in roots else None,
+            "role": str(inp.get("role") or "agent"), "task": str(inp.get("task") or "")[:300], "status": r.get("status") or "running",
+            "state": None, "now": "", "exit_reason": None, "rounds": int(b.get("rounds") or 0), "calls": 0,
+            "cost": float(b.get("cost") or 0.0), "started_at": r.get("started_at"), "ended_at": r.get("ended_at"), "error": r.get("error")}
+    live = subagent_mgr.children.get(r["run_id"])
+    if live is not None:
+        info = subagent_mgr.info(live)
+        node.update(state=info["state"], now=info["now"], exit_reason=info["exit_reason"], rounds=info["rounds"], calls=info["calls"],
+                    cost=info["cost"])
+    return node
+
+
+def _descendant_runs(root_id: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    frontier = [root_id]
+    seen = {root_id}
+    while frontier:
+        nxt = []
+        for rid in frontier:
+            for r in run_store.children(rid):
+                if r["run_id"] in seen:
+                    continue
+                seen.add(r["run_id"])
+                out.append(r)
+                nxt.append(r["run_id"])
+        frontier = nxt
+    return out
+
+
+@app.get("/crew/{ref_id}")
+def crew_view(ref_id: str) -> dict[str, Any]:
+    """One agent tree for the crew widget: a desk, a workflow run, or a saved workflow (its latest run) at the root, and
+    the subagents under it with their parent run, so the widget can nest them. Live children carry a 'now' line."""
+    desk = desks.get(ref_id, with_outputs=False)
+    if desk:
+        rows = run_store.list(None, None, 500, desk_id=desk["id"])
+        turns = {r["run_id"] for r in rows if r.get("kind") != "subagent"}
+        agents = sorted((r for r in rows if r.get("kind") == "subagent"), key=lambda r: (r.get("started_at") or 0))
+        root = {"kind": "desk", "id": desk["id"], "title": desk["title"], "status": desk["status"],
+                "now": desk.get("headline") or desk.get("status_reason") or "", "run_id": desk.get("run_id"),
+                "ended_at": desk.get("ended_at"), "cost": desk.get("cost")}
+        return {"root": root, "run": None, "workflow": None, "agents": [_agent_node(r, turns) for r in agents]}
+    run = workflow_store.get_run(ref_id)
+    wf = None
+    if run is None:
+        wf = workflow_store.get(ref_id)
+        if wf is None:
+            raise HTTPException(404, "No desk, workflow or workflow run with that id")
+        latest = workflow_store.list_runs(wf["id"], 1)
+        run = workflow_store.get_run(latest[0]["id"]) if latest else None
+    elif run.get("workflow_id"):
+        wf = workflow_store.get(run["workflow_id"])
+    if run is None:
+        root = {"kind": "workflow", "id": wf["id"], "title": wf["name"], "status": "idle", "now": wf.get("description") or ""}
+        return {"root": root, "run": None, "workflow": wf, "agents": []}
+    live_steps = [s["step_id"] for s in run["steps"] if s["status"] in ("running", "waiting_approval")]
+    root = {"kind": "workflow_run", "id": run["id"], "title": run["name"], "status": run["status"],
+            "now": run.get("error") if run["status"] in ("failed", "interrupted") else ", ".join(live_steps),
+            "ended_at": run.get("ended_at"), "workflow_id": run.get("workflow_id")}
+    agents = [_agent_node(r, {run["id"]}) for r in _descendant_runs(run["id"])]
+    return {"root": root, "run": run, "workflow": wf, "agents": agents}
+
+
 # ---------------- workflows and commands ----------------
 class WorkflowIn(BaseModel):
     text: str
@@ -8517,6 +8587,22 @@ def _workflow_report(run: dict[str, Any]) -> None:
 
 
 workflow_store.on_report = _workflow_report
+
+
+def _workflow_changed(run: dict[str, Any]) -> None:
+    """Every workflow run or step write lands on the app topic as `workflow_run`, the way desks do, so the crew
+    widget and the Library's run list move without polling. Sync routes run in a threadpool, hence the hop."""
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None:
+        events.publish("workflow_run", run)
+    elif _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "workflow_run", run)
+
+
+workflow_store.on_change = _workflow_changed
 
 
 toolbox.desk_starter = _desk_start_tool

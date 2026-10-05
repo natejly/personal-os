@@ -1198,6 +1198,10 @@ export const useStore = create<State>((set, get) => {
             get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+            window.dispatchEvent(new Event('grain-crew'))
+          } else if (ev.event === 'workflow_run') {
+            // Crew windows and the Library's run list re-read the run; the event itself carries no payloads.
+            window.dispatchEvent(new Event('grain-crew'))
           } else if (ev.event === 'preview') {
             const data = ev.data
             void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))

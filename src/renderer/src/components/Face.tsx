@@ -8,9 +8,10 @@ const MOOD: Record<string, Expression> = {
   awaiting_plan: unsure, blocked: unsure,
   needs_approval: surprised, awaiting_approval: surprised,
   paused: sleepy, queued: sleepy, stopped: sleepy,
-  interrupted: scared, timed_out: scared,
+  interrupted: scared, timed_out: scared, cancelled: sleepy,
   error: sad, failed: sad,
-  review: happy, done: happy
+  review: happy, done: happy, completed: happy, partial: unsure,
+  waiting_approval: surprised
 }
 
 const LIVE = new Set(['streaming', 'running', 'working', 'planning'])

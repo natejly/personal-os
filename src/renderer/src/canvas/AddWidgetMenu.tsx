@@ -126,12 +126,24 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     }))
   }
 
+  // Desks that are not finished first, then every saved workflow: each opens as the tree of agents under it.
+  const crew = async (): Promise<MenuEntry[]> => {
+    const desks = useStore.getState().desks.filter((d) => !['done', 'failed', 'stopped'].includes(d.status)).slice(0, RECENT_NOTES)
+    const wfs = await api.workflows.list()
+    const out: MenuEntry[] = [
+      ...desks.map((d): MenuEntry => ({ label: d.title || 'Untitled desk', run: act(() => cv().ensureWindow(canvasId, 'crew', d.id, { ref_kind: 'desk' }, at)) })),
+      ...wfs.map((w): MenuEntry => ({ label: w.name, run: act(() => cv().ensureWindow(canvasId, 'crew', w.id, { ref_kind: 'workflow' }, at)) }))
+    ]
+    return out.length ? out : [{ label: 'No desks or workflows yet', disabled: true, run: noop }]
+  }
+
   const pickers: Partial<Record<WidgetKind, () => MenuEntry[] | Promise<MenuEntry[]>>> = {
     chat,
     note,
     'dashboard-widget': widget,
     project,
-    artifact
+    artifact,
+    crew
   }
 
   return (Object.keys(WIDGETS) as WidgetKind[]).map((kind): MenuEntry => {

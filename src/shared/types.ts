@@ -1526,6 +1526,8 @@ export type BackgroundEvent =
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
   /** A shell job started, ended or was killed: the Running list refetches. */
   | { event: 'shell_jobs'; data: { live: number } }
+  /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
+  | { event: 'workflow_run'; data: WorkflowRun }
 
 /** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
 export interface ShellJobInfo {
@@ -1859,7 +1861,7 @@ export interface PromotionResult {
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact' | 'face'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact' | 'face' | 'crew'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -2024,7 +2026,10 @@ export interface CanvasPreset {
 /** POST /canvas-presets/{id}/instantiate: the new canvas plus how many preset windows were dropped (dangling refs). */
 export type InstantiatedCanvas = Canvas & { skipped: number }
 
-export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+export type DragKind =
+  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+  /** A desk, a saved workflow or one run of it: each opens as a crew window showing its agents. */
+  | 'desk' | 'workflow' | 'workflow_run'
 
 export interface DragPayload {
   kind: DragKind
@@ -3011,6 +3016,8 @@ export interface WorkflowStepRow {
   error: string | null
   approval_call_id: string | null
   idempotency_key: string
+  /** The subagent runs an agent / fan_out step spawned, in order; null for a tool step. */
+  agents: string[] | null
 }
 /** One step of the expanded plan the user approves: parameters filled in, step results still shown as {{step.result}}. */
 export interface WorkflowPlanStep {
@@ -3042,6 +3049,46 @@ export interface WorkflowRun {
   steps: WorkflowStepRow[]
   /** Not sent in the run list. */
   plan?: WorkflowPlanStep[]
+}
+// ---- The crew tree (GET /crew/{id}): a desk or workflow run and the subagents under it ----
+export interface CrewAgent {
+  id: string
+  /** Another agent's id, or null when it hangs straight off the root. */
+  parent_id: string | null
+  role: string
+  task: string
+  /** The run row's status: running | done | error | interrupted | awaiting_approval. */
+  status: string
+  /** Live only: running | completed | partial | error. */
+  state: string | null
+  /** Live only: the tool call in flight, or "thinking". */
+  now: string
+  exit_reason: string | null
+  rounds: number
+  calls: number
+  cost: number
+  started_at: number | null
+  ended_at: number | null
+  error: string | null
+}
+export interface CrewRoot {
+  kind: 'desk' | 'workflow_run' | 'workflow'
+  id: string
+  title: string
+  /** A DeskStatus, a WorkflowRunStatus, or 'idle' for a workflow that has never run. */
+  status: string
+  /** What it is on right now: the desk's headline, the live step ids, or the error. */
+  now: string
+  ended_at?: number | null
+  run_id?: string | null
+  workflow_id?: string | null
+  cost?: number | null
+}
+export interface CrewView {
+  root: CrewRoot
+  run: WorkflowRun | null
+  workflow: Workflow | null
+  agents: CrewAgent[]
 }
 export interface Command {
   id: string

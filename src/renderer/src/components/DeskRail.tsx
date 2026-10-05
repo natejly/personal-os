@@ -6,6 +6,7 @@ import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 import { NEEDS_YOU } from '../../../shared/types'
 import { useStore } from '../store'
 import { queuePositions } from '../lib/deskFiles'
+import { dragProps } from '../canvas/dnd'
 import ChatPulse from './ChatPulse'
 import Face from './Face'
 
@@ -96,6 +97,7 @@ function DeskRow({ desk, active, position, onOpen }: { desk: Desk; active: boole
       title={desk.brief || title}
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      {...dragProps({ kind: 'desk', id: desk.id, label: title, projectId: desk.project_id })}
     >
       <span className={`desk-ring desk-ring-${desk.status}`} title={STATUS_LABEL[desk.status]}><Face name={desk.id} status={desk.status} size={20} /></span>
       <span className="desk-row-main">

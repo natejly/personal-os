@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { placePopup, textPosition } from './caretPosition'
 import { diffRange } from './textEdit'
-import { highlight } from '../../components/MarkdownEditor'
+import { highlight, highlightChunks } from '../../components/MarkdownEditor'
 
 test('caret index maps to a text node and offset, preferring the end of a node', () => {
   assert.deepEqual(textPosition([3, 4, 2], 0), { node: 0, offset: 0 })
@@ -77,4 +77,14 @@ test('focus mode dims only lines outside the caret paragraph and keeps the line 
   const lines = highlight('one\ntwo\n\nthree', false, 4).split('\n')
   assert.deepEqual(lines.map((l) => l.startsWith('<span class="dim">')), [true, true, true, false])
   assert.ok(!highlight('x', false).includes('dim'))
+})
+
+test('highlight chunks join back to the whole highlight, one trailing newline per line', () => {
+  const src = Array.from({ length: 150 }, (_, i) => (i % 7 === 0 ? `# head ${i}` : `line ${i} **b** [[w]] #t`)).join('\n')
+  for (const wiki of [false, true]) {
+    const chunks = highlightChunks(src, wiki)
+    assert.equal(chunks.length, 3)
+    assert.equal(chunks.join(''), highlight(src, wiki) + '\n')
+  }
+  assert.equal(highlightChunks('', false).join(''), highlight('', false) + '\n')
 })

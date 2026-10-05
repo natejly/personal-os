@@ -62,11 +62,33 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
  * layers can never drift. Fenced code and maths blocks are tracked as state across lines.
  */
 export function highlight(src: string, wikilinks = false, activeLine?: number): string {
-  const out = highlightLines(src, wikilinks)
-  if (activeLine === undefined) return out.join('\n')
-  const [a, b] = paragraphRange(src.split('\n'), activeLine - 1)
-  return out.map((h, i) => (i < a || i > b ? `<span class="dim">${h}</span>` : h)).join('\n')
+  return highlightedLines(src, wikilinks, activeLine).join('\n')
 }
+
+function highlightedLines(src: string, wikilinks: boolean, activeLine?: number): string[] {
+  const out = highlightLines(src, wikilinks)
+  if (activeLine === undefined) return out
+  const [a, b] = paragraphRange(src.split('\n'), activeLine - 1)
+  return out.map((h, i) => (i < a || i > b ? `<span class="dim">${h}</span>` : h))
+}
+
+const MIRROR_CHUNK_LINES = 64
+
+/**
+ * The mirror's html in runs of lines, each line ending in its own newline. Painted as one element per
+ * run, a keystroke in a 250 KB doc re-parses and re-lays-out one run instead of the whole mirror
+ * (about a third of the cost); runs that did not change keep their DOM.
+ */
+export function highlightChunks(src: string, wikilinks = false, activeLine?: number): string[] {
+  const lines = highlightedLines(src, wikilinks, activeLine)
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i += MIRROR_CHUNK_LINES) out.push(lines.slice(i, i + MIRROR_CHUNK_LINES).join('\n') + '\n')
+  return out
+}
+
+const MirrorChunk = memo(function MirrorChunk({ html }: { html: string }): JSX.Element {
+  return <span dangerouslySetInnerHTML={{ __html: html }} />
+})
 
 /** Inclusive 0-based line span of the blank-line-delimited paragraph holding line `i`. */
 export function paragraphRange(lines: string[], i: number): [number, number] {
@@ -105,9 +127,24 @@ function highlightLines(src: string, wikilinks: boolean): string[] {
       out.push(`<span class="tk-math">${esc(line)}</span>`)
       continue
     }
-    out.push(inline(line, wikilinks))
+    out.push(inlineCached(line, wikilinks))
   }
   return out
+}
+
+const inlineMemo = new Map<string, string>()
+
+/** A keystroke changes one line of a long doc; the other thousands come back from here instead of being re-tokenised. */
+function inlineCached(line: string, wiki: boolean): string {
+  if (line.length > 2000) return inline(line, wiki)
+  const key = (wiki ? 'w' : 'p') + line
+  let html = inlineMemo.get(key)
+  if (html === undefined) {
+    if (inlineMemo.size > 30_000) inlineMemo.clear()
+    html = inline(line, wiki)
+    inlineMemo.set(key, html)
+  }
+  return html
 }
 
 function inline(line: string, wiki: boolean): string {
@@ -125,9 +162,14 @@ function inline(line: string, wiki: boolean): string {
   return span(line, wiki)
 }
 
-/** Inline spans: maths, code, links, emphasis. One pass, longest-delimiter-first. */
-function span(text: string, wiki = false, tags = wiki): string {
-  const pattern = new RegExp(
+const spanPatterns = new Map<string, RegExp>()
+
+/** Built once per option set: compiling this alternation per line made a 250 KB doc cost ~100 ms per keystroke. */
+function spanPattern(wiki: boolean, tags: boolean): RegExp {
+  const key = `${wiki}${tags}`
+  let re = spanPatterns.get(key)
+  if (re) return re
+  re = new RegExp(
     [
       '(?<m1>\\$\\$[^$]+\\$\\$)', // block maths on one line
       '(?<m2>\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
@@ -142,6 +184,14 @@ function span(text: string, wiki = false, tags = wiki): string {
     ].join('|'),
     'gu'
   )
+  spanPatterns.set(key, re)
+  return re
+}
+
+/** Inline spans: maths, code, links, emphasis. One pass, longest-delimiter-first. */
+function span(text: string, wiki = false, tags = wiki): string {
+  const pattern = spanPattern(wiki, tags)
+  pattern.lastIndex = 0
   let out = ''
   let last = 0
   for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
@@ -211,9 +261,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   const wikiOn = !!linkTargets
   // Keyed on the paragraph span, not the caret line, so moving within a paragraph does not re-highlight.
   const para = useMemo(() => (focusMode ? paragraphRange(value.split('\n'), caret.line - 1).join(':') : ''), [focusMode, value, caret.line])
-  const html = useMemo(() => {
-    if (!focusMode) return highlight(value, wikiOn) + '\n'
-    return highlight(value, wikiOn, Number(para.split(':')[0]) + 1) + '\n'
+  const chunks = useMemo(() => {
+    if (!focusMode) return highlightChunks(value, wikiOn)
+    return highlightChunks(value, wikiOn, Number(para.split(':')[0]) + 1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, wikiOn, focusMode, para])
 
@@ -518,7 +568,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     if (e.key === 'Tab') {
       e.preventDefault()
       const { value: v, selectionStart: s, selectionEnd: en } = el
-      if (s !== en || e.shiftKey) return apply(shiftLines(v, s, en, e.shiftKey))
+      // A caret in a list item indents the item (nesting it), like a selection does; elsewhere Tab types two spaces.
+      const inList = s === en && LIST_ITEM.test(v.slice(v.lastIndexOf('\n', s - 1) + 1, v.indexOf('\n', s) === -1 ? v.length : v.indexOf('\n', s)))
+      if (s !== en || e.shiftKey || inList) return apply(shiftLines(v, s, en, e.shiftKey))
       return apply({ value: v.slice(0, s) + '  ' + v.slice(en), start: s + 2, end: s + 2 })
     }
     if (e.key === 'Enter' && !e.shiftKey && !mod) {
@@ -547,7 +599,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     <div className={`md-editor ${wrap ? '' : 'nowrap'} ${focusMode ? 'focus' : ''}`}>
       <Gutter ref={gutter} lineCount={lineCount} cur={caret.line} />
       <div className="md-surface" ref={surface}>
-        <pre className="md-mirror" ref={mirror} aria-hidden dangerouslySetInnerHTML={{ __html: html }} />
+        <pre className="md-mirror" ref={mirror} aria-hidden>{chunks.map((h, i) => <MirrorChunk key={i} html={h} />)}</pre>
         <textarea
           ref={ta}
           className="md-input"

@@ -140,7 +140,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "compactAt": 0.7,
     "compactKeepRecent": 8,
     "microKeep": 3,
-    "microAt": 0.5,
+    "microAt": 0.25,  # old tool results stub out past a quarter of the window: past ~30k tokens a round, time to first token dominates
     # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
     # Loopback endpoints only unless allowRemote; no message content unless includeContent.
     "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},

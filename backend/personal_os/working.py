@@ -166,10 +166,13 @@ class Plans:
 # ---- tool results as handles ----
 # A result whose JSON fits in INLINE_CHARS goes into the context whole, as it always did. Anything
 # larger is stored and replaced by a handle: a preview of this size, the shape, and the result_id.
-INLINE_CHARS = 4000
+# 12000 chars is about 3k tokens. Every calendar, todo and mail listing recorded so far fits under it, so a
+# briefing reads its results in one round; at 4000 the same briefing spent three extra rounds paging, and
+# each round pays the provider's time to first token again.
+INLINE_CHARS = 12000
 PREVIEW_CHARS = 2000
 MAX_STORED_CHARS = 2_000_000
-READ_CHARS = 4000
+READ_CHARS = 12000
 SEARCH_WINDOW = 600   # chars per search hit
 SEARCH_TOTAL = 3800   # serialized size of all hits, under INLINE_CHARS
 MAX_READ_CHARS = 20000

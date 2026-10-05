@@ -2573,9 +2573,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
-            # Old tool results shrink to stubs once the run has filled half the window; read_tool_result still serves them.
+            # Old tool results shrink to stubs once the context passes a quarter of the window (`microAt`). Earlier
+            # turns replay every tool result they stored, so a few briefings grew a chat to 45k tokens a round, and
+            # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
-                                                         float(cfg.get("microAt", 0.5)))
+                                                         float(cfg.get("microAt", 0.25)))
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})

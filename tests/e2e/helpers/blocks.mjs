@@ -1,4 +1,4 @@
-// Shared helpers for the artifacts/blocks specs: drive the chat composer, wait for replies, shrink the window.
+// Shared helpers for the blocks specs: drive the chat composer, wait for replies, shrink the window.
 import { expect } from '@playwright/test'
 
 export async function newChat(page) {

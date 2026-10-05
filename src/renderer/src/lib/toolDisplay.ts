@@ -280,11 +280,11 @@ export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): bo
 
 /**
  * Calls that stay in the transcript when a reply's activity is collapsed: anything waiting on the user
- * (approval, plan, question), a call a circuit breaker refused, and results the user acts on (artifacts,
- * doc diffs, anything with an Undo button).
+ * (approval, plan, question), a call a circuit breaker refused, and results the user acts on (doc diffs,
+ * anything with an Undo button).
  */
 export function staysVisible(t: ToolEvent): boolean {
-  return (!!t.pending && !!t.needs_approval) || !!t.blocked || !!t.breaker || t.name.startsWith('artifact_') || t.name === 'doc_edit'
+  return (!!t.pending && !!t.needs_approval) || !!t.blocked || !!t.breaker || t.name === 'doc_edit'
     || !!t.undo?.snapshot_id || !!t.undo?.external_id
 }
 

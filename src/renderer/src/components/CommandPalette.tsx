@@ -32,7 +32,6 @@ export default function CommandPalette(): JSX.Element {
 
   const entries: Entry[] = [
     ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
-    { key: 'files:dashboards', label: 'Dashboards', hint: 'Go to', run: () => s.openFiles('dashboards') },
     { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },
     { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
     ...(cowork ? [{

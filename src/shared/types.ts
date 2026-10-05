@@ -508,53 +508,6 @@ export interface ToolEvent {
   /** What the model originally asked for, kept beside the edit so a card can show what changed. */
   original_arguments?: Record<string, unknown> | null
   edited_arguments?: Record<string, unknown> | null
-  /** The artifact an artifact_create / artifact_update / artifact_edit call made. Persisted with the event, so the card survives a reload. */
-  artifact?: ArtifactRef | null
-}
-
-/** Which artifact a tool call made, and what it did to it. */
-export interface ArtifactRef {
-  id: string
-  title: string
-  version: number | null
-  action: 'created' | 'updated'
-}
-
-/** An AI-generated, self-contained HTML document with version history (backend/personal_os/artifacts.py). */
-export interface Artifact {
-  id: string
-  project_id: string | null
-  title: string
-  kind: 'html'
-  prompt: string
-  version: number
-  created_at: number
-  updated_at: number
-  conversation_id: string | null
-  run_id: string | null
-  message_id: string | null
-  /** Signed, expiring path for the sandboxed iframe (the iframe cannot send the app token). */
-  render_path: string
-  /** Absent from list rows. */
-  code?: string
-  size?: number
-  version_count?: number
-  /** What the render CSP will silently break in this document: network, storage, form, ... */
-  blocked?: string[]
-  lint?: ArtifactLint
-}
-
-export interface ArtifactVersion {
-  id: string
-  artifact_id: string
-  version: number
-  prompt: string
-  instruction: string
-  source: 'llm' | 'user' | 'restore'
-  created_at: number
-  size?: number
-  code?: string
-  render_path?: string
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -1467,8 +1420,6 @@ export type ChatEvent =
   | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
-  /** artifact_create / artifact_update landed. Also on the run tape, so a reload replays it. */
-  | { event: 'artifact'; data: ArtifactRef & { message_id: string; call_id: string; conversation_id: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */
   | { event: 'plan_card'; data: { message_id: string; call_id: string; plan: PlanRecord } }
@@ -1661,20 +1612,6 @@ export interface AgentBrowserFrame {
   at: number
 }
 
-export interface DataSource {
-  id: string; name: string; kind: 'http' | 'rss' | 'internal' | string; config: Record<string, unknown>; description: string
-  has_secret: boolean; last_status: string | null; last_fetched_at: number | null; created_at: number
-}
-export interface Widget {
-  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | 'chart' | 'stat' | 'table' | string; prompt: string; source_ids: string[]
-  code: string; output: string; refresh_minutes: number; refreshed_at: number | null; position: number; width: number; height: number
-  created_at: number; updated_at: number
-  /** chart | stat | table only (widget_spec.py): the binding, the cached rows {rows, stat}, and why binding failed */
-  spec?: Record<string, unknown>; data?: unknown; data_error?: string
-}
-/** What the render CSP would break, or an empty document (artifacts.lint). */
-export interface ArtifactLint { blocked: string[]; empty: boolean; repaired?: boolean }
-export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
 
 // ---------------- Cowork desks ----------------
@@ -1756,7 +1693,7 @@ export interface FullDesk extends Desk {
 }
 
 export type DeskOutputStatus = 'proposed' | 'stale' | 'accepted' | 'promoted' | 'promote_failed' | 'rejected'
-export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download' | 'todo' | 'artifact' | 'mail_draft'
+export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download' | 'todo' | 'mail_draft'
 
 export interface DeskOutput {
   id: string
@@ -1863,8 +1800,8 @@ export interface PromotionResult {
 
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
-  | 'chat' | 'todos' | 'calendar' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact' | 'face' | 'crew'
+  | 'chat' | 'todos' | 'calendar' | 'note'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'face' | 'crew'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -2030,7 +1967,7 @@ export interface CanvasPreset {
 export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
-  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'note' | 'file' | 'nav'
   /** A desk, a saved workflow or one run of it: each opens as a crew window showing its agents. */
   | 'desk' | 'workflow' | 'workflow_run'
 
@@ -2040,8 +1977,6 @@ export interface DragPayload {
   id: string
   label: string
   projectId?: string | null
-  /** kind 'widget' only: the dashboard the widget belongs to, since there is no GET /widgets/{id}. */
-  dashboardId?: string
 }
 
 /** Run state of one chat session. Travels the cross-window bus, so it is a shared type, not a store-local one. */

@@ -29,12 +29,10 @@ import { toggleTaskAt } from '../features/notes/tasks'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
-import ArtifactsView from './ArtifactsView'
-import DashboardsView from './DashboardsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
 
-const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads'], ['pages', 'Pages'], ['dashboards', 'Dashboards']]
+const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads']]
 
 const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
@@ -302,8 +300,7 @@ export default function DocsView(): JSX.Element {
   }
 
   // ⌘I over a doc answers about that doc: the text as it stands in the editor, unsaved edits and all.
-  // The Dashboards section publishes its own snapshot.
-  usePageContext(() => (section === 'dashboards' ? undefined : activeDoc
+  usePageContext(() => (activeDoc
     ? {
         view: 'docs',
         label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
@@ -317,7 +314,7 @@ export default function DocsView(): JSX.Element {
         detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a file for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList, section])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList])
 
   return (
     <main className="page docs-page">
@@ -341,8 +338,6 @@ export default function DocsView(): JSX.Element {
       </header>
 
       {section === 'uploads' && <DocumentsView embedded />}
-      {section === 'pages' && <div className="page-body"><ArtifactsView /></div>}
-      {section === 'dashboards' && <DashboardsView />}
       {section === 'notes' && <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
         {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
         {treeOpen && (

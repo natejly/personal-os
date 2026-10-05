@@ -215,5 +215,5 @@ test('⌘0…⌘n are contiguous, each used once, each a distinct target', async
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
   assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
-  assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents' || a === 'view:dashboards'))
+  assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
 })

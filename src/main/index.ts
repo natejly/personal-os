@@ -6,7 +6,7 @@ import { registerBus } from './bus'
 import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
 import { isAppUrl } from './appUrl'
-import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
+import { guardNavigation, guardWebWidgetSession } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
 import { startPageBridge, stopPageBridge } from './pagefetch'
@@ -364,7 +364,6 @@ if (gotLock) app.whenReady().then(async () => {
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
-  attachWidgetRenderAuth()
   guardWebWidgetSession()
   buildMenu()
   setFrontListener((on) => {

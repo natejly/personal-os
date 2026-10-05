@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { buildPreviewDoc, fenceKind, hasScript, isSafeSandbox, PREVIEW_SANDBOX, SVG_CSP, titleOf } from './htmlFence'
+import { buildPreviewDoc, fenceKind, hasScript, isSafeSandbox, PREVIEW_SANDBOX, SVG_CSP } from './htmlFence'
 
 test('fenceKind recognises html and svg fences only', () => {
   assert.equal(fenceKind('html'), 'html')
@@ -21,7 +21,7 @@ test('the preview sandbox never includes allow-same-origin', () => {
 })
 
 test('the iframe source files pass the sandbox through the constant and never spell allow-same-origin', () => {
-  for (const f of ['HtmlBlock.tsx', 'ArtifactFrame.tsx']) {
+  for (const f of ['HtmlBlock.tsx']) {
     const src = readFileSync(`${process.cwd()}/src/renderer/src/components/${f}`, 'utf8')
     assert.ok(!/allow-same-origin/.test(src.replace(/\/\/.*|\/\*[\s\S]*?\*\//g, '')), `${f} must not grant allow-same-origin`)
     assert.ok(/sandbox=\{(PREVIEW_SANDBOX|FRAME_SANDBOX)\}/.test(src), `${f} sets sandbox from the pinned constant`)
@@ -48,9 +48,7 @@ test('svg previews refuse scripts outright', () => {
   assert.ok(out.includes("script-src 'none'"))
 })
 
-test('hasScript and titleOf', () => {
+test('hasScript', () => {
   assert.ok(hasScript('<div><script>1</script></div>'))
   assert.ok(!hasScript('<div>hi</div>'))
-  assert.equal(titleOf('<title> Tip   Splitter </title>'), 'Tip Splitter')
-  assert.equal(titleOf('<p>x</p>'), 'HTML preview')
 })

@@ -94,7 +94,6 @@ PROMPT_WRITES = frozenset({
     "todo_add", "todo_delete", "todo_update",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
-    "artifact_create", "artifact_update", "artifact_edit",
     "convert_document",
 })
 PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
@@ -684,7 +683,7 @@ class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
-                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None, artifacts: Any = None,
+                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None,
                  conversations: Any = None, extundo: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
@@ -710,7 +709,6 @@ class Toolbox:
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
         self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
-        self.artifacts = artifacts  # artifact_tools.py artifact_* tools are registered only when it is wired up
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
         self.specs: dict[str, ToolSpec] = {}
@@ -721,9 +719,6 @@ class Toolbox:
             m.register_tools(self)
         if docs is not None:
             self._register_docs()
-        if artifacts is not None:
-            from . import artifact_tools
-            artifact_tools.register(self, artifacts)
         if google is not None:
             self._register_google()
         if sandboxes is not None:

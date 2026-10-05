@@ -173,9 +173,6 @@ def tool_record(events: list[dict[str, Any]] | None, include_untrusted: bool = F
         line = f"- {ev['name']} {args} -> {status}"
         if ev.get("result_id"):
             line += f" result_id={ev['result_id']}"
-        art = ev.get("artifact")
-        if isinstance(art, dict) and art.get("id"):
-            line += f" artifact={art['id']}"
         if ev.get("tainted") and not include_untrusted:
             line += " " + WITHHELD
         elif ev.get("result_preview"):

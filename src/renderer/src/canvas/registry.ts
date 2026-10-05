@@ -3,11 +3,9 @@ import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import type { MenuEntry } from './Menu'
 import { setDefaultConfigs, setDefaultSizes } from './store'
 import { def as activity } from './widgets/activity'
-import { def as artifact } from './widgets/artifact'
 import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
 import { def as crew } from './widgets/crew'
-import { def as dashboardWidget } from './widgets/dashboardWidget'
 import { def as documents } from './widgets/documents'
 import { def as face } from './widgets/face'
 import { def as graph } from './widgets/graph'
@@ -34,7 +32,7 @@ export interface WidgetDef {
   statusful?: boolean
   /** counts against the 6-slot concurrent-live cap: iframes, d3, pollers */
   heavy?: boolean
-  /** cannot open without a ref_id: chat, note, dashboard-widget, project */
+  /** cannot open without a ref_id: chat, note, project */
   needsRef?: boolean
   defaultConfig?: Record<string, unknown>
   /** drag payload kinds this widget accepts as a drop target */
@@ -72,7 +70,6 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   todos,
   calendar,
   note,
-  'dashboard-widget': dashboardWidget,
   memory,
   graph,
   documents,
@@ -81,7 +78,6 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   usage,
   activity,
   web,
-  artifact,
   face,
   crew
 }

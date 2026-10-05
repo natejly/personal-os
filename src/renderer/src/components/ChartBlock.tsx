@@ -4,9 +4,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Brush
 } from 'recharts'
 import { parseJsonLoose } from '../lib/chartRepair'
-import { AlertCircle, BarChart3, Check, Code2, Copy, Pin, Table2 } from 'lucide-react'
+import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from 'lucide-react'
 import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
-import { pinChart } from '../lib/pinChart'
 
 /**
  * Renders a ```chart fenced block: a compact JSON spec the model writes (see RENDER_HINT in the backend).
@@ -72,7 +71,7 @@ export function parseSpec(source: string): Spec {
   }
   if (data.length === 0) throw new Error('Chart has no data rows')
   data = data.slice(0, MAX_ROWS)
-  // optional spec.transforms (sort | limit | filter | group), the same ops the dashboard widgets use
+  // optional spec.transforms (sort | limit | filter | group)
   if (raw.transforms !== undefined) data = applyTransforms(data, raw.transforms)
   if (data.length === 0) throw new Error('The transforms leave no rows')
 
@@ -220,8 +219,6 @@ export function ChartTools({ view, setView, source, chartIcon, children }: { vie
 
 export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
   const [view, setView] = useState<ChartView>('chart')
-  const [pinned, setPinned] = useState<'' | 'busy' | 'done' | 'err'>('')
-  const [pinErr, setPinErr] = useState('')
   const parsed = useMemo<{ spec: Spec } | { error: string }>(() => {
     try { return { spec: parseSpec(source) } } catch (e) { return { error: (e as Error).message } }
   }, [source])
@@ -240,10 +237,7 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
     <figure className="chart-block">
       <div className="code-head">
         <span>{spec.title || `${spec.type} chart`}</span>
-        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />}>
-          {!streaming && <button className="icon-btn ghost" title={pinned === 'done' ? 'Pinned (static data, does not refresh)' : pinned === 'err' ? pinErr || 'Pin failed' : 'Pin to the space as a widget (static data, does not refresh)'} disabled={pinned === 'busy'} onClick={() => { setPinned('busy'); pinChart(spec).then(() => setPinned('done'), (e) => { setPinErr((e as Error).message); setPinned('err') }) }}>{pinned === 'done' ? <Check size={13} /> : <Pin size={13} />}</button>}
-          {pinned === 'err' && <span role="alert" className="muted small">{pinErr || 'Pin failed'}</span>}
-        </ChartTools>
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />} />
       </div>
       {view === 'chart' && (
         <div className="chart-canvas" style={{ height: spec.type === 'pie' ? 260 : 280 }}>

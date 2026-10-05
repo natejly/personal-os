@@ -4,7 +4,7 @@ import { viewHidden } from '../moduleToggles'
 import { useStore } from '../store'
 
 /** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */
-const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
+const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
 
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Views). Memory lives in
  * Settings → Memory and uploads in Files, neither of which can be hidden. */
@@ -37,10 +37,6 @@ export function expandWindow(w: CanvasWindow): void {
       break
     case 'calendar':
       app.setView('calendar')
-      break
-    case 'dashboard-widget':
-      handoff('dashboard', String(w.config.dashboard_id ?? '') || null)
-      app.openFiles('dashboards')
       break
     case 'memory':
       app.openMemory('list')

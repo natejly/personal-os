@@ -19,6 +19,8 @@ import MessageEditor from './MessageEditor'
 import { statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
+import ResearchTrail from './ResearchTrail'
+import { trailFromEvents } from '../lib/researchTrail'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -276,6 +278,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
   const events = message.tool_events
   const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
+  const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
@@ -292,6 +295,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           <div className="msg-body">
             <BodyBoundary resetKey={message.id}>
               {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!message.content} browserSession={browserSession} />}
+              {trail && <ResearchTrail trail={trail} />}
               {!isUser && <SubagentThread messageId={message.id} conversationId={message.conversation_id} events={events ?? []} />}
               {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
               {/* Only the rendered text lives in .markdown: its element rules (p, ul, li) out-rank the

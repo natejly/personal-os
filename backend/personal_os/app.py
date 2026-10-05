@@ -3281,6 +3281,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 # likewise the side panel's content (the `show` tool): the model keeps only the one-line receipt
                 show = result.pop("show", None) if isinstance(result, dict) else None
+                research = result.pop("research", None) if isinstance(result, dict) else None  # deep_research's trail, UI only
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
@@ -3297,7 +3298,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None, "show": show or None, **edit_info,
+                         "error": err, "images": images or None, "show": show or None, "research": research or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,

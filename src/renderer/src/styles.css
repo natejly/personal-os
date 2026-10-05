@@ -2881,3 +2881,12 @@ select:focus-visible {
 .find-hint { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 ::highlight(chat-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
 ::highlight(chat-find-current) { background-color: var(--accent-solid); color: #fff; }
+
+/* ---------- Research trail (deep_research) ---------- */
+.research-body { padding: 0 10px 10px 30px; color: var(--text-muted); line-height: 1.5; }
+.research-body ol, .research-body ul { margin: 0 0 6px; padding-left: 18px; }
+.research-body small { margin-left: 6px; }
+.research-body small.research-failed { color: var(--danger, #d44); }
+.research-sources-head { display: flex; align-items: center; gap: 4px; color: var(--text-muted); padding: 2px 0; }
+.research-sources-head:hover { color: var(--text); }
+.research-sources-head svg.rot90 { transform: rotate(90deg); }

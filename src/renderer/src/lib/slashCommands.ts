@@ -12,6 +12,7 @@ export const BUILTIN: { name: string; args?: string; hint: string; client?: bool
   { name: 'skill', args: '<name> <message>', hint: 'Use one of your approved skills for this message' },
   { name: 'schedule', args: '<when>, <what>', hint: 'Have the assistant do this later, unattended' },
   { name: 'loop', args: '<every …> <what>', hint: 'Repeat something on an interval' },
+  { name: 'research', args: '<question>', hint: 'Plan, search in parallel, and answer with sources' },
   { name: 'compact', args: '[focus]', hint: 'Summarize the earlier messages of this chat', client: true },
   { name: 'skills', hint: 'Open Library → Skills', client: true },
   { name: 'commands', hint: 'Open Library → Automations', client: true },

@@ -91,10 +91,14 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
-  Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/compact`,
+  Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/research`, `/compact`,
   `/skills`, `/commands` and `/plan`. Attachments ride on the message as chips,
   and their text is given to the model under a size cap. Chat rows show a face
   that blinks while the chat works.
+- **Research mode.** `/research <question>` plans sub-questions, runs read-only
+  researchers in parallel, drops claims with no source, and answers with `[n]`
+  citations and a collapsed trail of the plan and sources considered. See
+  `docs/research-mode.md`.
 - **Tools with permissions.** The assistant can search your uploaded files, read and
   revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing

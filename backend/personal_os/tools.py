@@ -3684,7 +3684,7 @@ Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined
 # so a plain question never costs a search round. Everything else waits for tool_search.
 CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view"})
+                        "skill_list", "skill_view", "writing_style"})  # writing_style: the prompt's voice hint tells the model to call it
 
 
 def is_core(spec: ToolSpec) -> bool:

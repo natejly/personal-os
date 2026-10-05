@@ -334,8 +334,15 @@
 .face-widget .face { width: 82%; height: 82%; }
 /* A chat window in blob view: only the creature, filling the (small) frame. Drag it to move the
    window, click it to get the chat back; it leans in on hover so it reads as something to press. */
-.chat-blob { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: none; cursor: grab; touch-action: none; }
+.chat-blob { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: none; cursor: grab; touch-action: none; }
 .chat-blob:active { cursor: grabbing; }
+/* The blob's speech bubble: what the reply is doing now, hung off the face's upper right; the sharp corner is its tail. */
+.blob-say {
+  position: absolute; left: 82%; bottom: 78%; max-width: 220px; padding: 5px 9px;
+  font-size: 11px; line-height: 1.3; color: var(--text-muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px 10px 10px 2px; box-shadow: var(--shadow-float);
+  pointer-events: none; animation: win-open var(--dur-window) var(--spring);
+}
 .chat-blob .face { width: 90%; height: 90%; transition: transform var(--dur-hover) ease; }
 .chat-blob:hover .face { transform: scale(1.06); }
 /* The crew ring: orchestrator centred, children on a ring, one line each. Sized in % so it follows the frame. */

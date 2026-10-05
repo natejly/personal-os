@@ -10,7 +10,7 @@ import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
 import { composerKey, setDraftFiles } from '../../lib/drafts'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
-import { retainSession, useChatFace, useConversation, useIsStreaming, useStore, useStreamingMessageId, useSubagents } from '../../store'
+import { retainSession, useChatFace, useConversation, useIsStreaming, useNowText, useStore, useStreamingMessageId, useSubagents } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useCanvas, viewport } from '../store'
@@ -55,6 +55,12 @@ function ChatRing({ convId, status, title }: { convId: string; status: string; t
  * Fold a chat window to its blob (same top-left, old rect remembered), or grow it back: exactly where it was
  * if the blob stayed put, else at the blob's new spot, nudged clear of neighbours.
  */
+/** The blob's speech bubble: what the reply is doing right now, beside the face only while something is in flight. */
+function BlobSay({ convId }: { convId: string }): JSX.Element | null {
+  const now = useNowText(convId)
+  return now ? <span className="blob-say" role="status">{now}</span> : null
+}
+
 const setBlob = (win: CanvasWindow, on: boolean): void => {
   if (on) {
     placeAt(win, { x: win.x, y: win.y, ...BLOB }, { blob: true, restore: { x: win.x, y: win.y, w: win.w, h: win.h }, blobAt: { x: win.x, y: win.y } })
@@ -296,6 +302,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
           if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
         <ChatRing convId={convId} status={status} title={convo?.title || 'Chat'} />
+        <BlobSay convId={convId} />
       </button>
     )
   }

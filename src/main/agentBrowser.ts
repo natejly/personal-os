@@ -205,7 +205,7 @@ function newWindow(): BrowserWindow {
     show: false,
     width: VIEW_W,
     height: VIEW_H,
-    title: 'Grain agent browser',
+    title: 'You are in control: finish the step, then click Hand back in Grain',
     webPreferences: {
       partition: PARTITION,
       sandbox: true,
@@ -216,6 +216,7 @@ function newWindow(): BrowserWindow {
       spellcheck: false // images stay ON: screenshots need them
     }
   })
+  win.on('page-title-updated', (e) => e.preventDefault()) // the title is the "you are in control" bar, not the page's
   win.webContents.setAudioMuted(true)
   win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp') // no LAN address leak
   return win

@@ -244,6 +244,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   subagents around it. Subagents get the chat's tools minus asking, planning and
   scheduling, there is no per-subagent cost cap, and workflow steps see the
   chat's working folder. A chat can also speak as an approved agent.
+- **Taking over the browser.** When the assistant's own browser reaches a sign-in,
+  two-factor code, CAPTCHA or payment step, it hands the window to you: finish the
+  step, press Hand back, and it carries on from the page you left. A Take over
+  button on a live browser card does the same unasked. See `docs/cowork-design.md`.
 - **Context management.** Per-chat toggles for memory, graph, files, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.

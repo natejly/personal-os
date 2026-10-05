@@ -363,10 +363,28 @@ def test_handoff_order(env) -> None:
     # declined or unanswerable: window hidden again, no snapshot
     env.fake.calls.clear()
     env.answers.append(False)
-    assert env.run("browser_manage", action="handoff", reason="x")["error"]
+    assert env.run("browser_manage", action="handoff", reason="x")["handed_back"] is False
     assert [c[1].get("action") for c in env.fake.calls] == ["show", "hide"]
     env.fake.calls.clear()
     assert env.run("browser_manage", ctx=env.ctx(approve=None), action="handoff")["error"] and env.fake.calls == []
+
+
+def test_browser_handoff_tool(env) -> None:
+    env.fake.replies["manage"] = page()
+    out = env.run("browser_handoff", reason="enter the 2FA code", tab=2)
+    # switch to the tab, show, wait on the card, hide, then a fresh snapshot
+    assert env.fake.routes() == ["manage", "manage", "manage", "snapshot"]
+    assert [c[1].get("action") for c in env.fake.calls[:3]] == ["switch_tab", "show", "hide"]
+    assert env.cards == [{"action": "handoff", "reason": "enter the 2FA code", "url": "https://example.com/"}]
+    assert out["handed_back"] is True and "snapshot" in out and out["url"]
+    # Cancel: window hidden, no snapshot, the model is told to stop
+    env.fake.calls.clear()
+    env.answers.append(False)
+    out = env.run("browser_handoff", reason="captcha")
+    assert out["handed_back"] is False and "stop" in out["note"] and env.fake.routes() == ["manage", "manage"]
+    # nobody to ask
+    env.fake.calls.clear()
+    assert env.run("browser_handoff", ctx=env.ctx(approve=None), reason="x")["error"] and env.fake.calls == []
 
 
 def test_a_token_in_a_browser_page_is_stripped(env) -> None:

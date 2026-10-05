@@ -181,6 +181,7 @@ export function browserLine(name: string, args: Fields | null | undefined, d: Fi
     case 'browser_select': return { action: 'Choose', subject: `${strList(a.values).join(', ')} in ${ref}` }
     case 'browser_press': return { action: 'Press', subject: `${str(a.key)}${ref ? ` in ${ref}` : ''}` }
     case 'browser_scroll': return { action: 'Scroll', subject: `${str(a.direction) || 'down'}${num(a.amount) !== null ? ` ${num(a.amount)} screen${a.amount === 1 ? '' : 's'}` : ''}` }
+    case 'browser_handoff': return { action: 'Hand the browser to you', subject: str(a.reason) }
     case 'browser_manage': {
       const act = str(a.action)
       const label: Record<string, string> = { back: 'Go back', forward: 'Go forward', reload: 'Reload', tabs: 'List tabs', wait: 'Wait', dialog: 'Answer a dialog',

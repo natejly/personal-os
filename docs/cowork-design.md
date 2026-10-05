@@ -1667,3 +1667,7 @@ creates a pending revision and does not touch the doc; deleting without `purge` 
 | Who owns the chain | A supervisor task outside the run, plus a `desk_handoff` event and a bounded re-attach | Starting the next run from the previous run's `finally` is exactly the bug all three judges found. |
 | `Plans` naming | `ActionPlans` / `ActionPlan*` / `.aplan-*` everywhere | Costs nothing now, saves a rename against `worktree-working-memory`. |
 | Canvas widget | Cut from v1 | `Record<WidgetKind, WidgetDef>` makes a half-done widget a build failure; the Today card gives the same "felt daily" win for twenty lines. |
+
+## Taking over the agent browser
+
+The agent drives its own browser window (`browser_open`, `browser_click`, and so on), hidden from view. At a password, passkey, two-factor code, CAPTCHA or payment step it calls `browser_handoff(reason)` instead of trying to get past it. The window appears in front as an ordinary resizable window titled "You are in control", and the chat shows a card with **Hand back** and **Cancel**. The run waits on that card like any other approval, so it survives a restart. Hand back hides the window again and returns the page as the user left it, as a fresh text snapshot. Cancel returns `handed_back: false` and the agent stops that path. Nothing typed in the window is recorded; snapshots never include password or payment field values. A running browser card also has a **Take over** button for stepping in unasked; **Hand back** there just hides the window.

@@ -220,7 +220,6 @@ function buildMenu(): void {
         { label: 'Uploads', click: () => sendMenu('view:documents') },
         // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
-        { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.

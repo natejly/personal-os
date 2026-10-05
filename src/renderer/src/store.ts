@@ -37,7 +37,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads'
@@ -314,7 +314,7 @@ export interface State {
   activityInsights: ActivityInsights | null
   activityInsightsBusy: boolean
 
-  /** Cowork: the desk rail, the open desk, and everything its detail pane shows. */
+  /** Desks behind chats working autonomously: every row, the open chat's desk whole, and its files. */
   desks: Desk[]
   /** Set the moment a desk is opened, so a slower `desks.get` cannot land on a desk since left. */
   activeDeskId: string | null
@@ -323,9 +323,6 @@ export interface State {
   /** Unseen `needs_you` events across every desk: the sidebar badge and the Today card. */
   deskInbox: DeskEvent[]
   deskBusy: boolean
-  /** The rail lists archived desks instead of live ones. */
-  deskShowArchived: boolean
-  setDeskShowArchived: (v: boolean) => Promise<void>
 
   init: () => Promise<void>
   restartBackend: () => Promise<void>
@@ -440,8 +437,6 @@ export interface State {
   refreshDeskInbox: () => Promise<void>
   /** Load one desk whole and, when it is live, attach to the run driving it. */
   openDesk: (id: string) => Promise<void>
-  /** Resolves null on failure — the new-desk card is holding the user's brief on the verdict. */
-  createDesk: (p: Parameters<typeof api.cowork.desks.create>[0]) => Promise<Desk | null>
   startDesk: (id: string) => Promise<void>
   resumeDesk: (id: string, reason?: string) => Promise<void>
   pauseDesk: (id: string) => Promise<void>
@@ -449,7 +444,6 @@ export interface State {
   /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
   messageDesk: (id: string, text: string) => Promise<boolean>
   patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
-  deleteDesk: (id: string, purge?: boolean) => Promise<void>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
   /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
@@ -1058,10 +1052,10 @@ export const useStore = create<State>((set, get) => {
    */
   const putDesk = (d: Desk): void =>
     set((st) => ({
-      // A desk archived (or unarchived) leaves the list it no longer belongs to.
+      // An archived desk leaves the list, which holds current desks only.
       // A row older than the one held is dropped: a fetch that was in flight when a newer desk_status landed
       // resolves afterwards, and applying it would put the rail back on a status the desk has already left.
-      desks: Boolean(d.archived) !== st.deskShowArchived
+      desks: d.archived
         ? st.desks.filter((x) => x.id !== d.id)
         : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id && x.updated_at <= d.updated_at ? d : x)) : st.desks,
       activeDesk: st.activeDesk?.id === d.id && st.activeDesk.updated_at <= d.updated_at ? { ...st.activeDesk, ...d } : st.activeDesk
@@ -1202,7 +1196,8 @@ export const useStore = create<State>((set, get) => {
     // updates rows it has, so ask the list, which applies the scope filter itself.
     if (before === undefined && !deskListLoading) {
       deskListLoading = true
-      void get().refreshDesks().finally(() => { deskListLoading = false })
+      // Its chat is new to the sidebar too (a desk_start, a job, another window), so the chat list is read again with it.
+      void Promise.all([get().refreshDesks(), get().refreshConversations().catch(() => undefined)]).finally(() => { deskListLoading = false })
     }
     if (before === d.status) return
     if (st.activeDeskId === d.id) void get().openDesk(d.id)
@@ -1830,7 +1825,6 @@ export const useStore = create<State>((set, get) => {
     deskFiles: [],
     deskInbox: [],
     deskBusy: false,
-    deskShowArchived: false,
     pageAgentOpen: false,
     pageAgentId: null,
     pageAgentChatSettings: {},
@@ -1925,10 +1919,10 @@ export const useStore = create<State>((set, get) => {
       }
       loadedOnce = true
       // The sidebar's needs-you badge and the Today card read this; without it they stay empty until
-      // Cowork or Home happens to mount.
+      // Home happens to mount.
       void get().refreshDeskInbox()
       // The desk notifier watches `desks`, and `desk_status` events only update rows already loaded: without this
-      // a desk finishing before Cowork was first opened raised no notification.
+      // a desk finishing before its chat was first opened raised no notification.
       void get().refreshDesks()
       // Both for the sidebar: the review badge, and the indicator that says a recording is running.
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
@@ -2954,17 +2948,13 @@ export const useStore = create<State>((set, get) => {
 
     refreshDesks: async () => {
       try {
-        const fresh = await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived)
+        const fresh = await api.cowork.desks.list('all')
         // A desk_status event can land while this request is in flight; the list was read before it, so a row the
         // store already holds in a newer state wins, or the rail would sit on the old status until the next event.
         set((st) => ({ desks: fresh.map((d) => { const cur = st.desks.find((x) => x.id === d.id); return cur && cur.updated_at > d.updated_at ? cur : d }) }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
-    },
-    setDeskShowArchived: async (v) => {
-      set({ deskShowArchived: v })
-      await get().refreshDesks()
     },
     refreshDeskInbox: async () => {
       try {
@@ -2997,25 +2987,6 @@ export const useStore = create<State>((set, get) => {
         else await get().openSession(desk.conversation_id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
-      }
-    },
-    createDesk: async (p) => {
-      set({ deskBusy: true })
-      try {
-        const { desk, conversation_id, run_id, seq, position } = await api.cowork.desks.create(p)
-        if (position) get().toast(queuedNote(position))
-        await get().refreshDesks()
-        await get().openDesk(desk.id)
-        // Start returns the run outright, so the pane paints without waiting for `GET /runs` to
-        // notice it. `watchRun` dedupes on run_id against whatever `openDesk` already attached.
-        if (run_id) void watchRun(conversation_id, { run_id, seq: seq ?? 0 }, { messageId: null, approvals: 0, attached: true })
-        return desk
-      } catch (e) {
-        // Never rejects: the new-desk card is holding the user's brief on this verdict.
-        get().toast((e as Error).message, 'error')
-        return null
-      } finally {
-        set({ deskBusy: false })
       }
     },
     startDesk: async (id) => {
@@ -3073,22 +3044,6 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
-    },
-    deleteDesk: async (id, purge = false) => {
-      const convId = deskConv(id)
-      try {
-        await api.cowork.desks.delete(id, purge)
-      } catch (e) {
-        return get().toast((e as Error).message, 'error')
-      }
-      if (convId) get().closeSession(convId)
-      set((st) => ({
-        desks: st.desks.filter((d) => d.id !== id),
-        activeDeskId: st.activeDeskId === id ? null : st.activeDeskId,
-        activeDesk: st.activeDesk?.id === id ? null : st.activeDesk,
-        deskFiles: st.activeDeskId === id ? [] : st.deskFiles
-      }))
-      void get().refreshConversations()
     },
     loadDeskFiles: async (id, path = '', quiet = false) => {
       try {

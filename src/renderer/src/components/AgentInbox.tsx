@@ -657,7 +657,7 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
@@ -678,10 +678,7 @@ export default function AgentInbox(): JSX.Element | null {
   }
   const bulk = [...perJob.entries()].filter(([, g]) => g.n > 1)
 
-  const goDesk = (deskId: string): void => {
-    setView('cowork')
-    void openDesk(deskId)
-  }
+  const goDesk = (deskId: string): void => { void goToDesk(deskId) }
   const goChat = (conversationId: string): void => {
     setView('chat')
     void selectChat(conversationId)

@@ -30,7 +30,7 @@ export function noticeFor(d: Row): Notice | null {
             : d.status === 'review' ? `${label(d)} has output waiting for review.`
               : d.status === 'done' ? `${label(d)} is done.`
                 : why ? `${label(d)} failed: ${why}` : `${label(d)} failed.`
-  return { title: 'Cowork', body: body.length > 220 ? body.slice(0, 217) + '…' : body, deskId: d.id }
+  return { title: d.title || 'Working autonomously', body: body.length > 220 ? body.slice(0, 217) + '…' : body, deskId: d.id }
 }
 
 /**

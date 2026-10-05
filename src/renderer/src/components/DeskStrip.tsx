@@ -57,7 +57,8 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
  * parked turn let go of, the plan (the approval card while pending, then the live checklist), and why it stopped.
  */
 export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent[] }): JSX.Element | null {
-  const approvals = desk.approvals ?? []
+  // A card whose call is still pending in the transcript is answered there; these are the ones a parked turn let go of.
+  const approvals = (desk.approvals ?? []).filter((a) => !events.some((e) => e.id === a.call_id && e.pending && e.needs_approval))
   const asking = desk.question && !ENDED.includes(desk.status) && !approvals.some((a) => a.tool === 'desk_ask')
   return (
     <div className="desk-inline">

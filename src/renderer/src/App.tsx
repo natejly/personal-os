@@ -15,7 +15,6 @@ import MailView from './components/MailView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import LibraryView from './components/LibraryView'
-import CoworkView from './components/CoworkView'
 import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
@@ -75,7 +74,7 @@ function notifyDesk(n: { title: string; body: string; deskId: string }): void {
   } catch {
     return
   }
-  notify(n.title, n.body, { tag: `desk:${n.deskId}`, onClick: () => void useStore.getState().openDesk(n.deskId) })
+  notify(n.title, n.body, { tag: `desk:${n.deskId}`, onClick: () => void useStore.getState().goToDesk(n.deskId) })
 }
 
 const JOB_SEEN_KEY = 'grain.jobNotifySince'
@@ -267,7 +266,6 @@ export default function App(): JSX.Element {
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
           {view === 'library' && <LibraryView />}
-          {view === 'cowork' && <CoworkView />}
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}

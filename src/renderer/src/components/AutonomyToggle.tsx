@@ -36,8 +36,8 @@ export default function AutonomyToggle({ conversationId }: { conversationId?: st
   const label = AUTONOMY.find((a) => a.value === current)?.label
   const start = async (): Promise<void> => {
     if (!convId) return
+    setOpen(false)  // now, not after the desk starts: a click in between must find the menu closed
     await workAutonomously(convId, autonomy, Number(turns) > 0 ? { maxTurns: Number(turns) } : undefined)
-    setOpen(false)
   }
   return (
     <span className="autonomy-ctl" ref={box}>

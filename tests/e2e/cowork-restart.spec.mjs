@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scriptLLM } from './helpers/scriptllm.mjs'
 import { restartBackend } from './helpers/restart.mjs'
-import { expect, realErrors, deskStatus, waitStatus, openCowork, rail, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, chatRow, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 360_000 })
 
 const card = (page) => page.getByRole('group', { name: 'Run command' })
@@ -43,9 +43,8 @@ test('desk mid-run when the backend dies: it is Interrupted, never silently resu
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 600_000 })
   const { page } = grain
-  const { desk } = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'long work', title: 'Crashy', autonomy: 'propose', start: true } })
-  await openCowork(page)
-  await rail(page).getByText('Crashy').click()
+  const { desk } = await deskChat(grain, { brief: 'long work', title: 'Crashy' })
+  await openChat(page, 'Crashy')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 90_000 }).toMatch(/working|planning/)
   await expect.poll(() => llm.requests.length, { timeout: 60_000 }).toBeGreaterThan(0)
   await restartBackend(grain)
@@ -56,12 +55,12 @@ test('desk mid-run when the backend dies: it is Interrupted, never silently resu
   expect(llm.requests.length).toBe(requestsAtRestart) // nothing auto-resumed
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await openCowork(page)
-  await rail(page).getByText('Crashy').click()
+  await openChat(page, 'Crashy')
   await expect(page.getByText('Interrupted by a restart')).toBeVisible({ timeout: 60_000 })
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText('Interrupted')
+  await expect(strip(page)).toContainText('Interrupted')
+  await expect(chatRow(page, 'Crashy').locator('.convo-desk')).toHaveAttribute('aria-label', 'Interrupted')
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await page.getByRole('button', { name: /Resume/ }).dblclick()
+  await strip(page).getByRole('button', { name: /Resume/ }).dblclick()
   await waitStatus(grain, desk.id, 'review', 120_000)
   const d = await grain.api(`/cowork/desks/${desk.id}`)
   expect(d.outputs).toHaveLength(1)
@@ -73,14 +72,13 @@ test('desk waiting on a question survives a backend crash; the answer still resu
   const llm = await scriptLLM(grain)
   llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Which quarter?', options: ['Q1', 'Q3'] } }] })
   const { page } = grain
-  const { desk } = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'compare', title: 'Question crash', autonomy: 'propose', start: true } })
+  const { desk } = await deskChat(grain, { brief: 'compare', title: 'Question crash' })
   await waitStatus(grain, desk.id, 'needs_approval', 120_000)
   await restartBackend(grain)
   expect(['interrupted', 'blocked', 'needs_approval']).toContain(await deskStatus(grain, desk.id))
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await openCowork(page)
-  await rail(page).getByText('Question crash').click()
+  await openChat(page, 'Question crash')
   await expect(page.locator('.desk-ask').first()).toContainText('Which quarter?', { timeout: 60_000 })
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
   await page.getByRole('group', { name: 'Suggested answers' }).first().getByRole('button', { name: 'Q1' }).click()
@@ -94,14 +92,12 @@ test('desk waiting on a plan survives a backend crash; approving afterwards carr
   const edited = { path: 'outputs/plan.md', content: '# After crash\n' }
   llm.push({ calls: [{ name: 'propose_plan', args: { title: 'Plan after crash', steps: [{ tool: 'desk_write_file', title: 'Write it', arguments: edited }] } }] })
   const { page } = grain
-  const { desk } = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'plan then crash', title: 'Plan crash', autonomy: 'plan', start: true } })
+  const { desk } = await deskChat(grain, { brief: 'plan then crash', title: 'Plan crash', autonomy: 'plan' })
   await waitStatus(grain, desk.id, 'awaiting_plan', 120_000)
   await restartBackend(grain)
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await openCowork(page)
-  await rail(page).getByText('Plan crash').click()
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Plan/ }).click()
+  await openChat(page, 'Plan crash')
   await expect(page.locator('.aplan')).toContainText('Write it', { timeout: 60_000 })
   llm.push({ calls: [{ name: 'desk_write_file', args: edited }] }, { calls: [{ name: 'desk_deliver', args: { path: 'outputs/plan.md', title: 'Plan file' } }] }, { calls: [DONE] }, { text: 'ok' })
   await page.getByRole('button', { name: 'Approve & run' }).click()
@@ -111,18 +107,17 @@ test('desk waiting on a plan survives a backend crash; approving afterwards carr
   expect((await grain.api(`/cowork/desks/${desk.id}/file?path=outputs/plan.md`)).text).toContain('After crash')
 })
 
-test('relaunching Electron mid-run shows the live desk once, and a finished one unchanged', async ({ grain }) => {
+test('relaunching Electron mid-run lists the working chat once, and shows it finished', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER], delay: 8000 }, { calls: [DONE] }, { text: 'ok' })
-  const { desk } = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'relaunch me', title: 'Relaunch desk', autonomy: 'propose', start: true } })
+  const { desk } = await deskChat(grain, { brief: 'relaunch me', title: 'Relaunch desk' })
   await expect.poll(() => llm.requests.length, { timeout: 90_000 }).toBeGreaterThan(1)
   const page = await grain.relaunch()
-  await openCowork(page)
-  await expect(rail(page).locator('.desk-row')).toHaveCount(1)
-  await expect(rail(page).getByText('Relaunch desk')).toHaveCount(1)
+  await expect(page.locator('.sidebar .convo-item', { hasText: 'Relaunch desk' })).toHaveCount(1)
+  await openChat(page, 'Relaunch desk')
   await waitStatus(grain, desk.id, 'review', 120_000)
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText('Ready to review', { timeout: 60_000 })
+  await expect(strip(page)).toContainText('Ready to review', { timeout: 60_000 })
   const runs = await grain.api(`/cowork/desks/${desk.id}`)
   expect(runs.outputs).toHaveLength(1)
 })

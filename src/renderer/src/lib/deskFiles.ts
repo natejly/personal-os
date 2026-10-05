@@ -1,4 +1,4 @@
-import type { Desk, DeskStatus, PromotionKind, RunChanges, RunInfo } from '@shared/types'
+import type { Desk, PromotionKind, RunChanges, RunInfo } from '@shared/types'
 
 /**
  * Pure helpers behind the desk's Files / Changes / Browser tabs, kept out of the components so
@@ -108,15 +108,6 @@ export function undoNote(edited: string[], max = 3): string {
   const shown = edited.slice(0, max).join(', ')
   return `${edited.length} left alone (edited since): ${shown}${edited.length > max ? ', …' : ''}`
 }
-
-export type DeskTab = 'activity' | 'plan' | 'files' | 'browser' | 'output'
-
-/**
- * §7.8: the tab a desk opens on is the thing it is waiting for you to do. A plan card a desk has
- * parked leaves it `blocked`, not `awaiting_plan`, so a pending plan counts on its own.
- */
-export const defaultDeskTab = (status: DeskStatus, planPending = false): DeskTab =>
-  (status === 'awaiting_plan' || planPending ? 'plan' : status === 'review' ? 'output' : 'activity')
 
 /** Each queued desk's 1-based place in line, oldest first — the order the backend launches them in. */
 export const queuePositions = (desks: Desk[]): Map<string, number> =>

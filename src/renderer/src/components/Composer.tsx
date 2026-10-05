@@ -287,7 +287,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const submit = (mod = false): void => {
     if (!canSend) return
     // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
-    const action = queueId && !clientCommand(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
+    // A chat working autonomously sends straight to its desk, which steers the live turn or wakes the next.
+    const action = queueId && !deskBound && !clientCommand(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
     if (action === 'queue' && queueId) {
       updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID(), files))
       clearRedirect(key)

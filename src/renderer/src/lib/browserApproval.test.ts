@@ -42,11 +42,11 @@ test('a submit names the form and the button, and where it goes when that is ano
 test('typing, upload and hand-off read as plain sentences', () => {
   assert.equal(text({ action: 'type', risk: 'password', url: 'https://example.com/login', element: 'textbox "Password"' }), 'Type into the password field on example.com (textbox “Password”)')
   assert.equal(text({ action: 'upload', url: 'https://example.com/up', files: ['report.pdf'] }), 'Upload report.pdf to example.com')
-  assert.equal(text({ action: 'handoff', reason: 'solve the captcha', url: 'https://example.com' }), 'Take over the browser: solve the captcha')
+  assert.equal(text({ action: 'handoff', reason: 'solve the captcha', url: 'https://example.com' }), 'solve the captcha. Take over in the browser window, then hand back.')
 })
 
 test('only a hand-off changes the primary button', () => {
-  assert.equal(browserAllowLabel({ action: 'handoff' }), "I'm done")
+  assert.equal(browserAllowLabel({ action: 'handoff' }), 'Hand back')
   assert.equal(browserAllowLabel({ action: 'click' }), 'Allow')
 })
 
@@ -59,7 +59,7 @@ test('urls shrink to host and path', () => {
 test('the one-string form reads as the same sentence and takes anything', () => {
   assert.equal(browserApprovalSentence({ action: 'click', element: 'button "Pay now"', url: 'https://a.test/checkout', risk: 'submit' }),
     'Submit the form on a.test (button “Pay now”)')
-  assert.equal(browserApprovalSentence({ action: 'handoff', reason: 'sign in' }), 'Take over the browser: sign in')
+  assert.equal(browserApprovalSentence({ action: 'handoff', reason: 'sign in' }), 'sign in. Take over in the browser window, then hand back.')
   assert.equal(typeof browserApprovalSentence(null), 'string')
 })
 

@@ -394,27 +394,48 @@ def register(tb: Any) -> None:
                 return tool_error(f"browser_manage(upload): {DECLINED}", alternative="desk_ask, or browser_manage(action='handoff')")
             return await call("browser_manage", "act", {"action": "upload", "ref": ref, "paths": [str(p) for p in files]}, ctx, 45)
         if action == "handoff":
-            if ctx.get("approve") is None:
-                return tool_error("browser_manage(handoff): there is nobody to hand the page to in this run", alternative="finish without it, or say what you could not do")
-            shown = await mac.page_bridge.browser("manage", {"session": sess, "action": "show"}, 15)
-            if not shown.get("ok"):
-                return _fail("browser_manage", shown)
-            ok = await ask(ctx, {"action": "handoff", "reason": (reason or "the page needs you")[:300], "url": shown.get("url") or ""})
-            await mac.page_bridge.browser("manage", {"session": sess, "action": "hide"}, 15)  # whatever the answer, the window goes away
-            if not ok:
-                return tool_error("browser_manage(handoff): the user did not finish the hand-off", alternative="desk_ask what they would like instead")
-            out = await call("browser_manage", "snapshot", {}, ctx, 30)
-            if "error" not in out:
-                out["notes"] = [*out.get("notes", []), "the user took over the page and handed it back; re-check what changed"]
-            return out
+            return await handoff(ctx, reason, tab)
         payload = {"action": action}  # back / forward / reload / tabs
         return await call("browser_manage", "manage", payload, ctx, 30)
+
+    async def handoff(ctx: dict[str, Any], reason: str = "", tab: int | None = None) -> Any:
+        """Show the window, wait on the user's Hand back, hide it, then read the page as they left it."""
+        if ctx.get("approve") is None:
+            return tool_error("browser_handoff: there is nobody to hand the page to in this run", alternative="finish without it, or say what you could not do")
+        sess = session_of(ctx)
+        if tab is not None:
+            sw = await call("browser_handoff", "manage", {"action": "switch_tab", "tab": int(tab)}, ctx, 20)
+            if "error" in sw:
+                return sw
+        shown = await mac.page_bridge.browser("manage", {"session": sess, "action": "show"}, 15)
+        if not shown.get("ok"):
+            return _fail("browser_handoff", shown)
+        ok = await ask(ctx, {"action": "handoff", "reason": (reason or "the page needs you")[:300], "url": shown.get("url") or ""})
+        await mac.page_bridge.browser("manage", {"session": sess, "action": "hide"}, 15)  # whatever the answer, the window goes away
+        if not ok:
+            return {"handed_back": False, "note": "the user did not take this step; stop this path and desk_ask what they would like instead"}
+        out = await call("browser_handoff", "snapshot", {}, ctx, 30)
+        if "error" not in out:
+            out["handed_back"] = True
+            out["notes"] = [*out.get("notes", []), "the user took over the page and handed it back; re-check what changed"]
+        return out
+
+    async def browser_handoff(ctx: dict[str, Any], reason: str, tab: int | None = None) -> Any:
+        return await handoff(ctx, reason, tab)
+
+    R("browser_handoff", ToolSpec("browser_handoff",
+        "Hand the browser window to the user for a password, passkey, two-factor code, CAPTCHA or payment step. It shows the window and waits until they click Hand back, "
+        "then returns the page as they left it (handed_back, url, title, snapshot); on Cancel it returns handed_back=false and you stop that path. "
+        "Prefer handing off to the user over trying to bypass a login or CAPTCHA. What they type is never shown to you.",
+        _obj({"reason": {"type": "string"}, "tab": {"type": "integer"}}, ["reason"]),
+        browser_handoff, "browser", "safe",
+        examples=[{"reason": "sign in to the airline account"}], taints=True))
 
     R("browser_manage", ToolSpec("browser_manage",
         "Everything around the page itself. action: back | forward | reload | tabs (list tabs) | switch_tab(tab) | close_tab(tab) | wait(ms or text) | "
         "screenshot (saved as a file in the workspace; look at it with view_image) | dialog(accept, prompt_text) to answer an alert/confirm/prompt | "
         "upload(ref, paths) to attach workspace files to a file input (asks the user) | "
-        "handoff(reason) to get past a sign-in, CAPTCHA, two-factor prompt or anything you must not do yourself: it shows the browser window to the user "
+        "handoff(reason) (same as browser_handoff, which you should prefer over bypassing a login or CAPTCHA) to get past a sign-in, CAPTCHA, two-factor prompt or anything you must not do yourself: it shows the browser window to the user "
         "and waits until they have finished. You never type passwords you were not given in this conversation; hand off instead. | close (end the browser session).",
         _obj({"action": {"type": "string", "enum": list(MANAGE_ACTIONS)}, "tab": {"type": "integer"}, "ms": {"type": "integer", "default": 1000},
               "text": {"type": "string"}, "accept": {"type": "boolean", "default": True}, "prompt_text": {"type": "string"},
@@ -425,5 +446,5 @@ def register(tb: Any) -> None:
                   {"action": "upload", "ref": "e9", "paths": ["outputs/report.pdf"]}], taints=True))
 
     for n in ("browser_open", "browser_snapshot", "browser_scroll", "browser_click", "browser_type", "browser_select", "browser_press",
-              "browser_manage"):
+              "browser_manage", "browser_handoff"):
         tb.specs[n].available_fn = available

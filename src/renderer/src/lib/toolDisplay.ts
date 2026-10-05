@@ -50,7 +50,7 @@ const VERBS: Record<string, string> = {
   agent_spawn: 'Start subagent', agent_wait: 'Wait for subagents', agent_stop: 'Stop subagent',
   desk_fetch_file: 'Download file to desk',
   browser_open: 'Open in browser', browser_snapshot: 'Read browser page', browser_click: 'Click in browser', browser_type: 'Type in browser',
-  browser_select: 'Choose in browser', browser_press: 'Press key in browser', browser_scroll: 'Scroll browser', browser_manage: 'Manage browser',
+  browser_select: 'Choose in browser', browser_press: 'Press key in browser', browser_scroll: 'Scroll browser', browser_manage: 'Manage browser', browser_handoff: 'Hand browser to you',
   view_image: 'Look at image', convert_document: 'Convert document', render_preview: 'Preview document pages', doc_guide: 'Read format guide',
   browser: 'Browser approval'
 }
@@ -108,10 +108,11 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     case 'browser_select':
     case 'browser_scroll':
     case 'browser_manage':
+    case 'browser_handoff':
     case 'browser_press':
     case 'browser_type': {
       const b = browserLine(name, a, null)
-      return { verb, subject: clip(name === 'browser_manage' ? `${b.action} ${b.subject}`.trim() : b.subject, 80) }
+      return { verb, subject: clip(name === 'browser_manage' || name === 'browser_handoff' ? `${b.action} ${b.subject}`.trim() : b.subject, 80) }
     }
     case 'schedule_task': return { verb, subject: [clip(str('name'), 50), str('watch_dir') ? `when files change in ${clip(str('watch_dir'), 40)}` : ''].filter(Boolean).join(' ') }
     case 'gmail_send':

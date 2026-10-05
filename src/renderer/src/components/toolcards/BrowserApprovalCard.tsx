@@ -9,9 +9,10 @@ import { registerToolCard, type ToolCardProps } from './registry'
  * password and payment fields), so Details is safe to open.
  */
 export default function BrowserApprovalCard(props: ToolCardProps): JSX.Element {
+  const handoff = props.event.arguments.action === 'handoff'
   const risky = ['submit', 'password', 'payment', 'download'].includes(String(props.event.arguments.risk ?? ''))
   return (
-    <CardShell {...props} icon={<ShieldQuestion size={14} />} title="Browser needs your OK" tone={risky && props.pending ? 'warn' : undefined} hideResult>
+    <CardShell {...props} icon={<ShieldQuestion size={14} />} title={handoff ? 'Browser needs you' : 'Browser needs your OK'} approveLabel={handoff ? 'Hand back' : undefined} denyLabel={handoff ? 'Cancel' : undefined} tone={risky && props.pending ? 'warn' : undefined} hideResult>
       <p className="tc-sentence">{browserApprovalSentence(props.event.arguments)}</p>
     </CardShell>
   )

@@ -115,10 +115,10 @@ function BrowserApproval({ event, decide, conversationId, note }: {
       <header className="desk-approval-head"><Globe size={14} /><b>{handoff ? 'The browser needs you' : 'The browser is asking'}</b></header>
       {note}
       <p className="desk-approval-sentence">{s.before}{s.host && <strong className="desk-approval-host">{s.host}</strong>}{s.after}</p>
-      {handoff && <p className="muted small">The browser window is open for you. Finish what the page needs, then press “I'm done”.</p>}
+      {handoff && <p className="muted small">The browser window is open for you. Finish what the page needs, then press “Hand back”.</p>}
       <div className="approval-actions">
         <button type="button" className="primary-btn" disabled={busy} onClick={() => void go(true)}>{browserAllowLabel(event.arguments)}</button>
-        <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void go(false)}>{handoff ? "I can't" : 'Deny'}</button>
+        <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void go(false)}>{handoff ? 'Cancel' : 'Deny'}</button>
       </div>
       <ArgDetails event={event} />
       <ApprovalRules event={event} conversationId={conversationId} />

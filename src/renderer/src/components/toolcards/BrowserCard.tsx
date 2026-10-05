@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Eye, EyeOff, Globe } from 'lucide-react'
+import { Eye, EyeOff, Globe, MonitorUp } from 'lucide-react'
 import { hostPath } from '../../lib/browserApproval'
 import DeskBrowser from '../DeskBrowser'
 import { browserLine, num, str, strList } from '../../lib/toolResult'
@@ -7,7 +7,7 @@ import CardShell from './CardShell'
 import { ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'
 import { registerToolCard, type ToolCardProps } from './registry'
 
-const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_scroll', 'browser_manage']
+const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_scroll', 'browser_manage', 'browser_handoff']
 
 /**
  * browser_*: one line for what was done, the page it left the browser on, any notes, and the page text behind a
@@ -23,6 +23,11 @@ export default function BrowserCard(props: ToolCardProps): JSX.Element {
   const shot = event.name === 'browser_manage' && str(d?.path) ? str(d?.path) : ''
   const tabs = num(d?.tabs)
   const [watch, setWatch] = useState(false)
+  const [out, setOut] = useState(false) // the user holds the window
+  const hold = (show: boolean): void => {
+    const api = window.os?.agentBrowser
+    if (api && props.browserSession) void (show ? api.show : api.hide)(props.browserSession).then(() => setOut(show)).catch(() => undefined)
+  }
   return (
     <CardShell {...props} icon={<Globe size={14} />} title={line.action} subject={line.subject || undefined} hideResult={!unreadable(p, event)}>
       {d && (str(d.title) || str(d.url)) && (
@@ -48,6 +53,11 @@ export default function BrowserCard(props: ToolCardProps): JSX.Element {
           <button type="button" className="link small" aria-expanded={watch} onClick={() => setWatch((w) => !w)}>
             {watch ? <EyeOff size={12} /> : <Eye size={12} />} {watch ? 'Stop watching' : 'Watch the browser'}
           </button>
+          {props.streaming && (
+            <button type="button" className="link small" onClick={() => hold(!out)}>
+              <MonitorUp size={12} /> {out ? 'Hand back' : 'Take over'}
+            </button>
+          )}
           {watch && (
             <DeskBrowser session={props.browserSession} live={!!props.streaming}
               emptyText="This browser is closed (it shuts after a few idle minutes)." />

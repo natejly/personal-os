@@ -52,7 +52,7 @@ export function browserSentence(args: Record<string, unknown>): Sentence {
       return on(`Upload ${files || 'a file'} to `)
     }
     case 'handoff':
-      return { before: `Take over the browser: ${String(args.reason ?? 'the page needs you')}`, host: '', after: '' }
+      return { before: `${String(args.reason ?? 'the page needs you').replace(/[.\s]+$/, '')}. Take over in the browser window, then hand back.`, host: '', after: '' }
     case 'type':
       if (risk === 'password') return on('Type into the password field on ', q)
       if (risk === 'payment') return on('Type payment details on ', q)
@@ -75,8 +75,8 @@ export function browserSentence(args: Record<string, unknown>): Sentence {
   }
 }
 
-/** The primary button of a hand-off reads "I'm done": the browser window is open and the user is the one acting. */
-export const browserAllowLabel = (args: Record<string, unknown>): string => (String(args.action ?? '') === 'handoff' ? "I'm done" : 'Allow')
+/** The primary button of a hand-off reads 'Hand back': the browser window is open and the user is the one acting. */
+export const browserAllowLabel = (args: Record<string, unknown>): string => (String(args.action ?? '') === 'handoff' ? 'Hand back' : 'Allow')
 
 /** The same sentence as one string, for places that do not style the host (the transcript card). */
 export function browserApprovalSentence(args: Record<string, unknown> | null | undefined): string {

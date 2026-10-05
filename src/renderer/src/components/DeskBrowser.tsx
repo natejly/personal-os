@@ -75,7 +75,7 @@ export default function DeskBrowser({ session, live, emptyText = "This desk hasn
         <span className="spacer" />
         {frame && <span className="desk-browser-live muted small"><i className="live-dot" /> live {new Date(frame.at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>}
         <button className="ghost-btn" onClick={() => act('show')}><MonitorUp size={13} /> Take over</button>
-        <button className="ghost-btn" disabled={!info.visible} onClick={() => act('hide')}><EyeOff size={13} /> Hide window</button>
+        <button className="ghost-btn" disabled={!info.visible} onClick={() => act('hide')}><EyeOff size={13} /> Hand back</button>
       </div>
       <p className="muted small desk-browser-help">
         Taking over opens the agent's own browser window, separate from your browser, so you can sign in or get past a challenge.

@@ -14,7 +14,7 @@ import './toolcards.css'
  * Approve is also ⌘↵ / Ctrl↵ from anywhere inside a pending card. Deny is never a shortcut: a stray key must
  * not be able to refuse (or grant) an outward action on its own, so Deny is a click.
  */
-export default function CardShell({ event, pending, decide, rules, icon, title, subject, children, getEdited, invalid, approveLabel = 'Approve', hideResult = false, tone }: ToolCardProps & {
+export default function CardShell({ event, pending, decide, rules, icon, title, subject, children, getEdited, invalid, approveLabel = 'Approve', denyLabel = 'Deny', hideResult = false, tone }: ToolCardProps & {
   icon: ReactNode
   title: string
   subject?: string
@@ -25,6 +25,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
   /** A reason Approve is unavailable (e.g. a required field is empty). */
   invalid?: string | null
   approveLabel?: string
+  denyLabel?: string
   hideResult?: boolean
   tone?: 'warn'
 }): JSX.Element {
@@ -73,7 +74,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
           <button type="button" className="primary-btn sm" disabled={busy || !!invalid} title={invalid ?? 'Approve (⌘↵)'} onClick={() => void send(true)}>
             {approveLabel}
           </button>
-          <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void send(false)}>Deny</button>
+          <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void send(false)}>{denyLabel}</button>
           {invalid ? <span className="tc-hint err">{invalid}</span> : <span className="tc-hint">⌘↵ to approve</span>}
         </footer>
       ) : null}

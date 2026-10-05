@@ -49,7 +49,7 @@ const ICONS: Record<string, JSX.Element> = {
   desk_fetch_file: <Download size={13} />, todo_write: <ListChecks size={13} />,
   browser_open: <Globe size={13} />, browser_snapshot: <BookOpen size={13} />, browser_click: <MousePointerClick size={13} />,
   browser_type: <Keyboard size={13} />, browser_select: <ListFilter size={13} />, browser_press: <Keyboard size={13} />,
-  browser_scroll: <ArrowDownUp size={13} />, browser_manage: <MonitorCog size={13} />, browser: <ShieldQuestion size={13} />,
+  browser_scroll: <ArrowDownUp size={13} />, browser_manage: <MonitorCog size={13} />, browser_handoff: <MonitorCog size={13} />, browser: <ShieldQuestion size={13} />,
   view_image: <Eye size={13} />, convert_document: <FileOutput size={13} />, render_preview: <FileOutput size={13} />, doc_guide: <BookOpen size={13} />
 }
 

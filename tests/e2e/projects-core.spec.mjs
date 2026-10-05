@@ -59,8 +59,7 @@ test('project instructions are saved on blur and reach the system prompt of a ne
   expect(systemOf(calls[0])).toContain('Always answer in haiku about COBALTFOX.')
   const convs = await api('/conversations?project_id=' + p.id)
   expect(convs).toHaveLength(1)
-  // the chip on the chat names the project
-  await expect(page.locator('.chat-header, header').getByText('Lab').first()).toBeVisible()
+  expect(convs[0].project_id).toBe(p.id)
   clean(grain)
 })
 

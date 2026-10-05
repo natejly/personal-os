@@ -14,7 +14,7 @@ test('each doc keeps its own page-agent chat; switching docs switches threads', 
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'Doc A' }).first().click()
   await expect(titleBox(page)).toHaveValue('Doc A')
-  await menu(grain, 'Ask About This Page')
+  await menu(grain, 'Page Agent')
   await expect(panel(page)).toBeVisible()
   const box = panel(page).getByRole('textbox').first()
   await box.fill('!!reply about alpha')

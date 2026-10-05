@@ -73,7 +73,7 @@ test('folder names: slashes, long names, duplicates and depth limit are handled'
   expect(errorsOf(g).filter((e) => !/status of 400/.test(e))).toEqual([]) // the refused rename logs its 400
 })
 
-test('move a doc: drag onto folder, via toolbar folder menu, and between projects', async ({ grain: g }) => {
+test('move a doc: drag onto a folder, folder to folder, and between projects', async ({ grain: g }) => {
   const { page } = g
   const proj = await g.api('/projects', { method: 'POST', body: { name: 'Proj One' } })
   await page.reload()
@@ -85,12 +85,12 @@ test('move a doc: drag onto folder, via toolbar folder menu, and between project
   const row = page.locator('.doc-row', { hasText: 'Dragged doc' }).last()
   await drag(page, row, folderRow(page, 'Target'))
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).folder).toBe('Target')
-  // toolbar select
-  await page.locator('.doc-row', { hasText: 'Dragged doc' }).last().click()
-  await page.locator('label[title="Folder"] select').selectOption('Second')
+  // drag onto another folder
+  await folderRow(page, 'Target').locator('.doc-folder-name').click() // expand it to reach the doc
+  await drag(page, page.locator('.doc-row', { hasText: 'Dragged doc' }).last(), folderRow(page, 'Second'))
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).folder).toBe('Second')
-  // project select moves it out of the folder tree into the project root
-  await page.locator('label[title="Project"] select').selectOption(proj.id)
+  // drag onto the project group row: out of the folder tree into the project root
+  await drag(page, page.locator('.doc-row', { hasText: 'Dragged doc' }).last(), page.locator('.doc-group-row', { hasText: 'Proj One' }).first())
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).project_id).toBe(proj.id)
   expect((await g.api(`/docs/${d.id}`)).folder).toBe('')
   // drag the doc onto the Personal group row to bring it back
@@ -139,7 +139,6 @@ test('delete folder: cancelling the confirm keeps it; delete with open doc insid
   await page.getByRole('button', { name: 'Delete folder' }).click()
   await expect(folderRow(page, 'Keep')).toHaveCount(0)
   await expect(body(page)).toHaveValue('abc')
-  await expect(page.locator('label[title="Folder"] select')).toHaveValue('')
   expect((await g.api(`/docs/${d.id}`)).folder).toBe('')
   expect(errorsOf(g)).toEqual([])
 })

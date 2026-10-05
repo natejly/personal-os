@@ -88,7 +88,7 @@ test('scope select: personal vs project uploads', async ({ grain: g }) => {
   // Notes tree: a project group exists and a file made in it lives there
   await tab(page, 'Notes').click()
   await page.getByRole('button', { name: 'New file in Scope Project' }).click()
-  await expect(page.locator('label[title="Project"] select')).toHaveValue(proj.id)
+  await expect.poll(async () => (await g.api('/docs')).filter((d) => d.project_id === proj.id).length).toBe(1)
   expect(errorsOf(g)).toEqual([])
 })
 

@@ -32,6 +32,10 @@ export const uploadDocAsset = (id: string, file: File): Promise<{ url: string }>
   return req(`/docs/${encodeURIComponent(id)}/assets`, { method: 'POST', body: fd }, NO_TIMEOUT)
 }
 
+/** Alt text, OCR and a description for a stored note image; never fails for a missing model (alt "image" and a notice). */
+export const describeImage = (id: string, url: string): Promise<{ alt: string; notice: string | null }> =>
+  req(`/docs/${encodeURIComponent(id)}/describe-image`, { method: 'POST', body: json({ url }) }, NO_TIMEOUT)
+
 export const linkTitle = (url: string): Promise<{ title: string | null }> =>
   req('/docs/link-title', { method: 'POST', body: json({ url }) })
 

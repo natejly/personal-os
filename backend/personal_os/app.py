@@ -43,6 +43,7 @@ from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
+from . import vision
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
@@ -7008,6 +7009,61 @@ async def upload_doc_asset(id: str, file: UploadFile = File(...)) -> dict[str, A
         return {"url": save_asset(db.data_dir / "doc_assets", id, file.filename or "image", data, file.content_type or "")}
     except AssetError as e:
         raise HTTPException(e.status, str(e)) from e
+
+
+class DescribeImageIn(BaseModel):
+    url: str
+
+
+_IMAGE_ASK = ("Reply in exactly this shape. Line 1: 'ALT: ' and a one-line alt text under 100 characters. Then 'TEXT:' and a "
+              "transcription of every word visible in the image, or 'none'. Then 'DESCRIPTION:' and 1-3 sentences on what it shows.")
+
+
+@app.post("/docs/{id}/describe-image")
+async def describe_doc_image(id: str, body: DescribeImageIn) -> dict[str, Any]:
+    """Alt text, OCR and a description for an image pasted into a note, stored as an upload row so search finds it.
+    Never an error for a missing model: the image stays and the alt falls back to "image"."""
+    d = docs.get(id)
+    m = re.fullmatch(r"/docs/assets/([\w-]+)/([\w.-]+)", body.url)
+    if not d or not m or m.group(1) != id:
+        raise HTTPException(404)
+    try:
+        p = asset_path(db.data_dir / "doc_assets", id, m.group(2))
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+    data = p.read_bytes()
+    out: dict[str, Any] = {"alt": "image", "text": "", "document_id": None, "notice": None}
+    try:
+        r = await vision.describe(settings(), data, _IMAGE_ASK, settings().get("defaultModel") or None)
+    except (vision.ImageError, llm.LLMError) as e:
+        r = {"error": str(e)[:200]}
+    text = (r.get("description") or r.get("text") or "").strip()
+    if r.get("description"):
+        first = text.splitlines()[0] if text else ""
+        alt = re.sub(r"^ALT:\s*|[\[\]\n]", "", first, flags=re.I).strip()[:120]
+        out["alt"] = alt or "image"
+    if not text:
+        out["notice"] = "No vision model is configured, so this image has no description."
+        return out
+    out["text"] = text
+    mime = next((mt for mt, x in ASSET_MIMES.items() if x == p.suffix.lower()), "image/png")
+    name = safe_upload_name(f"{d['title'] or 'note'}-{int(time.time())}{p.suffix.lower()}")
+
+    def store() -> dict[str, Any]:
+        pid = d["project_id"]
+        digest = hashlib.sha256(data).hexdigest()
+        if documents.find_by_hash(pid, digest):
+            return documents.find_by_hash(pid, digest)  # type: ignore[return-value]
+        dest = db.data_dir / "uploads" / f"{new_id()}-{name}"
+        dest.write_bytes(data)
+        try:
+            return documents.create(pid, name, mime, len(data), str(dest), f"[Image pasted into a note]\n{text}", content_hash=digest)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+
+    out["document_id"] = (await asyncio.to_thread(store))["id"]
+    return out
 
 
 @app.get("/docs/{id}")

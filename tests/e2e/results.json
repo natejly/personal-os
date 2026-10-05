@@ -2,14 +2,16 @@
   "config": {
     "argv": [
       "/Users/natejly/.nvm/versions/node/v20.16.0/bin/node",
-      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/node_modules/.bin/playwright",
+      "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/node_modules/.bin/playwright",
       "test",
       "-c",
       "playwright.config.mjs",
-      "smoke"
+      "approvals-chat",
+      "--grep",
+      "this chat|two chats|relaunch"
     ],
-    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e/playwright.config.mjs",
-    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+    "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
+    "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": true,
@@ -20,20 +22,20 @@
     "grepInvert": null,
     "maxFailures": 0,
     "metadata": {
-      "actualWorkers": 1
+      "actualWorkers": 2
     },
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/out/e2e",
+        "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/out/e2e",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 1
+          "actualWorkers": 2
         },
         "id": "",
         "name": "",
-        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/stress-test-2026-10-04/tests/e2e",
+        "testDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
         "testIgnore": [],
         "testMatch": [
           "/.*\\.spec\\.mjs/"
@@ -68,13 +70,13 @@
   },
   "suites": [
     {
-      "title": "smoke.spec.mjs",
-      "file": "smoke.spec.mjs",
+      "title": "approvals-chat.spec.mjs",
+      "file": "approvals-chat.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "app boots, a chat round-trips through the provider",
+          "title": "always allow in this chat: grant listed in Settings, next call runs without a card, revoke brings the card back",
           "ok": true,
           "tags": [],
           "tests": [
@@ -89,12 +91,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4292,
+                  "duration": 33589,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T03:26:47.549Z",
+                  "startTime": "2026-10-05T04:15:06.495Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -102,9 +104,77 @@
               "status": "expected"
             }
           ],
-          "id": "c3460f1d697aa8671d63-277f9579f120ad1c183c",
-          "file": "smoke.spec.mjs",
-          "line": 3,
+          "id": "828711ab4a4b3c5baf2e-bec71d7360e00fdd78da",
+          "file": "approvals-chat.spec.mjs",
+          "line": 65,
+          "column": 1
+        },
+        {
+          "title": "two chats pending at once are answered independently, at 820x520",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 27408,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:15:06.378Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-2fe6e7ef50b1ab8ed5b3",
+          "file": "approvals-chat.spec.mjs",
+          "line": 154,
+          "column": 1
+        },
+        {
+          "title": "a pending approval survives relaunch: card is still there and the decision is recorded once",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 29508,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:15:34.342Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-1d03a2f0e1e11e6558a6",
+          "file": "approvals-chat.spec.mjs",
+          "line": 183,
           "column": 1
         }
       ]
@@ -112,9 +182,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T03:26:47.111Z",
-    "duration": 4779.176,
-    "expected": 1,
+    "startTime": "2026-10-05T04:15:05.276Z",
+    "duration": 59305.072,
+    "expected": 3,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

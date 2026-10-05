@@ -109,9 +109,31 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     return out.length ? out : [{ label: 'No desks or workflows yet', disabled: true, run: noop }]
   }
 
+  // Recent Files docs, or a new one; a doc already on this space is focused, not duplicated.
+  const doc = (): MenuEntry[] => {
+    const docs = [...useStore.getState().docs].sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT_NOTES)
+    const fresh: MenuEntry = {
+      label: 'New doc',
+      icon: <Plus size={14} />,
+      run: act(async () => {
+        const d = await api.docs.create({ project_id: projectOf() })
+        void useStore.getState().refreshDocs()
+        await open('doc', d.id)
+      })
+    }
+    if (!docs.length) return [fresh]
+    return [
+      fresh,
+      { kind: 'separator' },
+      { kind: 'header', label: 'Recent docs' },
+      ...docs.map((d): MenuEntry => ({ label: d.title || 'Untitled', run: act(() => cv().ensureWindow(canvasId, 'doc', d.id, undefined, at)) }))
+    ]
+  }
+
   const pickers: Partial<Record<WidgetKind, () => MenuEntry[] | Promise<MenuEntry[]>>> = {
     chat,
     note,
+    doc,
     project,
     crew
   }

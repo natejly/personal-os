@@ -8,16 +8,17 @@ in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
 ## Windows
 
 Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
-`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `web`,
+`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `doc`,
 `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
-desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
+desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a doc, a note, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
 each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
 frame, drag the creature to move it, click it (or **Open chat** in the menu) to grow the chat back, and
 Settings › Behavior › Spaces › **Compact chats** makes the blob the default for windows that have not
-chosen. Sticky notes and the Web browser exist only here.
+chosen. A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
+onto the plane or onto a space row in the sidebar. Sticky notes exist only here.
 
 Windows move, resize, minimize and maximize. The Spaces bar holds the space tabs (drag to reorder),
 the add-widget button, **Tidy up** (⌃⌘T), the snapping picker and the lock. Snapping is per space:

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -69,7 +69,6 @@ const TOP: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'docs', label: 'Files', icon: <Files size={15} /> }
 ]
-const WEB: NavEntry = { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
@@ -248,7 +247,7 @@ export default function Sidebar(): JSX.Element {
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav">
-        {[...TOP, ...navEntries().filter((e) => placeOf(settings, e) === 'sidebar'), WEB]
+        {[...TOP, ...navEntries().filter((e) => placeOf(settings, e) === 'sidebar')]
           .filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
         {navEntries().some((e) => viewHidden(settings, e.view)) && (
@@ -292,7 +291,7 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-rows">
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
-                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))}>
+                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))} {...dragProps({ kind: 'doc', id: r.id, label: r.title, projectId: p.id })}>
                         <span className="convo-title">{r.title}</span>
                         <FileText size={12} className="row-kind" />
                       </div>

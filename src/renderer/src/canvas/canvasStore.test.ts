@@ -9,7 +9,6 @@ import { liveWindows, renderOrder } from './Canvas'
 import { clampOpacity, nextOpacity } from './opacity'
 import { WIDGETS } from './registry'
 import { flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
-import { toUrl } from './widgets/web'
 import type { Viewport } from './snapping'
 
 interface Call { url: string; method: string; keepalive: boolean; body: { windows?: { id: string; x: number }[] } | null }
@@ -68,18 +67,9 @@ const idsOf = (c: Call): string[] => (c.body?.windows ?? []).map((w) => w.id).so
 // ---- what the registry and liveWindows() agree is live -------------------------------
 const view: Viewport = { zoom: 1, panX: 0, panY: 0, width: 4000, height: 3000 }
 
-test('the web widget address bar takes a URL, a bare domain, or words for search', () => {
-  assert.equal(toUrl('https://news.ycombinator.com'), 'https://news.ycombinator.com')
-  assert.equal(toUrl('HTTP://example.com/a?b=1'), 'HTTP://example.com/a?b=1')
-  assert.equal(toUrl('github.com/natejly'), 'https://github.com/natejly')
-  assert.equal(toUrl('electron webview docs'), 'https://www.google.com/search?q=electron%20webview%20docs')
-  assert.equal(toUrl('recipes'), 'https://www.google.com/search?q=recipes')
-  assert.equal(toUrl('   '), '')
-})
-
 test('the registry still marks exactly these kinds heavy, which is what the cap counts', () => {
   const heavy = Object.values(WIDGETS).filter((d) => d.heavy).map((d) => d.kind)
-  assert.deepEqual([...heavy].sort(), ['calendar', 'crew', 'graph', 'usage', 'web'])
+  assert.deepEqual([...heavy].sort(), ['calendar', 'crew', 'graph', 'usage'])
 })
 
 /** Canvas.tsx renders every window up front (`EAGER`), so the heavy cap is held in reserve, not applied. */

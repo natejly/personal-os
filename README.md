@@ -83,7 +83,7 @@ them in the sidebar, in the title bar, or out of sight.
     into replies.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes,
-  todos, calendar, memory and a web browser sit side
+  todos, calendar, memory and docs sit side
   by side; drag anything from the sidebar or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
   global shortcut gathers them all. Save a space as a preset, lock it so

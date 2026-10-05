@@ -1819,7 +1819,7 @@ export interface PromotionResult {
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'note'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'face' | 'crew'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'doc' | 'face' | 'crew'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -1986,6 +1986,8 @@ export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
   | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'note' | 'file' | 'nav'
+  /** A Files doc: opens as a doc window editing it in place. */
+  | 'doc'
   /** A desk, a saved workflow or one run of it: each opens as a crew window showing its agents. */
   | 'desk' | 'workflow' | 'workflow_run'
 

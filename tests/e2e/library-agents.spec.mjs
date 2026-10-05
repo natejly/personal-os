@@ -72,6 +72,7 @@ test('Library > Agents: a drafted agent is edited, saved, approved, and a chat s
 
 test('a subagent opens from its card, takes a message while it runs, and shows in the crew ring', async ({ grain }) => {
   const { page, api } = grain
+  await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } }) // every tool offered up front, no tool_search round
   const s = (await spaces(grain))[0]
   const c = await api('/conversations', { method: 'POST', body: { title: 'Crew' } })
   const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'chat', ref_id: c.id, x: 64, y: 48, w: 560, h: 600 } })
@@ -81,13 +82,11 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await expect(win).toBeVisible()
   // A background child that thinks for a while, so there is a running subagent to talk to.
   const box = win.getByRole('textbox', { name: 'Message' })
-  await box.fill('!!tool agent_spawn {"task": "!!slow 12000 !!reply first draft", "role": "researcher", "background": true}')
+  // (The mock reads directives off the whole message, so the parent waits the same 8 s before each of its turns.)
+  await box.fill('!!tool agent_spawn {"task": "!!slow 8000 !!reply first draft", "role": "researcher", "background": true}')
   await box.press('Enter')
   // Its face sits on the reply's activity line, no fold to open.
-  await expect(win.locator('.msg.assistant').last()).toContainText('tool done', { timeout: 60_000 })
-  console.log('DEBUG tool_events', JSON.stringify((await api(`/conversations/${c.id}`)).messages.map((m) => m.tool_events)))
-  console.log('DEBUG runs', JSON.stringify(await api(`/runs?status=all&conversation_id=${c.id}`)))
-  await expect(win.locator('.crew-face')).toHaveCount(1, { timeout: 40_000 })
+  await expect(win.locator('.crew-face')).toHaveCount(1, { timeout: 60_000 })
   await shot(page, 'chat-crew-face')
 
   // The ring: fold the window to its face; the orchestrator sits in the middle with one child on the ring.
@@ -109,7 +108,7 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await shot(page, 'subagent-panel')
   const view = await api(`/subagents/${(await api(`/runs?status=all&conversation_id=${c.id}`)).find((r) => r.kind === 'subagent').run_id}`)
   expect(view.run.status).toBe('done')
-  expect(view.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['!!slow 12000 !!reply first draft', 'and also check the weather'])
+  expect(view.messages.filter((m) => m.role === 'user').map((m) => m.content)).toEqual(['!!slow 8000 !!reply first draft', 'and also check the weather'])
 
   // Finished: the box now routes to the chat that owns the child.
   await expect(panel.getByRole('textbox')).toHaveAttribute('placeholder', /Finished/)

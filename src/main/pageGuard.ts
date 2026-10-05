@@ -132,7 +132,7 @@ function isLoopbackV4(dotted: string): boolean {
 
 /**
  * Loopback and the unspecified address, including the spellings Chrome dials as 127/8.
- * Private LAN ranges are not loopback: a web widget may still open a machine on the LAN.
+ * Private LAN ranges are not loopback: a page on the LAN is not one of the app's own services.
  */
 export function isLoopbackHost(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '')

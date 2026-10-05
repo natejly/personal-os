@@ -46,7 +46,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "space_list", "space_add_widget", "space_arrange",
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
-    "web_search", "fetch_url",
+    "web_search", "fetch_url", "deep_research", "generate_image",
     "youtube_video", "youtube_search", "github_search", "github_read", "read_feed",
     "run_python", "current_time", "propose_plan", "ask_user",
     "agent_spawn", "agent_wait", "agent_stop", "desk_start",

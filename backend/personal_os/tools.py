@@ -1601,7 +1601,7 @@ def _register_working(self: Toolbox) -> None:
                       {"steps": [{"text": "Find the migration file", "status": "done", "note": "db.py line 155"}, {"text": "Add the column", "status": "in_progress"}, {"text": "Run the tests", "status": "pending"}]}]))
 
     if self.results is not None:
-        async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 4000) -> Any:
+        async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 12000) -> Any:
             out = self.results.read(ctx["conversation_id"], result_id, offset, limit)
             if out is None:
                 recent = [r["id"] for r in self.results.list(ctx["conversation_id"], limit=5)]
@@ -1619,9 +1619,9 @@ def _register_working(self: Toolbox) -> None:
             "{result_id, total_chars, shape, preview}, the full text is kept out of the conversation; read it here, "
             "starting at offset 0 and following next_offset. `shape` tells you what is in there before you page."),
             _obj({"result_id": {"type": "string"}, "offset": {"type": "integer", "default": 0, "description": "character offset into the stored result"},
-                  "limit": {"type": "integer", "default": 4000, "description": "characters to return, max 20000"}}, ["result_id"]),
+                  "limit": {"type": "integer", "default": 12000, "description": "characters to return, max 20000"}}, ["result_id"]),
             read_tool_result, "context",
-            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 4000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 12000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
 
         async def search_tool_results(ctx: dict[str, Any], query: str, limit: int = 3) -> Any:
             out = self.results.search(ctx["conversation_id"], query, limit)

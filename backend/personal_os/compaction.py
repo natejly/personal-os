@@ -60,6 +60,7 @@ def _public(text: str) -> str:
 def _role(role: str) -> str:
     return " ".join(str(role or "message").replace("\r", " ").split())[:40].upper() or "MESSAGE"
 CLEARED_NOTE = "cleared to save context; call read_tool_result(result_id) to re-read"
+CLEARED_INLINE_NOTE = "cleared to save context; it was never stored, so call the tool again if you still need it"
 MICRO_MIN_CHARS = 400
 MAX_ROW_CHARS = 6000
 
@@ -404,7 +405,7 @@ def _stub(m: dict[str, Any], names: dict[str, str]) -> dict[str, Any] | None:
             rid = parsed["result_id"]
         if isinstance(parsed.get("tool"), str):
             tool = parsed["tool"]
-    return {"cleared": True, "tool": tool, "chars": len(content), "result_id": rid, "note": CLEARED_NOTE}
+    return {"cleared": True, "tool": tool, "chars": len(content), "result_id": rid, "note": CLEARED_NOTE if rid else CLEARED_INLINE_NOTE}
 
 
 MEMORY_NUDGE = ("Older tool results were just cleared from this context (read_tool_result still serves them). "

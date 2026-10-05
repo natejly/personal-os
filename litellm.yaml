@@ -8,7 +8,10 @@ model_list:
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/kimi-k3
       api_key: os.environ/FIREWORKS_API_KEY
-  - model_name: kimi-k3-fast          # Fireworks "fast" router of the same model
+  # Fireworks "fast" router of the same model: more tokens per second, but measured on 2026-10-05 with the app's
+  # real chat payload it took 7.4-7.8 s to the first token against 2.1-3.1 s for kimi-k3 above, tools or not.
+  # A tool round emits ~200 tokens, so the wait before the first one is the whole cost: prefer kimi-k3 for chat.
+  - model_name: kimi-k3-fast
     litellm_params:
       model: fireworks_ai/accounts/fireworks/routers/kimi-k3-fast
       api_key: os.environ/FIREWORKS_API_KEY

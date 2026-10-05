@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line, Area, PieChart, Pie, Cell, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Brush
@@ -201,9 +201,25 @@ export function DataTable({ spec }: { spec: Spec }): JSX.Element {
   )
 }
 
-export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
-  const [view, setView] = useState<'chart' | 'table' | 'source'>('chart')
+export type ChartView = 'chart' | 'table' | 'source'
+
+/** The chart/table/source/copy toolbar both chart blocks share; `children` are the block's own actions, before Copy. */
+export function ChartTools({ view, setView, source, chartIcon, children }: { view: ChartView; setView: (v: ChartView) => void; source: string; chartIcon: ReactNode; children?: ReactNode }): JSX.Element {
   const [copied, setCopied] = useState(false)
+  const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
+  return (
+    <div className="chart-tools">
+      <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}>{chartIcon}</button>
+      <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
+      <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
+      {children}
+      <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
+    </div>
+  )
+}
+
+export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
+  const [view, setView] = useState<ChartView>('chart')
   const [pinned, setPinned] = useState<'' | 'busy' | 'done' | 'err'>('')
   const [pinErr, setPinErr] = useState('')
   const parsed = useMemo<{ spec: Spec } | { error: string }>(() => {
@@ -220,19 +236,14 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
     )
   }
   const { spec } = parsed
-  const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
   return (
     <figure className="chart-block">
       <div className="code-head">
         <span>{spec.title || `${spec.type} chart`}</span>
-        <div className="chart-tools">
-          <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}><BarChart3 size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />}>
           {!streaming && <button className="icon-btn ghost" title={pinned === 'done' ? 'Pinned (static data, does not refresh)' : pinned === 'err' ? pinErr || 'Pin failed' : 'Pin to the space as a widget (static data, does not refresh)'} disabled={pinned === 'busy'} onClick={() => { setPinned('busy'); pinChart(spec).then(() => setPinned('done'), (e) => { setPinErr((e as Error).message); setPinned('err') }) }}>{pinned === 'done' ? <Check size={13} /> : <Pin size={13} />}</button>}
           {pinned === 'err' && <span role="alert" className="muted small">{pinErr || 'Pin failed'}</span>}
-          <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
-        </div>
+        </ChartTools>
       </div>
       {view === 'chart' && (
         <div className="chart-canvas" style={{ height: spec.type === 'pie' ? 260 : 280 }}>

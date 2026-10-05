@@ -206,3 +206,14 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
     assert.ok(!menu.includes(`'${accel[c]}'`), `${c} is a menu accelerator`)
   }
 })
+
+test('⌘0…⌘n are contiguous, each used once, each a distinct target', async () => {
+  const { readFileSync } = await import('node:fs')
+  const menu = readFileSync('src/main/index.ts', 'utf8')
+  const rows = [...menu.matchAll(/accelerator: 'CmdOrCtrl\+(\d)', click: \(\) => sendMenu\('([^']+)'\)/g)].map((m) => [Number(m[1]), m[2]] as const)
+  assert.equal(rows.length, 8, 'Today, Chats, Todos, Calendar, Files, Mail, Memory, Activity')
+  const digits = rows.map(([d]) => d).sort((a, b) => a - b)
+  assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')
+  assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
+  assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents' || a === 'view:dashboards'))
+})

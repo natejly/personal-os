@@ -14,7 +14,7 @@ import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
-import CoworkSettings from './CoworkSettings'
+import CoworkSettings, { CoworkAdvanced } from './CoworkSettings'
 import RunSafetySettings from './RunSafetySettings'
 import SandboxSettings from './SandboxSettings'
 import GoogleSettings from './GoogleSettings'
@@ -425,17 +425,7 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Hybrid memory search</b><small>Combine keywords, embeddings, recency and graph links. Off means keywords only.</small></span>
                 <input type="checkbox" checked={draft.hybridRetrieval !== false} onChange={(e) => patch({ hybridRetrieval: e.target.checked })} /><span className="switch" />
               </label>
-              <label className="setting-row"><span className="toggle-text"><b>Suggest a memory tidy-up every</b><small>Counted in new auto memories. 0 means manual only.</small></span>
-                <span className="num-unit">
-                  <input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} />
-                  <em>memories</em>
-                </span>
-              </label>
               <IndexStatusLine />
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its file, and index it with the chunk. Applies to new and re-indexed passages; Rebuild search index covers the rest. Costs one model call per chunk. Off by default.</small></span>
-                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
-              </label>
               <AdvancedRetrieval draft={draft} patch={patch} models={models} />
               <h3 id="context-settings">Context</h3>
               <p className="muted">How much chat history is replayed, and when older messages are summarized. Type <code>/compact</code> in a chat, or use Compact now in its context panel, to summarize on demand.</p>
@@ -458,6 +448,19 @@ export default function SettingsModal(): JSX.Element {
                 <input type="number" min={2} max={200} value={draft.compactKeepRecent ?? ''} placeholder={String(CONTEXT_DEFAULTS.compactKeepRecent)}
                   onChange={(e) => patch({ compactKeepRecent: e.target.value === '' ? undefined : Number(e.target.value) })} />
               </label>
+              <details className="modal-free">
+                <summary>Advanced</summary>
+                <label className="setting-row"><span className="toggle-text"><b>Suggest a memory tidy-up every</b><small>Counted in new auto memories. 0 means manual only.</small></span>
+                  <span className="num-unit">
+                    <input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} />
+                    <em>memories</em>
+                  </span>
+                </label>
+                <label className="toggle-row plain">
+                  <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its file, and index it with the chunk. Applies to new and re-indexed passages; Rebuild search index covers the rest. Costs one model call per chunk. Off by default.</small></span>
+                  <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
+                </label>
+              </details>
             </section>}
 
             {tab === 'integrations' && <section>
@@ -488,11 +491,14 @@ export default function SettingsModal(): JSX.Element {
               <label><span className="toggle-text"><b>Exa API key</b><small>Exa works without one; a key lifts its rate limit.</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
               <label><span className="toggle-text"><b>SearXNG URL</b><small>Your own instance, searched beside Exa. Needs <code>json</code> under search.formats.</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
               <h4>Web pages and GitHub</h4>
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Retry blocked pages through Jina Reader</b><small>For pages that are blocked or need JavaScript. Jina sees the page address.</small></span>
-                <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} /><span className="switch" />
-              </label>
               <label><span className="toggle-text"><b>GitHub token</b><small>Optional. GitHub tools use your <code>gh</code> login when this is empty.</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
+              <details className="modal-free">
+                <summary>Advanced</summary>
+                <label className="toggle-row plain">
+                  <span className="toggle-text"><b>Retry blocked pages through Jina Reader</b><small>For pages that are blocked or need JavaScript. Jina sees the page address.</small></span>
+                  <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} /><span className="switch" />
+                </label>
+              </details>
             </section>}
 
             {tab === 'meetings' && <section>
@@ -532,22 +538,26 @@ export default function SettingsModal(): JSX.Element {
                 <input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} />
               </label>
               <SandboxSettings draft={draft} patch={patch} />
-              <h4>Prompt size</h4>
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
-                <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
-              </label>
-              <label className="setting-row"><span className="toggle-text"><b>Load built-in tools on demand above</b><small>A tool count. 0 always sends every schema.</small></span><input type="number" min={0} value={draft.toolDeferAbove ?? 40} onChange={(e) => patch({ toolDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
-              <label className="setting-row"><span className="toggle-text"><b>Defer connector tools above</b><small>A tool count. 0 always sends every schema.</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
-              <label className="setting-row"><span className="toggle-text"><b>Skill text inlined per reply</b><small>Beyond it, skills show as a list.</small></span>
-                <span className="num-unit">
-                  <input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} />
-                  <em>characters</em>
-                </span>
-              </label>
               <h3 id="cowork-settings">Cowork</h3>
               <p className="muted">Limits and reach for desks: the parallel sessions that work on a task in their own folder.</p>
               <CoworkSettings draft={draft} patch={patch} />
+              <details className="modal-free">
+                <summary>Advanced</summary>
+                <h4>Prompt size</h4>
+                <label className="toggle-row plain">
+                  <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
+                  <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
+                </label>
+                <label className="setting-row"><span className="toggle-text"><b>Load built-in tools on demand above</b><small>A tool count. 0 always sends every schema.</small></span><input type="number" min={0} value={draft.toolDeferAbove ?? 40} onChange={(e) => patch({ toolDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
+                <label className="setting-row"><span className="toggle-text"><b>Defer connector tools above</b><small>A tool count. 0 always sends every schema.</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
+                <label className="setting-row"><span className="toggle-text"><b>Skill text inlined per reply</b><small>Beyond it, skills show as a list.</small></span>
+                  <span className="num-unit">
+                    <input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} />
+                    <em>characters</em>
+                  </span>
+                </label>
+                <CoworkAdvanced draft={draft} patch={patch} />
+              </details>
             </section>}
 
             {tab === 'data' && <>
@@ -556,9 +566,12 @@ export default function SettingsModal(): JSX.Element {
               <TrashPanel />
               <section>
                 <h3>Diagnostics</h3>
-                <ReliabilitySettings draft={draft} patch={patch} />
-                <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
                 <SupportSettings />
+                <details className="modal-free">
+                  <summary>Advanced</summary>
+                  <ReliabilitySettings draft={draft} patch={patch} />
+                  <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
+                </details>
               </section>
             </>}
 
@@ -630,24 +643,31 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <h4>Shortcuts</h4>
-              <label><span className="toggle-text"><b>Gather widgets shortcut</b><small>Works anywhere on your Mac: brings every detached widget to the front and back again.</small></span>
-                <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}
-                  placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
-              </label>
               {shortcut && !shortcut.ok && (
-                <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
+                <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} Change it under Advanced below. The menubar icon gathers them too.</p>
               )}
-              <label><span className="toggle-text"><b>Quick capture shortcut</b><small>Works anywhere on your Mac: opens a small window that adds a line to today's note.</small></span>
-                <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
-                  placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
-              </label>
               {capShortcut && !capShortcut.ok && (
-                <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>
+                <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`} Change it under Advanced below.</p>
               )}
               <label><span className="toggle-text"><b>Dictation chord</b><small>In a file: hold to dictate, tap to latch.</small></span>
                 <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
                   placeholder="Control+Alt+D" spellCheck={false} />
               </label>
+              <details className="modal-free">
+                <summary>Advanced</summary>
+                <label className="toggle-row plain">
+                  <span className="toggle-text"><b>Developer tools</b><small>Traces, context preview, system prompt, telemetry export. Traces are recorded either way.</small></span>
+                  <input type="checkbox" checked={draft.devTools === true} onChange={(e) => patch({ devTools: e.target.checked })} /><span className="switch" />
+                </label>
+                <label><span className="toggle-text"><b>Gather widgets shortcut</b><small>Works anywhere on your Mac: brings every detached widget to the front and back again.</small></span>
+                  <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}
+                    placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
+                </label>
+                <label><span className="toggle-text"><b>Quick capture shortcut</b><small>Works anywhere on your Mac: opens a small window that adds a line to today's note.</small></span>
+                  <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
+                    placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
+                </label>
+              </details>
             </section>}
 
             {/* Outside the tabs: both the Provider and the Memory tab's model fields list from it. */}

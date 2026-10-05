@@ -10,10 +10,8 @@ import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
-import AppSwitcher from './AppSwitcher'
 import DeclarativeWidget from './DeclarativeWidget'
 import { isDeclarative } from '../lib/boundWidget'
-import SidebarToggle from './SidebarToggle'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
@@ -206,29 +204,24 @@ export default function DashboardsView(): JSX.Element {
       }), [dash, list])
 
   return (
-    <main className="page dash-page">
-      <header className="page-header drag">
-        <SidebarToggle />
-        <h2><Gauge size={16} /> Dashboards</h2>
-        <div className="no-drag header-right">
-          <SendToSpace
-            items={dash ? dash.widgets.map((w) => ({ kind: 'dashboard-widget' as const, refId: w.id, config: { dashboard_id: dash.id } })) : []}
-            title="Send widgets to space"
-          />
-          {list.length > 0 && (
-            <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.id === dash?.id ? dash.widgets.length : d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
-          )}
-          <button className="ghost-btn" onClick={() => setShowSources(true)}><Database size={14} /> Sources <span className="count">{sources.length}</span></button>
-          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}" and its widgets? This can't be undone.`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
-          {creating && dash ? (
-            <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
-          ) : (
-            <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
-          )}
-          {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
-        </div>
-        <AppSwitcher />
-      </header>
+    <div className="dash-page">
+      <div className="dash-toolbar">
+        <SendToSpace
+          items={dash ? dash.widgets.map((w) => ({ kind: 'dashboard-widget' as const, refId: w.id, config: { dashboard_id: dash.id } })) : []}
+          title="Send widgets to space"
+        />
+        {list.length > 0 && (
+          <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.id === dash?.id ? dash.widgets.length : d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
+        )}
+        <button className="ghost-btn" onClick={() => setShowSources(true)}><Database size={14} /> Sources <span className="count">{sources.length}</span></button>
+        {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}" and its widgets? This can't be undone.`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
+        {creating && dash ? (
+          <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
+        ) : (
+          <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
+        )}
+        {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
+      </div>
 
       {composer && dash && (
         <div className="dw-composer">
@@ -280,6 +273,6 @@ export default function DashboardsView(): JSX.Element {
       )}
       {showSources && <SourcesPanel sources={sources} internal={internal} onChange={() => void loadSources()} onClose={() => setShowSources(false)} />}
       {dash && <Pencil size={0} />}
-    </main>
+    </div>
   )
 }

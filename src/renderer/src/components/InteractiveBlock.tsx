@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ResponsiveContainer } from 'recharts'
-import { SlidersHorizontal, Table2, Code2, Copy, Check, AlertCircle, RotateCcw } from 'lucide-react'
-import { Chart, DataTable, fmtNum, TYPES, type ChartType, type Row, type Series, type Spec } from './ChartBlock'
+import { SlidersHorizontal, AlertCircle, RotateCcw } from 'lucide-react'
+import { Chart, ChartTools, DataTable, type ChartView, fmtNum, TYPES, type ChartType, type Row, type Series, type Spec } from './ChartBlock'
 import { tryCompile, type Compiled, type Scope, type Value } from '../lib/expr'
 
 /**
@@ -385,8 +385,7 @@ function ControlRow({ c, value, onChange }: { c: Control; value: Value; onChange
 // ---------------------------------------------------------------- block
 
 export default function InteractiveBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
-  const [view, setView] = useState<'chart' | 'table' | 'source'>('chart')
-  const [copied, setCopied] = useState(false)
+  const [view, setView] = useState<ChartView>('chart')
   const parsed = useMemo<{ spec: Parsed } | { error: string }>(() => {
     try { return { spec: parseInteractive(source) } } catch (e) { return { error: (e as Error).message } }
   }, [source])
@@ -420,7 +419,6 @@ export default function InteractiveBlock({ source, streaming }: { source: string
   }
 
   const spec = parsed.spec
-  const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
   const chartSpec: Spec | null = 'out' in computed
     ? {
       type: spec.type, title: spec.title, x: spec.x.id, data: computed.out.rows, stacked: spec.stacked,
@@ -433,15 +431,11 @@ export default function InteractiveBlock({ source, streaming }: { source: string
     <figure className="chart-block interactive">
       <div className="code-head">
         <span>{spec.title || 'interactive chart'}</span>
-        <div className="chart-tools">
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<SlidersHorizontal size={13} />}>
           {dirty && (
             <button className="icon-btn ghost" title="Reset controls" onClick={() => setLive({ sig: signature, values: initial })}><RotateCcw size={13} /></button>
           )}
-          <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}><SlidersHorizontal size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
-          <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
-        </div>
+        </ChartTools>
       </div>
 
       {view !== 'source' && spec.controls.length > 0 && (

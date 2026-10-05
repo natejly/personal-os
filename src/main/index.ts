@@ -212,16 +212,16 @@ function buildMenu(): void {
         { label: 'Chats', accelerator: 'CmdOrCtrl+1', click: () => sendMenu('view:chat') },
         { label: 'Todos', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
         { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
-        { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
+        { label: 'Files', accelerator: 'CmdOrCtrl+4', click: () => sendMenu('view:docs') },
+        { label: 'Mail', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:mail') },
         { label: 'Memory…', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
-        { label: 'Knowledge Graph…', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
-        { label: 'Uploads', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
-        { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
-        // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
+        { label: 'Activity', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:activity') },
+        // No digit for these: the graph is a mode of Memory (⌘6) and Uploads is a Files section (⌘4, ⌘U).
+        { label: 'Knowledge Graph…', click: () => sendMenu('view:graph') },
+        { label: 'Uploads', click: () => sendMenu('view:documents') },
+        // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
         { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
-        { label: 'Files', click: () => sendMenu('view:docs') },
-        { label: 'Mail', click: () => sendMenu('view:mail') },
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.

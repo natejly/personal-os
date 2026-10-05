@@ -31,7 +31,7 @@ interface ModelMenuProps {
 
 /**
  * Model, reasoning level, and fast mode. The model list shows the model name, not the
- * provider path. Reasoning is the dropdown beside the model. Edit still holds effort and Fast.
+ * provider path. Reasoning is the dropdown beside the model; Edit holds Fast and Restore defaults.
  */
 export default function ModelMenu({ model, effort, fast, onChange, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
@@ -258,20 +258,6 @@ export default function ModelMenu({ model, effort, fast, onChange, placement = '
               style={{ top: box?.subTop ?? -9999, left: box?.subLeft ?? 0, visibility: box ? 'visible' : 'hidden' }}
             >
               <div className="model-menu-param-title">{modelLabel(editing)}</div>
-              {editingEffortShown && <div className="model-menu-section">Reasoning</div>}
-              {editingEffortShown && EFFORTS.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={effort === e.id}
-                  className="model-menu-choice"
-                  onClick={() => applyTo(editing, { effort: e.id })}
-                >
-                  <span>{e.label}</span>
-                  {effort === e.id && <Check size={14} />}
-                </button>
-              ))}
               <div className="model-menu-section">Options</div>
               <button
                 type="button"

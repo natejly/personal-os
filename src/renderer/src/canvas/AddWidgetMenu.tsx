@@ -87,7 +87,7 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 
   const widget = async (): Promise<MenuEntry[]> => {
     const dashboards = await api.dashboards.list()
-    if (!dashboards.length) return [{ label: 'New dashboard…', icon: <Plus size={14} />, run: () => useStore.getState().setView('dashboards') }]
+    if (!dashboards.length) return [{ label: 'New dashboard…', icon: <Plus size={14} />, run: () => useStore.getState().openFiles('dashboards') }]
     return dashboards.map((d): MenuEntry => ({
       kind: 'submenu',
       label: d.name,

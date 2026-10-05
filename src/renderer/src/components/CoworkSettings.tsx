@@ -224,18 +224,10 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <h4>Desks</h4>
       <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
         help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
-      <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
-        help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
       <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
-      <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}
-        help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
         checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
-      <Toggle title="Check before finishing" help="Don't let a desk finish with open steps or missing files."
-        checked={draft.deskDoneGate !== false} onChange={(deskDoneGate) => patch({ deskDoneGate })} />
-      <Toggle title="Review against the brief" help="Have a reviewer check the result against the brief before finishing."
-        checked={draft.deskSelfReview !== false} onChange={(deskSelfReview) => patch({ deskSelfReview })} />
 
       <h4>Shell</h4>
       <Toggle title="Run sandboxed commands without asking" help="Run sandboxed commands inside a desk's own folder without asking."
@@ -267,8 +259,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <h4>Browser</h4>
       <Toggle title="Let desks use a browser" help="Gives desks a browser they can read and click in. It asks before submitting forms, entering passwords or uploading."
         checked={draft.browserEnabled !== false} onChange={(browserEnabled) => patch({ browserEnabled })} />
-      <NumField title="Tabs per desk" settingKey="browserMaxTabs" value={draft.browserMaxTabs} fallback={4}
-        help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
       <HostList title="Allowed sites" help="Sites a desk may open even when a link came from something it read, instead of being asked. A name also allows its subdomains."
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
       <SignIns />
@@ -284,6 +274,29 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
 
       <h4>Work environment</h4>
       <WorkEnv draft={draft} saved={saved} patch={patch} />
+    </div>
+  )
+}
+
+/** Desk limits and finishing checks, shown under Settings → Tools → Advanced. Same keys and defaults as before. */
+export function CoworkAdvanced({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  return (
+    <div className="cowork-settings">
+      <h4>Desk limits</h4>
+      <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
+        help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
+      <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}
+        help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
+      <NumField title="Tabs per desk" settingKey="browserMaxTabs" value={draft.browserMaxTabs} fallback={4}
+        help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
+      <Toggle title="Check before finishing" help="Don't let a desk finish with open steps or missing files."
+        checked={draft.deskDoneGate !== false} onChange={(deskDoneGate) => patch({ deskDoneGate })} />
+      <Toggle title="Review against the brief" help="Have a reviewer check the result against the brief before finishing."
+        checked={draft.deskSelfReview !== false} onChange={(deskSelfReview) => patch({ deskSelfReview })} />
+      <label className="toggle-row plain">
+        <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
+        <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
+      </label>
     </div>
   )
 }

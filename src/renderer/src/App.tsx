@@ -12,7 +12,6 @@ import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
-import DashboardsView from './components/DashboardsView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import LibraryView from './components/LibraryView'
@@ -262,7 +261,6 @@ export default function App(): JSX.Element {
           {ModView && <ModView />}
           {view === 'calendar' && <CalendarView />}
           {view === 'mail' && <MailView />}
-          {view === 'dashboards' && <DashboardsView />}
           {view === 'docs' && <DocsView />}
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}

@@ -36,10 +36,10 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'agents' | 'commands'
-export type FilesSection = 'notes' | 'uploads' | 'pages'
+export type LibraryTab = 'skills' | 'automations' | 'connectors'
+export type FilesSection = 'notes' | 'uploads' | 'pages' | 'dashboards'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -52,7 +52,7 @@ export const readDocMode = (): DocMode => {
   } catch { return 'split' }
 }
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
-export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
+export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
  *  'memory' holds the Memory panel above the learning and search-index controls.
@@ -212,10 +212,6 @@ export interface State {
    */
   pageAgentOpen: boolean
   pageAgentId: string | null
-  /** Model, effort, and fast mode for the next ⌘I thread, and the live thread once it exists. */
-  pageAgentModel: string | null
-  pageAgentEffort: Effort
-  pageAgentFast: boolean
   /** Plan mode and skip permissions picked in the ⌘I panel before its thread exists. */
   pageAgentChatSettings: Pick<ConversationSettings, 'planMode' | 'skipPermissions'>
   pageContext: PageContext | null
@@ -335,9 +331,6 @@ export interface State {
   closePageAgent: () => void
   /** Drop the current thread and start a fresh one against the page on screen. */
   resetPageAgent: () => void
-  /** Model for the ⌘I thread. Before the first send this is only a draft; it does not change the app default. */
-  setPageAgentModel: (model: string) => Promise<void>
-  setPageAgentParams: (patch: { effort?: Effort; fast?: boolean }) => Promise<void>
   /** Called by the active view. Passing null means "this view has nothing to say". */
   setPageContext: (ctx: PageContext | null) => void
   setContextTab: (t: ContextTab) => void
@@ -1697,11 +1690,7 @@ export const useStore = create<State>((set, get) => {
     }
     if (id === PAGE_AGENT_DRAFT) {
       // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
-      set((s) => ({
-        pageAgentEffort: patch.effort ?? s.pageAgentEffort,
-        pageAgentFast: patch.fast ?? s.pageAgentFast,
-        pageAgentChatSettings: { ...s.pageAgentChatSettings, ...parked }
-      }))
+      set((s) => ({ pageAgentChatSettings: { ...s.pageAgentChatSettings, ...parked } }))
       return
     }
     await writeConversation(id, { settings: patch })
@@ -1728,7 +1717,7 @@ export const useStore = create<State>((set, get) => {
     projects: [],
     view: 'home',
     lastClassicView: 'home',
-    memoryMode: 'split',
+    memoryMode: 'list',
     projectViewId: null,
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
@@ -1782,9 +1771,6 @@ export const useStore = create<State>((set, get) => {
     deskShowArchived: false,
     pageAgentOpen: false,
     pageAgentId: null,
-    pageAgentModel: null,
-    pageAgentEffort: DEFAULT_EFFORT,
-    pageAgentFast: false,
     pageAgentChatSettings: {},
     pageContext: null,
     traceMessageId: null,
@@ -1899,6 +1885,8 @@ export const useStore = create<State>((set, get) => {
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
     },
     setView: (view) => {
+      // Dashboards moved under Files; a stale 'dashboards' (old canvas state, an old menu) lands there.
+      if ((view as string) === 'dashboards') return get().openFiles('dashboards')
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()
@@ -1941,40 +1929,9 @@ export const useStore = create<State>((set, get) => {
     closePageAgent: () => set({ pageAgentOpen: false }),
     resetPageAgent: () => {
       const id = get().pageAgentId
-      const convo = id ? get().sessions[id]?.conversation : undefined
       // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
       if (id) get().closeSession(id)
-      set({
-        pageAgentId: null,
-        ...(convo ? {
-          pageAgentModel: convo.model,
-          pageAgentEffort: convo.settings.effort,
-          pageAgentFast: !!convo.settings.fast
-        } : {})
-      })
-    },
-    setPageAgentModel: async (model) => {
-      set({ pageAgentModel: model })
-      const id = get().pageAgentId
-      if (!id) return
-      try {
-        await writeConversation(id, { model })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    setPageAgentParams: async (patch) => {
-      set((s) => ({
-        pageAgentEffort: patch.effort ?? s.pageAgentEffort,
-        pageAgentFast: patch.fast ?? s.pageAgentFast
-      }))
-      const id = get().pageAgentId
-      if (!id) return
-      try {
-        await writeConversation(id, { settings: patch })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
+      set({ pageAgentId: null })
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -2444,15 +2401,13 @@ export const useStore = create<State>((set, get) => {
       if (!id) {
         let c: Conversation
         try {
-          c = await api.conversations.create(get().draftProjectId, get().pageAgentModel || get().settings.defaultModel)
+          c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
         } catch (e) {
           get().toast((e as Error).message, 'error')
           return false
         }
-        const { pageAgentEffort, pageAgentFast, pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
+        const { pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
         const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
-        if (pageAgentEffort !== DEFAULT_EFFORT) pageSettings.effort = pageAgentEffort
-        if (pageAgentFast) pageSettings.fast = true
         const fromUpload = uploadTaintTarget === 'page'
         if (fromUpload) {
           pageSettings.tainted = true
@@ -2473,7 +2428,7 @@ export const useStore = create<State>((set, get) => {
         set({ pageAgentId: id, pageAgentChatSettings: {} })
         void get().refreshProjects()
       }
-      // The panel's model menu writes through the same queue as the chat page's: let a change land first.
+      // Panel toggles write through the same queue as the chat page's: let a change land first.
       await convWrites.get(id)?.catch(() => undefined)
       return runStream(id, { content: text, page_context: page })
     },

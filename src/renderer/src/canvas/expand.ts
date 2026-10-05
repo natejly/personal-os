@@ -9,7 +9,7 @@ const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'dashboard-
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Views). Memory lives in
  * Settings → Memory and uploads in Files, neither of which can be hidden. */
 const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
-  todos: 'todos', calendar: 'calendar', 'dashboard-widget': 'dashboards'
+  todos: 'todos', calendar: 'calendar'
 }
 
 /** Whether a window kind has a reachable classic equivalent (false for note, usage, or a hidden view). */
@@ -40,10 +40,10 @@ export function expandWindow(w: CanvasWindow): void {
       break
     case 'dashboard-widget':
       handoff('dashboard', String(w.config.dashboard_id ?? '') || null)
-      app.setView('dashboards')
+      app.openFiles('dashboards')
       break
     case 'memory':
-      app.openMemory('split')
+      app.openMemory('list')
       break
     case 'graph':
       app.openMemory('graph')

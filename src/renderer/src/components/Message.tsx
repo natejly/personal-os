@@ -193,6 +193,19 @@ export function Thinking(): JSX.Element {
   return <><span className="thinking"><span /><span /><span /></span>{text && <div className="run-status" role="status">{text}</div>}</>
 }
 
+/** The "N steps · ms · tok" chip, shown only with Settings → Behavior → Developer tools on. Its own component so the
+ *  subscription stays out of MessageView. */
+function TraceChip({ message }: { message: Message }): JSX.Element | null {
+  const devTools = useStore((s) => s.settings.devTools === true)
+  if (!devTools || !message.trace?.length) return null
+  const trace = traceSummary(message.trace)
+  return (
+    <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
+      <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
+    </button>
+  )
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
@@ -210,7 +223,6 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
-  const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
@@ -273,11 +285,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {!isUser && (message.tool_events?.length ?? 0) > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
-            {showContextChips && trace && (
-              <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
-                <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
-              </button>
-            )}
+            {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
             {editable && isUser && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>

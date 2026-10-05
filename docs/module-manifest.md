@@ -1,10 +1,24 @@
-# Feature modules — pilot contract (todos)
+# Feature modules — contract
 
-Status: **FROZEN 2026-10-01** for the pilot, since merged to `main` (todos is the ported module).
+Status: **live.** The todos pilot set this contract and merged to `main`; later features ported onto it.
 
 Goal: one unit per feature that owns its routes, tools, background loops, Today payload, view, nav entry,
-canvas widget and Today card, so the shell iterates a list instead of naming each feature. Todos is the
+canvas widget and Today card, so the shell iterates a list instead of naming each feature. Todos was the
 pilot because it touches every surface. Built-in only — no runtime loading, no third-party code.
+
+## Ported modules
+
+`build_modules` (`backend/personal_os/modules/__init__.py`) registers them in this order; the frontend list is
+`MODULES` in `src/renderer/src/shell/registry.ts`.
+
+| Key | Backend | Frontend `ModuleDef` |
+|---|---|---|
+| `todos` | `modules/todos.py` — `TodosModule` | `features/todos/module.tsx` |
+| `mailwatch` | `modules/mailwatch.py` — `MailWatchModule` (reply tracker, `mail_followups`) | none (backend only) |
+| `planner` | `modules/planner.py` — `PlannerModule` (time-block suggestions for todos) | none (backend only) |
+| `health` | `modules/health.py` — `HealthModule` | `features/health/module.tsx` |
+
+The slices below are the pilot's original work split, kept as the worked example of a port.
 
 ## Contract files (written by the contract owner; nobody else edits them)
 
@@ -64,6 +78,6 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 - `test_mcp_servers` scans `modules/*.py` too, so tools that move into a module stay covered by the
   reserved-name check.
 
-## Later (not this pilot)
+## Later
 Open the `View`/`WidgetKind` unions; move store slices into modules; a settings-panel slot (GoogleSettings'
-sync UI); per-module SCHEMA registration; port calendar, docs, mail; then think about third-party.
+sync UI); per-module SCHEMA registration; port calendar, docs, mail (mailwatch is ported; the mail view is not); then think about third-party.

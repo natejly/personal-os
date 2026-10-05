@@ -12,16 +12,16 @@ instructions, files, memories and graph.
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today      2 │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Dashboards   │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Files        │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
-│ Cowork       │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ Library      │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ SPACES     + │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ ▦ Space 1    │  └───────────────┘ └───────────────┘ │   run python │
-│ PROJECTS   + │                                      │   gmail send │
-│ ■ Grain      │  [Brief me]                          │  Last reply… │
-│ RECENTS      │                                      │              │
+│ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Cowork       │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
+│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
+│ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │
+│ ■ Grain      │                                      │   gmail send │
+│ RECENTS      │  [Brief me]                          │  Last reply… │
 │ · …          │                                      │              │
+│              │                                      │              │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
@@ -53,7 +53,7 @@ Settings → Modules.
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget, see a memory's past versions, and export or import
-    a scope as a JSON file. It lives in Settings → Memory & learning, next to
+    a scope as a JSON file. It lives in Settings → Memory, next to
     the auto-learn switches.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
@@ -66,7 +66,7 @@ Settings → Modules.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Files.** One view with three sections:
+- **Files.** One view with four sections:
   - *Notes* — writing of your own, in an editor rather than an upload box:
     markdown and LaTeX, a line-numbered editor beside a live preview, folders
     per project, and full revision history. The assistant can read and revise
@@ -85,6 +85,8 @@ Settings → Modules.
     revises with the `artifact_*` tools. A page renders sandboxed with no
     network access, every version is kept and restorable, and a page can sit
     on a space as a window.
+  - *Dashboards* — the widgets described under **Dashboards you describe**
+    below.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes,
   todos, calendar, memory, pages, dashboard widgets and a web browser sit side
@@ -159,9 +161,9 @@ Settings → Modules.
   to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
   opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
-  the procedures it can be asked to repeat; **Workflows**, multi-step jobs you
-  approve once; **Agents** and **Commands**, the roles and prompt templates you
-  write; and **Connectors**, the MCP servers whose tools join the toolbox.
+  the procedures it can be asked to repeat; **Automations**, which holds
+  workflows (multi-step jobs you approve once), agents and commands (the roles
+  and prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -209,7 +211,7 @@ Settings → Modules.
   further runs either; that proposal is yours to accept too. If the machine was
   asleep over a slot the task still runs, once, and is told it is late so it says
   so in its report. A one-off retires itself after it fires.
-- **Dashboards you describe.** Register data sources (an HTTP API with an API
+- **Dashboards you describe** (Files → Dashboards). Register data sources (an HTTP API with an API
   key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
   plain English. The model writes a self-contained HTML widget that runs in a
   sandboxed iframe and fetches data through the backend (keys never reach the
@@ -219,56 +221,6 @@ Settings → Modules.
   Gmail, Tasks, Drive, Docs and Sheets become dashboard widgets and assistant
   tools. Connecting turns on two-way Tasks sync with your todos and creates a
   "Grain Todos" calendar that mirrors todos with a due date.
-- **Sign in with ChatGPT.** *(Planned — not shipped yet.)* Connect an OpenAI
-  account the way Google connects today: an OAuth flow that opens in the browser
-  and returns to the app on a loopback URL, the token stored in the local
-  database, and model calls signed with it so usage draws on the signed-in
-  user's own OpenAI credits instead of the app's shared key. That account's
-  models join the picker, usage rows are attributed to it, and the LiteLLM key
-  in Settings stays the fallback for anyone who does not connect one. One
-  constraint to design around: OpenAI's ChatGPT sign-in bills API usage to the
-  connected OpenAI account — a Plus or Pro subscription is not itself a pool of
-  API credits — so the flow has to name the account being charged before the
-  first call.
-- **Private inference.** *(Planned — not shipped yet.)* Chat can stay on the
-  cloud model in the picker. Jobs that read the sensitive store go to a local
-  model you run on this machine (Ollama, llama.cpp, or MLX, wired through
-  LiteLLM's `ollama/` route): activity summaries, meeting enhance, auto-learn
-  over mail and keystrokes, voice extraction from your docs. If that model is
-  down, those jobs skip or fail closed instead of forwarding the payload to
-  Fireworks. That is the switch an air-gapped deployment would use:
-  private data stays on the box; only ordinary chat hits a remote API.
-  `extractionModel` today is just a cheaper LiteLLM name, not an on-device
-  guarantee. Audio already has a local path (whisper.cpp); this is the same
-  idea for text.
-- **Cloud worker.** *(Planned — not shipped yet.)* A scheduled task only fires
-  while this Mac is awake, and a missed slot is caught up once, late. The cloud
-  piece is a second process on a machine that stays up — a VPS you control, to
-  start — and it owns only the jobs that are useless with the lid closed:
-  scheduled tasks, the morning brief, and watches whose result is a proposal in
-  the Agent inbox. Chat stays in the desktop app. Activity, meetings, the Python
-  sandbox, cowork folders and the macOS tools stay here; they need this machine,
-  and raw keystrokes and call audio are never uploaded. A task has one home,
-  local or cloud, so a late catch-up and a cloud run cannot both fire. The
-  worker keeps its own database for the stores those jobs read, synced per
-  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md)
-  proposes, rather than a network copy of the desktop SQLite file. Signing the
-  desktop into the worker replaces the loopback sidecar token, and Google
-  sign-in on the worker is a web OAuth client with a fixed redirect, not the
-  Desktop client the app ships now. Its tool box is the scheduled-run box, drawn
-  tighter: read Grain, propose anything that would leave the app, and no view of
-  your filesystem, the activity log, or meeting audio. Private inference still
-  wins for a job that reads the sensitive store — with that switch on, the
-  worker does not receive it. A browser that replaces the desktop app, and a
-  multi-tenant host, are a later product.
-- **RLHF on company data.** *(Planned — enterprise, later.)* Once Grain is
-  running on an organisation's own mail, docs, tickets and accepted/rejected
-  drafts, those preference signals (approve vs deny on tool cards, accept vs
-  reject on doc diffs, edited vs sent mail) become labelled pairs. A later
-  enterprise build trains or DPO-adapts a tenant-local policy on that data so
-  the assistant writes and acts in the company's voice, against the company's
-  rules, without the traces leaving the tenant. Personal Grain stays
-  single-user and does not train on your machine.
 
 ## Architecture
 
@@ -435,10 +387,7 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘3, ⌘5 | Today / Chats / Todos / Calendar / Dashboards |
-| ⌘6 / ⌘7 | Settings → Memory / its knowledge graph |
-| ⌘8 | Files → Uploads |
-| ⌘9 | Activity |
+| ⌘0 … ⌘7 | Today / Chats / Todos / Calendar / Files / Mail / Settings → Memory / Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
 | ⌘⇧K | Cowork |
 | ⌘⇧F | Search chats |
@@ -617,7 +566,7 @@ from character counts and the row is flagged `estimated`.
 
 ## Activity monitor
 
-Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
+Off by default. Turn it on in the **Activity** panel (⌘7), where each signal is a
 separate switch with a plain description of what it records — or flip **Record
 everything** for one switch that records everything, with the redaction and
 “never record” filters down. Turning that mode off restores the settings it
@@ -706,5 +655,31 @@ auth, CSP images) were fixed on 2026-09-29. Much of what the roadmap then listed
 as later work has shipped since: durable runs, budgets, taint tracking and the
 undo journal, skills, MCP connectors, scripts that call tools, local file tools
 and the agent browser (see [CHANGELOG.md](CHANGELOG.md)). What is still open is
-the **Planned** items under Features, plus whatever in the roadmap is not in
+the planned items below, plus whatever in the roadmap is not in
 the changelog yet.
+
+Planned, not shipped:
+
+**Sign in with ChatGPT.** Connect an OpenAI account through a browser OAuth flow
+with a loopback return, so model calls bill the user's own OpenAI account and
+its models join the picker. The LiteLLM key stays the fallback. The flow must
+name the account being charged before the first call, since a Plus or Pro
+subscription is not a pool of API credits.
+
+**Private inference.** Jobs that read the sensitive store (activity summaries,
+meeting enhance, auto-learn, voice extraction) go to a local model through
+LiteLLM's `ollama/` route and fail closed if it is down, while chat can stay on
+a cloud model. `extractionModel` today is only a cheaper LiteLLM name, not an
+on-device guarantee.
+
+**Cloud worker.** A second process on an always-on machine owns the jobs that
+are useless with the lid closed: scheduled tasks, the morning brief, and
+watches that propose into the Agent inbox. Each task has one home, local or
+cloud. The worker keeps its own per-domain database (see
+[docs/sources-of-truth.md](docs/sources-of-truth.md)), proposes rather than
+acts, and never sees the filesystem, activity log or meeting audio.
+
+**RLHF on company data (enterprise, later).** Approve/deny, accept/reject and
+edited-vs-sent signals become labelled pairs for a tenant-local policy trained
+inside the organisation. Personal Grain stays single-user and does not train
+on your machine.

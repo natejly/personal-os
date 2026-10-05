@@ -1,5 +1,5 @@
 import { DEFAULT_EFFORT } from '@shared/types'
-import { useStore, useConversation } from '../store'
+import { PAGE_AGENT_DRAFT, useStore, useConversation } from '../store'
 import ModelMenu from './ModelMenu'
 
 /**
@@ -14,12 +14,15 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const draftModel = useStore((s) => s.draftModel)
   const draftEffort = useStore((s) => s.draftEffort)
   const draftFast = useStore((s) => s.draftFast)
+  const pageDraft = conversationId === PAGE_AGENT_DRAFT
+  const pageModel = useStore((s) => s.pageAgentModel)
+  const pageSettings = useStore((s) => s.pageAgentChatSettings)
   const setChatConfig = useStore((s) => s.setChatConfig)
   // A canvas window always names its chat; only the page's draft reads the parked values.
   const draft = !convo && !conversationId
-  const model = convo?.model ?? (draft ? draftModel : null) ?? defaultModel
-  const effort = convo?.settings?.effort ?? (draft ? draftEffort : DEFAULT_EFFORT)
-  const fast = convo?.settings?.fast ?? (draft ? draftFast : false)
+  const model = convo?.model ?? (draft ? draftModel : pageDraft ? pageModel : null) ?? defaultModel
+  const effort = convo?.settings?.effort ?? (draft ? draftEffort : pageDraft ? pageSettings.effort : null) ?? DEFAULT_EFFORT
+  const fast = convo?.settings?.fast ?? (draft ? draftFast : pageDraft ? pageSettings.fast : false)
   return (
     <ModelMenu
       model={model}

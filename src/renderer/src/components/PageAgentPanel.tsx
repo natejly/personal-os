@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageSquarePlus, SquareArrowOutUpRight, X } from 'lucide-react'
-import { useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
+import { MessageSquarePlus, Pin, PinOff, SquareArrowOutUpRight, X } from 'lucide-react'
+import { PAGE_AGENT_DRAFT, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
+import { panelConversationFor } from '../lib/pagePanel'
+import ChatControls from './ChatControls'
 import Composer from './Composer'
 import ResizeHandle from './ResizeHandle'
 import MessageView from './Message'
 import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
-
-/** `pick()` falls back to the focused chat on an undefined id, so an empty panel needs a dead key. */
-const NO_THREAD = '\u0000page-agent'
 
 /**
  * The page agent: ⌘I anywhere. It is an ordinary chat — same model, same tools, same history — that
@@ -15,11 +14,16 @@ const NO_THREAD = '\u0000page-agent'
  * as todos" or "move it to Thursday" resolve against what the user is actually looking at.
  */
 export default function PageAgentPanel(): JSX.Element {
-  const ctx = useStore((s) => s.pageContext)
-  const threadId = useStore((s) => s.pageAgentId)
-  const convo = useConversation(threadId ?? NO_THREAD)
-  const streaming = useIsStreaming(threadId ?? NO_THREAD)
-  const streamingMessageId = useStreamingMessageId(threadId ?? NO_THREAD)
+  const pin = useStore((s) => s.pageAgentPin)
+  const liveCtx = useStore((s) => s.pageContext)
+  // Pinned, the panel keeps describing the view it was pinned on, not whatever is on screen now.
+  const ctx = pin ? pin.ctx : liveCtx
+  const threadId = useStore((s) => panelConversationFor({ pageAgentId: s.pageAgentId, pin: s.pageAgentPin }))
+  const pinPageAgent = useStore((s) => s.pinPageAgent)
+  const unpinPageAgent = useStore((s) => s.unpinPageAgent)
+  const convo = useConversation(threadId ?? PAGE_AGENT_DRAFT)
+  const streaming = useIsStreaming(threadId ?? PAGE_AGENT_DRAFT)
+  const streamingMessageId = useStreamingMessageId(threadId ?? PAGE_AGENT_DRAFT)
   const sendToPageAgent = useStore((s) => s.sendToPageAgent)
   const closePageAgent = useStore((s) => s.closePageAgent)
   const resetPageAgent = useStore((s) => s.resetPageAgent)
@@ -46,9 +50,14 @@ export default function PageAgentPanel(): JSX.Element {
       <ResizeHandle id="page-agent-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={closePageAgent} label="Page agent width" className="at-left" />
       <div className="page-agent-ctx" title={ctx?.detail ? `${ctx.detail.slice(0, 600)}…` : undefined}>
         <span className="page-agent-label">
-          {ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
+          {pin ? <><Pin size={11} /> <b>{pin.label}</b></> : ctx ? <><b>{ctx.label}</b>{ctx.selection ? <em> · selection</em> : null}</> : <span className="muted">This screen has no context to send.</span>}
         </span>
         <div className="page-agent-actions">
+          {pin ? (
+            <button className="ghost-btn xs" title="Unpin and return to this page" onClick={unpinPageAgent}><PinOff size={12} /> Back to this page</button>
+          ) : (
+            <button className="icon-btn" title="Pin to this page: the panel keeps this chat when you switch views" aria-label="Pin to this page" onClick={pinPageAgent}><Pin size={15} /></button>
+          )}
           {convo && (
             <>
               <button className="icon-btn" title="New thread" aria-label="New thread" onClick={resetPageAgent}><MessageSquarePlus size={15} /></button>
@@ -74,9 +83,10 @@ export default function PageAgentPanel(): JSX.Element {
       </div>
 
       <Composer
-        conversationId={threadId ?? NO_THREAD}
+        conversationId={threadId ?? PAGE_AGENT_DRAFT}
         draftKey="page"
         compact
+        footer={<ChatControls conversationId={threadId ?? PAGE_AGENT_DRAFT} />}
         onSend={sendToPageAgent}
         placeholder={ctx ? `Ask about ${ctx.label}…` : 'Ask…'}
       />

@@ -10,6 +10,7 @@ import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
+import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
@@ -222,7 +223,14 @@ export interface State {
   pageAgentOpen: boolean
   pageAgentId: string | null
   /** Plan mode and skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Pick<ConversationSettings, 'planMode' | 'skipPermissions'>
+  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'planMode' | 'skipPermissions' | 'effort' | 'fast'>>
+  /** Model picked in the ⌘I panel before its thread exists. */
+  pageAgentModel: string | null
+  /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
+  pageAgentPin: PagePin | null
+  pinPageAgent: () => void
+  /** Back to following the current view; also returns to the pinned view when it is not the one on screen. */
+  unpinPageAgent: () => void
   pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
@@ -1824,6 +1832,8 @@ export const useStore = create<State>((set, get) => {
     pageAgentOpen: false,
     pageAgentId: null,
     pageAgentChatSettings: {},
+    pageAgentModel: null,
+    pageAgentPin: null,
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
@@ -1995,10 +2005,22 @@ export const useStore = create<State>((set, get) => {
     togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
     closePageAgent: () => set({ pageAgentOpen: false }),
     resetPageAgent: () => {
-      const id = get().pageAgentId
+      const pin = get().pageAgentPin
+      const id = panelConversationFor({ pageAgentId: get().pageAgentId, pin })
       // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
       if (id) get().closeSession(id)
-      set({ pageAgentId: null })
+      if (pin) set({ pageAgentPin: { ...pin, id: null } })
+      else set({ pageAgentId: null })
+    },
+    pinPageAgent: () => {
+      const { pageContext: ctx, view, activeDoc, pageAgentId } = get()
+      const doc = view === 'docs' && activeDoc ? { id: activeDoc.id, title: activeDoc.title || 'Untitled' } : null
+      set({ pageAgentPin: { view, label: ctx?.label ?? view, id: pageAgentId, ctx, doc } })
+    },
+    unpinPageAgent: () => {
+      const pin = get().pageAgentPin
+      set({ pageAgentPin: null })
+      if (pin && pin.view !== get().view) get().setView(pin.view as View)
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -2252,6 +2274,15 @@ export const useStore = create<State>((set, get) => {
     },
     setChatConfig: async (change, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
+      if (id === PAGE_AGENT_DRAFT) {
+        // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
+        const { effort, fast } = change
+        set((st) => ({
+          pageAgentModel: change.model ?? st.pageAgentModel,
+          pageAgentChatSettings: { ...st.pageAgentChatSettings, ...(effort !== undefined ? { effort } : {}), ...(fast !== undefined ? { fast } : {}) }
+        }))
+        return
+      }
       if (!id) {
         set((st) => ({
           draftModel: change.model ?? st.draftModel,
@@ -2432,12 +2463,13 @@ export const useStore = create<State>((set, get) => {
         get().toast(tooLong, 'error')
         return false
       }
-      const ctx = get().pageContext
+      const pin = get().pageAgentPin
+      const ctx = pin ? pin.ctx : get().pageContext
       // The selection is read at send time, not when the view published itself: the user highlights
       // a paragraph and *then* reaches for ⌘I.
       const selection = ctx?.selection || currentSelection()
       const page = ctx ? { ...ctx, selection: selection || undefined } : undefined
-      let id = get().pageAgentId
+      let id = panelConversationFor({ pageAgentId: get().pageAgentId, pin })
       if (id) {
         // Mid-reply the panel steers, exactly as the composer does in a chat. The auto-learn tail
         // is still `streaming` but no longer answering, and a steer there 409s.
@@ -2470,14 +2502,14 @@ export const useStore = create<State>((set, get) => {
       if (!id) {
         let c: Conversation
         try {
-          c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+          c = await api.conversations.create(get().draftProjectId, get().pageAgentModel ?? get().settings.defaultModel)
         } catch (e) {
           get().toast((e as Error).message, 'error')
           return false
         }
         const { pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
         const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
-        const doc = get().view === 'docs' ? get().activeDoc : null
+        const doc = pin ? pin.doc : get().view === 'docs' ? get().activeDoc : null
         if (doc) pageSettings.docId = doc.id
         const fromUpload = uploadTaintTarget === 'page'
         if (fromUpload) {
@@ -2496,7 +2528,8 @@ export const useStore = create<State>((set, get) => {
         c.messages = []
         putSession(c)
         id = c.id
-        set({ pageAgentId: id, pageAgentChatSettings: {} })
+        const live = get().pageAgentPin
+        set(live ? { pageAgentPin: { ...live, id }, pageAgentChatSettings: {}, pageAgentModel: null } : { pageAgentId: id, pageAgentChatSettings: {}, pageAgentModel: null })
         void get().refreshProjects()
       }
       // Panel toggles write through the same queue as the chat page's: let a change land first.

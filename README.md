@@ -175,6 +175,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
+- **Side chat.** ⌘I opens a chat beside any view, with the same model and effort pickers as the main chat. The pin button keeps it on the page it was opened on while you switch views; Back to this page unpins.
 - **Files.** One view with two sections:
   - *Notes* — writing of your own, in an editor rather than an upload box:
     markdown and LaTeX, a line-numbered editor beside a live preview, folders

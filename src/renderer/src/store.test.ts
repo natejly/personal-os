@@ -1173,3 +1173,17 @@ test('opening a doc swaps the page agent thread to the chat bound to that doc', 
     Object.assign(docs, orig)
   }
 })
+
+test('the side chat parks its model and effort until its thread exists, and a pin holds the thread', async (t) => {
+  useStore.setState({ sessions: {}, pageAgentChatSettings: {}, pageAgentModel: null, pageAgentPin: null, pageAgentId: 'a', view: 'home' } as never)
+  const { calls } = stubFetch(t, () => json([]))
+  await useStore.getState().setChatConfig({ model: 'm1', effort: 'high' }, PAGE_AGENT_DRAFT)
+  assert.equal(calls.length, 0)
+  assert.equal(useStore.getState().pageAgentModel, 'm1')
+  assert.equal(useStore.getState().pageAgentChatSettings.effort, 'high')
+  useStore.getState().pinPageAgent()
+  useStore.setState({ pageAgentId: 'b' })
+  assert.equal(useStore.getState().pageAgentPin?.id, 'a')
+  useStore.getState().unpinPageAgent()
+  assert.equal(useStore.getState().pageAgentPin, null)
+})

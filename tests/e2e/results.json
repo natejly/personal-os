@@ -6,11 +6,8 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "cowork-narrow",
-      "cowork-lifecycle",
-      "--grep",
-      "elsewhere|820x520",
-      "--repeat-each=2"
+      "cowork-",
+      "approvals-"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
@@ -30,7 +27,7 @@
     "projects": [
       {
         "outputDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/out/e2e",
-        "repeatEach": 2,
+        "repeatEach": 1,
         "retries": 0,
         "metadata": {
           "actualWorkers": 2
@@ -72,11 +69,1275 @@
   },
   "suites": [
     {
+      "title": "approvals-chat.spec.mjs",
+      "file": "approvals-chat.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "approval card shows the command; Allow runs it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4130,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:39.779Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-3d8d93c2ed4661b40924",
+          "file": "approvals-chat.spec.mjs",
+          "line": 18,
+          "column": 1
+        },
+        {
+          "title": "Deny records a rejection and nothing runs; Deny with a note reaches the model",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4390,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:39.780Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-f619af0b818126a291bb",
+          "file": "approvals-chat.spec.mjs",
+          "line": 40,
+          "column": 1
+        },
+        {
+          "title": "always allow in this chat: grant listed in Settings, next call runs without a card, revoke brings the card back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4203,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:43.933Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-bec71d7360e00fdd78da",
+          "file": "approvals-chat.spec.mjs",
+          "line": 66,
+          "column": 1
+        },
+        {
+          "title": "always allow with a saved rule: rule appears in settings and skips the card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3603,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:44.191Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-f07a1f1abd1ad2a23b2e",
+          "file": "approvals-chat.spec.mjs",
+          "line": 98,
+          "column": 1
+        },
+        {
+          "title": "deny rules win over allow rules",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 33364,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:47.800Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-444b0f3e2507d1eae5a5",
+          "file": "approvals-chat.spec.mjs",
+          "line": 115,
+          "column": 1
+        },
+        {
+          "title": "a forced approval is never bypassed by allow rules or chat grants",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2673,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:48.144Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-511ebe56c333a22f2544",
+          "file": "approvals-chat.spec.mjs",
+          "line": 134,
+          "column": 1
+        },
+        {
+          "title": "two chats pending at once are answered independently, at 820x520",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3012,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:50.825Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-2fe6e7ef50b1ab8ed5b3",
+          "file": "approvals-chat.spec.mjs",
+          "line": 155,
+          "column": 1
+        },
+        {
+          "title": "a pending approval survives relaunch: card is still there and the decision is recorded once",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3710,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:53.845Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-1d03a2f0e1e11e6558a6",
+          "file": "approvals-chat.spec.mjs",
+          "line": 184,
+          "column": 1
+        },
+        {
+          "title": "the first decision on a card wins; a second one is refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2583,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:22:57.561Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "828711ab4a4b3c5baf2e-d528d93c6590c25a0b01",
+          "file": "approvals-chat.spec.mjs",
+          "line": 205,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "approvals-plan-mode.spec.mjs",
+      "file": "approvals-plan-mode.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "plan toggle: click and ⌘⇧P cycle off → auto → always → off and persist on the chat",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2213,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:00.160Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-01edd289cd5c3f765061",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 23,
+          "column": 1
+        },
+        {
+          "title": "plan mode always: a plan card appears, nothing runs before approval, an approved step runs once without a second card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2769,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:02.379Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-973f1c8a580d4d1227f3",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 44,
+          "column": 1
+        },
+        {
+          "title": "plan mode always: a call that is not in the approved plan still asks",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2560,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:05.156Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-27751f8af6af3655f88e",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 70,
+          "column": 1
+        },
+        {
+          "title": "plan mode always: while drafting, a consequential tool is refused, not carded and not run",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2558,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:07.723Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-9c9cf017b97463283a63",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 89,
+          "column": 1
+        },
+        {
+          "title": "plan card: edited arguments are what the approval binds; the unedited call asks again",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2752,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:10.293Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-bb0955e8d0ff86582b32",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 103,
+          "column": 1
+        },
+        {
+          "title": "plan card: Deny runs nothing and the model is told the plan was rejected",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2456,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:13.052Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-a637812b0bcb3b432f19",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 124,
+          "column": 1
+        },
+        {
+          "title": "plan mode auto: a read-only first turn needs no plan; the first change turns planning on",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2359,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:15.515Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-7c4190f25bcf20841693",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 142,
+          "column": 1
+        },
+        {
+          "title": "plan card and approval card fit at 820x520",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2339,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:17.882Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a9a04347df09d4a541a2-c88fb5fc513d2da44f35",
+          "file": "approvals-plan-mode.spec.mjs",
+          "line": 157,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "approvals-rules.spec.mjs",
+      "file": "approvals-rules.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "Settings → Tools: add rules in the UI, bad rules are refused, the tester explains, Save persists",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2899,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:20.240Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-dba37e06a8e53206742d",
+          "file": "approvals-rules.spec.mjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "rules in the chat: allow skips the card, ask forces it even when the tool is on, deny refuses a compound line before anything runs",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3779,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:21.178Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-133e58feacbae21d5c1c",
+          "file": "approvals-rules.spec.mjs",
+          "line": 61,
+          "column": 1
+        },
+        {
+          "title": "the opaque and the hardline cases: substitutions always ask, rm -rf / is refused whatever the rules say",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2636,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:23.145Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-3e71cab0d33b0db92f62",
+          "file": "approvals-rules.spec.mjs",
+          "line": 86,
+          "column": 1
+        },
+        {
+          "title": "skip permissions: ordinary tools run unasked, but a shell command and a forced call still get a card",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2648,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:24.963Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-17f037fa3d848c9f98a5",
+          "file": "approvals-rules.spec.mjs",
+          "line": 104,
+          "column": 1
+        },
+        {
+          "title": "stress: 20 chats waiting at once are all answerable from the API and none runs twice",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7628,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:25.787Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-1a5d92badc90b3fedc87",
+          "file": "approvals-rules.spec.mjs",
+          "line": 118,
+          "column": 1
+        },
+        {
+          "title": "a 150 KB command in a card is shown without freezing the UI and can be denied",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3055,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:27.618Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "644f2b319da58fd3ed14-c0e73b80f21664b4fba8",
+          "file": "approvals-rules.spec.mjs",
+          "line": 139,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-abuse.spec.mjs",
+      "file": "cowork-abuse.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "backend gone while a card is on screen: the click fails softly, the card stays, and works once the backend is back",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5535,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:30.688Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b2bf68d62cc563ebc0ad-48982fb142b44a2d88d7",
+          "file": "cowork-abuse.spec.mjs",
+          "line": 12,
+          "column": 1
+        },
+        {
+          "title": "double-clicking Start on a draft desk makes one run",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3300,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:33.432Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b2bf68d62cc563ebc0ad-f56accc951456c768a1d",
+          "file": "cowork-abuse.spec.mjs",
+          "line": 37,
+          "column": 1
+        },
+        {
+          "title": "Pause then Resume hammered five times ends in a consistent state with no duplicate run",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2662,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:36.230Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b2bf68d62cc563ebc0ad-35e7d2904ccacfd868ec",
+          "file": "cowork-abuse.spec.mjs",
+          "line": 58,
+          "column": 1
+        },
+        {
+          "title": "20 desks started at once: the cap queues the rest and all of them finish",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8313,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:36.739Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b2bf68d62cc563ebc0ad-147d38578bd1e325dfaa",
+          "file": "cowork-abuse.spec.mjs",
+          "line": 78,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-desk.spec.mjs",
+      "file": "cowork-desk.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a propose-autonomy desk works, delivers, reaches review, and accept puts the file into a doc",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3391,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:38.908Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "12129c24ff9587a0266f-4bece8649095e5d66d8b",
+          "file": "cowork-desk.spec.mjs",
+          "line": 7,
+          "column": 1
+        }
+      ]
+    },
+    {
       "title": "cowork-lifecycle.spec.mjs",
       "file": "cowork-lifecycle.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
+        {
+          "title": "desk_ask: the desk waits on the question and the answer resumes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3128,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:42.318Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-fea71988b399255183e1",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "desk_ask answered with typed text via ⌘↵",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2938,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:45.067Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-bb3396205af3a7394581",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 25,
+          "column": 1
+        },
+        {
+          "title": "stop a working desk, then message it to pick it back up; delete removes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2977,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:45.458Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-da8cc19da2127b485945",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 43,
+          "column": 1
+        },
+        {
+          "title": "delete: only offered once the desk is stopped; confirm dialogs gate it; workspace purge optional",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4855,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:48.011Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-8c2654858b686b71dbfb",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 71,
+          "column": 1
+        },
+        {
+          "title": "pause and resume a desk",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3142,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:48.441Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-26b4fc8a7e870896b865",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 93,
+          "column": 1
+        },
+        {
+          "title": "new desk form: validation, ⌘↵, draft, autonomy, limits, then Start",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2907,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:51.590Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-c1001effb9854cf4d55c",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 112,
+          "column": 1
+        },
+        {
+          "title": "empty brief is refused by the API; unknown autonomy too",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2165,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:52.871Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-88d676efc9c5d430cb6e",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 146,
+          "column": 1
+        },
+        {
+          "title": "desk tabs: Files lists the workspace, Output, Browser empty state, Plan empty state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3702,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:54.503Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-e7828cca30339476d46b",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 154,
+          "column": 1
+        },
         {
           "title": "25 desks on the rail: sections, counts, [ and ] stepping, at 820x520",
           "ok": true,
@@ -93,35 +1354,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 3502,
+                  "duration": 2737,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T06:14:45.658Z",
-                  "annotations": [],
-                  "attachments": []
-                }
-              ],
-              "status": "expected"
-            },
-            {
-              "timeout": 300000,
-              "annotations": [],
-              "expectedStatus": "passed",
-              "projectId": "",
-              "projectName": "",
-              "results": [
-                {
-                  "workerIndex": 2,
-                  "parallelIndex": 0,
-                  "status": "passed",
-                  "duration": 3139,
-                  "errors": [],
-                  "stdout": [],
-                  "stderr": [],
-                  "retry": 0,
-                  "startTime": "2026-10-05T06:14:49.479Z",
+                  "startTime": "2026-10-05T06:23:55.042Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -147,38 +1385,15 @@
               "projectName": "",
               "results": [
                 {
-                  "workerIndex": 1,
-                  "parallelIndex": 1,
-                  "status": "passed",
-                  "duration": 2816,
-                  "errors": [],
-                  "stdout": [],
-                  "stderr": [],
-                  "retry": 0,
-                  "startTime": "2026-10-05T06:14:45.656Z",
-                  "annotations": [],
-                  "attachments": []
-                }
-              ],
-              "status": "expected"
-            },
-            {
-              "timeout": 300000,
-              "annotations": [],
-              "expectedStatus": "passed",
-              "projectId": "",
-              "projectName": "",
-              "results": [
-                {
-                  "workerIndex": 2,
+                  "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2141,
+                  "duration": 2568,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T06:14:52.640Z",
+                  "startTime": "2026-10-05T06:23:57.787Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -189,6 +1404,184 @@
           "id": "0ae59ffa24bf550aca61-54c67a582c10130ad21e",
           "file": "cowork-lifecycle.spec.mjs",
           "line": 204,
+          "column": 1
+        },
+        {
+          "title": "desk with a 100 KB brief and a long title is created and rendered",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2383,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:23:58.211Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "0ae59ffa24bf550aca61-e7f25364c8f2fe875f2e",
+          "file": "cowork-lifecycle.spec.mjs",
+          "line": 216,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-limits.spec.mjs",
+      "file": "cowork-limits.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "desks working at once: the extra desk queues (\"#1 in line\") and starts when the first finishes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 15428,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:00.379Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5caf62a3f71cbbb9bfd6-fc78453a5b6ccf9c92ae",
+          "file": "cowork-limits.spec.mjs",
+          "line": 8,
+          "column": 1
+        },
+        {
+          "title": "a desk that hits its turn cap stops and asks instead of running on",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 6388,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:00.606Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5caf62a3f71cbbb9bfd6-f5bc4186d87f3313c765",
+          "file": "cowork-limits.spec.mjs",
+          "line": 26,
+          "column": 1
+        },
+        {
+          "title": "a desk lets go of a card nobody answers (parkAfterSeconds) and the answer still wakes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5792,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:07.000Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5caf62a3f71cbbb9bfd6-ce34f70e9867a64d6e47",
+          "file": "cowork-limits.spec.mjs",
+          "line": 40,
+          "column": 1
+        },
+        {
+          "title": "Settings → Cowork numeric fields clamp, save, and survive a reopen",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2340,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:12.799Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5caf62a3f71cbbb9bfd6-b6e213efdab4287cc9b0",
+          "file": "cowork-limits.spec.mjs",
+          "line": 57,
           "column": 1
         }
       ]
@@ -215,35 +1608,12 @@
                   "workerIndex": 1,
                   "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 5207,
+                  "duration": 4832,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T06:14:48.530Z",
-                  "annotations": [],
-                  "attachments": []
-                }
-              ],
-              "status": "expected"
-            },
-            {
-              "timeout": 300000,
-              "annotations": [],
-              "expectedStatus": "passed",
-              "projectId": "",
-              "projectName": "",
-              "results": [
-                {
-                  "workerIndex": 3,
-                  "parallelIndex": 1,
-                  "status": "passed",
-                  "duration": 4570,
-                  "errors": [],
-                  "stdout": [],
-                  "stderr": [],
-                  "retry": 0,
-                  "startTime": "2026-10-05T06:14:54.064Z",
+                  "startTime": "2026-10-05T06:24:15.157Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -257,13 +1627,835 @@
           "column": 1
         }
       ]
+    },
+    {
+      "title": "cowork-plan.spec.mjs",
+      "file": "cowork-plan.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "plan-first desk: awaiting plan, approve in the Plan tab, steps run and tick off",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3541,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:15.825Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "fa2b212fc7679de8310b-0c52b18a2f2dc18fd829",
+          "file": "cowork-plan.spec.mjs",
+          "line": 24,
+          "column": 1
+        },
+        {
+          "title": "plan-first desk: edited arguments are what runs (\"Approve with changes\")",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3632,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:19.375Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "fa2b212fc7679de8310b-8854324d755310a7f170",
+          "file": "cowork-plan.spec.mjs",
+          "line": 47,
+          "column": 1
+        },
+        {
+          "title": "plan-first desk: rejecting the plan runs nothing and the desk stays alive",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3067,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:20.002Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "fa2b212fc7679de8310b-3a18aeb60f7a5731aa4b",
+          "file": "cowork-plan.spec.mjs",
+          "line": 65,
+          "column": 1
+        },
+        {
+          "title": "dropping a step from a plan leaves it unauthorised",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2505,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:23.015Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "fa2b212fc7679de8310b-d14ed7001d10935b05d7",
+          "file": "cowork-plan.spec.mjs",
+          "line": 78,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-restart.spec.mjs",
+      "file": "cowork-restart.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "backend crash while a chat approval waits: card is recorded, answering it is safe and runs nothing twice",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5331,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:23.083Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-a2b7e142077f02529337",
+          "file": "cowork-restart.spec.mjs",
+          "line": 11,
+          "column": 1
+        },
+        {
+          "title": "desk mid-run when the backend dies: it is Interrupted, never silently resumed, and Resume finishes it once",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8351,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:25.531Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-ce3180665749c26e56a8",
+          "file": "cowork-restart.spec.mjs",
+          "line": 41,
+          "column": 1
+        },
+        {
+          "title": "desk waiting on a question survives a backend crash; the answer still resumes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4431,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:28.420Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-a29f9332e07fe3d1d889",
+          "file": "cowork-restart.spec.mjs",
+          "line": 71,
+          "column": 1
+        },
+        {
+          "title": "desk waiting on a plan survives a backend crash; approving afterwards carries the plan out",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5264,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:32.861Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-f6201cc13dbd1d769018",
+          "file": "cowork-restart.spec.mjs",
+          "line": 91,
+          "column": 1
+        },
+        {
+          "title": "relaunching Electron mid-run shows the live desk once, and a finished one unchanged",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 360000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11506,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:33.889Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "2a7eace91d4d1a81df66-d9257fcfbaa638aac8da",
+          "file": "cowork-restart.spec.mjs",
+          "line": 114,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-review.spec.mjs",
+      "file": "cowork-review.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ask-as-it-goes desk: every change shows a card; Deny leaves the file unwritten and the desk alive; Approve writes it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3031,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:38.142Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-df9fda75bc62a76b5b64",
+          "file": "cowork-review.spec.mjs",
+          "line": 23,
+          "column": 1
+        },
+        {
+          "title": "ask-as-it-goes desk: Approve writes the file once",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2873,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:41.180Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-aefb6a7b06202e79d90b",
+          "file": "cowork-review.spec.mjs",
+          "line": 44,
+          "column": 1
+        },
+        {
+          "title": "review: accept into a new doc, verified, the desk closes out and can be archived",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 11028,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:44.060Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-eda443ad44c25073d826",
+          "file": "cowork-review.spec.mjs",
+          "line": 60,
+          "column": 1
+        },
+        {
+          "title": "review: append to an existing doc keeps the old text",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3058,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:45.408Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-b6829865b6da7722322c",
+          "file": "cowork-review.spec.mjs",
+          "line": 73,
+          "column": 1
+        },
+        {
+          "title": "review: reject with a note, and \"Send back\" wakes the desk with the feedback",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 62988,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:48.475Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-f5d0cecccea379351860",
+          "file": "cowork-review.spec.mjs",
+          "line": 91,
+          "column": 1
+        },
+        {
+          "title": "review: rejecting all outputs marks them rejected and finishes the desk",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2758,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:55.095Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-fec3c95deb29ae78882f",
+          "file": "cowork-review.spec.mjs",
+          "line": 103,
+          "column": 1
+        },
+        {
+          "title": "a file rewritten after it was delivered is stale: plain accept is refused, Accept current file ships the new bytes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3535,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:24:57.858Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-a9941bba3ded2c6c24bc",
+          "file": "cowork-review.spec.mjs",
+          "line": 114,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-shelljobs.spec.mjs",
+      "file": "cowork-shelljobs.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a desk starts a background command; Running lists it with output; Kill stops it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3024,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:01.407Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "72af37fed79b4b2d4e1a-04535c828dc8be9bdc6b",
+          "file": "cowork-shelljobs.spec.mjs",
+          "line": 6,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "cowork-workflows.spec.mjs",
+      "file": "cowork-workflows.spec.mjs",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "workflows panel: empty state, create through the editor with live validation, list",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 3911,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:04.446Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-e06a961f36e007a39668",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 15,
+          "column": 1
+        },
+        {
+          "title": "run a workflow: propose, review the plan, approve, steps tick off in order and the work happens once",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2321,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:08.363Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-01cf36c08311cd9bce40",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 32,
+          "column": 1
+        },
+        {
+          "title": "a step marked approval:required waits on a card; Deny fails the step and what needs it, Approve continues",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5471,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:10.689Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-67edef24422a74d8736f",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 53,
+          "column": 1
+        },
+        {
+          "title": "editing a workflow withdraws a pending approval; a stale digest cannot be approved; cancel works",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 2254,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:16.166Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-71935c544759062ef680",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 80,
+          "column": 1
+        },
+        {
+          "title": "a 40-step chain runs in order at 820x520 and the run card scrolls",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 4572,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:18.426Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-f8d7df8f72760e16d0c7",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 106,
+          "column": 1
+        },
+        {
+          "title": "independent steps run side by side (waves), and a step that needs a failed step is blocked",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 5555,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T06:25:23.006Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "aae6716e47e073be3e66-9ba07daffaf1d23f6dd2",
+          "file": "cowork-workflows.spec.mjs",
+          "line": 121,
+          "column": 1
+        }
+      ]
     }
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T06:14:45.224Z",
-    "duration": 13442.589,
-    "expected": 6,
+    "startTime": "2026-10-05T06:22:39.392Z",
+    "duration": 192090.362,
+    "expected": 67,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

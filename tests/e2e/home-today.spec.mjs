@@ -78,12 +78,12 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   // One at a time.
   for (const n of ['Library', 'Mail', 'Meetings']) {
     await openSettings(page, 'Modules')
-    await dialog(page).getByRole('checkbox', { name: n, exact: true }).click({ force: true })
+    await views.filter({ hasText: n }).locator('input').click({ force: true })
     await save(page)
     expect(await shown(n), `${n} off`).toBe(false)
     for (const o of names.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)
     await openSettings(page, 'Modules')
-    await dialog(page).getByRole('checkbox', { name: n, exact: true }).click({ force: true })
+    await views.filter({ hasText: n }).locator('input').click({ force: true })
     await save(page)
     expect(await shown(n), `${n} on`).toBe(true)
   }
@@ -110,7 +110,7 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   await expect(page.locator('main.home .agent-inbox')).toHaveCount(0)
   // The Today popover reflects and edits the same switches.
   await page.getByRole('button', { name: 'Choose what shows on Today' }).click()
-  await page.locator('.home-customize').getByRole('checkbox', { name: 'Projects' }).check()
+  await page.locator('.home-customize').getByRole('checkbox', { name: 'Projects' }).click()
   await expect(card(page, 'Projects')).toBeVisible()
   await page.keyboard.press('Escape')
   const s = await api('/settings')

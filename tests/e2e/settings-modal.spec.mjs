@@ -115,8 +115,8 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   let cur = before.maxToolRounds
   for (const [v, want] of [['0', () => cur], ['-5', () => cur], ['999', () => 60], ['', () => cur], ['2.6', () => 3]]) {
     await field(page, 'Max tool rounds per reply').fill(v)
-    await dialog(page).getByRole('button', { name: 'Save', exact: true }).click().catch(() => {})
-    if (await dialog(page).count()) await closeDirty(page)
+    await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(dialog(page)).toHaveCount(0)
     cur = (await api('/settings')).maxToolRounds
     expect(cur, `rounds ${v}`).toBe(want())
     await openSettings(page, 'Tools')
@@ -164,7 +164,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   const after = await api('/settings')
   expect(after.nonsense).toBeUndefined()
   expect(after.meetings).toEqual(before.meetings)
-  noErrors(grain)
+  expect(grain.consoleErrors.filter((e) => !benign(e) && !/status of 422/.test(e))).toEqual([]) // the refusals above
 })
 
 async function closeDirty(page) {
@@ -271,10 +271,28 @@ test('Esc closes, the menu shortcut opens, rapid open/close leaves no duplicate 
   }
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await page.locator('.settings-btn').click()
-  await page.locator('.settings-btn').click({ force: true, trial: false }).catch(() => {})
   await expect(page.getByRole('dialog')).toHaveCount(1)
   await closeSettings(page)
   expect(await page.locator('.modal-backdrop').count()).toBe(0)
+  noErrors(grain)
+})
+
+test('a 200 KB system prompt saves and reloads; junk in view toggles cannot brick the shell', async ({ grain }) => {
+  const { page, api } = grain
+  const big = 'lorem ipsum '.repeat(17_000)
+  await openSettings(page, 'Behavior')
+  await dialog(page).getByLabel('Global system prompt').fill(big)
+  await save(page)
+  expect((await api('/settings')).systemPrompt.length).toBe(big.length)
+  // Wrong-typed or odd-shaped values for the toggles: accepted or refused, never a broken app.
+  for (const body of [{ hiddenViews: [null, {}, 3] }, { homeWidgets: { projects: 'yes', x: null } }, { hiddenViews: 'meetings' }, { homeWidgets: [] }]) {
+    await api('/settings', { method: 'PUT', body, raw: true })
+  }
+  const p2 = await grain.relaunch()
+  await expect(p2.locator('.sidebar').first()).toBeVisible()
+  await openSettings(p2, 'Modules')
+  await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
+  await closeSettings(p2)
   noErrors(grain)
 })
 

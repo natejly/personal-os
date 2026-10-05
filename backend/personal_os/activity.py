@@ -688,9 +688,11 @@ def request_permission(pid_: str, browser: str = "") -> dict[str, Any]:
         try:
             import AVFoundation  # type: ignore[import-not-found]
 
-            AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(_AV_AUDIO, lambda ok: None)
+            answered = threading.Event()
+            AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(_AV_AUDIO, lambda ok: answered.set())
             out["prompted"] = True
             out["note"] = "macOS is showing the Microphone request."
+            _wait_for_dialog(answered)
         except Exception as e:  # noqa: BLE001
             out["note"] = f"Could not ask: {e}. Install pyobjc-framework-AVFoundation or use the pane."
 
@@ -698,9 +700,11 @@ def request_permission(pid_: str, browser: str = "") -> dict[str, Any]:
         try:
             from Speech import SFSpeechRecognizer  # type: ignore[import-not-found]
 
-            SFSpeechRecognizer.requestAuthorization_(lambda st: None)
+            answered = threading.Event()
+            SFSpeechRecognizer.requestAuthorization_(lambda st: answered.set())
             out["prompted"] = True
             out["note"] = "macOS is showing the Speech Recognition request."
+            _wait_for_dialog(answered)
         except Exception as e:  # noqa: BLE001
             out["note"] = f"Could not ask: {e}. Install pyobjc-framework-Speech or use the pane."
 
@@ -730,8 +734,25 @@ def request_permission(pid_: str, browser: str = "") -> dict[str, Any]:
     return out
 
 
+def _wait_for_dialog(answered: threading.Event, limit: float = 30.0) -> None:
+    """Block until the system dialog is answered (or `limit` passes) so the state returned, and the
+    caller's re-check, reflect the answer. Pumps this thread's run loop in case the completion
+    handler is delivered there rather than on a background queue."""
+    t0 = time.time()
+    try:
+        from Foundation import NSDate, NSDefaultRunLoopMode, NSRunLoop  # type: ignore[import-not-found]
+    except Exception:  # noqa: BLE001
+        answered.wait(limit)
+        return
+    while not answered.is_set() and time.time() - t0 < limit:
+        NSRunLoop.currentRunLoop().runMode_beforeDate_(NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(0.1))
+
+
 def permission_state(pid_: str) -> str:
     """Current stored state of one permission, without prompting."""
+    if pid_ == "speech_recognition":
+        st = stt.speech_auth_status()
+        return {0: UNASKED, 1: DENIED, 2: DENIED, 3: GRANTED}.get(st, UNKNOWN)
     if pid_ == "accessibility":
         return GRANTED if accessibility_trusted() else DENIED
     if pid_ == "input_monitoring":

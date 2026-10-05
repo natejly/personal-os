@@ -295,7 +295,7 @@ def test_seen_clears_the_desks_needs_you_badge() -> None:
 
 
 def test_three_desks_run_at_once() -> None:
-    script(delay=0.05)
+    script(delay=0.5)  # slow enough that no desk finishes its turn before /runs is read
     made = [make_desk(f"Desk {i}") for i in range(3)]
     ids = [m["desk"]["id"] for m in made]
     check(len({m["run_id"] for m in made}) == 3, "three desks, three distinct run ids")

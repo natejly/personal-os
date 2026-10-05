@@ -118,13 +118,18 @@ def speech_available() -> bool:
     return False
 
 
-def speech_authorized() -> bool:
-    """Stored Speech Recognition grant. 3 is authorized; never prompts."""
+def speech_auth_status() -> int:
+    """Stored Speech Recognition grant: 0 not asked, 1 denied, 2 restricted, 3 authorized; -1 when the
+    framework is missing. Never prompts."""
     try:
         from Speech import SFSpeechRecognizer  # type: ignore[import-not-found]
-        return int(SFSpeechRecognizer.authorizationStatus()) == 3
+        return int(SFSpeechRecognizer.authorizationStatus())
     except Exception:  # noqa: BLE001
-        return False
+        return -1
+
+
+def speech_authorized() -> bool:
+    return speech_auth_status() == 3
 
 
 def speech_ready() -> bool:
@@ -279,7 +284,7 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
                        "Apple Speech is unavailable, so auto falls through to whisper.cpp or the proxy."),
             "fix": "" if (speech_ok and authorized) else speech_fix,
             # macOS can be asked (SFSpeechRecognizer prompts once); after a refusal only the pane works.
-            "permission": SPEECH_PERMISSION, "requestable": speech_ok and not authorized,
+            "permission": SPEECH_PERMISSION, "requestable": speech_ok and speech_auth_status() == 0,
         },
         {
             "id": "stt_whistle", "label": "On-device transcription (Whistle)", "ok": whistle_ok,

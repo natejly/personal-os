@@ -83,26 +83,71 @@ def fill(body: str, arguments: str = "") -> str:
 
 _SLASH = re.compile(r"^/([a-z0-9][a-z0-9_-]{0,39})(?:\s+([\s\S]*))?$")
 
+# Built-in slash commands the backend fills. They shadow a saved command of the same name; the composer
+# lists them beside the saved ones (lib/slashCommands.ts). /compact, /skills, /commands and /plan act in
+# the UI and never reach a run.
+BUILTIN = ("skill", "schedule", "loop")
 
-def expand(text: str, store: "Commands | None") -> str:
+_SCHEDULE_NOTE = ("\n\n[The user ran /schedule: they want this done later, unattended. Call schedule_task once — work out the time "
+                  "from what they typed (call current_time first if you are unsure of today's date) and write `prompt` as a "
+                  "self-contained instruction, since the later run cannot see this chat. Then tell them when it will run.]")
+_LOOP_NOTE = ("\n\n[The user ran /loop: they want this repeated on an interval. Call schedule_task once with a five-field `cron` "
+              "matching the interval they typed (every 5 minutes → */5 * * * *, every weekday at 9 → 0 9 * * 1-5) and `prompt` "
+              "as a self-contained instruction for each run. Then tell them the schedule and that Scheduled in the inbox lists it.]")
+
+
+def _skill_key(name: str) -> str:
+    from .skillmd import slug
+    return slug(name)
+
+
+def expand_skill(text: str, args: str, skills: Any) -> str:
+    """`/skill <slug> [message]`: the approved skill's procedure rides under the turn. Only approved rows: a
+    candidate is named so the user knows to approve it, nothing of its text is shown."""
+    key = args.partition(" ")[0]
+    key = key.strip().lower()
+    if not key:
+        return f"{text}\n\n[The user ran /skill without a name. Ask which skill they meant; skill_list shows the approved ones.]"
+    rows = skills.list(project_id="__all__")
+    hit = next((s for s in rows if s["status"] == "approved" and _skill_key(s["name"]) == key), None)
+    if hit:
+        return (f"{text}\n\n[The user asked to use their skill “{hit['name']}” for this message. Its approved procedure follows; "
+                f"follow it.]\n{hit['procedure']}")
+    waiting = next((s for s in rows if s["status"] == "candidate" and _skill_key(s["name"]) == key), None)
+    if waiting:
+        return (f"{text}\n\n[The skill “{waiting['name']}” is still waiting for approval under Library → Skills, so it cannot be "
+                f"used yet. Tell the user, then answer as best you can without it.]")
+    names = ", ".join(_skill_key(s["name"]) for s in rows if s["status"] == "approved") or "(none approved)"
+    return f"{text}\n\n[No approved skill is called “{key}”. Approved skills: {names}. Tell the user, then answer as best you can.]"
+
+
+def expand(text: str, store: "Commands | None", skills: Any = None) -> str:
     """A user turn typed as `/name args` gains the filled command under it; the stored row keeps what was typed.
     Unknown names, and text that is not a leading slash command, pass through unchanged. A subtask command is
     not filled here: the model is told to run it with command_run, so the child agent, its approval and its
     taint go through the ordinary tool path."""
-    m = _SLASH.match((text or "").strip()) if store is not None and isinstance(text, str) and text.startswith("/") else None
-    cmd = store.get(m.group(1)) if m else None
-    if not m or not cmd or cmd["name"] != m.group(1):
+    m = _SLASH.match((text or "").strip()) if isinstance(text, str) and text.startswith("/") else None
+    if not m:
         return text
-    args = (m.group(2) or "").strip()
+    name, args = m.group(1), (m.group(2) or "").strip()
+    if name == "skill" and skills is not None:
+        return expand_skill(text, args, skills)
+    if name == "schedule":
+        return text + _SCHEDULE_NOTE
+    if name == "loop":
+        return text + _LOOP_NOTE
+    cmd = store.get(name) if store is not None else None
+    if not cmd or cmd["name"] != name:
+        return text
     if cmd["subtask"]:
         return (f"{text}\n\n[The user ran their saved command /{cmd['name']}, which runs as a subtask. Call command_run "
                 f"with name {cmd['name']!r} and arguments {args!r}, then report its result.]")
     return f"{text}\n\n[The user ran their saved command /{cmd['name']}. Its filled-in instructions follow; carry them out.]\n{fill(cmd['body'], args)}"
 
 
-def expand_history(history: list[dict[str, Any]], store: "Commands | None") -> list[dict[str, Any]]:
+def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None) -> list[dict[str, Any]]:
     """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
-    return [{**m, "content": expand(m["content"], store)} if m.get("role") == "user" and isinstance(m.get("content"), str)
+    return [{**m, "content": expand(m["content"], store, skills)} if m.get("role") == "user" and isinstance(m.get("content"), str)
             and m["content"].startswith("/") else m for m in history]
 
 

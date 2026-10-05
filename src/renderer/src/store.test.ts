@@ -1150,3 +1150,24 @@ test('learnedText leaves out zero counts and says nothing when nothing changed',
   assert.equal(learnedText({ memories: [], nodes: [1, 2], edges: [1], removed: [1] }), 'Forgot 1, 2 entities, 1 relation')
   assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
 })
+
+test('opening a doc swaps the page agent thread to the chat bound to that doc', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.get = async (id: unknown) => docFull({ id })
+  docs.revisions = async () => []
+  const conv = (id: string, docId?: string) => ({ id, title: id, project_id: null, model: null, settings: docId ? { docId } : {}, created_at: 0, updated_at: 0 })
+  try {
+    const sessions = { a1: session({ conversation: conv('a1', 'dA') as never }), b1: session({ conversation: conv('b1', 'dB') as never }) } as never
+    useStore.setState({ activeDoc: null, docTabs: [], docDraft: null, docTitleDraft: null, sessions, conversations: [conv('x'), conv('a1', 'dA'), conv('b1', 'dB')] as never, pageAgentId: 'x' })
+    await useStore.getState().openDoc('dA')
+    assert.equal(useStore.getState().pageAgentId, 'a1')
+    await useStore.getState().openDoc('dB')
+    assert.equal(useStore.getState().pageAgentId, 'b1')
+    await useStore.getState().openDoc('dC')
+    assert.equal(useStore.getState().pageAgentId, null, 'an unbound doc starts a fresh thread')
+  } finally {
+    Object.assign(docs, orig)
+  }
+})

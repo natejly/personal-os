@@ -1345,8 +1345,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body.mode-style { overflow: hidden; }
 .memory-body.mode-style .style-body { max-width: 760px; }
 
-/* Three columns (graph + inspector + memories) need a narrower list on small windows. */
-@media (max-width: 1400px) { .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }
 .memory-toolbar > .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

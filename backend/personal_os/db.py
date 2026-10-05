@@ -618,7 +618,7 @@ class Database:
         c.commit()
 
     def connect(self) -> sqlite3.Connection:
-        c = sqlite3.connect(self.path, check_same_thread=False)
+        c = sqlite3.connect(self.path, timeout=30, check_same_thread=False)  # default 5 s: a burst of writers (indexing, imports) outlasted it and a save failed with "database is locked"
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA foreign_keys=ON")
         return c

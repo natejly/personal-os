@@ -2720,6 +2720,15 @@ select:focus-visible {
 .agent-editor .agent-filter { margin: 8px 0 6px; width: 100%; }
 .agent-editor .agent-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .agent-editor .agent-chips .tag { cursor: pointer; border: 1px solid transparent; }
+/* Agent home: header, status pill, and the plain lists under Chats and Activity. */
+.agent-home-head { display: flex; align-items: center; gap: 12px; }
+.agent-home-title { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.agent-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+.agent-status.working { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.agent-status.needs-you { color: var(--warn, var(--accent)); border-color: color-mix(in srgb, var(--warn, var(--accent)) 55%, var(--border)); font-weight: 600; }
+.agent-home-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.agent-home-list li { display: flex; align-items: center; gap: 10px; }
+.agent-boundaries { white-space: pre-wrap; }
 .agent-editor .agent-chips .tag.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); border-color: var(--accent); }
 .agent-editor label.chip-check-row { flex-direction: row; align-items: center; gap: 8px; align-self: flex-end; padding-bottom: 8px; white-space: nowrap; }
 .agent-editor .agent-face-row input[type=number] { min-width: 96px; }

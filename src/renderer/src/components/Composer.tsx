@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
+import { mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
@@ -80,7 +81,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const skills = useStore((s) => s.skills)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
-  const slash = slashClosedAt === text ? null : slashItems(text, commands, skills)
+  // '@' opens the same menu over the agents (lib/mentions.ts). A draft opening with `@name` goes to that agent's chat on send.
+  const agentDefs = useStore((s) => s.agentDefs)
+  const agentRows = useMemo(() => [...agentDefs.builtin, ...agentDefs.custom.filter((d) => d.approved && !d.hidden)], [agentDefs])
+  const caret = box.current?.querySelector('textarea')?.selectionStart ?? text.length
+  const slash = slashClosedAt === text ? null
+    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows))
   useEffect(() => setSlashActive(0), [text])
 
   // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,
@@ -261,7 +267,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     recall.current = null
     clearRedirect(k0)
     dropDraft(k0)
-    const ok = await (onSend ? onSend(t, sent) : send(t, conversationId, sent)).catch(() => false)
+    // "@name message": the message goes to that agent's chat, unless this chat already speaks as it.
+    const st = useStore.getState()
+    const here = activeId ? st.sessions[activeId]?.conversation.settings.agent : st.draftChatSettings.agent
+    const to = onSend ? null : routeMention(t, agentRows.map((a) => a.name))
+    const ok = await (onSend ? onSend(t, sent)
+      : to && to.agent !== here ? st.sendToAgent(to.agent, to.text, sent) : send(t, conversationId, sent)).catch(() => false)
     const k1 = keyNow()
     // The new chat has its row now: anything typed while it was being made follows it.
     if (k0.startsWith('new:') && k1.startsWith('c:')) moveDraft(k0, k1)

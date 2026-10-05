@@ -71,8 +71,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    its own OS window. Save a layout as a preset from the Spaces bar, and lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
 7. **Agents and crews.** Library → Agents lists roles. Describe one and the
-   model drafts its hue, skills and prompt; edit it, then approve it. Start a
-   chat as an agent, or let a reply hand work to subagents with `agent_spawn`.
+   model drafts its label, hue, skills, boundaries and prompt; edit it, then
+   approve it. Click an agent to open its page: its chats, its routines (jobs
+   that run as it), the skills it carries, notes it always remembers and its
+   recent activity. Start a chat as an agent, type `@name` in any chat to reach
+   it, or let a reply hand work to subagents with `agent_spawn`.
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
    delegating agent as a big face with its subagents around it. Longer jobs go
@@ -244,6 +247,15 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   subagents around it. Subagents get the chat's tools minus asking, planning and
   scheduling, there is no per-subagent cost cap, and workflow steps see the
   chat's working folder. A chat can also speak as an approved agent.
+- **Scoped agents as teammates.** An agent carries a one-line label, boundaries
+  (what it must ask first and what it never does, fenced into its prompt), its
+  own notes, an optional working folder and its own tool settings (above the
+  project's, below the chat's; anything that leaves the app still asks). Its
+  routines are scheduled jobs that run as it, still proposal-only; a task
+  scheduled from its chat joins them. Typing `@name` opens an agent menu: a
+  message that starts with `@name` goes to that agent's latest chat, and an
+  `@name` elsewhere hints the reply to hand the work to it. See
+  [docs/agents.md](docs/agents.md).
 - **Context management.** Per-chat toggles for memory, graph, files, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
@@ -713,6 +725,7 @@ litellm.yaml        Model routing (Fireworks by default)
 docs/research/      Feature research, the roadmap, per-track source reports
 docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
+docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API

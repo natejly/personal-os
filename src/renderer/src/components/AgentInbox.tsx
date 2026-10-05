@@ -328,7 +328,7 @@ function ToolPicker({ value, onChange }: { value: string[]; onChange: (next: str
   )
 }
 
-function JobRow({ job }: { job: Job }): JSX.Element {
+export function JobRow({ job }: { job: Job }): JSX.Element {
   const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
   const [history, setHistory] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -553,7 +553,8 @@ function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChan
  * watch: a typed path the backend refuses outside home or hidden, and the toast says why, or a Gmail search to run on
  * as matching mail arrives), or, given `job`, edit that
  * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
-function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
+/** `agentId` makes it a routine of that agent: every fire runs as it, so a desk is not offered. */
+export function NewTask({ onDone, job, agentId }: { onDone: () => void; job?: Job; agentId?: string }): JSX.Element {
   const { createJob, updateJob } = useStore()
   const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
   const [f, setF] = useState(job
@@ -591,7 +592,7 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
       ok = refused === null
     } else {
       ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
-        ...(f.desk ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}) })
+        ...(f.desk && !agentId ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}), ...(agentId ? { agent_id: agentId } : {}) })
     }
     setBusy(false)
     if (ok) {
@@ -631,7 +632,7 @@ function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Elemen
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>{job ? 'Save' : 'Schedule'}</button>
       </div>
       {err && <p className="msg-error">{err}</p>}
-      {!job && (
+      {!job && !agentId && (
         <label className="chip-check-row small">
           <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
           <span>Start a desk</span>

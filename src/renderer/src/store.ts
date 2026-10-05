@@ -6,6 +6,7 @@ import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit,
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
+import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
@@ -251,6 +252,8 @@ export interface State {
   skills: Skill[]
   /** Library > Agents: the user's definitions and the built-in roles, for faces and the Chat button. */
   agentDefs: { builtin: BuiltinAgent[]; custom: AgentDef[] }
+  /** {agent name: {working, needs_you}}: the marks on Library > Agents rows and the agent header. Refreshed with the definitions. */
+  agentStatus: Record<string, { working: number; needs_you: number }>
   /** The subagent panel (transcript + a message box), opened from a run card or a crew face. */
   openSubagentId: string | null
   /** Writing style for the loaded scope: the profile a chat drafts with, and the samples behind it. */
@@ -469,6 +472,8 @@ export interface State {
   openSubagent: (id: string | null) => void
   /** A new chat that speaks as this agent: the row is created on the first send, with `agent` in its settings. */
   chatWithAgent: (name: string, model?: string | null) => void
+  /** Send to an agent's most recent open chat (or a fresh one) and switch to it: what a leading @name does. */
+  sendToAgent: (name: string, text: string, files?: Attachment[]) => Promise<boolean>
   /** A procedure the user writes by hand. Still stored as a candidate: approval is always its own step. */
   createSkill: (s: { name: string; description?: string; procedure?: string; project_id?: string | null }) => Promise<void>
   /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
@@ -1841,6 +1846,7 @@ export const useStore = create<State>((set, get) => {
     plans: {},
     skills: [],
     agentDefs: { builtin: [], custom: [] },
+    agentStatus: {},
     openSubagentId: null,
     style: null,
     styleSamples: [],
@@ -3163,11 +3169,23 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshSkills: async () => set({ skills: await api.skills.list() }),
-    refreshAgentDefs: async () => set({ agentDefs: await api.agentDefs.list() }),
+    refreshAgentDefs: async () => {
+      const [agentDefs, agentStatus] = await Promise.all([api.agentDefs.list(), api.agentDefs.status().catch(() => get().agentStatus)])
+      set({ agentDefs, agentStatus })
+    },
     openSubagent: (openSubagentId) => set({ openSubagentId }),
     chatWithAgent: (name, model = null) => {
       get().newChat()
       set({ draftChatSettings: { agent: name }, draftModel: model })
+    },
+    sendToAgent: async (name, text, files) => {
+      const id = latestAgentChat(get().conversations, name)
+      if (id) {
+        await get().selectChat(id)
+        return get().send(text, id, files)
+      }
+      get().chatWithAgent(name)
+      return get().send(text, undefined, files)
     },
     createSkill: async (draft) => {
       try {

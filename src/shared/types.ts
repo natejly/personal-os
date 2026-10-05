@@ -505,6 +505,8 @@ export interface ToolEvent {
   forced?: boolean
   /** Rule context for an ask card: the suggested rules to save and whether a session grant is offered. */
   permission?: PermissionCard | null
+  /** The review gate's verdict on this call; 'ask' is why a card opened. */
+  review?: { verdict: 'allow' | 'ask'; reason: string; model: string; ms: number } | null
   /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
@@ -1304,6 +1306,10 @@ export interface Settings {
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
+  /** Review gate: a second model looks at a risky call that would run unasked and may turn it into a card. */
+  autoReview?: 'off' | 'risky' | 'all-writes'
+  /** Model for the review gate; empty = the extraction model, else the chat model. */
+  autoReviewModel?: string
   /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
   alwaysAsk?: string[]
   /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
@@ -1486,7 +1492,7 @@ export type ChatEvent =
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }

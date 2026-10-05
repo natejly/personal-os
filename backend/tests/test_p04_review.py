@@ -1,0 +1,185 @@
+"""The review gate (autoReview): a second model looks at a call that would run unasked.
+
+Off -> no reviewer call. allow -> runs, verdict on the event. ask -> a normal card carrying the reason. An error or
+unreadable answer asks. Safe tools and always-ask tools are never reviewed. An ask verdict beats an allow rule.
+
+Run: zsh tests/e2e/run-pytest.sh backend/tests/test_p04_review.py
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="p04review-"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from personal_os import app as appmod  # noqa: E402
+from personal_os import autoreview, llm  # noqa: E402
+
+client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
+store = appmod.run_store
+ROUNDS: list[Any] = []
+REVIEWS: list[list[dict[str, Any]]] = []
+ANSWER: list[Any] = []  # what the reviewer says next: a string, or an Exception to raise
+
+
+async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, kind: str = "chat",
+                    **_kw: Any) -> Any:
+    step = ROUNDS.pop(0) if ROUNDS else ["done"]
+    if isinstance(step, dict):
+        yield {"type": "end", "finish_reason": "tool_calls", "tool_calls": step["tool_calls"], "usage": None}
+        return
+    for chunk in step:
+        yield {"type": "delta", "text": chunk}
+    yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
+
+
+async def _complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", **_kw: Any) -> str:
+    assert kind == "review"
+    REVIEWS.append(messages)
+    a = ANSWER.pop(0) if ANSWER else json.dumps({"verdict": "allow", "reason": "ok"})
+    if isinstance(a, Exception):
+        raise a
+    return a
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _portal():  # type: ignore[no-untyped-def]
+    real = llm.stream_chat, llm.complete
+    with client:
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "autoTitle": False, "toolDeferAbove": 500})
+        yield
+    llm.stream_chat, llm.complete = real
+
+
+@pytest.fixture(autouse=True)
+def _script():  # type: ignore[no-untyped-def]
+    llm.stream_chat, llm.complete = _scripted, _complete
+    ROUNDS.clear(), REVIEWS.clear(), ANSWER.clear()
+    client.put("/settings", json={"autoReview": "off", "permissionRules": {}})
+    yield
+    client.put("/settings", json={"autoReview": "off", "permissionRules": {}})
+
+
+def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
+    r = client.request(method, path, json=body)
+    assert r.status_code == expect, f"{method} {path} -> {r.status_code} {r.text[:300]} (wanted {expect})"
+    return r.json()
+
+
+def wait_until(pred: Callable[[], Any], label: str, timeout: float = 15.0) -> Any:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if v := pred():
+            return v
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {label}")
+
+
+def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    return {"tool_calls": [{"id": "c1", "name": name, "arguments": json.dumps(args)}]}
+
+
+def run(name: str, args: dict[str, Any]) -> str:
+    ROUNDS.extend([call(name, args), ["done"]])
+    cid = j("POST", "/conversations", {})["id"]
+    return j("POST", f"/conversations/{cid}/chat", {"content": "write it down"})["run_id"]
+
+
+def finished(rid: str) -> dict[str, Any]:
+    return wait_until(lambda: (r := store.get(rid)) and r["status"] not in ("running", "awaiting_approval") and r, "the run to finish")
+
+
+def events(rid: str) -> list[dict[str, Any]]:
+    run_row = store.get(rid)
+    msgs = j("GET", f"/conversations/{run_row['conversation_id']}")["messages"]
+    return [t for m in msgs for t in (m.get("tool_events") or [])]
+
+
+WRITE = ("doc_create", {"title": "Note", "content": "hello"})
+
+
+def test_off_never_calls_the_reviewer() -> None:
+    finished(run(*WRITE))
+    assert REVIEWS == []
+
+
+def test_allow_runs_and_the_event_records_the_verdict() -> None:
+    j("PUT", "/settings", {"autoReview": "risky"})
+    ANSWER.append('Sure: {"verdict":"allow","reason":"matches the request"}')
+    rid = run(*WRITE)
+    finished(rid)
+    ev = events(rid)[0]
+    assert len(REVIEWS) == 1 and "write it down" in REVIEWS[0][1]["content"]
+    assert not ev["error"] and ev["review"]["verdict"] == "allow" and ev["review"]["reason"] == "matches the request"
+    assert ev["review"]["ms"] >= 0 and ev["review"]["model"] is not None
+
+
+def test_ask_opens_a_card_with_the_reason_and_approve_runs() -> None:
+    j("PUT", "/settings", {"autoReview": "risky"})
+    ANSWER.append(json.dumps({"verdict": "ask", "reason": "not what was asked"}))
+    rid = run(*WRITE)
+    row = wait_until(lambda: store.approvals("pending", run_id=rid), "the review card")[0]
+    j("POST", f"/approvals/{row['call_id']}", {"decision": "allow"})
+    finished(rid)
+    ev = events(rid)[0]
+    assert ev["approval"] == "allow" and not ev["error"] and ev["review"] == {**ev["review"], "verdict": "ask", "reason": "not what was asked"}
+
+
+def test_a_reviewer_error_or_garbage_asks() -> None:
+    j("PUT", "/settings", {"autoReview": "risky"})
+    for bad in (RuntimeError("down"), "I think it is fine"):
+        ANSWER.append(bad)
+        rid = run(*WRITE)
+        row = wait_until(lambda: store.approvals("pending", run_id=rid), "a card after a reviewer failure")[0]
+        j("POST", f"/approvals/{row['call_id']}", {"decision": "deny"})
+        finished(rid)
+
+
+def test_safe_tools_and_always_ask_tools_are_not_reviewed() -> None:
+    j("PUT", "/settings", {"autoReview": "all-writes"})
+    finished(run("current_time", {}))
+    assert REVIEWS == []
+    rid = run("schedule_task", {"name": "x", "prompt": "y", "in_minutes": 5})  # always-ask by default: already a card
+    wait_until(lambda: store.approvals("pending", run_id=rid), "the always-ask card")
+    assert REVIEWS == []
+    j("POST", f"/approvals/{store.approvals('pending', run_id=rid)[0]['call_id']}", {"decision": "deny"})
+    finished(rid)
+
+
+def test_an_ask_verdict_beats_an_allow_rule() -> None:
+    j("PUT", "/settings", {"autoReview": "risky", "permissionRules": {"allow": ["doc_create"]}})
+    ANSWER.append(json.dumps({"verdict": "ask", "reason": "looks odd"}))
+    rid = run(*WRITE)
+    row = wait_until(lambda: store.approvals("pending", run_id=rid), "a card despite the allow rule")[0]
+    j("POST", f"/approvals/{row['call_id']}", {"decision": "deny"})
+    finished(rid)
+    assert len(REVIEWS) == 1
+
+
+def test_all_writes_adds_network_and_validation() -> None:
+    assert autoreview.wants_review("all-writes", "network") and not autoreview.wants_review("risky", "network")
+    assert not any(autoreview.wants_review(lv, "safe") for lv in autoreview.LEVELS)
+    assert autoreview.parse("nonsense")[0] == "ask" and autoreview.parse('{"verdict":"maybe"}')[0] == "ask"
+    j("PUT", "/settings", {"autoReview": "sometimes"}, expect=422)
+    j("PUT", "/settings", {"autoReviewModel": 3}, expect=422)
+
+
+def test_the_reviewer_sees_redacted_arguments() -> None:
+    body = asyncio.run(_review_body({"title": "k", "body": "key sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD"}))
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in body
+
+
+async def _review_body(args: dict[str, Any]) -> str:
+    await autoreview.review({}, "m", name="doc_create", description="d", args=args, user_text="u", mode="on", tainted=False)
+    return REVIEWS[-1][1]["content"]
+

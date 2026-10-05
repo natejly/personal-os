@@ -8,6 +8,7 @@ import { HostList } from './CoworkSettings'
  */
 export default function RunSafetySettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const unattended = draft.unattendedApprovals ?? 'deny'
+  const review = draft.autoReview ?? 'off'
   const snapOk = draft.snapshotsAvailable !== false
   return (
     <>
@@ -21,6 +22,19 @@ export default function RunSafetySettings({ draft, patch }: { draft: Settings; p
           <button type="button" className={unattended === 'deny' ? 'on' : ''} aria-pressed={unattended === 'deny'} onClick={() => patch({ unattendedApprovals: 'deny' })}>Refuse</button>
         </div>
         <p className="muted small">Ask leaves an approval card waiting until you answer. Refuse turns the call down and the run carries on without it.</p>
+      </div>
+      <div className="send-hold">
+        <span className="toggle-text"><b>Review gate</b><small>A second model looks at a call before it runs on its own and can turn it into an approval card. Your ask and deny rules always win, and an ask from the reviewer is never skipped by an allow rule.</small></span>
+        <div className="seg" role="group" aria-label="Review gate">
+          {([['off', 'Off'], ['risky', 'Risky calls'], ['all-writes', 'All writes']] as const).map(([v, label]) => (
+            <button key={v} type="button" className={review === v ? 'on' : ''} aria-pressed={review === v} onClick={() => patch({ autoReview: v })}>{label}</button>
+          ))}
+        </div>
+        <p className="muted small">Risky calls: running code, outside actions, changes in the app, delegation and scheduling. All writes also covers web fetches. One short model call per reviewed call.</p>
+        {review !== 'off' && (
+          <input value={draft.autoReviewModel ?? ''} placeholder="Reviewer model (empty: the extraction model)" spellCheck={false} aria-label="Reviewer model"
+            onChange={(e) => patch({ autoReviewModel: e.target.value })} />
+        )}
       </div>
       <label className="toggle-row plain">
         <span className="toggle-text"><b>Snapshot granted folders before runs</b>

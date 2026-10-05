@@ -135,7 +135,12 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Tools default to on, and a few always ask, whatever their mode: Gmail send,
   calendar delete, trash or move a file, run a shortcut, install a Python
   package and schedule a task. Override modes globally, per project, or per
-  chat. Web search retries a failed key, then falls back to keyless engines
+  chat.
+  The optional **Review gate** (Settings → Tools) has a second model read a
+  risky call that would run unasked and turn it into an approval card, showing
+  its reason. Its "ask" always wins, over allow rules and grants alike; an
+  unreadable answer or an error asks too, safe tools are never reviewed, and a
+  background run only records the verdict. Off by default. Web search retries a failed key, then falls back to keyless engines
   rather than failing. Fetching a URL after the reply read untrusted content
   asks once; the card can also add the host to Settings → Tools → Allowed hosts.
   Hovering a tool row or a title-bar app button shows what it does. Tool calls

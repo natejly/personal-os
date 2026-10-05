@@ -2881,3 +2881,7 @@ select:focus-visible {
 .find-hint { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 ::highlight(chat-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
 ::highlight(chat-find-current) { background-color: var(--accent-solid); color: #fff; }
+
+.selection-toolbar { position: fixed; z-index: 900; transform: translate(-50%, -100%); display: flex; gap: 2px; padding: 3px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
+.selection-toolbar button { padding: 3px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
+.selection-toolbar button:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.18)); }

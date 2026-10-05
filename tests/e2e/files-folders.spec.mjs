@@ -177,6 +177,8 @@ test('300 docs in one folder: renders, filters and searches quickly', async ({ g
     await Promise.all(Array.from({ length: 25 }, (_, j) => mkDoc(g, { title: `Bulk ${i + j} ${(i + j) % 7 === 0 ? 'zebra' : 'plain'}`, content: `Body of doc ${i + j}\n\nline`, folder: 'Big' })))
   }
   await openFiles(page)
+  // Folders start shut and Recent holds only a handful of rows, so open the folder before looking for its last doc.
+  await page.getByRole('button', { name: 'Expand Big' }).click()
   const t0 = Date.now()
   await expect(page.locator('.doc-row', { hasText: 'Bulk 299' }).last()).toBeVisible()
   const rendered = Date.now() - t0

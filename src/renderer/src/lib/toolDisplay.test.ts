@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -159,4 +159,16 @@ test('recalled chats from search_memory become links, even from a cut-short prev
   assert.deepEqual(recalledChats(cut), [{ id: 'a1b2c3d4e5f60718', title: 'Past chat' }])
   assert.deepEqual(recalledChats(JSON.stringify({ memories: [], conversations: { skipped: 'x' } })), [])
   assert.deepEqual(recalledChats(null), [])
+})
+
+test('only calls that need the user, refused calls and actionable results stay out of the collapsed activity', () => {
+  const ev = (o: Partial<ToolEvent>): ToolEvent => ({ id: 'x', name: 'web_search', arguments: {}, result_preview: '', duration_ms: 1, error: null, ...o })
+  assert.equal(staysVisible(ev({})), false)
+  assert.equal(staysVisible(ev({ pending: true })), false)
+  assert.equal(staysVisible(ev({ error: 'boom' })), false)
+  assert.equal(staysVisible(ev({ pending: true, needs_approval: true })), true)
+  assert.equal(staysVisible(ev({ name: 'propose_plan', pending: true, needs_approval: true })), true)
+  assert.equal(staysVisible(ev({ blocked: 'loop' })), true)
+  assert.equal(staysVisible(ev({ name: 'artifact_create' })), true)
+  assert.equal(staysVisible(ev({ name: 'doc_edit' })), true)
 })

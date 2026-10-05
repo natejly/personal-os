@@ -1386,6 +1386,8 @@ textarea.instructions:focus { border-color: var(--accent); }
   font-size: 12px; line-height: 1.5;
   color: var(--text-muted); white-space: pre-wrap; word-break: break-word;
 }
+.activity-tools { padding: 0 6px 6px; }
+.activity-tools .tool-events { margin: 0; }
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }
 .tool-doc-diff .diff-card { margin-bottom: 0; }

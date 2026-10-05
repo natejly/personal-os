@@ -3,7 +3,7 @@ import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Message, MessageStatus, RunChanges } from '@shared/types'
+import type { Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import ToolEvents from './ToolEvents'
@@ -12,6 +12,7 @@ export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
+import { describeCall, staysVisible } from '../lib/toolDisplay'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import { statusText, statusTicks, waitText } from '../lib/runStatus'
@@ -54,24 +55,32 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
   )
 }
 
-/** Chain-of-thought from a reasoning model. Open while it is the only thing happening, collapsed once the answer starts. */
-
-function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element {
-  const [manual, setManual] = useState<boolean | null>(null)
-  const open = manual ?? live
+/**
+ * One collapsed line per reply holding its chain-of-thought and every tool call that does not need the user.
+ * Closed by default, streaming or not; only the user's click opens it, and that state lives here, so stream updates keep it.
+ */
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
+  const [open, setOpen] = useState(false)
   const body = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (open && live && body.current) body.current.scrollTop = body.current.scrollHeight
-  }, [text, open, live])
+    if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
+  }, [reasoning, open, streaming])
+  const last = events[events.length - 1]
+  const label = [
+    reasoning ? (streaming && !answering ? 'Thinking…' : 'Thought') : '',
+    events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
+    streaming && !answering && last ? describeCall(last.name, last.arguments).verb : ''
+  ].filter(Boolean).join(' · ')
   return (
-    <div className={`reasoning ${live ? 'live' : ''}`}>
-      <button className="reasoning-head" onClick={() => setManual(!open)} aria-expanded={open}>
+    <div className={`reasoning ${streaming && !answering ? 'live' : ''}`}>
+      <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
         <Lightbulb size={13} />
-        <span className="reasoning-label">{live ? 'Thinking' : 'Thought process'}</span>
-        {live && <span className="thinking mini"><span /><span /><span /></span>}
+        <span className="reasoning-label">{label}</span>
+        {streaming && !answering && <span className="thinking mini"><span /><span /><span /></span>}
       </button>
-      {open && <div className="reasoning-body" ref={body}>{text}</div>}
+      {open && reasoning && <div className="reasoning-body" ref={body}>{reasoning}</div>}
+      {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
     </div>
   )
 }
@@ -224,6 +233,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
+  // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
+  const events = message.tool_events
+  const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
@@ -238,16 +250,16 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           )
         ) : (
           <div className="msg-body">
-            {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             <BodyBoundary resetKey={message.id}>
-              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
+              {(message.reasoning || folded.length > 0) && <ReplyActivity reasoning={message.reasoning} events={folded} conversationId={message.conversation_id} streaming={streaming} answering={!!message.content} browserSession={browserSession} />}
+              {shown.length > 0 && <ToolEvents events={shown} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
               {/* Only the rendered text lives in .markdown: its element rules (p, ul, li) out-rank the
                   single-class rules the cards above are styled with. Its streaming class draws the cursor. */}
               {message.content ? (
                 <div className={streaming ? 'markdown streaming' : 'markdown'}>
                   <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
                 </div>
-              ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
+              ) : streaming && !message.reasoning && !folded.length && !shown.some((t) => t.pending) ? (
                 <Thinking />
               ) : null}
             </BodyBoundary>

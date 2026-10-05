@@ -278,6 +278,14 @@ export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): bo
     && readVerdict(t.result_preview) === null && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_')
 }
 
+/**
+ * Calls that stay in the transcript when a reply's activity is collapsed: anything waiting on the user
+ * (approval, plan, question), a call a circuit breaker refused, and results the user acts on (artifacts, doc diffs).
+ */
+export function staysVisible(t: ToolEvent): boolean {
+  return (!!t.pending && !!t.needs_approval) || !!t.blocked || !!t.breaker || t.name.startsWith('artifact_') || t.name === 'doc_edit'
+}
+
 export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
 
 /** Maximal runs of at least `min` foldable events become one group keyed by the first id; order is kept. */

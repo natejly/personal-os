@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -9,6 +9,7 @@ import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { viewHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
+import { navEntries, placeOf } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
@@ -62,35 +63,13 @@ type ProjectRow =
   | { kind: 'chat'; id: string; title: string; at: number }
   | { kind: 'doc'; id: string; title: string; at: number }
 
-// Todos, Calendar and Mail live in the title bar instead (AppSwitcher).
-const SHELL_NAV: NavEntry[] = [
+// The fixed rows. Every other view (shell/nav.tsx) is slotted between these by Settings → Modules,
+// which also moves it to the title bar (AppSwitcher) or hides it.
+const TOP: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'docs', label: 'Files', icon: <Files size={15} /> },
-  // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
-  // union would not typecheck — so the row is not a canvas drag source.
-  { view: 'meetings', label: 'Meetings', icon: <Mic size={15} /> },
-  // Deliberately no `kind`: a desk is a place you go to, not something to pin on a canvas, and a
-  // kind outside the WidgetKind union would not typecheck anyway.
-  { view: 'cowork', label: 'Cowork', icon: <Users size={15} /> },
-  // No widget kind: the Library is a place to review and author, not something to pin on a canvas.
-  { view: 'library', label: 'Library', icon: <Library size={15} /> },
-  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
-  { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
+  { view: 'docs', label: 'Files', icon: <Files size={15} /> }
 ]
-
-/** The shell's own rows take 0, 10, 20… in their listed order; a module's `nav.order` slots between them. */
-function withModules(shell: NavEntry[], section: 'main' | 'knowledge'): NavEntry[] {
-  const rows = shell.map((n, i) => ({ n, order: i * 10 }))
-  for (const m of MODULES) {
-    if (m.nav?.section !== section || !m.view) continue
-    rows.push({ n: { view: m.view.id, label: m.label, icon: m.icon, kind: m.widget?.kind }, order: m.nav.order })
-  }
-  // Array.sort is stable, so equal orders keep the shell row first.
-  return rows.sort((a, b) => a.order - b.order).map((r) => r.n)
-}
-// Memory and Documents moved into Settings → Knowledge base, so the sidebar has no Knowledge section
-// any more; a module that asks for one is listed with the main rows instead.
-const NAV = [...withModules(SHELL_NAV, 'main'), ...withModules([], 'knowledge')]
+const WEB: NavEntry = { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
@@ -269,9 +248,10 @@ export default function Sidebar(): JSX.Element {
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav">
-        {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
+        {[...TOP, ...navEntries().filter((e) => placeOf(settings, e) === 'sidebar'), WEB]
+          .filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
-        {NAV.some((n) => n.view && n.view !== 'home' && viewHidden(settings, n.view)) && (
+        {navEntries().some((e) => viewHidden(settings, e.view)) && (
           <button className="nav-item nav-more" title="Turn on hidden views in Settings → Modules"
             onClick={() => useStore.getState().openSettings('modules')}>
             <Plus size={15} /><span>More modules…</span>

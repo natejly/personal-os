@@ -58,34 +58,34 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) + (await page.locator(`.app-switcher button[aria-label="${name}"]`).count()) > 0
   await openSettings(page, 'Modules')
-  const views = dialog(page).locator('h4', { hasText: 'Views' }).locator('xpath=following-sibling::div[1]').locator('label.toggle-row')
+  // One row per view: Sidebar, Title bar or Hidden.
+  const views = dialog(page).locator('h4', { hasText: 'Views' }).locator('xpath=following-sibling::div[1]').locator('.place-row')
   const names = await views.locator('b').allInnerTexts()
-  expect(names).toEqual(expect.arrayContaining(['Todos', 'Calendar', 'Mail', 'Library', 'Cowork', 'Meetings', 'Activity', 'Health']))
-  const setAll = async (on) => {
+  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Cowork', 'Meetings', 'Activity', 'Health']))
+  const setAll = async (where) => {
     await openSettings(page, 'Modules')
-    for (let i = 0; i < names.length; i++) {
-      const box = views.nth(i).locator('input')
-      if ((await box.isChecked()) !== on) await box.click({ force: true })
-    }
+    for (let i = 0; i < names.length; i++) await views.nth(i).getByRole('button', { name: where }).click()
     await save(page)
   }
-  await setAll(false)
+  await setAll('Hidden')
   expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'cowork', 'health', 'library', 'mail', 'meetings', 'todos'])
   for (const n of names) expect(await shown(n), `${n} hidden`).toBe(false)
-  await setAll(true)
+  await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])
   for (const n of names) expect(await shown(n), `${n} shown`).toBe(true)
-  // One at a time.
+  expect(await page.locator('.app-switcher button[aria-label="Calendar"]').count()).toBe(0)
+  // One at a time: hide it, then bring it back in the title bar.
   for (const n of ['Library', 'Mail', 'Meetings']) {
     await openSettings(page, 'Modules')
-    await views.filter({ hasText: n }).locator('input').click({ force: true })
+    await views.filter({ hasText: n }).getByRole('button', { name: 'Hidden' }).click()
     await save(page)
     expect(await shown(n), `${n} off`).toBe(false)
     for (const o of names.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)
     await openSettings(page, 'Modules')
-    await views.filter({ hasText: n }).locator('input').click({ force: true })
+    await views.filter({ hasText: n }).getByRole('button', { name: 'Title bar' }).click()
     await save(page)
     expect(await shown(n), `${n} on`).toBe(true)
+    expect(await page.locator(`.app-switcher button[aria-label="${n}"]`).count(), `${n} in the title bar`).toBe(1)
   }
 
   // Today cards that need no Google account.
@@ -126,7 +126,7 @@ test('hiding the view you are on sends you home', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
   await openSettings(page, 'Modules')
-  await dialog(page).getByRole('checkbox', { name: 'Library' }).click({ force: true })
+  await dialog(page).locator('.place-row', { hasText: 'Library' }).getByRole('button', { name: 'Hidden' }).click()
   await save(page)
   await expect(page.locator('main.home')).toBeVisible()
   noErrors(grain)

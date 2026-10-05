@@ -44,7 +44,7 @@ export const testDisconnected = base.extend({
   grain: async ({}, use, testInfo) => run(use, testInfo, {})
 })
 
-/** Open an app-switcher view by its button name (Calendar, Mail, Todos...). */
+/** Open an app-switcher view by its button name (Calendar, Mail, Lists...). */
 export async function openApp(page, name) {
   await page.getByRole('button', { name: new RegExp(`^${name}$`, 'i') }).first().click()
 }

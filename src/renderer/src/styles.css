@@ -1514,6 +1514,36 @@ textarea.instructions:focus { border-color: var(--accent); }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- Lists ---------- */
+.lists-body { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; container-type: inline-size; }
+.list-rail { position: sticky; top: 0; width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
+.lists-main { flex: 1; min-width: 0; }
+/* Narrow page: the rail becomes a row of chips above the items instead of squeezing them. */
+@container (max-width: 640px) {
+  .list-rail { position: static; width: 100%; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .lists-main { flex-basis: 100%; }
+}
+.list-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; border-radius: 8px; color: var(--text-muted); font-size: 13px; cursor: pointer; text-align: left; }
+.list-row:hover { background: var(--hover); color: var(--text); }
+.list-row.active { background: var(--active); color: var(--text); }
+.list-row > svg { flex-shrink: 0; }
+.list-row > span:not(.count) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row .count { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.list-row input { flex: 1; min-width: 0; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; margin: -3px 0; outline: 0; font: inherit; }
+.list-row .ghost { opacity: 0; }
+.list-row:hover .ghost, .list-row:focus-within .ghost { opacity: 1; }
+.list-new { color: var(--text-faint); }
+/* The add row reads as the list's next item: a plus where the check circle sits, no border until it is focused. */
+.todo-add { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 10px; border: 1px dashed var(--border-strong); background: var(--bg-elev); }
+.todo-add:focus-within { border-style: solid; border-color: var(--accent); }
+.todo-add > svg { color: var(--text-faint); flex-shrink: 0; }
+.todo-add > :nth-child(2) { flex: 1; min-width: 0; }
+.todo-add .primary-btn { min-height: 28px; padding: 4px 12px; }
+.todo-add-more { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px 0 36px; }
+.todo-add-more input, .todo-add-more select { min-height: 26px; font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; outline: 0; }
+/* Settings → Modules: one row per view with where it lives. */
+.place-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; }
+
 /* ---------- Todos ---------- */
 .todo { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; background: var(--bg-elev); margin: 0; }
 .todo-section .todo:first-of-type { border-radius: 10px 10px 0 0; }

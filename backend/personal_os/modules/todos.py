@@ -36,6 +36,10 @@ class TodoIn(BaseModel):
     status: str | None = None
 
 
+class TodoListIn(BaseModel):
+    name: str
+
+
 class TodoFilterIn(BaseModel):
     name: str
     tag: str = ""
@@ -123,8 +127,26 @@ class TodosModule(Module):
 
         @r.get("/todo-lists")
         def list_todo_lists() -> list[str]:
-            """The list names in use (what boards used to be), for the board view's picker."""
+            """Every list (what boards used to be). Unlisted todos are the default list, shown as "Todos"."""
             return store.lists()
+
+        @r.post("/todo-lists")
+        def create_todo_list(body: TodoListIn) -> list[str]:
+            try:
+                return store.create_list(body.name)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
+
+        @r.put("/todo-lists/{name}")
+        def rename_todo_list(name: str, body: TodoListIn) -> list[str]:
+            try:
+                return store.rename_list(name, body.name)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
+
+        @r.delete("/todo-lists/{name}")
+        def delete_todo_list(name: str) -> list[str]:
+            return store.delete_list(name)
 
         @r.get("/todo-filters")
         def list_todo_filters() -> list[dict[str, Any]]:
@@ -291,7 +313,7 @@ class TodosModule(Module):
              "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
              "estimate_min": {"type": "integer", "description": "Expected minutes of work; the planner uses it to time-block."},
              "tags": {"type": "array", "items": {"type": "string"}}, "parent_id": {"type": "string", "description": "Make this a subtask of the todo with this id."},
-             "list_name": {"type": "string", "description": "Put it on this named list (a project-like group, shown as a board), e.g. \"Home renovation\"."},
+             "list_name": {"type": "string", "description": "Put it on this list (the Lists page shows one rail entry per list; unlisted todos are the default \"Todos\" list). A new name makes the list, e.g. \"Groceries\"."},
              "status": {"type": "string", "description": "Board column: Backlog, To do, In progress or Done (default To do)."}}, ["title"]), todo_add, "todos", "writes",
             examples=[{"title": "Renew passport", "due": "2026-10-14", "priority": 1},
                       {"title": "Buy milk", "personal": True},

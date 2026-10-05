@@ -1,36 +1,21 @@
-import { Calendar, Mail, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore, type View } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
+import { navEntries, placeOf } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
-import type { WidgetKind } from '@shared/types'
 
-type AppEntry = { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }
-
-/** The shell's own apps take 10, 20… in their listed order; a module's `nav.order` slots between them (ties keep shell apps first). */
-const SHELL_APPS: AppEntry[] = [
-  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
-  { view: 'mail', label: 'Mail', icon: <Mail size={15} /> }
-]
-// Built on first render, never at import: the registry imports module views, and those views render
+// Read on first render, never at import: the registry imports module views, and those views render
 // this component, so MODULES is still uninitialised while this file is first evaluated.
-let cache: { modules: typeof MODULES; apps: AppEntry[] } | null = null
-const strip = (): NonNullable<typeof cache> => {
-  if (cache) return cache
-  const modules = MODULES.filter((m) => m.nav?.section === 'apps' && m.view)
-  const apps = [
-    ...SHELL_APPS.map((a, i) => ({ a, order: (i + 1) * 10 })),
-    ...modules.map((m) => ({ a: { view: m.view!.id, label: m.label, icon: m.icon, kind: m.widget?.kind }, order: m.nav!.order }))
-  ].sort((x, y) => x.order - y.order).map((r) => r.a)
-  return (cache = { modules, apps })
-}
+let mods: typeof MODULES | null = null
+const navModules = (): typeof MODULES => (mods ??= MODULES.filter((m) => m.nav && m.view))
 
 /**
- * Todos, Calendar and Mail as icons at the right end of every title bar, so they sit in the same
- * spot in each view and stay reachable with the sidebar hidden. A click navigates (as the sidebar
- * rows did); a drag drops the widget into a space, so the canvas keeps them as drag sources.
- * Modules join the strip with `nav.section: 'apps'`. The last button opens the page agent (⌘I).
+ * The views placed in the title bar (Settings → Modules; Lists, Calendar and Mail by default) as icons
+ * at the right end of every title bar, so they sit in the same spot in each view and stay reachable
+ * with the sidebar hidden. A click navigates; a drag drops the widget into a space, so the canvas keeps
+ * them as drag sources. The last button opens the page agent (⌘I).
  */
 export default function AppSwitcher(): JSX.Element {
   const view = useStore((s) => s.view)
@@ -39,10 +24,10 @@ export default function AppSwitcher(): JSX.Element {
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const togglePageAgent = useStore((s) => s.togglePageAgent)
   // useShallow compares element-wise, so a fresh array with the same counts does not re-render.
-  const { modules, apps: all } = strip()
+  const modules = navModules()
   const badges = useStore(useShallow((s) => modules.map((m) => m.nav?.badge?.(s) ?? null)))
   const badgeOf = (v: View): number => badges[modules.findIndex((m) => m.view?.id === v)] ?? 0
-  const apps = all.filter((a) => !viewHidden(settings, a.view))
+  const apps = navEntries().filter((a) => placeOf(settings, a) === 'apps' && !viewHidden(settings, a.view))
   return (
     <div className="app-switcher no-drag" role="toolbar" aria-label="Apps">
       {apps.map((a) => {

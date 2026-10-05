@@ -126,6 +126,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Meetings / Activity ship off (they record); Settings → Modules turns them back on.
     "homeWidgets": {"meetings": False},
     "hiddenViews": ["meetings", "activity"],
+    # {view: "sidebar" | "apps"}; missing = the module's own default placement.
+    "navPlacement": {},
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 4,
     # tools: {tool_name: bool}; missing = on

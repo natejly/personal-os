@@ -68,12 +68,12 @@ test('persistence across relaunch, Today card matches and can be hidden', async 
   await expect(row(page, 'Persist me')).toBeVisible()
   // Today
   await page.getByRole('button', { name: 'Today', exact: true }).first().click()
-  const card = page.locator('section.widget', { hasText: 'View all' }).filter({ hasText: 'Todos' })
+  const card = page.locator('section.widget', { hasText: 'View all' }).filter({ hasText: 'Lists' })
   await expect(card.locator('.todo')).toHaveCount(1)
   await expect(card).toContainText('Persist me')
   await expect(card).toContainText('1 open')
   await page.getByRole('button', { name: 'Choose what shows on Today' }).click()
-  await page.locator('.home-customize label', { hasText: 'Todos' }).locator('input').click()
+  await page.locator('.home-customize label', { hasText: 'Lists' }).locator('input').click()
   await expect(page.locator('section.widget', { hasText: 'Persist me' })).toHaveCount(0)
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })
@@ -109,6 +109,8 @@ test('820x520 window: add row and rows usable without horizontal overflow', asyn
   // every row's delete button within viewport
   const box = await page.getByRole('button', { name: 'Delete todo: small 0' }).boundingBox()
   expect(box.x + box.width).toBeLessThanOrEqual(o.w)
+  // The Add button appears once there is something to add; it must sit inside the window too.
+  await addBox(page).fill('one more')
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeInViewport()
   expect(ignoreErrs(grain.consoleErrors)).toEqual([])
 })

@@ -102,7 +102,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
     return (
       <div className="proxy-card">
         <CheckSquare size={18} />
-        <strong>{win.title || 'Todos'}</strong>
+        <strong>{win.title || 'Lists'}</strong>
         <span>{open.length} open · paused while off-screen</span>
       </div>
     )
@@ -173,7 +173,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
 
 export const def: WidgetDef = {
   kind: 'todos',
-  label: 'Todos',
+  label: 'Lists',
   icon: <CheckSquare size={18} />,
   defaultSize: { w: 380, h: 520 },
   minSize: { w: 280, h: 240 },

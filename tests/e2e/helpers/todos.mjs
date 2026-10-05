@@ -1,8 +1,8 @@
 export async function openTodos(page) {
-  await page.getByRole('button', { name: 'Todos', exact: true }).first().click()
-  await page.getByPlaceholder('Add a todo…').waitFor()
+  await page.getByRole('button', { name: 'Lists', exact: true }).first().click()
+  await page.getByPlaceholder('Add to Todos…').waitFor()
 }
-export const addBox = (page) => page.getByPlaceholder('Add a todo…')
+export const addBox = (page) => page.getByPlaceholder('Add to Todos…')
 export const seed = async (api, n, mk = (i) => ({ title: `bulk todo ${i}` }), conc = 20) => {
   const out = []
   for (let i = 0; i < n; i += conc) {

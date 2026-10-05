@@ -253,7 +253,7 @@ test('Today shows a Health card that follows the Show on Today toggle and surviv
   await expect.poll(async () => (await api('/settings')).homeWidgets.health).toBe(false)
   await grain.relaunch()
   await grain.page.locator('.nav-item', { hasText: 'Today' }).first().click()
-  await expect(grain.page.locator('section.widget', { has: grain.page.getByText('Brief me').or(grain.page.getByText('Todos')) }).first()).toBeVisible()
+  await expect(grain.page.locator('section.widget', { has: grain.page.getByText('Brief me').or(grain.page.getByText('Lists')) }).first()).toBeVisible()
   await expect(grain.page.locator('section.widget', { has: grain.page.getByText('logged today') })).toHaveCount(0)
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })

@@ -62,8 +62,8 @@ def box(tmp_path: Path) -> Box:
 
 def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> None:
     spec = box.tb.specs["shell_run"]
-    assert (spec.group, spec.danger, spec.default_mode) == ("shell", "executes", "ask")
-    assert box.tb.specs["shell_poll"].default_mode == "on"
+    assert (spec.group, spec.danger, box.tb.default_mode(spec)) == ("shell", "executes", "ask")
+    assert box.tb.default_mode(box.tb.specs["shell_poll"]) == "on"
     # unsandboxed is a forced approval: an 'on' mode is upgraded, and the call is flagged as forced
     assert box.tb.gate("shell_run", "on", {}, {"command": "ls"}) == "on"
     assert box.tb.gate("shell_run", "on", {}, {"command": "ls", "unsandboxed": True}) == "ask"
@@ -840,7 +840,7 @@ def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> No
     d = spec.description
     assert "proxy" in d and "on_timeout" in d and "environment variables do not" in d
     assert spec.parameters["properties"]["on_timeout"]["enum"] == ["background", "kill"]
-    assert spec.default_mode == "ask"
+    assert box.tb.default_mode(spec) == "ask"
 
 
 def test_package_tool_caches_live_in_the_run_dir() -> None:

@@ -184,7 +184,7 @@ export interface ToolInfo {
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
   taints?: boolean
-  /** Capped at 'ask' and never granted whole-tool (external and schedules tools, minus the ungated calendar writes). */
+  /** Capped at 'ask' and never granted whole-tool: an external or schedules tool under the alwaysAsk setting. */
   ask_locked?: boolean
 }
 
@@ -1292,6 +1292,8 @@ export interface Settings {
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
+  /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
+  alwaysAsk?: string[]
   /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
   skipPermissions?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
@@ -1465,6 +1467,8 @@ export type ChatEvent =
   | { event: 'reasoning'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
+  /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
+  | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
   | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason'] } }

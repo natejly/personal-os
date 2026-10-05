@@ -517,7 +517,7 @@ def test_untrusted_agent_text_makes_external_tools_ask() -> None:
         {"id": "ag", "agent": {"role": "researcher", "task": "look it up"}},
         {"id": "mail", "tool": "wf_mail", "args": {"body": "{{ag.result}}"}}]}
     w = save(d)
-    appmod.db.set_settings({"tools": {"wf_mail": "on"}})
+    appmod.db.set_settings({"tools": {"wf_mail": "on"}, "alwaysAsk": ["wf_mail"]})
 
     async def go() -> None:
         r = store.create_run(w, {})
@@ -528,7 +528,7 @@ def test_untrusted_agent_text_makes_external_tools_ask() -> None:
         runs.decide(card[0]["call_id"], "allow")
         done = await until(lambda: (g := store.get_run(r["id"]))["status"] == "done" and g)
         check(CALLS["wf_mail"] == 1 and done["status"] == "done", "it runs once allowed")
-        appmod.db.set_settings({"tools": {}})
+        appmod.db.set_settings({"tools": {}, "alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
 
     run(go())
 

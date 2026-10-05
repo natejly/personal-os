@@ -78,7 +78,7 @@ def offered(tb: Any, ctx: dict[str, Any], wanted: list[str] | None, modes: dict[
             why[n] = "cannot be called from a script (allowed: " + ", ".join(sorted(ALLOWED)) + ")"
         elif spec is None or not tb.available(n):
             why[n] = "not available here"
-        elif (modes.get(n) if modes is not None and n in modes else spec.default_mode) == "off":
+        elif (modes.get(n) if modes is not None and n in modes else tb.default_mode(spec)) == "off":
             why[n] = "turned off for this chat"
         else:
             ok.append(n)
@@ -169,7 +169,7 @@ class Bridge:
         self.calls += 1
         raw = (self.modes or {}).get(name) if self.modes is not None else None
         spec = self.tb.specs[name]
-        raw = raw or spec.default_mode
+        raw = raw or self.tb.default_mode(spec)
         if raw == "off":
             return self._refuse(name, f"{name} is turned off for this chat.")
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.

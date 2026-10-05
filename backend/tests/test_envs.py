@@ -129,7 +129,7 @@ def test_python_install_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     env, fake = make(tmp_path, monkeypatch, uv=True)
     tb = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
     spec = tb.specs["python_install"]
-    assert (spec.group, spec.danger, spec.default_mode) == ("code", "external", "ask")
+    assert (spec.group, spec.danger, tb.default_mode(spec)) == ("code", "external", "ask"), "under alwaysAsk by default"
     ctx: dict[str, Any] = {}
     assert "not available" in asyncio.run(spec.fn(ctx, packages=["scipy"]))["error"]  # no env wired yet
     tb.work_env = env

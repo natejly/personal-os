@@ -118,10 +118,11 @@ def test_danger_levels_agree_across_modules() -> None:
     builtin_only = {"plan", "schedules"}
     assert set(mcp_servers.DANGER_LEVELS) == set(DEFAULT_MODE) - builtin_only
     assert builtin_only <= set(DEFAULT_MODE), "a built-in-only tier vanished from tools.DEFAULT_MODE"
-    for spec in full_toolbox().specs.values():
+    tb = full_toolbox()
+    for spec in tb.specs.values():
         assert spec.danger in set(mcp_servers.DANGER_LEVELS) | builtin_only, (
             f"{spec.name}: unknown danger {spec.danger!r}")
-        assert spec.default_mode in mcp_servers.MODES, spec.name
+        assert tb.default_mode(spec) in mcp_servers.MODES, spec.name
 
 
 def test_meeting_lifecycle_is_not_a_tool() -> None:

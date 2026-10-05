@@ -431,6 +431,8 @@ class RunStore:
                 text.append(data.get("text") or "")
             elif event == "tool_call" and data.get("message_id") == message_id:
                 opened[str(data.get("id"))] = {k: v for k, v in data.items() if k != "message_id"}
+            elif event == "tool_decision" and data.get("message_id") == message_id and str(data.get("id")) in opened:
+                opened[str(data.get("id"))].update({"needs_approval": False, "approval": data.get("decision")})
             elif event == "tool_result" and data.get("message_id") == message_id:
                 tool_events.append({k: v for k, v in data.items() if k != "message_id"})
                 opened.pop(str(data.get("id")), None)

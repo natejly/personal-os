@@ -825,7 +825,7 @@ def test_agent_routes_and_prompt_blocks() -> None:
     conv = new_conv()
     out = run(appmod.toolbox.call("agent_spawn", {"task": "t", "role": "researcher"}, mkctx(conv)))
     view = asyncio.run(appmod.get_subagent(out["agent_id"]))
-    check(view["run"]["kind"] == "subagent" and view["agent"] is None and view["messages"][-1]["content"] == "done", "GET /subagents/{id} serves a finished child's history")
+    check(view["run"]["kind"] == "subagent" and view["agent"]["state"] == "completed" and view["messages"][-1]["content"] == "done", "GET /subagents/{id} serves a finished child's history and state")
     try:
         asyncio.run(appmod.message_subagent(out["agent_id"], appmod.SteerIn(content="more")))
         check(False, "a finished child refuses a message")

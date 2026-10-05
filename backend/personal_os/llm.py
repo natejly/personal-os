@@ -267,6 +267,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "googleClientId": "",
     "googleClientSecret": "",
     "googleToken": {},
+    # Entra public client (PKCE, no secret). Tenant "" means "common".
+    "microsoftClientId": "",
+    "microsoftTenant": "",
+    "microsoftToken": {},
+    # Which account Mail, Calendar, the mail/calendar tools, the reply tracker and the outbox use: "google" | "microsoft".
+    "pimProvider": "google",
     # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
     # /activity/config rather than /settings so the merge is a deep one.
     "activity": {"enabled": False},

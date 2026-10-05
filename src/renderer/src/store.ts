@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
+  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, MicrosoftStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -158,6 +158,7 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
+  microsoft: MicrosoftStatus | null
   tasksSync: TasksSyncStatus | null
   todoCalendar: TodoCalendarStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
@@ -522,6 +523,9 @@ export interface State {
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
+  refreshMicrosoft: () => Promise<void>
+  connectMicrosoft: () => Promise<void>
+  disconnectMicrosoft: () => Promise<void>
   refreshTasksSync: () => Promise<void>
   refreshTodoCalendar: () => Promise<void>
   setTodoCalendar: (patch: { enabled?: boolean; calendarId?: string; keepCompleted?: boolean }) => Promise<void>
@@ -1721,11 +1725,12 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', microsoftClientId: '', microsoftTenant: '', pimProvider: 'google', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
     google: null,
+    microsoft: null,
     tasksSync: null,
     todoCalendar: null,
     mailWatchKind: null,
@@ -1907,9 +1912,17 @@ export const useStore = create<State>((set, get) => {
       }
     },
     saveSettings: async (patch) => {
+      const prevPim = get().settings.pimProvider
       set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
       if ('baseUrl' in patch || 'apiKey' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
+      if ('microsoftClientId' in patch || 'microsoftTenant' in patch) void get().refreshMicrosoft()
+      // Mail and Calendar now read from the other account: drop what the first one cached.
+      if (get().settings.pimProvider !== prevPim) {
+        clearViews()
+        void get().refreshDashboard()
+        void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+      }
     },
     setView: (view) => {
       // Dashboards moved under Files; a stale 'dashboards' (old canvas state, an old menu) lands there.
@@ -4085,6 +4098,42 @@ export const useStore = create<State>((set, get) => {
     },
     disconnectGoogle: async () => {
       set({ google: await api.google.disconnect() })
+      clearViews()
+      void get().refreshDashboard()
+      void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+    },
+    refreshMicrosoft: async () => {
+      try {
+        set({ microsoft: await api.microsoft.status() })
+      } catch { /* ignore */ }
+    },
+    connectMicrosoft: async () => {
+      try {
+        const before = get().microsoft?.connected_at ?? null
+        const { url } = await api.microsoft.start()
+        window.open(url, '_blank')
+        // poll until the callback lands
+        const started = Date.now()
+        const timer = setInterval(async () => {
+          const st = await api.microsoft.status().catch(() => null)
+          const fresh = !!st?.connected && st.connected_at !== before
+          if (fresh || Date.now() - started > 180_000) {
+            clearInterval(timer)
+            if (fresh && st) {
+              clearViews()
+              set({ microsoft: st })
+              get().toast(`Connected ${st.email ?? 'Microsoft account'}`)
+              void get().refreshDashboard()
+              void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+            }
+          }
+        }, 1500)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    disconnectMicrosoft: async () => {
+      set({ microsoft: await api.microsoft.disconnect() })
       clearViews()
       void get().refreshDashboard()
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)

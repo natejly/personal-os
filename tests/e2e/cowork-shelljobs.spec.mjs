@@ -1,14 +1,14 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, waitStatus, newChat, say, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, waitStatus, newChat, deskChat, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
-test('a desk starts a background command; Running lists it with output; Kill stops it', async ({ grain }) => {
+test('a chat working autonomously starts a background command; Running lists it with output; Kill stops it', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [{ name: 'shell_run', args: { command: 'echo job-started; sleep 300', background: true } }] }, { calls: [{ name: 'desk_done', args: { summary: 'started a job' } }] }, { text: 'ok' }, { text: 'final' })
   const { page } = grain
-  const { desk } = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'run a job', title: 'Jobber', autonomy: 'propose', start: true } })
+  const { desk } = await deskChat(grain, { brief: 'run a job', title: 'Jobber' })
   await expect.poll(async () => (await grain.api('/shell/jobs')).jobs.length, { timeout: 120_000 }).toBe(1)
   await waitStatus(grain, desk.id, 'done', 120_000)
   const [job] = (await grain.api('/shell/jobs')).jobs

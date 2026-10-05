@@ -22,13 +22,37 @@ export const pending = (grain) => grain.api('/approvals?status=pending')
 export const homeScratch = () => realpathSync(mkdtempSync(join(homedir(), 'grain-e2e-ws-')))
 export const rmScratch = (d) => { try { rmSync(d, { recursive: true, force: true }) } catch {} }
 
-// ---- cowork ----
+// ---- a chat working autonomously ----
 export const settingsFor = { toolDeferAbove: 0 }
 export const deskStatus = async (grain, id) => (await grain.api(`/cowork/desks/${id}`)).status
 export const waitStatus = (grain, id, status, timeout = 90_000) =>
   expect.poll(() => deskStatus(grain, id), { timeout, message: `desk ${id} -> ${status}` }).toBe(status)
-export const openCowork = async (page) => { await page.locator('.sidebar').getByText('Cowork', { exact: true }).click() }
-export const rail = (page) => page.locator('.desk-rail')
+/** A chat made through the API and told to work autonomously on `brief` (its first turn's message). `start: false` leaves a draft. */
+export async function deskChat(grain, { title = 'Task chat', brief = 'Write a short report', autonomy = 'propose', start = true, budget } = {}) {
+  const chat = await grain.api('/conversations', { method: 'POST', body: { title } })
+  const out = await grain.api('/cowork/desks', { method: 'POST', body: { conversation_id: chat.id, brief, autonomy, start, ...(budget ? { budget } : {}) } })
+  return { ...out, chat }
+}
+/** The sidebar row of a chat, by title. */
+export const chatRow = (page, title) => page.locator('.sidebar .convo-item', { hasText: title }).first()
+export const openChat = async (page, title) => { await chatRow(page, title).click() }
+export const strip = (page) => page.locator('.desk-strip')
+export const panel = (page) => page.locator('.desk-panel')
+/** The workspace panel, on `tab` (Files, Changes or Review). */
+export async function openPanel(page, tab) {
+  if (!(await panel(page).count())) await strip(page).getByRole('button', { name: 'Files, changes and review' }).click()
+  if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
+}
+/** Turn autonomy on from the composer, as a user does: pick the level, optionally a turn cap, Start working. */
+export async function turnOn(page, level = 'Work and propose', turns) {
+  await page.getByRole('button', { name: /Work autonomously/ }).click()
+  const menu = page.getByRole('dialog', { name: 'Work autonomously' })
+  await menu.getByLabel(new RegExp(level)).check()
+  if (turns) await menu.locator('.desk-limits input').fill(String(turns))
+  await menu.getByRole('button', { name: 'Start working' }).click()
+}
+/** The desk bound to a chat, read off its settings. */
+export const deskOf = async (grain, chatId) => (await grain.api(`/conversations/${chatId}`)).settings.deskId
 
 export const WRITE = { name: 'desk_write_file', args: { path: 'outputs/report.md', content: '# Report\n\nHello from the desk.\n' } }
 export const DELIVER = { name: 'desk_deliver', args: { path: 'outputs/report.md', title: 'The report', summary: 'a short report' } }

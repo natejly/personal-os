@@ -17,6 +17,7 @@ import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListen
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 import { startUpdater } from './updater'
+import { background, goBackground, reveal } from './background'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -40,8 +41,6 @@ for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
 initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
 hookConsole()
 
-const background = process.env.GRAIN_E2E_BACKGROUND === '1'
-
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -63,8 +62,7 @@ function createWindow(): void {
     }
   })
 
-  // Test runs set GRAIN_E2E_BACKGROUND so the window appears without taking focus from whatever the user is doing.
-  win.once('ready-to-show', () => (background ? win?.showInactive() : win?.show()))
+  win.once('ready-to-show', () => { if (win) reveal(win) })
 
   // When the renderer dies there is no React error and no macOS crash report -- the window simply goes
   // blank, and because it is transparent that looks like the app vanishing. These say why.
@@ -102,8 +100,8 @@ function createWindow(): void {
 function showMain(): void {
   if (!win || win.isDestroyed()) return createWindow()
   if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
+  reveal(win)
+  if (!background) win.focus()
 }
 
 /** The Mac woke or unlocked: have the job scheduler run its pass now, so a slot missed asleep fires at once. */
@@ -239,7 +237,6 @@ function buildMenu(): void {
         { label: 'Uploads', click: () => sendMenu('view:documents') },
         // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
-        { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.
@@ -345,7 +342,7 @@ if (!gotLock) app.quit()
 else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
-  if (background && isMac) app.dock?.hide()
+  goBackground()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('ui:zoom', (e, percent: number) => {
@@ -438,7 +435,7 @@ if (gotLock) app.whenReady().then(async () => {
   startUpdater()
   powerMonitor.on('resume', nudgeScheduler)
   powerMonitor.on('unlock-screen', nudgeScheduler)
-  app.on('activate', showMain)
+  app.on('activate', () => { if (!background) showMain() })
 })
 
 app.on('window-all-closed', () => {

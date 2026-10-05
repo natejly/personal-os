@@ -9,6 +9,7 @@ ln -sfn <dir with @playwright/test>/node_modules tests/e2e/node_modules
 node tests/e2e/node_modules/.bin/playwright test -c tests/e2e/playwright.config.mjs [file-or-grep]
 E2E_LLM=real …                                   # use the LiteLLM proxy from .env instead of the mock
 E2E_KEEP=1 …                                     # keep scratch dirs; E2E_WORKERS=n; E2E_RETRIES=n
+E2E_FOREGROUND=1 …                                # debugging: normal windows (default is GRAIN_E2E_BACKGROUND=1: no Dock icon, showInactive(), app never frontmost)
 ```
 
 `fixtures.mjs` gives each test a fresh `grain` ({page, api, llm, backend, dataDir}); `mockllm.mjs` documents the

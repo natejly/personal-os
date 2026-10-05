@@ -1,10 +1,8 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, deskStatus, waitStatus, openCowork, rail, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, panel, openPanel, chatRow, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
-const mk = (grain, body) => grain.api('/cowork/desks', { method: 'POST', body })
-const tab = (page, name) => page.locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + name) })
 const REVIEWED = (llm, ...steps) => llm.push(...steps, { text: 'reviewer ok' }, { text: 'final' })
 const deskFile = async (grain, id, path) => (await grain.api(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}`, { raw: true })).status
 
@@ -12,11 +10,10 @@ async function reviewDesk(grain, title, extra = []) {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   REVIEWED(llm, { calls: [WRITE] }, { calls: [DELIVER] }, ...extra, { calls: [DONE] })
-  const { desk } = await mk(grain, { brief: 'make a report', title, autonomy: 'propose', start: true })
-  await openCowork(grain.page)
+  const { desk } = await deskChat(grain, { brief: 'make a report', title })
   await waitStatus(grain, desk.id, 'review')
-  await rail(grain.page).getByText(title).click()
-  await tab(grain.page, 'Output').click()
+  await openChat(grain.page, title)
+  await openPanel(grain.page, 'Review')
   return { llm, desk }
 }
 
@@ -25,16 +22,16 @@ test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwri
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'write carefully', title: 'Careful', autonomy: 'ask', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Careful').click()
+  const { desk } = await deskChat(grain, { brief: 'write carefully', title: 'Careful', autonomy: 'ask' })
+  await openChat(page, 'Careful')
   await waitStatus(grain, desk.id, 'needs_approval', 90_000)
-  const banners = page.locator('.desk-banners')
-  await expect(banners.locator('.desk-approval').first()).toBeVisible({ timeout: 60_000 })
+  const cards = page.locator('.messages')
+  await expect(cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first()).toBeVisible({ timeout: 60_000 })
   expect(await deskFile(grain, desk.id, 'outputs/report.md')).not.toBe(200)
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText('Approval needed')
+  await expect(strip(page)).toContainText('Approval needed')
+  await expect(chatRow(page, 'Careful').locator('.convo-desk')).toHaveAttribute('aria-label', 'Approval needed')
   llm.push({ text: 'ok, not writing it' })
-  await banners.getByRole('button', { name: /^(Deny|Reject)$/ }).first().click()
+  await cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first().click()
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).not.toBe('needs_approval')
   expect(await deskFile(grain, desk.id, 'outputs/report.md')).not.toBe(200)
   expect((await grain.api('/approvals?status=denied')).length).toBe(1)
@@ -46,27 +43,27 @@ test('ask-as-it-goes desk: Approve writes the file once', async ({ grain }) => {
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'write carefully', title: 'Careful 2', autonomy: 'ask', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Careful 2').click()
+  const { desk } = await deskChat(grain, { brief: 'write carefully', title: 'Careful 2', autonomy: 'ask' })
+  await openChat(page, 'Careful 2')
   await waitStatus(grain, desk.id, 'needs_approval', 90_000)
   llm.push({ text: 'written' })
-  await page.locator('.desk-banners').getByRole('button', { name: /^(Approve|Allow once|Allow)$/ }).first().dblclick()
+  await page.locator('.messages').getByRole('button', { name: /^(Approve|Allow once|Allow)$/ }).first().dblclick()
   await expect.poll(() => deskFile(grain, desk.id, 'outputs/report.md'), { timeout: 60_000 }).toBe(200)
   expect((await grain.api('/approvals?status=approved')).length).toBe(1)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('review: accept into a new doc, verified, the desk closes out and can be archived', async ({ grain }) => {
+test('review: accept into a new doc, verified, the desk closes out and the chat stays', async ({ grain }) => {
   const { desk } = await reviewDesk(grain, 'Reviewed')
   const { page } = grain
-  await expect(page.locator('.desk-review-head')).toContainText('1 output')
-  await page.getByRole('button', { name: /Accept selected/ }).click()
-  await expect(page.locator('.desk-output .desk-verified').first()).toBeVisible()
+  await expect(strip(page)).toContainText('Ready to review')
+  await expect(panel(page).locator('.desk-review-head')).toContainText('1 output')
+  await panel(page).getByRole('button', { name: /Accept selected/ }).click()
+  await expect(panel(page).locator('.desk-output .desk-verified').first()).toBeVisible()
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toBe('done')
-  await page.locator('.desk-actions').getByRole('button', { name: 'Archive', exact: true }).click()
-  await expect.poll(async () => (await grain.api(`/cowork/desks/${desk.id}`)).archived).toBeTruthy()
-  await expect(rail(page)).toHaveCount(0)
+  await expect(strip(page)).toContainText('Done')
+  await expect(chatRow(page, 'Reviewed')).toBeVisible()
+  await expect(chatRow(page, 'Reviewed').locator('.convo-desk')).toHaveCount(0) // done: nothing to flag
   expect(realErrors(grain)).toEqual([])
 })
 

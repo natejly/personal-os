@@ -61,14 +61,14 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   // One row per view: Sidebar, Title bar or Hidden.
   const views = dialog(page).locator('h4', { hasText: 'Views' }).locator('xpath=following-sibling::div[1]').locator('.place-row')
   const names = await views.locator('b').allInnerTexts()
-  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Cowork', 'Meetings', 'Activity', 'Health']))
+  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Meetings', 'Activity', 'Health']))
   const setAll = async (where) => {
     await openSettings(page, 'Modules')
     for (let i = 0; i < names.length; i++) await views.nth(i).getByRole('button', { name: where }).click()
     await save(page)
   }
   await setAll('Hidden')
-  expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'cowork', 'health', 'library', 'mail', 'meetings', 'todos'])
+  expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'health', 'library', 'mail', 'meetings', 'todos'])
   for (const n of names) expect(await shown(n), `${n} hidden`).toBe(false)
   await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])

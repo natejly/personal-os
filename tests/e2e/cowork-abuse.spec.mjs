@@ -3,10 +3,9 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { scriptLLM } from './helpers/scriptllm.mjs'
 import { restartBackend } from './helpers/restart.mjs'
-import { expect, realErrors, deskStatus, waitStatus, openCowork, rail, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, newChat, say, pending, homeScratch, rmScratch, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
-const mk = (grain, body) => grain.api('/cowork/desks', { method: 'POST', body })
 const card = (page) => page.getByRole('group', { name: 'Run command' })
 
 test('backend gone while a card is on screen: the click fails softly, the card stays, and works once the backend is back', async ({ grain }) => {
@@ -34,15 +33,14 @@ test('backend gone while a card is on screen: the click fails softly, the card s
   } finally { rmScratch(ws) }
 })
 
-test('double-clicking Start on a draft desk makes one run', async ({ grain }) => {
+test('double-clicking Start on a draft chat makes one run', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' }, { text: 'final' })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'once only', title: 'Once', autonomy: 'propose', start: false })
-  await openCowork(page)
-  await rail(page).getByText('Once', { exact: true }).click()
-  await page.getByRole('button', { name: /^Start/ }).dblclick()
+  const { desk } = await deskChat(grain, { brief: 'once only', title: 'Once', start: false })
+  await openChat(page, 'Once')
+  await strip(page).getByRole('button', { name: /^Start/ }).dblclick()
   await waitStatus(grain, desk.id, 'review', 120_000)
   const first = llm.requests.filter((r) => r.messages.some((m) => m.role === 'user' && m.content === 'once only')).length
   expect(first).toBeGreaterThan(0)
@@ -59,7 +57,7 @@ test('Pause then Resume hammered five times ends in a consistent state with no d
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 60_000 })
-  const { desk } = await mk(grain, { brief: 'hammer', title: 'Hammer', autonomy: 'propose', start: true })
+  const { desk } = await deskChat(grain, { brief: 'hammer', title: 'Hammer' })
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 90_000 }).toMatch(/working|planning/)
   const results = []
   for (let i = 0; i < 5; i++) {
@@ -75,14 +73,15 @@ test('Pause then Resume hammered five times ends in a consistent state with no d
   expect(live).toBe(0)
 })
 
-test('20 desks started at once: the cap queues the rest and all of them finish', async ({ grain }) => {
+test('20 chats working autonomously at once: the cap queues the rest and all of them finish', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: { ...settingsFor, deskMaxLive: 4 } })
   await scriptLLM(grain) // unscripted: every desk's turns are plain mock replies, which block them 'Waiting on you'
   const { page } = grain
   const ids = []
-  for (let i = 0; i < 20; i++) ids.push((await mk(grain, { brief: `bulk ${i}`, title: `Bulk ${String(i).padStart(2, '0')}`, autonomy: 'propose', start: true })).desk.id)
-  await openCowork(page)
-  await expect(rail(page).locator('.desk-row')).toHaveCount(20, { timeout: 60_000 })
+  for (let i = 0; i < 20; i++) ids.push((await deskChat(grain, { brief: `bulk ${i}`, title: `Bulk ${String(i).padStart(2, '0')}` })).desk.id)
+  await page.reload()
+  await page.waitForSelector('.sidebar')
+  await expect(page.locator('.sidebar .convo-item', { hasText: /^Bulk \d\d/ })).toHaveCount(20, { timeout: 60_000 })
   await expect.poll(async () => {
     const rows = await grain.api('/cowork/desks')
     return rows.filter((d) => ['working', 'planning', 'needs_approval'].includes(d.status)).length

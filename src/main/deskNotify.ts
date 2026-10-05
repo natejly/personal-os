@@ -9,7 +9,7 @@ export function cleanNotice(raw: unknown): DeskNotice | null {
   const r = raw as Record<string, unknown>
   if (typeof r.body !== 'string' || !r.body.trim()) return null
   return {
-    title: (typeof r.title === 'string' && r.title.trim() ? r.title : 'Cowork').slice(0, 80),
+    title: (typeof r.title === 'string' && r.title.trim() ? r.title : 'Grain').slice(0, 80),
     body: r.body.slice(0, 240),
     deskId: typeof r.deskId === 'string' && /^[\w-]{1,80}$/.test(r.deskId) ? r.deskId : undefined
   }

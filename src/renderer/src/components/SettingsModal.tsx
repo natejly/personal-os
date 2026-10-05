@@ -570,8 +570,8 @@ export default function SettingsModal(): JSX.Element {
                 <input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} />
               </label>
               <SandboxSettings draft={draft} patch={patch} />
-              <h3 id="cowork-settings">Cowork</h3>
-              <p className="muted">Limits and reach for desks: the parallel sessions that work on a task in their own folder.</p>
+              <h3 id="cowork-settings">Autonomy</h3>
+              <p className="muted">Limits and reach for chats working autonomously: each works on its task in its own folder.</p>
               <CoworkSettings draft={draft} patch={patch} />
               <details className="modal-free">
                 <summary>Advanced</summary>

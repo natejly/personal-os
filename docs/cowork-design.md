@@ -1,5 +1,7 @@
 # Cowork + Planning Mode — original design
 
+> **Folded into chats, 2026-10-05.** The standalone Cowork view, its desk rail and detail pane, the `cowork` nav entry and ⌘⇧K are gone. The same desks now run behind any chat: "Work autonomously" (`AutonomyToggle.tsx`), the status strip (`DeskStrip.tsx`) and side panel with Files / Changes / Review (`DeskPanel.tsx`), and Settings → Autonomy (`CoworkSettings.tsx`). The backend (`backend/personal_os/cowork.py`) is as described here.
+
 > **Status.** This is the original implementation spec, kept for its reasoning. It is not a description
 > of the current code. The desk model, workspaces, autonomy modes, parking and the plan-mode guards
 > shipped, on main's `plans.Plans` / `runs.RunStore` substrate. These sections describe things that were

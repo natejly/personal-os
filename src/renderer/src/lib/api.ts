@@ -421,7 +421,8 @@ export const api = {
     delete: (id: string) => req<{ ok: boolean; stopped?: number }>(`/projects/${id}`, { method: 'DELETE' })
   },
   conversations: {
-    list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}`),
+    /** Chats working autonomously list among the rest. */
+    list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}&include_desks=true`),
     get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
     create: (projectId: string | null, model?: string, isPrivate = false) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model, ...(isPrivate ? { private: true } : {}) }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
@@ -658,7 +659,7 @@ export const api = {
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
       /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
-      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
+      create: (d: { brief?: string; conversation_id?: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
         req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
       /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
       addInputs: (id: string, inputs: DeskInputRef[]) =>
@@ -675,7 +676,8 @@ export const api = {
       /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
       pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
-      stop: (id: string) => req<Desk>(`/cowork/desks/${id}/stop`, { method: 'POST' }),
+      /** `detach` is a chat turning autonomy off: stopped if it can be, and the chat answers as a plain chat again. */
+      stop: (id: string, detach = false) => req<Desk>(`/cowork/desks/${id}/stop?detach=${detach}`, { method: 'POST' }),
       files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
       file: (id: string, path: string, offset = 0, length = 6000) =>
         req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),

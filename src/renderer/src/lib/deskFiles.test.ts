@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Desk, RunChanges, RunInfo } from '@shared/types'
-import { defaultDeskTab, defaultDest, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, queuePositions, recentRunIds, splitUrl, undoNote } from './deskFiles'
+import { defaultDest, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, queuePositions, recentRunIds, splitUrl, undoNote } from './deskFiles'
 
 const run = (id: string, at: number): RunInfo => ({ run_id: id, conversation_id: 'c', message_id: null, seq: 0, started_at: at, live: false, answering: false })
 const ch = (count: number): RunChanges => ({ available: true, count, state: 'applied', files: Array.from({ length: count }, (_, i) => ({ root: 'r', status: 'A' as const, path: `f${i}` })), skipped: [] })
@@ -34,13 +34,6 @@ test('groupChangesByTurn: newest first, empty turns dropped, capped', () => {
   assert.deepEqual(groupChangesByTurn(runs, { a: ch(1), b: ch(1), c: ch(1) }, 2).map((t) => t.runId), ['b', 'c'])
   assert.deepEqual(recentRunIds(runs, 2), ['b', 'c'])
   assert.deepEqual(groupChangesByTurn(runs, {}), [])
-})
-
-test('defaultDeskTab follows what the desk is waiting for', () => {
-  assert.equal(defaultDeskTab('awaiting_plan'), 'plan')
-  assert.equal(defaultDeskTab('blocked', true), 'plan')
-  assert.equal(defaultDeskTab('review'), 'output')
-  assert.equal(defaultDeskTab('working'), 'activity')
 })
 
 test('deliveryLabel, undoNote, splitUrl', () => {

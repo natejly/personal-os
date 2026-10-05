@@ -311,7 +311,7 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘⇧N / ⌘⇧D | New file / today's file |
 | ⌘U | Upload file |
 | ⌘0 ... ⌘7 | Today, Chats, Lists, Calendar, Files, Mail, Memory, Activity |
-| ⌘⇧M / ⌘⇧K | Meetings / Cowork |
+| ⌘⇧M | Meetings |
 | ⌘K | Command palette |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |

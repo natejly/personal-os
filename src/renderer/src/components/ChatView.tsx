@@ -18,7 +18,9 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { firstPrompts } from './onboarding/steps'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
-import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
+import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
+import DeskStrip, { DeskInline } from './DeskStrip'
+import DeskPanel from './DeskPanel'
 import Face from './Face'
 
 function greeting(): string {
@@ -55,6 +57,23 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   // The side panel (the `show` tool, or "Open in panel" on a block) belongs to this chat alone.
   const showKey = convo?.id ?? conversationId ?? ''
   const showing = useStore((s) => (showKey ? !!s.shows[showKey] : false))
+
+  // A chat working autonomously: the full-window chat opens its desk (plan, cards, outputs) and owns the panel.
+  const deskId = convo?.settings.deskId || undefined
+  const desk = useStore((s) => (!conversationId && deskId && s.activeDesk?.id === deskId ? s.activeDesk : null))
+  const openDesk = useStore((s) => s.openDesk)
+  const markDeskSeen = useStore((s) => s.markDeskSeen)
+  const [deskPanel, setDeskPanel] = useState(false)
+  useEffect(() => { if (deskId && !conversationId) void openDesk(deskId) }, [deskId, conversationId, openDesk])
+  // Looking at the chat is the acknowledgement. Keyed on desk+count so a failed POST /seen is not retried every render.
+  const deskUnseen = desk?.unseen ?? 0
+  const seenTried = useRef('')
+  useEffect(() => {
+    const key = `${desk?.id}:${deskUnseen}`
+    if (!desk || deskUnseen === 0 || seenTried.current === key) return
+    seenTried.current = key
+    void markDeskSeen(desk.id)
+  }, [desk, deskUnseen, markDeskSeen])
 
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
@@ -124,7 +143,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
                     <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} showContextChips
                       branchable={m.created_at > 0 && !convo?.settings.deskId && !convo?.settings.job_id}
-                      browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />
+                      browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />
                   </Fragment>
                 ))}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}
@@ -134,6 +153,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
                   <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face name={face.name || conversationId!} hue={face.hue} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
                 )}
+                {desk && <DeskInline desk={desk} events={msgs.flatMap((m) => m.tool_events ?? [])} />}
                 {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>
             )}
@@ -144,9 +164,11 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <PlanPanel conversationId={conversationId} />
+          {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
+        {desk && deskPanel && <DeskPanel desk={desk} onClose={() => setDeskPanel(false)} />}
         {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
         {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

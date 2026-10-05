@@ -153,6 +153,7 @@ def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 # ---- error shaping: no tracebacks to the model, always a way forward ----
 ALTERNATIVE = {
+    "opencode_run": "fs_edit and shell_run, making the change yourself step by step",
     "gmail_send": "gmail_draft, which writes the same email without sending it",
     "gmail_outbox": "tell the user to use the Undo button on the pending send",
     "gmail_draft": "write the email text in your reply so the user can send it",
@@ -749,8 +750,9 @@ class Toolbox:
             self._register_meetings()
         from . import subagents
         subagents.register(self)
-        from . import shell
+        from . import opencode, shell
         shell.register(self)
+        opencode.register(self)  # opencode_run: a coding agent in the shell sandbox
         from . import commands as _commands, workflows as _workflows
         _workflows.register(self)
         _commands.register(self)

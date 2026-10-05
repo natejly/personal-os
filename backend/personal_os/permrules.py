@@ -1081,7 +1081,7 @@ def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = Fals
     is still `ask` here was not cleared).
     """
     if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
-            and danger not in ("external", "schedules") and name != "shell_run"):
+            and danger not in ("external", "schedules") and name not in ("shell_run", "opencode_run")):
         return "on"
     return mode
 

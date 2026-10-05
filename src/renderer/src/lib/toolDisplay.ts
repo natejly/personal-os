@@ -45,7 +45,7 @@ const VERBS: Record<string, string> = {
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
   sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy uploaded file to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
   sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
-  shell_run: 'Run command', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
+  shell_run: 'Run command', opencode_run: 'Run coding agent', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
   fs_glob: 'Find files by name', fs_grep: 'Search file contents', fs_edit: 'Edit file', fs_copy: 'Copy file', fs_mkdir: 'Create folder',
   agent_spawn: 'Start subagent', agent_wait: 'Wait for subagents', agent_stop: 'Stop subagent',
   desk_fetch_file: 'Download file to desk',
@@ -84,6 +84,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     case 'move_local_file': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
     case 'run_python': return { verb, subject: clip(str('code').split('\n')[0] ?? '', 70) }
     case 'shell_run': return { verb, subject: clip(str('command'), 80) }
+    case 'opencode_run': return { verb, subject: clip(str('prompt'), 80) }
     case 'shell_poll':
     case 'shell_kill': return { verb, subject: str('job_id') ? `job ${str('job_id')}` : '' }
     case 'python_install': return { verb, subject: Array.isArray(a.packages) ? clip(a.packages.map(String).join(', '), 80) : '' }

@@ -98,7 +98,8 @@ def carry_desk_copies(box: Any, ctx: dict[str, Any], g: Grants, paths: list[Path
 
 def grants_for(box: Any, ctx: dict[str, Any]) -> Grants:
     roots: list[Path] = []
-    raw = box.settings().get("workspaceRoots") or []
+    # The run's settings first: a chat bound to a working folder carries it in its own workspaceRoots.
+    raw = (ctx.get("settings") or box.settings()).get("workspaceRoots") or []
     for r in raw if isinstance(raw, list) else []:
         try:
             p = mac.allowed_root(str(r))

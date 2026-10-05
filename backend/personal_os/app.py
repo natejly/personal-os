@@ -661,6 +661,25 @@ _approval_notes: dict[str, str] = {}
 QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 
+def _working_folder(conv_settings: dict[str, Any]) -> str | None:
+    """The folder the user bound a chat to, when it still exists and may be granted (mac.allowed_root: inside home,
+    not home itself, not around the app's data). A folder that stopped qualifying is simply not granted."""
+    raw = str(conv_settings.get("workingFolder") or "").strip()
+    if not raw:
+        return None
+    try:
+        p = mac.allowed_root(raw)
+    except mac.LocalPathError:
+        return None
+    return str(p) if p.is_dir() else None
+
+
+FOLDER_HINT = ("## Working folder\nThe user bound this chat to `{path}`. shell_run, opencode_run, the fs_* tools and the local file "
+               "tools may read and write there; an empty cwd or a relative path means that folder. For a whole coding task "
+               "(a feature, a fix, a refactor) prefer opencode_run with a self-contained brief, then check its diff. Say which "
+               "files you changed.")
+
+
 def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
     """Folders a shell or file call counts as inside: the granted roots plus the active desk's workspace."""
     roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
@@ -1309,6 +1328,17 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
+    if "workingFolder" in settings_patch:  # the chat's working folder: a grantable folder, stored resolved; "" unbinds
+        raw = str(settings_patch.get("workingFolder") or "").strip()
+        if raw:
+            try:
+                p = mac.allowed_root(raw)
+            except mac.LocalPathError as e:
+                raise HTTPException(422, str(e)) from None
+            if not p.is_dir():
+                raise HTTPException(422, f"{p} is not a folder")
+            raw = str(p)
+        settings_patch["workingFolder"] = raw
     # Clearing the banner has to drop library text that was copied into the sandbox, or the next
     # command can print it back as if the chat were trusted again.
     if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
@@ -1682,8 +1712,8 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
-    if run is not None and snaps.wants(name, args, run.desk_id):
-        await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id))
+    if run is not None and snaps.wants(name, args, run.desk_id, ctx.get("settings")):
+        await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id, ctx.get("settings")))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
         return await toolbox.call(name, args, ctx)
     result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
@@ -1796,6 +1826,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "error", {"message": "Conversation not found"}
         return
     cfg = settings()
+    # A chat bound to a working folder (the Folder control under the composer) grants that folder to this run the
+    # way a Settings workspace root would, and first, so an empty cwd or a relative path means that folder.
+    folder = _working_folder(conv["settings"])
+    if folder:
+        cfg = {**cfg, "workspaceRoots": [folder, *[r for r in (cfg.get("workspaceRoots") or []) if r != folder]]}
     model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
@@ -2233,6 +2268,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
+                 FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):

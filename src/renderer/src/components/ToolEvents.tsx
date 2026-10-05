@@ -45,7 +45,7 @@ const ICONS: Record<string, JSX.Element> = {
   sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
   sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_export_file: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />,
   sandbox_checkpoint: <Terminal size={13} />, sandbox_restore: <Terminal size={13} />,
-  shell_run: <Terminal size={13} />, shell_poll: <Hourglass size={13} />, shell_kill: <OctagonX size={13} />, python_install: <Package size={13} />,
+  shell_run: <Terminal size={13} />, opencode_run: <Bot size={13} />, shell_poll: <Hourglass size={13} />, shell_kill: <OctagonX size={13} />, python_install: <Package size={13} />,
   fs_glob: <Search size={13} />, fs_grep: <FileSearch size={13} />, fs_edit: <FilePen size={13} />, fs_copy: <Copy size={13} />, fs_mkdir: <FolderPlus size={13} />,
   desk_fetch_file: <Download size={13} />, todo_write: <ListChecks size={13} />,
   browser_open: <Globe size={13} />, browser_snapshot: <BookOpen size={13} />, browser_click: <MousePointerClick size={13} />,

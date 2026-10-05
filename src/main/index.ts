@@ -345,6 +345,10 @@ if (gotLock) app.whenReady().then(async () => {
     const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : r.filePaths
   })
+  handle('data:choose-folder', async () => {
+    const r = await dialog.showOpenDialog({ title: 'Work in a folder', defaultPath: app.getPath('home'), properties: ['openDirectory', 'createDirectory'] })
+    return r.canceled || !r.filePaths[0] ? null : r.filePaths[0]
+  })
   // Folders only: openPath on a file or .app would run it.
   handle('data:reveal', async (_e, path: string) => {
     const p = String(path)

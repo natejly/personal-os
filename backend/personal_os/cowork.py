@@ -261,6 +261,9 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
             str(facts.get("shell_network")), "network reaches only package registries and hosts the user allowed")
         out.append(f"- `shell_run` runs in the workspace under the OS sandbox and can write only inside it; {net}. Long commands: "
                    "`background=true`, then `shell_poll`.")
+    if has("opencode_run"):
+        out.append("- `opencode_run` hands a whole coding task (a feature, a fix, a refactor in a repo under the workspace) to a "
+                   "coding agent that edits files and runs commands there; give it a self-contained brief and check its diff after.")
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")

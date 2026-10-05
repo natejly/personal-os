@@ -99,7 +99,8 @@ _PROTECTED_WRITES = r"""(deny file-write* (regex #"/\.(zshrc|zprofile|zshenv|zlo
 """
 
 
-def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None) -> str:
+def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None,
+                  allow_hosts: list[str] | None = None, loopback: bool = False) -> str:
     """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
 
     Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
@@ -115,6 +116,11 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     net = "(allow network*)" if network else "(deny network*)"
     if proxy_port and not network:
         net += f'\n(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))'
+    for h in allow_hosts or []:  # "localhost:4000" or "*:443": Seatbelt matches ports and localhost, never other names
+        if not network and re.fullmatch(r"(localhost|\*):\d{1,5}", h):
+            net += f'\n(allow network-outbound (remote tcp "{h}"))'
+    if loopback and not network:  # a program that talks to itself over a local port (opencode's private server)
+        net += '\n(allow network-bind network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))'
     # The shared work venv lives under the app data dir, which is denied above; the shell has its bin first on PATH, so it must
     # be able to read it (pip, python). Appended after the deny so it wins; only that folder, never the database beside it.
     late = ""

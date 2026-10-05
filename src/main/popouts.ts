@@ -8,6 +8,7 @@ import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
 import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
+import { reveal, stealFocus } from './background'
 
 const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
@@ -189,7 +190,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
   // Before ready-to-show, so a translucent pop-out never flashes opaque on open.
   if (entry.opacity < 1) win.setOpacity(entry.opacity)
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => reveal(win))
   guardNavigation(win.webContents)
   const onBounds = (): void => scheduleSave(windowId, entry)
   win.on('move', onBounds)
@@ -306,7 +307,7 @@ const raiseMain = (): void => {
     m.show()
     m.focus()
   }
-  app.focus({ steal: true })
+  stealFocus()
 }
 
 /**
@@ -356,7 +357,7 @@ export const gather = (): GatherState => {
       m.show()
       m.focus()
     }
-    app.focus({ steal: true })
+    stealFocus()
     return state()
   }
 
@@ -401,7 +402,7 @@ export const gather = (): GatherState => {
   }
 
   setFronted(true)
-  app.focus({ steal: true })
+  stealFocus()
   return state()
 }
 

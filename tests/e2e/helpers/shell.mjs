@@ -126,6 +126,7 @@ export async function launchSupervised({ settings = {} } = {}) {
   const env = {
     ...process.env,
     GRAIN_USER_DATA: profile,
+    ...(process.env.E2E_FOREGROUND ? {} : { GRAIN_E2E_BACKGROUND: '1' }),
     GRAIN_SECRETS_BACKEND: 'file',
     PERSONAL_OS_BASE_URL: llm.url,
     PERSONAL_OS_API_KEY: 'mock-key',

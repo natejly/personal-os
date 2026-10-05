@@ -111,7 +111,9 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     PERSONAL_OS_BACKEND_URL: backend.url,
     PERSONAL_OS_AUTH_TOKEN: token,
     PERSONAL_OS_DATA_DIR: dataDir,
-    GRAIN_USER_DATA: profile
+    GRAIN_USER_DATA: profile,
+    // Windows stay real but inactive and out of the Dock; E2E_FOREGROUND=1 restores normal behaviour.
+    ...(process.env.E2E_FOREGROUND ? {} : { GRAIN_E2E_BACKGROUND: '1' })
   }
   delete env.ELECTRON_RUN_AS_NODE
   const executablePath = join(ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim())
@@ -128,6 +130,8 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()) })
     page.on('pageerror', (e) => consoleErrors.push('pageerror: ' + e.message))
     await page.waitForSelector('.sidebar, [class*="sidebar"]', { timeout: 60_000 })
+    // Background mode shows windows inactive; Chromium crashes filling some inputs in a window that is never key, so make it key (the accessory policy keeps the app itself from coming forward).
+    if (!process.env.E2E_FOREGROUND) await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isVisible()) w.focus() })
     return { app, page }
   }
   const g = { api, backend, llm, dataDir, scratch, token, consoleErrors }

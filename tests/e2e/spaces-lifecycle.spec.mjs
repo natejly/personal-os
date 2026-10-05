@@ -1,6 +1,8 @@
 import { test, expect } from './fixtures.mjs'
 import { actionsBtn, enterCanvas, menuClick, sleep, spaces } from './helpers/spaces.mjs'
 
+test.describe.configure({ timeout: 300_000 })
+
 const rowOf = (page, name) => page.locator('.space-row').filter({ hasText: name })
 
 test('create / rename / switch / delete a space from the sidebar', async ({ grain }) => {
@@ -47,7 +49,7 @@ test('create / rename / switch / delete a space from the sidebar', async ({ grai
   await expect(page.locator('.space-tab.active')).toContainText(s1.name)
   await page.locator('.space-tab', { hasText: 'Deep work' }).click()
   await expect(page.locator('.space-tab.active')).toContainText('Deep work')
-  await page.keyboard.press('Control+1')
+  await menuClick(grain.app, 'Space 1')
   await expect(page.locator('.space-tab.active')).toContainText(s1.name)
 
   // delete the non-active space

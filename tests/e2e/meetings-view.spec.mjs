@@ -107,6 +107,8 @@ test('start with no usable transcription gives a readable error, not a spinner',
   const st = await api('/meetings/status')
   expect(st.active).toBeNull()
   expect(m.id).toBeTruthy()
+  // a refused start leaves no empty meeting behind: only the one this test made
+  expect((await api('/meetings')).map((x) => x.id)).toEqual([m.id])
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 

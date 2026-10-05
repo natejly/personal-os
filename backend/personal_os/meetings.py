@@ -2499,6 +2499,10 @@ class MeetingService:
                 seg_id, text=res["text"], detail=res["detail"], backend=res["backend"],
                 error=res["error"], state=res["state"], wav_path=res["wav_path"],
                 wav_bytes=int(res["wav_bytes"] or 0), attempts=int(res.get("attempts") or 0))
+            if res["wav_bytes"] or res.get("evicted"):
+                # A kept wav changes what is on disk. The row's `audio_bytes` is what the UI's "delete the
+                # audio" button and the size label read, and nothing else refreshes it for a clip that succeeded.
+                self.meetings.audio_bytes(meeting_id)
             if res["error"] and not res.get("evicted"):
                 self.meetings.patch(meeting_id, {"error": res["error"]})
                 self._emit("status", meeting_id, status="error", error=str(res["error"])[:300])

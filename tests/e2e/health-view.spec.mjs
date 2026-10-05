@@ -279,3 +279,19 @@ test('900 readings over 90 days at 820x520: tiles, sparklines and the trend rend
   await expect(page.getByRole('img', { name: /Meds taken over 90 days/ })).toBeVisible()
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
+
+test('backend dies while the page is open: logging reports an error and the page stays usable', async ({ grain }) => {
+  const { page, backend } = grain
+  await openHealth(grain)
+  backend.child.kill('SIGKILL')
+  const steps = tile(page, 'Steps')
+  await steps.getByLabel(/Add to Steps/).fill('1234')
+  await steps.getByRole('button', { name: 'Add' }).click()
+  // a readable error toast, the tile unchanged, the form still there
+  await expect(page.locator('.toast.error, [role="alert"]').first()).toBeVisible({ timeout: 30_000 })
+  await expect(steps.locator('.hl-tile-value')).toHaveText('—')
+  await expect(steps.getByLabel(/Add to Steps/)).toHaveValue('1234')
+  await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' }).click()
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Health' }).first()).toBeVisible()
+})

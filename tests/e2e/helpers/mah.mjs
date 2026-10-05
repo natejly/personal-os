@@ -40,9 +40,11 @@ export const realErrors = (errs) => errs.filter((e) => !BENIGN.some((b) => b.tes
 /** Segment rows for a meeting: [{id,channel,t,text,speaker,state}] */
 export function seedSegments(dataDir, meetingId, segs) {
   const t0 = Date.now() / 1000
+  // A diarized clip carries its speaker both on the row and in the detail's utterances, which is where the backend reads ids from.
   sql(dataDir, segs.map((s, i) => [
-    'INSERT INTO meeting_segments(id,meeting_id,channel,seq,t_start,t_end,started_at,duration_ms,text,speaker,state,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-    [s.id ?? `seg${i}`, meetingId, s.channel ?? 'mic', i, s.t ?? i * 10, (s.t ?? i * 10) + 8, t0, 8000, s.text, s.speaker ?? '', s.state ?? 'done', t0]
+    'INSERT INTO meeting_segments(id,meeting_id,channel,seq,t_start,t_end,started_at,duration_ms,text,speaker,state,detail,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [s.id ?? `seg${i}`, meetingId, s.channel ?? 'mic', i, s.t ?? i * 10, (s.t ?? i * 10) + 8, t0, 8000, s.text, s.speaker ?? '', s.state ?? 'done',
+      JSON.stringify(s.speaker ? { utterances: [{ speaker: s.speaker, start: 0, end: 8, text: s.text }] } : {}), t0]
   ]))
   sql(dataDir, [['UPDATE meetings SET transcript=? WHERE id=?', [segs.map((s) => s.text).join('\n'), meetingId]]])
 }

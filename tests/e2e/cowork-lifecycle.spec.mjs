@@ -1,20 +1,17 @@
 import { test } from './fixtures.mjs'
 import { scriptLLM } from './helpers/scriptllm.mjs'
-import { expect, realErrors, resize, deskStatus, waitStatus, openCowork, rail, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
+import { expect, realErrors, resize, newChat, say, deskStatus, waitStatus, deskChat, openChat, chatRow, strip, panel, openPanel, turnOn, deskOf, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
-const mk = (grain, body) => grain.api('/cowork/desks', { method: 'POST', body })
-
-test('desk_ask: the desk waits on the question and the answer resumes it', async ({ grain }) => {
+test('desk_ask: the chat waits on the question and the answer resumes it', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Which quarter?', options: ['Q1', 'Q3'] } }] })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'compare quarters', title: 'Asker', autonomy: 'propose', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Asker').click()
+  const { desk } = await deskChat(grain, { brief: 'compare quarters', title: 'Asker' })
+  await openChat(page, 'Asker')
   await expect(page.locator('.desk-ask').first()).toContainText('Which quarter?', { timeout: 90_000 })
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText(/Approval needed|Waiting on you/)
+  await expect(strip(page)).toContainText(/Approval needed|Waiting on you/)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'done' })
   await page.getByRole('group', { name: 'Suggested answers' }).getByRole('button', { name: 'Q3' }).first().click()
   await waitStatus(grain, desk.id, 'review')
@@ -27,9 +24,8 @@ test('desk_ask answered with typed text via ⌘↵', async ({ grain }) => {
   const llm = await scriptLLM(grain)
   llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Who gets it?' } }] })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'send it', title: 'Typed asker', autonomy: 'propose', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Typed asker').click()
+  const { desk } = await deskChat(grain, { brief: 'send it', title: 'Typed asker' })
+  await openChat(page, 'Typed asker')
   await expect(page.locator('.desk-ask').first()).toContainText('Who gets it?', { timeout: 90_000 })
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'done' })
   const box = page.getByRole('textbox', { name: 'Your answer' }).first()
@@ -40,187 +36,181 @@ test('desk_ask answered with typed text via ⌘↵', async ({ grain }) => {
   expect(realErrors(grain)).toEqual([])
 })
 
-test('stop a working desk, then message it to pick it back up; delete removes it', async ({ grain }) => {
+test('the composer answers a question too: a message to a waiting chat goes to its desk', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+  const llm = await scriptLLM(grain)
+  llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Which colour?' } }] })
+  const { page } = grain
+  const { desk } = await deskChat(grain, { brief: 'paint it', title: 'Composer answer' })
+  await openChat(page, 'Composer answer')
+  await expect(page.locator('.desk-ask').first()).toContainText('Which colour?', { timeout: 90_000 })
+  llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'done' })
+  await say(page, 'teal-from-the-composer')
+  await waitStatus(grain, desk.id, 'review')
+  expect(JSON.stringify(llm.requests)).toContain('teal-from-the-composer')
+  expect(realErrors(grain)).toEqual([])
+})
+
+test('stop a working chat from the strip, then message it to pick it back up', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
   const { page } = grain
-  page.on('dialog', (d) => void d.accept())
-  const { desk } = await mk(grain, { brief: 'slow work', title: 'Slowpoke', autonomy: 'propose', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Slowpoke').click()
+  const { desk } = await deskChat(grain, { brief: 'slow work', title: 'Slowpoke' })
+  await openChat(page, 'Slowpoke')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText(/Working|Planning/)
-  await page.getByRole('button', { name: /Stop/ }).dblclick()
+  await expect(strip(page)).toContainText(/Working|Planning/)
+  await expect(chatRow(page, 'Slowpoke').locator('.convo-desk')).toHaveAttribute('aria-label', /Working|Planning/)
+  await strip(page).getByRole('button', { name: /Stop/ }).dblclick()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText('Stopped')
-  await expect(page.getByRole('button', { name: /^Stop$/ })).toHaveCount(0)
-  // a stopped desk picks work back up when messaged
+  await expect(strip(page)).toContainText('Stopped')
+  await expect(strip(page).getByRole('button', { name: /^Stop$/ })).toHaveCount(0)
+  await expect(chatRow(page, 'Slowpoke').locator('.convo-desk')).toHaveCount(0) // a stopped chat carries no mark
+  // a stopped desk picks work back up when messaged from the composer
   llm.queue.length = 0
   llm.push({ text: 'Resuming.' })
-  const steer = page.getByRole('textbox').last()
-  await steer.fill('carry on please')
-  await steer.press('Meta+Enter')
+  await say(page, 'carry on please')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).not.toBe('stopped')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 90_000 }).toMatch(/done|review|paused|blocked|interrupted|failed/)
-  // a desk that is waiting on the user cannot be deleted while it holds a card (DELETE_FROM): no trash button
-  await expect(page.locator('[title="Delete this desk"]')).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('delete: only offered once the desk is stopped; confirm dialogs gate it; workspace purge optional', async ({ grain }) => {
-  await grain.api('/settings', { method: 'PUT', body: settingsFor })
-  const { page } = grain
-  const { desk } = await mk(grain, { brief: 'to delete', title: 'Doomed', autonomy: 'propose', start: false })
-  await openCowork(page)
-  await rail(page).getByText('Doomed').click()
-  const trash = page.locator('[title="Delete this desk"]')
-  // Cancel the first confirm: nothing is deleted
-  page.once('dialog', (d) => void d.dismiss())
-  await trash.click()
-  await page.waitForTimeout(500)
-  expect(await grain.api('/cowork/desks')).toHaveLength(1)
-  // Accept the confirm, keep the workspace files
-  const answers = [true, false] // delete? yes. also purge the workspace files? no.
-  page.on('dialog', (d) => void (answers.shift() ? d.accept() : d.dismiss()))
-  await trash.click()
-  await expect.poll(async () => (await grain.api('/cowork/desks')).length).toBe(0)
-  await expect(page.locator('.empty-state')).toBeVisible()
-  expect((await grain.api(`/cowork/desks/${desk.id}`, { raw: true })).status).toBe(404)
-  expect(realErrors(grain)).toEqual([])
-})
-
-test('pause and resume a desk', async ({ grain }) => {
+test('turning autonomy off stops the desk and the chat answers as a plain chat; on again picks the same desk up', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'pausable', title: 'Pausable', autonomy: 'propose', start: true })
-  await openCowork(page)
-  await rail(page).getByText('Pausable').click()
+  const { desk, chat } = await deskChat(grain, { brief: 'switch me off', title: 'Switchable' })
+  await openChat(page, 'Switchable')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await page.getByRole('button', { name: /Pause/ }).click()
-  await waitStatus(grain, desk.id, 'paused', 60_000)
-  await expect(rail(page).locator('.desk-row-status').first()).toHaveText('Paused')
+  await page.getByRole('button', { name: /Autonomous:/ }).click()
+  await page.getByRole('dialog', { name: 'Work autonomously' }).getByRole('button', { name: 'Turn off' }).click()
+  await waitStatus(grain, desk.id, 'stopped', 60_000)
+  await expect(strip(page)).toHaveCount(0)
+  expect(await deskOf(grain, chat.id)).toBe('')
   llm.queue.length = 0
+  llm.push({ text: 'plain-chat-reply' })
+  await say(page, 'just a question')
+  await expect(page.locator('.msg.assistant').last()).toContainText('plain-chat-reply', { timeout: 60_000 })
+  expect(await deskStatus(grain, desk.id)).toBe('stopped') // the message did not wake the desk
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await page.getByRole('button', { name: /Resume/ }).click()
+  await turnOn(page, 'Work and propose')
+  await expect(strip(page)).toBeVisible()
+  expect(await deskOf(grain, chat.id)).toBe(desk.id)
   await waitStatus(grain, desk.id, 'review', 90_000)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('new desk form: validation, ⌘↵, draft, autonomy, limits, then Start', async ({ grain }) => {
+test('pause and resume from the strip', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+  const llm = await scriptLLM(grain)
+  llm.push({ calls: [WRITE], delay: 120_000 })
+  const { page } = grain
+  const { desk } = await deskChat(grain, { brief: 'pausable', title: 'Pausable' })
+  await openChat(page, 'Pausable')
+  await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
+  await strip(page).getByRole('button', { name: /Pause/ }).click()
+  await waitStatus(grain, desk.id, 'paused', 60_000)
+  await expect(strip(page)).toContainText('Paused')
+  llm.queue.length = 0
+  llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
+  await strip(page).getByRole('button', { name: /Resume/ }).click()
+  await waitStatus(grain, desk.id, 'review', 90_000)
+  expect(realErrors(grain)).toEqual([])
+})
+
+test('the Work autonomously menu: needs a chat first, sets autonomy and limits, and autonomy changes later', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   const { page } = grain
-  await openCowork(page)
-  await page.getByRole('button', { name: 'New desk' }).first().click()
-  const create = page.getByRole('button', { name: /Create (and start|draft)/ })
-  await expect(create).toBeDisabled()
-  await page.getByRole('textbox').filter({ hasText: '' }).first().fill('   ')
-  await expect(create).toBeDisabled()
-  await page.locator('.desk-new textarea').fill('Summarise the thing')
-  await page.getByPlaceholder('Taken from the brief').fill('My draft desk')
-  await page.getByLabel(/Ask as it goes/).check()
-  await page.locator('.desk-limits input[type=number]').fill('3')
-  await page.getByLabel('Start it now').uncheck()
-  await expect(page.getByRole('button', { name: /Create draft/ })).toBeVisible()
-  await page.locator('.desk-new textarea').press('Meta+Enter')
-  await expect.poll(async () => (await grain.api('/cowork/desks')).length).toBe(1)
-  const [d] = await grain.api('/cowork/desks')
-  expect(d).toMatchObject({ title: 'My draft desk', status: 'draft', autonomy: 'ask' })
+  await newChat(page)
+  await expect(page.getByRole('button', { name: /Work autonomously/ })).toBeDisabled() // nothing to work on yet
+  llm.push({ text: 'Noted.' })
+  await say(page, 'Summarise the thing')
+  await expect(page.locator('.msg.assistant').last()).toContainText('Noted.', { timeout: 60_000 })
+  const [chat] = await grain.api('/conversations?include_desks=true')
+  llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Hold on?' } }] })
+  await turnOn(page, 'Ask as it goes', 3)
+  await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
+  const id = await deskOf(grain, chat.id)
+  const d = await grain.api(`/cowork/desks/${id}`)
+  expect(d).toMatchObject({ autonomy: 'ask', conversation_id: chat.id })
   expect(d.budget.maxTurns).toBe(3)
-  await expect(rail(page)).toContainText('Drafts & paused')
-  // open the draft, change autonomy, then Start it
-  await rail(page).getByText('My draft desk').click()
-  await page.getByRole('button', { name: /Autonomy and limits/ }).or(page.locator('[title="Autonomy and limits"]')).click()
-  await page.getByLabel(/Work and propose/).check()
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await grain.api(`/cowork/desks/${d.id}`)).autonomy).toBe('propose')
-  llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await page.getByRole('button', { name: /Start/ }).click()
-  await waitStatus(grain, d.id, 'review', 90_000)
+  expect(d.brief).toBe('Summarise the thing') // the chat's own ask is the brief
+  // change autonomy while it works: takes effect on its next turn
+  await page.getByRole('button', { name: /Autonomous: Ask as it goes/ }).click()
+  await page.getByRole('dialog', { name: 'Work autonomously' }).getByLabel(/Work and propose/).click() // saved, then shown
+  await expect.poll(async () => (await grain.api(`/cowork/desks/${id}`)).autonomy).toBe('propose')
+  await expect(page.getByRole('button', { name: /Autonomous: Work and propose/ })).toBeVisible()
+  // plan mode steps aside while the chat works autonomously
+  await expect(page.locator('.composer-footer .plan-mode')).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('empty brief is refused by the API; unknown autonomy too', async ({ grain }) => {
-  const r1 = await grain.api('/cowork/desks', { method: 'POST', body: { brief: '   ' }, raw: true })
-  expect(r1.status).toBe(400)
-  const r2 = await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'x', autonomy: 'yolo' }, raw: true })
-  expect(r2.status).toBe(400)
-  expect(await grain.api('/cowork/desks')).toHaveLength(0)
+test('the API refuses an empty brief, an unknown autonomy, an unknown chat and a second desk on one chat', async ({ grain }) => {
+  expect((await grain.api('/cowork/desks', { method: 'POST', body: { brief: '   ' }, raw: true })).status).toBe(400)
+  expect((await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'x', autonomy: 'yolo' }, raw: true })).status).toBe(400)
+  expect((await grain.api('/cowork/desks', { method: 'POST', body: { conversation_id: 'nope' }, raw: true })).status).toBe(404)
+  const { chat } = await deskChat(grain, { title: 'Once bound', start: false })
+  expect((await grain.api('/cowork/desks', { method: 'POST', body: { conversation_id: chat.id }, raw: true })).status).toBe(409)
+  expect(await grain.api('/cowork/desks')).toHaveLength(1)
 })
 
-test('desk tabs: Files lists the workspace, Output, Browser empty state, Plan empty state', async ({ grain }) => {
+test('workspace panel: Files lists the workspace, Changes lists the turns, Review shows the output', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
   const { page } = grain
-  const { desk } = await mk(grain, { brief: 'tabs', title: 'Tabby', autonomy: 'propose', start: true })
-  await openCowork(page)
+  const { desk } = await deskChat(grain, { brief: 'tabs', title: 'Tabby' })
   await waitStatus(grain, desk.id, 'review')
-  await rail(page).getByText('Tabby').click()
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Files/ }).click()
-  await expect(page.getByText('report.md').first()).toBeVisible()
-  await page.getByText('report.md').first().click()
-  await expect(page.getByText('Hello from the desk').first()).toBeVisible()
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Browser/ }).click()
-  await expect(page.getByText("This desk hasn't opened its browser.")).toBeVisible()
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Plan/ }).click()
-  await expect(page.getByText('No plan yet.')).toBeVisible()
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Output/ }).click()
-  await expect(page.locator('.desk-output')).toContainText('The report')
-  await page.locator('.desk-tabs').getByRole('button', { name: /^Activity/ }).click()
+  await openChat(page, 'Tabby')
+  await openPanel(page, 'Files')
+  await expect(panel(page).getByText('report.md').first()).toBeVisible()
+  await panel(page).getByText('report.md').first().click()
+  await expect(panel(page).getByText('Hello from the desk').first()).toBeVisible()
+  await openPanel(page, 'Changes')
+  await expect(panel(page).getByText(/What each turn changed/)).toBeVisible()
+  await openPanel(page, 'Review')
+  await expect(panel(page).locator('.desk-output')).toContainText('The report')
+  await panel(page).getByRole('button', { name: 'Close the workspace panel' }).click()
+  await expect(panel(page)).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('25 desks on the rail: sections, counts, [ and ] stepping, at 820x520', async ({ grain }) => {
+test('25 autonomous chats list among chats at 820x520 without overflowing', async ({ grain }) => {
   await resize(grain)
   const { page } = grain
-  for (let i = 0; i < 25; i++) await mk(grain, { brief: `brief ${i}`, title: `Desk ${String(i).padStart(2, '0')}`, autonomy: 'plan', start: false })
-  await openCowork(page)
-  await expect(rail(page).locator('.desk-row')).toHaveCount(25, { timeout: 30_000 })
-  await expect(rail(page).locator('h4').first()).toContainText('25')
-  const titles = await rail(page).locator('.desk-row-title').allInnerTexts()
-  const name = (i) => titles[(i + titles.length) % titles.length].trim()
-  await rail(page).locator('.desk-row').nth(3).click()
-  await expect(rail(page).locator('.desk-row.active')).toContainText(name(3))
-  await page.locator('.desk-head').click() // focus outside any field
-  await page.keyboard.press(']')
-  await expect(rail(page).locator('.desk-row.active')).toContainText(name(4))
-  await page.keyboard.press('[')
-  await page.keyboard.press('[')
-  await expect(rail(page).locator('.desk-row.active')).toContainText(name(2))
-  await rail(page).locator('.desk-row').first().click()
-  await page.locator('.desk-head').click()
-  await page.keyboard.press('[')
-  await expect(rail(page).locator('.desk-row.active')).toContainText(name(-1)) // wraps
-  // the rail scrolls rather than overflowing the window
+  for (let i = 0; i < 25; i++) await deskChat(grain, { brief: `brief ${i}`, title: `Desk ${String(i).padStart(2, '0')}`, autonomy: 'plan', start: false })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
+  await expect(page.locator('.sidebar .convo-item', { hasText: /^Desk \d\d/ })).toHaveCount(25, { timeout: 30_000 })
+  await openChat(page, 'Desk 03')
+  await expect(strip(page)).toContainText('Draft')
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
   expect(overflow).toBe(false)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('a desk started elsewhere (agent tool, scheduled job) shows up on an open rail without a reload', async ({ grain }) => {
+test('a desk started elsewhere (agent tool, scheduled job) shows up among chats without a reload', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const { page } = grain
-  await openCowork(page)
-  await expect(page.locator('.empty-state')).toBeVisible()
-  await mk(grain, { brief: 'from elsewhere', title: 'Elsewhere desk', autonomy: 'plan', start: false })
-  await expect(rail(page).getByText('Elsewhere desk')).toBeVisible()
-  await mk(grain, { brief: 'again', title: 'Elsewhere two', autonomy: 'plan', start: false })
-  await expect(rail(page).getByText('Elsewhere two')).toBeVisible()
+  await deskChat(grain, { brief: 'from elsewhere', title: 'Elsewhere desk', autonomy: 'plan', start: false })
+  await expect(chatRow(page, 'Elsewhere desk')).toBeVisible()
+  await grain.api('/cowork/desks', { method: 'POST', body: { brief: 'again', title: 'Elsewhere two', autonomy: 'plan', start: false } })
+  await expect(chatRow(page, 'Elsewhere two')).toBeVisible()
   expect(realErrors(grain)).toEqual([])
 })
 
-test('desk with a 100 KB brief and a long title is created and rendered', async ({ grain }) => {
+test('a chat with a 100 KB brief and a long title works autonomously and renders', async ({ grain }) => {
   await resize(grain)
   const { page } = grain
   const brief = ('lorem ipsum dolor sit amet '.repeat(4000)).slice(0, 100_000)
-  const { desk } = await mk(grain, { brief, title: 'T'.repeat(300), autonomy: 'plan', start: false })
-  await openCowork(page)
-  await rail(page).locator('.desk-row').first().click()
-  await expect(page.locator('.desk-brief')).toBeVisible()
+  const { desk } = await deskChat(grain, { brief, title: 'T'.repeat(300), autonomy: 'plan', start: false })
+  await page.reload() // made before this window's event stream was up
+  await page.waitForSelector('.sidebar')
+  await chatRow(page, 'TTTT').click()
+  await expect(strip(page)).toBeVisible()
   expect((await grain.api(`/cowork/desks/${desk.id}`)).brief.length).toBeGreaterThan(50_000)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
   expect(realErrors(grain)).toEqual([])
 })

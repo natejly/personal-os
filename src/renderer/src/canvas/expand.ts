@@ -54,8 +54,8 @@ export function expandWindow(w: CanvasWindow): void {
       if (w.ref_id) app.openProject(w.ref_id)
       break
     case 'crew':
-      // A desk opens in Cowork; a workflow or one of its runs opens in the Library's automations tab.
-      if (w.config.ref_kind === 'desk' && w.ref_id) { app.setView('cowork'); void app.openDesk(w.ref_id) }
+      // A desk opens as the chat it works in; a workflow or one of its runs opens in the Library's automations tab.
+      if (w.config.ref_kind === 'desk' && w.ref_id) void app.goToDesk(w.ref_id)
       else { app.setLibraryTab('automations'); app.setView('library') }
       break
   }

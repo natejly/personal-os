@@ -290,6 +290,8 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   const lastBrowser = browserSession ? latestBrowserCall(events) : null
   // The context panel only ever shows the main view's chat, so "See why" is offered there alone.
   const inMainChat = useStore((s) => s.view === 'chat' && s.focusedConversationId === conversationId)
+  // A chat working autonomously shows its desk's plan card at the foot of the transcript (DeskInline), so not twice.
+  const deskPlanShown = useStore((s) => inMainChat && s.activeDesk?.conversation_id === conversationId && !!s.activeDesk.plan)
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
 
@@ -330,14 +332,14 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
         {t.name === 'desk_start' && !t.pending && !t.error && /"desk_id":\s*"([^"]+)"/.test(t.result_preview ?? '') && (
           <button className="link small" onClick={() => {
             const id = /"desk_id":\s*"([^"]+)"/.exec(t.result_preview ?? '')?.[1]
-            if (id) { useStore.getState().setView('cowork'); void useStore.getState().openDesk(id) }
-          }}>Open the desk</button>
+            if (id) void useStore.getState().goToDesk(id)
+          }}>Open its chat</button>
         )}
         {t.name === 'search_memory' && !t.pending && !t.error && recalledChats(t.result_preview).map((c) => (
           <button key={c.id} className="link small" title="Open this chat" onClick={() => void useStore.getState().selectChat(c.id)}>{c.title}</button>
         ))}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
-        {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
+        {t.pending && t.needs_approval && t.name === 'propose_plan' && !deskPlanShown && <PlanApproval event={t} conversationId={conversationId} />}
         {/* A question is answered, not permitted: its options and a text box instead of Allow/Deny. */}
         {t.pending && t.needs_approval && QUESTION_TOOLS.has(t.name) && <AskQuestion event={t} conversationId={conversationId} />}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && !QUESTION_TOOLS.has(t.name) && (

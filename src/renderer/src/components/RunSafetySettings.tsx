@@ -12,7 +12,7 @@ export default function RunSafetySettings({ draft, patch }: { draft: Settings; p
   return (
     <>
       <HostList title="Allowed hosts after reading untrusted content"
-        help="Once a reply has read a web page, mail or another outside source, it may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains; desks also use the Allowed sites list under Cowork."
+        help="Once a reply has read a web page, mail or another outside source, it may only fetch links you or a search gave it, plus these hosts. A name also allows its subdomains; chats working autonomously also use the Allowed sites list under Autonomy."
         value={draft.fetchAllowlist ?? []} onChange={(fetchAllowlist) => patch({ fetchAllowlist })} />
       <div className="send-hold">
         <span className="toggle-text"><b>Unattended runs</b><small>What a scheduled job or other run with nobody watching does with a call that would ask for approval.</small></span>

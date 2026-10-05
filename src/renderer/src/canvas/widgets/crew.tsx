@@ -5,7 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import Face from '../../components/Face'
 import CrewRing from '../../components/CrewRing'
-import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../components/DeskRail'
+import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../lib/deskStatus'
 import { ParamForm } from '../../components/WorkflowsPanel'
 import type { WidgetDef, WidgetProps } from '../registry'
 
@@ -219,7 +219,7 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
 
   const openRoot = (): void => {
     const app = useStore.getState()
-    if (root.kind === 'desk') { app.setView('cowork'); void app.openDesk(root.id) } else { app.setLibraryTab('automations'); app.setView('library') }
+    if (root.kind === 'desk') void app.goToDesk(root.id); else { app.setLibraryTab('automations'); app.setView('library') }
   }
   const resumable = run && ['interrupted', 'failed', 'cancelled'].includes(run.status) && run.approved_digest
 
@@ -247,7 +247,7 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
         {workflow && (!run || ROOT_DONE.has(run.status)) && (
           <button className={`icon-btn ghost xs${running ? ' on' : ''}`} title="Run this workflow again" aria-pressed={running} onClick={() => setRunning((r) => !r)}><Play size={11} /></button>
         )}
-        <button className="icon-btn ghost xs" title={root.kind === 'desk' ? 'Open the desk' : 'Open in Library'} onClick={openRoot}><ExternalLink size={11} /></button>
+        <button className="icon-btn ghost xs" title={root.kind === 'desk' ? 'Open the chat' : 'Open in Library'} onClick={openRoot}><ExternalLink size={11} /></button>
       </div>
       {root.now && !running && <div className="crew-now" title={root.now}>{root.now}</div>}
       <div className="widget-scroll">

@@ -7,6 +7,9 @@ import ChatPulse from './ChatPulse'
 import { api } from '../lib/api'
 import { copyMarkdown, downloadMarkdown } from '../features/notes/exportDoc'
 import type { Conversation } from '@shared/types'
+// Runtime value by relative path: `npm test`'s esbuild line maps no alias (see store.ts).
+import { NEEDS_YOU } from '../../../shared/types'
+import { STATUS_LABEL } from '../lib/deskStatus'
 
 /**
  * One chat row in the sidebar lists: click or Enter opens it, right-click or the "…" button opens
@@ -17,6 +20,9 @@ import type { Conversation } from '@shared/types'
 export default function ChatRow({ conv, active, sub = false, lead, trail }: { conv: Conversation; active: boolean; sub?: boolean; lead?: ReactNode; trail?: ReactNode }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const face = useChatFace(conv)
+  // A chat working autonomously carries its desk's state: a mark while it works or needs you, nothing once it is idle.
+  const desk = useStore((s) => (conv.settings?.deskId ? s.desks.find((d) => d.id === conv.settings.deskId) : undefined))
+  const deskMark = desk && (desk.live || NEEDS_YOU.includes(desk.status)) ? desk.status : null
   const deleteChat = useStore((s) => s.deleteChat)
   const renameChat = useStore((s) => s.renameChat)
   const pinChat = useStore((s) => s.pinChat)
@@ -99,6 +105,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
             />
           ) : <>{conv.title}{trail}</>}
         </span>
+        {deskMark && <span className={`convo-desk desk-ring-${deskMark}`} role="img" title={STATUS_LABEL[deskMark]} aria-label={STATUS_LABEL[deskMark]} />}
         <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom }) }}><MoreHorizontal size={14} /></button>
       </div>

@@ -80,7 +80,7 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docsPending = useStore((s) => s.docsPending)
   const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
-  /** Desks with something unseen that needs you: the one badge worth interrupting for. */
+  /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const meetingsPending = useStore((s) => s.meetingsPending)
   const memoryProposals = useStore((s) => s.memoryProposals)
@@ -205,9 +205,6 @@ export default function Sidebar(): JSX.Element {
     if (v === 'home' || v === 'activity') return null
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
-    // Counted off the inbox rather than `desks`, which is only loaded once Cowork has been opened:
-    // the badge has to be right before you have been there.
-    if (v === 'cowork') return needsYou || null
     if (v === 'library') return skillCandidates || null
     // Load-bearing, not cosmetic: without it a Meetings row would show no review count.
     if (v === 'meetings') return meetingsPending || null
@@ -310,6 +307,8 @@ export default function Sidebar(): JSX.Element {
       <div className="section-row">
         <button className="section-toggle" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
           <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Chats
+          {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
+          {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
         <button
           className={`icon-btn sm${searching ? ' on' : ''}`}

@@ -4,7 +4,7 @@ import type { PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
 import { argRows, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
 import { useStore } from '../store'
 // This card mounts inline in a chat bubble as well as in the Plan tab, so it carries its own sheet
-// rather than relying on CoworkView having been opened first.
+// rather than relying on another component having loaded it first.
 import '../styles/cowork.css'
 
 /**

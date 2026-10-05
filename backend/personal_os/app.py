@@ -57,7 +57,7 @@ from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthSto
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTO_RESUME_FROM, AUTONOMY, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -1304,6 +1304,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
+    settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
     if "workingFolder" in settings_patch:  # the chat's working folder: a grantable folder, stored resolved; "" unbinds
         raw = str(settings_patch.get("workingFolder") or "").strip()
         if raw:
@@ -2210,8 +2211,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if desk_id:
                 m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
                 m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
-            if "cowork" in (cfg.get("hiddenViews") or []):
-                m.pop("desk_start", None)  # with Cowork hidden a started desk would have no row to come back to
             # Past toolDeferAbove the model gets the core tools, what earlier searches loaded and tool_search; the
             # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
             # the run_python bridge, agent_spawn and a plan's step check read every enabled tool from it.
@@ -3776,6 +3775,9 @@ def _wake_desk(desk_id: str) -> Run | dict[str, Any] | None:
 def _shell_wake(conversation_id: str | None) -> None:
     """A background shell job finished in a desk that has no run going: wake it so it reads the result."""
     desk = desks.by_conversation(conversation_id) if conversation_id else None
+    conv = convos.get(conversation_id, with_messages=False) if desk else None
+    if conv and conv["settings"].get("deskId") != desk["id"]:
+        return  # the chat turned autonomy off: its shell result is read on its next ordinary reply
     if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done", "queued"):
         return
     notes = toolbox.shell.drain_notes(conversation_id)
@@ -8201,7 +8203,9 @@ class DeskInputRef(BaseModel):
 
 
 class DeskIn(BaseModel):
-    brief: str
+    brief: str = ""
+    # Work autonomously in this existing chat: its history is the brief, and no new conversation is made.
+    conversation_id: str | None = None
     title: str | None = None
     project_id: str | None = None
     autonomy: str = "plan"
@@ -8330,6 +8334,8 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
     """`origin` is the chat that asked for the desk (it is told when the desk finishes); `inputs` are (name, bytes,
     source) snapshots copied into the desk's inputs/ folder before its first turn, so the desk starts with the material.
     `body.inputs` are resolved into more of them, and a bad one refuses the desk before anything is created."""
+    if body.conversation_id:
+        return _desk_on_chat(body)
     brief = (body.brief or "").strip()
     if not brief:
         raise HTTPException(400, "A desk needs a brief")
@@ -8363,6 +8369,51 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
     out: dict[str, Any] = {"desk": desk, "conversation_id": conv["id"]}
     if body.start:
         run = _launch_desk(desk["id"], brief, START_FROM)
+        if isinstance(run, Run):
+            out["run_id"], out["seq"] = run.run_id, run.seq
+        elif run is not None:
+            out.update(_queued_view(desk["id"]))
+        out["desk"] = desks.get(desk["id"]) or desk
+    return out
+
+
+def _desk_on_chat(body: DeskIn) -> dict[str, Any]:
+    """A chat told to work autonomously: the desk binds to THAT conversation and reads its history as the brief. One
+    desk per conversation, so a chat that worked autonomously before gets its old desk back, workspace and outputs
+    included. Plan mode is left alone: a desk reads its autonomy, and the chat's own setting is back when it detaches."""
+    if body.autonomy not in AUTONOMY:
+        raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
+    cid = body.conversation_id or ""
+    conv = convos.get(cid)
+    if not conv:
+        raise HTTPException(404, "No such conversation")
+    if conv["settings"].get("job_id"):
+        raise HTTPException(409, "A job transcript cannot work autonomously")
+    if conv["settings"].get("deskId"):
+        raise HTTPException(409, "This chat is already working autonomously")
+    if bus.live(cid):
+        raise HTTPException(409, "Stop the running reply first")
+    inputs = _load_desk_inputs(body.inputs)
+    said = next((m["content"] for m in reversed(conv["messages"]) if m["role"] == "user"), "")
+    brief = (body.brief or "").strip() or said.strip()[:2000] or conv["title"] or "Carry on with this chat"
+    desk = desks.by_conversation(cid)
+    try:
+        if desk:
+            desk = desks.update(desk["id"], {"autonomy": body.autonomy, "budget": body.budget or {}, "archived": False}) or desk
+        else:
+            desk = desks.create(conversation_id=cid, brief=brief, title=conv["title"], project_id=conv["project_id"],
+                                autonomy=body.autonomy, budget=body.budget)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if inputs:
+        try:
+            workspace.add_inputs(desk["id"], inputs)
+        except WorkspaceError as e:
+            raise HTTPException(400, f"Could not copy the inputs: {e}") from e
+    convos.update(cid, {"settings": {"deskId": desk["id"]}})
+    out: dict[str, Any] = {"desk": desk, "conversation_id": cid}
+    if body.start:
+        run = _launch_desk(desk["id"], (body.brief or "").strip() or CHAT_HANDOFF, MESSAGE_FROM)
         if isinstance(run, Run):
             out["run_id"], out["seq"] = run.run_id, run.seq
         elif run is not None:
@@ -8681,18 +8732,24 @@ async def pause_desk(id: str) -> dict[str, Any]:
 
 
 @app.post("/cowork/desks/{id}/stop")
-async def stop_desk(id: str) -> dict[str, Any]:
+async def stop_desk(id: str, detach: bool = False) -> dict[str, Any]:
     """Stopped before the run is, for the same reason pause is: settle() and the cancellation
     handler both read the row back, and whichever of them runs last must find the decision the
-    user made, not overwrite it."""
+    user made, not overwrite it. `detach` is a chat turning autonomy off: the desk is stopped if
+    it still can be, and the chat is unbound so it answers as a plain chat again. The row and its
+    workspace stay; turning autonomy back on binds the same desk."""
     desk = _desk_or_404(id, False)
-    if desk["status"] not in STOP_FROM:
+    out: dict[str, Any] | None = desk
+    if desk["status"] in STOP_FROM:
+        out = desks.set_status(id, "stopped", reason="stopped", headline="")
+        bus.stop(desk["conversation_id"])
+        task = _desk_tasks.pop(id, None)
+        if task is not None:
+            task.cancel()
+    elif not detach:
         raise HTTPException(409, {"message": "That desk has already finished", "status": desk["status"]})
-    out = desks.set_status(id, "stopped", reason="stopped", headline="")
-    bus.stop(desk["conversation_id"])
-    task = _desk_tasks.pop(id, None)
-    if task is not None:
-        task.cancel()
+    if detach:
+        convos.update(desk["conversation_id"], {"settings": {"deskId": ""}})
     return out or desk
 
 

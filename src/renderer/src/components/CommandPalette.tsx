@@ -26,22 +26,14 @@ export default function CommandPalette(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
-  const desks = useStore((s) => s.desks)
   const s = useStore.getState()
-  const cowork = !viewHidden(settings, 'cowork')
 
   const entries: Entry[] = [
     ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
     { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },
     { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
-    ...(cowork ? [{
-      key: 'new-desk', label: 'New desk', hint: 'Create',
-      // The new-desk form is CoworkView's own state, so open it the way a click does once the view is up.
-      run: () => { s.setView('cowork'); setTimeout(() => document.getElementById('new-desk-btn')?.click(), 100) }
-    }] : []),
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: c.title || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
-    ...(cowork ? recent(desks).map((d) => ({ key: `desk:${d.id}`, label: d.title, hint: 'Desk', run: () => { s.setView('cowork'); void s.openDesk(d.id) } })) : []),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) }))
   ]
   const needle = q.trim().toLowerCase()

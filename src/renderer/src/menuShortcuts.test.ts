@@ -141,9 +141,9 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   useStore.setState({ settings: orig, toasts: [] })
 })
 
-test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {
-  fire('view:cowork')
-  assert.equal(useStore.getState().view, 'cowork')
+test('view:library routes with no view-specific wiring', () => {
+  fire('view:library')
+  assert.equal(useStore.getState().view, 'library')
 })
 
 test('new-note creates a doc; daily-note switches to Files and opens today', () => {

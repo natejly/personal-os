@@ -6,7 +6,6 @@ import { wordDiff, type Op, type WordPart } from '../lib/diff'
 import { deliveredPaths, deliveryLabel, fileKind, fmtAgo, fmtBytes } from '../lib/deskFiles'
 import { useStore } from '../store'
 import MarkdownPreview from './MarkdownPreview'
-import DeskChanges from './DeskChanges'
 import { Parts } from './DiffView'
 
 /**
@@ -278,7 +277,6 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
             ))}
           </section>
         ))}
-        <DeskChanges desk={desk} />
       </div>
 
       <div className="desk-preview">

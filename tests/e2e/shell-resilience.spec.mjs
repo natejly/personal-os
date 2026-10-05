@@ -140,7 +140,6 @@ const VIEWS = [
   ['Mail', async (p) => p.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Mail' }).click()],
   ['Files', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()],
   ['Meetings', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Meetings/ }).click()],
-  ['Cowork', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Cowork/ }).click()],
   ['Library', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Library/ }).click()],
   ['Activity', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Activity/ }).click()],
   ['Space', async (p, g) => { await (await import('./helpers/shell.mjs')).menu(g, 'Toggle Spaces') }]

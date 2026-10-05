@@ -6,7 +6,7 @@ const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ 
 
 test('every sidebar nav item opens its view and is marked current; Today brings you back', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
-    const rows = [['Files', /Files/], ['Meetings', /Meetings/], ['Cowork', /Cowork/], ['Library', /Library/], ['Activity', /Activity/]]
+    const rows = [['Files', /Files/], ['Meetings', /Meetings/], ['Library', /Library/], ['Activity', /Activity/]]
     for (const [name, h] of rows) {
       await sidebarItem(page, name).click()
       await heading(page, h)
@@ -224,7 +224,6 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Files'); await heading(page, /Files/)
   await menu(grain, 'Mail'); await heading(page, /Mail/)
   await menu(grain, 'Library'); await heading(page, /Library/)
-  await menu(grain, 'Cowork'); await heading(page, /Cowork/)
   // Hidden by default: a toast offers to turn it on instead of silently doing nothing
   await menu(grain, 'Activity')
   await expect(page.getByText('Activity is turned off')).toBeVisible()
@@ -305,7 +304,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       expect.soft(o.sw, `${label} body scrollWidth`).toBe(o.cw)
       expect.soft(o.dsw, `${label} html scrollWidth`).toBe(o.dcw)
     }
-    for (const n of ['Today', 'Files', 'Meetings', 'Cowork', 'Library', 'Activity']) {
+    for (const n of ['Today', 'Files', 'Meetings', 'Library', 'Activity']) {
       await sidebarItem(page, n).click()
       await check(n)
     }

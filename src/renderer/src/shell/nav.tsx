@@ -1,4 +1,4 @@
-import { Calendar, Mail, Mic, Users, Library, MonitorDot } from 'lucide-react'
+import { Calendar, Mail, Mic, Library, MonitorDot } from 'lucide-react'
 import type { Settings, WidgetKind } from '@shared/types'
 import type { View } from '../store'
 import { MODULES } from './registry'
@@ -25,7 +25,6 @@ export interface NavEntry {
  */
 const SHELL: NavEntry[] = [
   { view: 'meetings', description: 'Record and transcribe meetings, with summaries and action items', label: 'Meetings', icon: <Mic size={15} />, place: 'sidebar', order: 20 },
-  { view: 'cowork', description: 'Desks: parallel autonomous sessions, each with its own plan and workspace', label: 'Cowork', icon: <Users size={15} />, place: 'sidebar', order: 30 },
   { view: 'library', description: 'Skills, connectors and everything Grain made for you', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
   { view: 'activity', description: 'What you did on this Mac, and the habits it suggests automating', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity', place: 'sidebar', order: 50 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },

@@ -3109,7 +3109,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # An external write, or booking unattended work, is never granted whole-tool: only a patterned rule
                     # (always_rule) can stand. Toolbox.effective would cap such a grant back to ask anyway.
                     standing = granted and not forced and c["name"] != PLAN_TOOL and (
-                        danger not in ASK_LOCKED_DANGER or mcp_is(c["name"]))
+                        spec is None or not spec.ask_locked)  # a connector tool (no spec) keeps its schema-bound grant
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":

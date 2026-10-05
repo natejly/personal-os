@@ -734,7 +734,10 @@ class Google:
                     body["start"].update({"dateTime": None, "timeZone": None})
                     body["end"].update({"dateTime": None, "timeZone": None})
             else:
-                body["start"], body["end"] = {"dateTime": start}, {"dateTime": str(end)}
+                # The API rejects a dateTime without seconds ("2026-10-04T10:00" is a 400 Bad Request), and the
+                # tool schema asks the model for exactly that form, so every timed value is reserialised.
+                start, end = _parse_iso(start).isoformat(), _parse_iso(str(end)).isoformat()
+                body["start"], body["end"] = {"dateTime": start}, {"dateTime": end}
                 naive = "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start)
                 tz = f.get("time_zone") or (_local_tz() if naive else None)
                 if tz:

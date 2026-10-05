@@ -56,7 +56,7 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
 
 def test_effective_caps_external_and_schedules_at_ask_at_every_level() -> None:
     assert tb.specs["gmail_send"].danger == "external" and tb.specs["schedule_task"].danger == "schedules"
-    for name in ("gmail_send", "calendar_create", "schedule_task"):
+    for name in ("gmail_send", "gmail_draft", "schedule_task"):
         on = {name: "on"}
         assert tb.effective(on, None, None)[name] == "ask"
         assert tb.effective({}, on, None)[name] == "ask"
@@ -68,6 +68,19 @@ def test_effective_caps_external_and_schedules_at_ask_at_every_level() -> None:
     assert tb.effective({}, None, {"web_search": "on"})["web_search"] == "on"
 
 
+def test_calendar_writes_are_external_but_not_locked() -> None:
+    """Calendar changes run on a plain yes in the conversation (tools.UNGATED_EXTERNAL): on by default and settable
+    to on at every level, while keeping the external tier's read-back, undo and proposal-only handling."""
+    for name in ("calendar_create", "calendar_update", "calendar_delete", "calendar_respond"):
+        spec = tb.specs[name]
+        assert spec.danger == "external" and not spec.ask_locked and spec.default_mode == "on"
+        assert tb.effective({}, None, None)[name] == "on"
+        assert tb.effective({name: "ask"}, None, None)[name] == "ask", "a user can still make it ask"
+        assert tb.gate(name, "on", {"tainted": True}) == "on", "untrusted content in the reply does not force a card"
+    assert tb.specs["calendar_propose"].ask_locked, "a batch proposal is the user's review card and stays one"
+    assert tb.gate("gmail_send", "on", {"tainted": True}) == "ask"
+
+
 def test_saving_on_for_an_external_tool_stores_ask() -> None:
     out = j("PUT", "/settings", {"tools": {"gmail_send": "on", "schedule_task": "on", "todo_add": "on", "mcp__x__y": "on"}})
     assert out["tools"]["gmail_send"] == "ask" and out["tools"]["schedule_task"] == "ask"
@@ -75,8 +88,8 @@ def test_saving_on_for_an_external_tool_stores_ask() -> None:
     j("PUT", "/settings", {"tools": {}})
 
     pid = j("POST", "/projects", {"name": "Lock"})["id"]
-    proj = j("PUT", f"/projects/{pid}", {"tools": {"calendar_create": "on", "gmail_send": "off"}})
-    assert proj["tools"] == {"calendar_create": "ask", "gmail_send": "off"}
+    proj = j("PUT", f"/projects/{pid}", {"tools": {"calendar_create": "on", "gmail_draft": "on", "gmail_send": "off"}})
+    assert proj["tools"] == {"calendar_create": "on", "gmail_draft": "ask", "gmail_send": "off"}, "calendar writes are not locked"
 
     cid = j("POST", "/conversations", {})["id"]
     conv = j("PATCH", f"/conversations/{cid}", {"settings": {"tools": {"gmail_send": "on", "todo_add": "off"}}})

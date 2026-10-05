@@ -82,6 +82,10 @@ PROPOSAL_ONLY_DANGER = ("external", "schedules")
 # outside the app (mail, calendar, Tasks) and booking unattended work always show a card. 'off' is still honoured,
 # and a patterned allow rule (permrules) is the one way a specific call can skip the card.
 ASK_LOCKED_DANGER = ("external", "schedules")
+# External tools that run on a plain yes in the conversation: on by default, no ask cap, and untrusted content in
+# the reply does not force a card. Every one of them is undoable (extundo.CALENDAR) and still read back (verify),
+# still a proposal in an unattended run, and still a card on an ask-as-it-goes desk. Mail is not here on purpose.
+UNGATED_EXTERNAL = frozenset({"calendar_create", "calendar_update", "calendar_delete", "calendar_respond"})
 # Lasting text, and destructive edits to the user's lists. Untrusted content must not plant or
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
@@ -120,8 +124,17 @@ class ToolSpec:
         self.available_fn: Callable[[], bool] | None = None
 
     @property
+    def ask_locked(self) -> bool:
+        """The mode tops out at 'ask' and no card grants the whole tool (ASK_LOCKED_DANGER, minus UNGATED_EXTERNAL)."""
+        return self.danger in ASK_LOCKED_DANGER and self.name not in UNGATED_EXTERNAL
+
+    @property
     def default_mode(self) -> str:
-        return self.default or DEFAULT_MODE.get(self.danger, "on")
+        if self.default:
+            return self.default
+        if self.danger in ASK_LOCKED_DANGER and not self.ask_locked:
+            return "on"
+        return DEFAULT_MODE.get(self.danger, "on")
 
     def schema(self) -> dict[str, Any]:
         d = self.description
@@ -131,7 +144,7 @@ class ToolSpec:
 
     def info(self) -> dict[str, Any]:
         return {"name": self.name, "description": self.description, "group": self.group, "danger": self.danger,
-                "default_mode": self.default_mode, "taints": self.taints}
+                "default_mode": self.default_mode, "taints": self.taints, "ask_locked": self.ask_locked}
 
 
 def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -827,13 +840,13 @@ class Toolbox:
             v = self._norm(global_tools.get(name)) or spec.default_mode
             v = self._norm((project_tools or {}).get(name)) or v
             v = self._norm((chat_tools or {}).get(name)) or v
-            out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER else v
+            out[name] = "ask" if v == "on" and spec.ask_locked else v
         return out
 
     def cap_modes(self, tools: dict[str, Any]) -> dict[str, Any]:
         """A tool map as it may be stored: an ask-locked tool saved as 'on' becomes 'ask'. Names that are not built-in
         tools (connector slugs, unknown keys) pass through unchanged."""
-        return {k: "ask" if self._norm(v) == "on" and (s := self.specs.get(k)) and s.danger in ASK_LOCKED_DANGER else v
+        return {k: "ask" if self._norm(v) == "on" and (s := self.specs.get(k)) and s.ask_locked else v
                 for k, v in tools.items()}
 
     def schemas(self, modes: dict[str, str]) -> list[dict[str, Any]]:
@@ -882,7 +895,7 @@ class Toolbox:
         spec = self.specs.get(name)
         cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
         if spec and mode == "on" and ctx.get("tainted") and (
-                spec.danger in ("external", "network", "schedules") or name in PROMPT_WRITES
+                (spec.danger in ("external", "network", "schedules") and name not in UNGATED_EXTERNAL) or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args, ctx):

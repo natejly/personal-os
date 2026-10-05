@@ -13,14 +13,14 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   decide?: (approve: boolean) => Promise<void>
 }): JSX.Element {
   const approveTool = useStore((s) => s.approveTool)
-  const danger = useStore((s) => s.tools.find((t) => t.name === event.name)?.danger)
+  const tool = useStore((s) => s.tools.find((t) => t.name === event.name))
   const perm = event.permission
   const [rules, setRules] = useState<string[]>(perm?.suggestions ?? [])
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
-  const wholeTool = !event.forced && !askLocked(perm?.danger) && !askLocked(danger)
+  const wholeTool = !event.forced && !askLocked(tool ?? perm?.danger)
   const anyGrant = wholeTool || canSave
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return

@@ -1,7 +1,7 @@
 import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
 import { useState } from 'react'
 import { useStore } from '../store'
-import { askLocked, type ToolMode, type ToolOverride } from '@shared/types'
+import { askLocked, type ToolInfo, type ToolMode, type ToolOverride } from '@shared/types'
 import { describeCall, humanizeName } from '../lib/toolDisplay'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
@@ -20,7 +20,7 @@ const toolLabel = (name: string): string => describeCall(name, null).verb
 export const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
 const LOCKED_TIP = 'Actions outside the app always ask'
 /** A legacy stored 'on' for an ask-locked tool reads as what the backend runs: ask. */
-const capped = (danger: string, m: ToolMode): ToolMode => (m === 'on' && askLocked(danger) ? 'ask' : m)
+const capped = (t: ToolInfo, m: ToolMode): ToolMode => (m === 'on' && askLocked(t) ? 'ask' : m)
 
 /** Tri-state overrides (inherit / on / ask / off) for a project or a chat. `effectiveBase` is what "inherit" resolves to. */
 export function ToolOverrides({ value, onChange, effectiveBase, compact = false }: {
@@ -33,10 +33,10 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   return (
     <div className={`tool-perms ${compact ? 'compact' : ''}`}>
       {tools.map((t) => {
-        const locked = askLocked(t.danger)
+        const locked = askLocked(t)
         const raw = value[t.name] ?? 'inherit'
         const ov: ToolOverride = raw === 'on' && locked ? 'ask' : raw
-        const base = capped(t.danger, effectiveBase[t.name] ?? t.default_mode)
+        const base = capped(t, effectiveBase[t.name] ?? t.default_mode)
         const eff: ToolMode = ov === 'inherit' ? base : ov
         return (
           <div key={t.name} className={`tool-perm ${eff === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description + (t.available ? '' : ' (integration not connected)')}>
@@ -75,8 +75,8 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
           <details key={g} className="tool-group" open={needle ? true : undefined}>
             <summary><h5>{GROUP_ICON[g] ?? <Wrench size={13} />} {humanizeName(g)} <small className="muted">{rows.length}</small></h5></summary>
             {rows.map((t) => {
-              const locked = askLocked(t.danger)
-              const mode = capped(t.danger, current(t.name, t.default_mode))
+              const locked = askLocked(t)
+              const mode = capped(t, current(t.name, t.default_mode))
               const label = toolLabel(t.name)
               return (
                 <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>

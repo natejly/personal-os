@@ -165,8 +165,13 @@ export interface PageContext {
 
 export type ToolMode = 'on' | 'ask' | 'off'
 export type ToolOverride = 'inherit' | ToolMode
-/** Danger tiers whose mode tops out at 'ask' (tools.ASK_LOCKED_DANGER): no map can switch them on, and no card grants them whole-tool. */
-export const askLocked = (danger: string | undefined): boolean => danger === 'external' || danger === 'schedules'
+/** The mode tops out at 'ask' (tools.ASK_LOCKED_DANGER): no map can switch the tool on, and no card grants it whole-tool.
+ *  The backend's per-tool answer wins when known; a bare danger tier is the fallback for a tool the store has not loaded. */
+export const askLocked = (t: { danger: string | undefined; ask_locked?: boolean } | string | undefined): boolean => {
+  if (typeof t === 'object' && t?.ask_locked !== undefined) return t.ask_locked
+  const danger = typeof t === 'string' ? t : t?.danger
+  return danger === 'external' || danger === 'schedules'
+}
 
 export interface ToolInfo {
   name: string
@@ -177,6 +182,8 @@ export interface ToolInfo {
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
   taints?: boolean
+  /** Capped at 'ask' and never granted whole-tool (external and schedules tools, minus the ungated calendar writes). */
+  ask_locked?: boolean
 }
 
 export interface ToolImage {

@@ -95,6 +95,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   `/skills`, `/commands` and `/plan`. Attachments ride on the message as chips,
   and their text is given to the model under a size cap. Chat rows show a face
   that blinks while the chat works.
+  After a reply, up to three follow-up questions appear as chips under it
+  (Settings > Memory, Follow-up suggestions): click one to fill the composer,
+  Shift-click to send.
 - **Tools with permissions.** The assistant can search your uploaded files, read and
   revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing

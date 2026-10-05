@@ -89,6 +89,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "extractionModel": "",
     "consolidateEvery": 25,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
+    "followUps": True,  # up to 3 suggested next questions under the latest reply (uses the extraction model)
     "autoTitle": True,  # a short model-written chat title after the first reply (uses the extraction model)
     # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).
     "fileSnapshots": True,

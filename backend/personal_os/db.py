@@ -576,7 +576,9 @@ class Database:
                          "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT", "outcome": "TEXT", "error_kind": "TEXT", "superseded_at": "REAL", "variant_of": "TEXT",
                          # JSON [{id, name, mime, size}]: uploaded files sent with a user turn (the documents rows they point at).
-                         "attachments": "TEXT"},
+                         "attachments": "TEXT",
+                         # JSON [str]: up to 3 follow-up questions written after the reply (followups.py).
+                         "followups": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",

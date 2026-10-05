@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
-from . import compaction, otel_export, titles
+from . import compaction, followups, otel_export, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -219,6 +219,7 @@ _tool_loaded: dict[str, set[str]] = {}
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
 title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
+followup_jobs = followups.FollowupJobs(convos.set_followups, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
                      alive=lambda cid: convos.get(cid, with_messages=False) is not None, style=style)
 
@@ -3482,6 +3483,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             skills_in_use=learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
         ))
 
+    # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.
+    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id
+            and cfg.get("followUps", True)):
+        followup_jobs.spawn(conv_id, am["id"], conv["project_id"], user_text, text, model, cfg)
+
     # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
     # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
     # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
@@ -5951,6 +5957,7 @@ async def _shutdown() -> None:
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
+    await followup_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish

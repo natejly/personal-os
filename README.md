@@ -13,7 +13,8 @@ instructions, files, memories and graph.
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today      2 │  ┌ Calendar ─────┐ ┌ Lists ────────┐ │  ☑ Memory    │
 │ Files        │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Library      │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
+│              │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
+│ Library      │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
 │ SPACES     + │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
 │ ▦ Space 1    │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
 │ PROJECTS   + │  └───────────────┘ └───────────────┘ │   run python │

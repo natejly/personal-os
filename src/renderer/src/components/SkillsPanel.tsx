@@ -184,9 +184,15 @@ export default function SkillsPanel(): JSX.Element {
     }
   }
 
+  const [saving, setSaving] = useState(false)
   const add = async (): Promise<void> => {
-    if (!form.name.trim()) return
-    await createSkill(form)
+    if (!form.name.trim() || saving) return
+    setSaving(true)
+    try {
+      await createSkill(form)
+    } finally {
+      setSaving(false)
+    }
     setForm({ name: '', description: '', procedure: '' })
     setAdding(false)
   }
@@ -260,7 +266,7 @@ export default function SkillsPanel(): JSX.Element {
           <label>Steps<textarea rows={8} value={form.procedure} placeholder={'1. Pull this week\'s done todos.\n2. Check the calendar for what slipped.\n3. Draft the summary as bullets.'} onChange={(e) => setForm({ ...form, procedure: e.target.value })} /></label>
           {(form.name || form.procedure) && <Findings findings={formFindings} />}
           <div className="row-actions">
-            <button className="primary-btn sm" disabled={!form.name.trim()} onClick={() => void add()}>Add as candidate</button>
+            <button className="primary-btn sm" disabled={!form.name.trim() || saving} onClick={() => void add()}>Add as candidate</button>
             <button className="ghost-btn sm" onClick={() => setAdding(false)}>Cancel</button>
             <span className="muted small">It stays off until you approve it.</span>
           </div>

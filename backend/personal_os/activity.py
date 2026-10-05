@@ -101,6 +101,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "categories": None,
 }
 
+# (key, min, max) for the numeric settings the panel bounds; see ActivityView.tsx.
+_CONFIG_LIMITS = (
+    ("sampleSeconds", 1, 120), ("idleSeconds", 30, 3600), ("rollupMinutes", 5, 180), ("profileEveryHours", 0, 168),
+    ("retentionHours", 1, 720), ("summaryRetentionDays", 1, 730), ("contextDays", 1, 30),
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS activity_events (
   id TEXT PRIMARY KEY,
@@ -1535,6 +1541,13 @@ class Monitor:
                 patch["recordEverythingRestore"] = {**(cur.get("recordEverythingRestore") or {}), **kept}
         cfg = _deep_merge(cur, patch)
         cfg["signals"] = {k: bool(v) for k, v in (cfg.get("signals") or {}).items() if k in SIGNALS}
+        # The panel's own limits, enforced here too: a negative sample interval or retention is not a
+        # setting, it is a sampler that errors or samples that expire as they are written.
+        for key, lo, hi in _CONFIG_LIMITS:
+            try:
+                cfg[key] = int(min(hi, max(lo, float(cfg[key]))))
+            except (KeyError, TypeError, ValueError):
+                cfg.pop(key, None)  # unreadable: the shipped default applies on the next read
         self.db.set_settings({"activity": cfg})
         if not cfg.get("enabled"):
             if self.running:

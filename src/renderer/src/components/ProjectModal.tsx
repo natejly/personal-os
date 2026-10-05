@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChevronRight, X, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
@@ -29,15 +29,20 @@ export default function ProjectModal(): JSX.Element {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { titleId, backdrop, modal: dialog } = useModal(() => setProjectModal(null))
 
+  // A second click or Enter while the first save is in flight would create the project twice.
+  const saving = useRef(false)
   const save = async (): Promise<void> => {
-    if (!name.trim()) return
-    if (existing) await updateProject(existing.id, { name: name.trim(), description, color, tools, memory_mode: memoryMode })
-    else {
-      await createProject({ name: name.trim(), description, system_prompt: '', color, memory_mode: memoryMode })
-      const created = useStore.getState().projects.find((p) => p.name === name.trim())
-      if (created && Object.keys(tools).length) await updateProject(created.id, { tools })
-    }
-    setProjectModal(null)
+    if (!name.trim() || saving.current) return
+    saving.current = true
+    try {
+      if (existing) await updateProject(existing.id, { name: name.trim(), description, color, tools, memory_mode: memoryMode })
+      else {
+        await createProject({ name: name.trim(), description, system_prompt: '', color, memory_mode: memoryMode })
+        const created = useStore.getState().projects.find((p) => p.name === name.trim())
+        if (created && Object.keys(tools).length) await updateProject(created.id, { tools })
+      }
+      setProjectModal(null)
+    } finally { saving.current = false }
   }
 
   return (

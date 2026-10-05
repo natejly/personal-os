@@ -28,7 +28,7 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
       <div className="mem-main">
         {editing ? (
           <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() } if (e.key === 'Escape') { setDraft(m.content); setEditing(false) } }} />
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() } if (e.key === 'Escape') { e.preventDefault(); setDraft(m.content); setEditing(false) } }} />
         ) : (
           <p onClick={() => setEditing(true)} title="Click to edit">{m.content}</p>
         )}

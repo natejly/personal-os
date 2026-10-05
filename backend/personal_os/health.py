@@ -216,12 +216,16 @@ class Health:
             raise HealthError(f"agg is one of {', '.join(AGGS)}.")
         if goal is not None and goal_dir not in GOAL_DIRS:
             raise HealthError(f"A goal needs goal_dir: {' or '.join(GOAL_DIRS)}.")
+        if goal is not None and not 0 <= float(goal) <= 1e9:
+            raise HealthError("A goal is a number from 0 up.")
 
     # ---- readings ----
     def _check_value(self, m: dict[str, Any], value: float) -> float:
         v = float(value)
         if v != v or v in (float("inf"), float("-inf")):
             raise HealthError("Value must be a finite number.")
+        if abs(v) > 1e9:
+            raise HealthError("That number is too large.")
         if m["kind"] == "scale" and not 1 <= v <= 5:
             raise HealthError(f"{m['label']} is a 1-5 scale.")
         if m["kind"] == "check" and v not in (0, 1):
@@ -229,6 +233,15 @@ class Health:
         if m["kind"] == "number" and v < 0:
             raise HealthError(f"{m['label']} can't be negative.")
         return v
+
+    @staticmethod
+    def _past_day(day: str | None) -> str:
+        """The ISO day, refused when it is later than tomorrow (a day of slack for time zones): a reading cannot
+        come from a day that has not happened, and a typo year would hide it past every chart."""
+        d = parse_day(day)
+        if d > date.today() + timedelta(days=1):
+            raise HealthError("That day has not happened yet.")
+        return d.isoformat()
 
     @staticmethod
     def _note(text: str) -> str:
@@ -240,7 +253,7 @@ class Health:
         if not m:
             raise HealthError(f"No metric '{metric}'.")
         v = self._check_value(m, value)
-        d = parse_day(day).isoformat()
+        d = self._past_day(day)
         eid = new_id()
         with self.db.tx() as c:
             # A yes/no metric has one answer per day: logging it again replaces the earlier one.
@@ -259,7 +272,7 @@ class Health:
         if not m:
             raise HealthError(f"No metric '{metric}'.")
         v = self._check_value(m, value)
-        d = parse_day(day).isoformat()
+        d = self._past_day(day)
         with self.db.tx() as c:
             old = c.execute("SELECT value FROM health_entries WHERE metric=? AND day=? AND source=?", (metric, d, source)).fetchall()
             if len(old) == 1 and float(old[0]["value"]) == v:

@@ -443,6 +443,21 @@ desks = Desks(db, workspace)
 _loop: asyncio.AbstractEventLoop | None = None
 
 
+def _todos_changed() -> None:
+    """Any todo write (routes, assistant tools, sync, meetings) tells open windows to re-read the list.
+    Sync routes run in a threadpool, so off-loop calls are handed to the loop like _desk_changed."""
+    try:
+        asyncio.get_running_loop()
+        events.publish("todos_changed", {})
+    except RuntimeError:
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(events.publish, "todos_changed", {})
+
+
+_todos_prev_change = todos.on_change
+todos.on_change = lambda: (_todos_prev_change() if _todos_prev_change else None, _todos_changed())[-1]
+
+
 def _desk_changed(row: dict[str, Any]) -> None:
     """Every desk write lands on the app topic as `desk_status`, so the rail, the badge and the Today
     card stay live for desks nobody is watching. Topic queues belong to the event loop and sync routes
@@ -3109,7 +3124,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # An external write, or booking unattended work, is never granted whole-tool: only a patterned rule
                     # (always_rule) can stand. Toolbox.effective would cap such a grant back to ask anyway.
                     standing = granted and not forced and c["name"] != PLAN_TOOL and (
-                        danger not in ASK_LOCKED_DANGER or mcp_is(c["name"]))
+                        spec is None or not spec.ask_locked)  # a connector tool (no spec) keeps its schema-bound grant
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
@@ -4762,13 +4777,15 @@ async def create_job(body: JobIn) -> dict[str, Any]:
     _check_job_budget(body.budget)
     await _check_job_model(body.model)
     _check_target(body.target, body.desk_autonomy, body.allowed_tools)
-    return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
+    job = jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
                        model=body.model or None, budget=body.budget or None,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None,
                        mail_query=body.mail_query.strip() if body.kind == "mail" and body.mail_query else None,
                        target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget)
+    scheduler.nudge()  # re-read the earliest slot now: the loop may be mid-way through a 60 s nap past this job's time
+    return job
 
 
 @app.patch("/jobs/{id}")
@@ -4804,6 +4821,7 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     job = jobs.update(id, patch)
     if not job:
         raise HTTPException(404, "No such job")
+    scheduler.nudge()  # an enable or a new time may be due before the current nap ends
     return job
 
 

@@ -9,6 +9,7 @@ import { openPayload } from '../canvas/drops'
 import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
 import { focusFirstItem, menuKeyDown, useReturnFocus } from '../canvas/Menu'
 import { rowButton } from '../lib/rowButton'
+import Face, { SPACE_HUE } from './Face'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
 const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'widget', 'note', 'file', 'nav']
@@ -132,7 +133,7 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
           setMenu({ x: e.clientX, y: e.clientY })
         }}
       >
-        {project ? <span className="project-dot" style={{ background: project.color }} /> : <LayoutGrid size={12} className="space-row-icon" />}
+        <Face name={canvasId} size={14} {...SPACE_HUE} />
         {editing === null ? <span className="project-name">{name}</span> : (
           <span className="project-name">
             <input

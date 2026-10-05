@@ -20,7 +20,10 @@ The rules the rest of the app relies on:
   - a done step is never run again. Resume starts at the first step that is not done; a side-effecting
     call that began before a crash is not repeated (the journal reports its outcome as unknown).
   - results of agent steps are untrusted text: they taint the run, so external tools later in it ask.
-  - a failed step stops everything that needs it; independent steps still finish.
+  - a failed step stops everything that needs it; independent steps still finish. Steps run in waves: every step
+    whose dependencies are settled starts at once, so two agents with nothing between them work side by side.
+  - an agent or fan-out step records the subagent runs it spawned (`agents` on its row), and every run or step
+    write is announced through `Workflows.on_change`, so a tree of who is doing what can be drawn live.
   - nothing starts by itself: `workflow_run` from chat or from a scheduled job only records a run that
     waits for approval.
 """
@@ -463,6 +466,18 @@ class Workflows:
     def __init__(self, db: Any, tools: Callable[[], set[str]], role_ok: Callable[[str], bool] | None = None) -> None:
         self.db, self.tools, self.role_ok = db, tools, role_ok
         self.on_report: Callable[[dict[str, Any]], None] | None = None
+        # Every run or step write, with the run as `slim()` leaves it: a status nudge, never the results.
+        self.on_change: Callable[[dict[str, Any]], None] | None = None
+
+    def _changed(self, run_id: str) -> None:
+        if self.on_change is None:
+            return
+        run = self.get_run(run_id)
+        if run:
+            try:
+                self.on_change(slim(run))
+            except Exception:  # noqa: BLE001 - a status ping must never fail the write
+                log.debug("workflow on_change failed", exc_info=True)
 
     def _report(self, run_id: str) -> None:
         if self.on_report is None:
@@ -534,7 +549,7 @@ class Workflows:
     @staticmethod
     def _step(r: Any) -> dict[str, Any]:
         d = dict(r)
-        for k in ("result", "items"):
+        for k in ("result", "items", "agents"):
             d[k] = json.loads(d[k]) if d.get(k) else None
         return d
 
@@ -574,6 +589,7 @@ class Workflows:
                           (rid, s["id"], i, "tool" if "tool" in s else "agent" if "agent" in s else "fan_out", f"{rid}:{s['id']}"))
         if conversation_id:
             self._report(rid)
+        self._changed(rid)
         return self.get_run(rid) or {}
 
     def set_run(self, run_id: str, **f: Any) -> None:
@@ -586,14 +602,15 @@ class Workflows:
                 c.execute(f"UPDATE workflow_runs SET {', '.join(k + '=?' for k in cols)}, updated_at=? WHERE id=?", (*cols.values(), now(), run_id))
             if prev and "status" in cols and cols["status"] != prev[0] and cols["status"] in REPORT_ON:
                 self._report(run_id)
+            self._changed(run_id)
 
     def set_step(self, run_id: str, step_id: str, **f: Any) -> None:
-        allowed = {"status", "result", "items", "error", "approval_call_id", "started_at", "ended_at", "attempts"}
+        allowed = {"status", "result", "items", "error", "approval_call_id", "started_at", "ended_at", "attempts", "agents"}
         cols = {}
         for k, v in f.items():
             if k not in allowed:
                 continue
-            if k in ("result", "items") and v is not None:
+            if k in ("result", "items", "agents") and v is not None:
                 v = json.dumps(v, ensure_ascii=False, default=str)
                 if len(v) > MAX_RESULT_CHARS:
                     v = json.dumps({"truncated": True, "text": v[:MAX_RESULT_CHARS]})
@@ -601,6 +618,7 @@ class Workflows:
         if cols:
             with self.db.tx() as c:
                 c.execute(f"UPDATE workflow_steps SET {', '.join(k + '=?' for k in cols)} WHERE run_id=? AND step_id=?", (*cols.values(), run_id, step_id))
+            self._changed(run_id)
 
     def reset_for_resume(self, run_id: str) -> None:
         """Everything that is not done goes back to pending (fan-out items already finished are kept in `items`)."""
@@ -614,6 +632,13 @@ class Workflows:
                           "WHERE status IN ('running','waiting_approval')", (now(),)).rowcount
             c.execute("UPDATE workflow_steps SET status='pending' WHERE status IN ('running','waiting_approval')")
         return n
+
+
+def slim(run: dict[str, Any]) -> dict[str, Any]:
+    """A run without its payloads (step results, items, the output), for an event or a list."""
+    out = {k: v for k, v in run.items() if k not in ("result", "plan", "definition")}
+    out["steps"] = [{k: v for k, v in s.items() if k not in ("result", "items")} for s in run.get("steps") or []]
+    return out
 
 
 # ---- execution ----------------------------------------------------------------------------------
@@ -632,6 +657,8 @@ class Engine:
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.stops: dict[str, asyncio.Event] = {}
         self.seq: dict[str, int] = {}
+        # (run_id, step_id) -> the subagent run ids the step spawned, seeded from the row when a run (re)starts.
+        self.agents: dict[tuple[str, str], list[str]] = {}
 
     # ---- the approval boundary
     def approve(self, run_id: str, plan_digest: str) -> dict[str, Any]:
@@ -767,53 +794,23 @@ class Engine:
         state: dict[str, str] = {}
         for s in defn["steps"]:
             r = rows[s["id"]]
+            self.agents[(run_id, s["id"])] = list(r.get("agents") or [])
             if r["status"] in DONE:
                 results[s["id"]] = r["result"]
                 state[s["id"]] = r["status"]
                 if r["status"] == "done" and self._taints(s):
                     ctx["tainted"] = True
-        for step in defn["steps"]:
-            sid = step["id"]
-            if sid in state:
-                continue
+        # Waves: every step whose dependencies are settled runs now, side by side. Validation ruled out cycles
+        # and unknown needs, so the frontier only empties once every step has a state.
+        while True:
             if stop.is_set():
                 self.store.set_run(run_id, status="cancelled", error="Cancelled by the user.", ended_at=now())
                 self._close_tape(run_id, "cancelled", "Cancelled by the user.")
                 return
-            bad = [d for d in deps(step, defn) if state.get(d) in ("failed", "blocked")]
-            if bad:
-                state[sid] = "blocked"
-                self.store.set_step(run_id, sid, status="blocked", error=f"needs {', '.join(bad)}, which did not finish", ended_at=now())
-                continue
-            try:
-                if step.get("when") is not None and not truthy(render(step["when"], params, results)):
-                    state[sid] = "skipped"
-                    self.store.set_step(run_id, sid, status="skipped", result=None, ended_at=now())
-                    continue
-            except TemplateError as e:
-                state[sid] = "failed"
-                self.store.set_step(run_id, sid, status="failed", error=f"when: {e}", ended_at=now())
-                continue
-            self.store.set_step(run_id, sid, status="running", started_at=now(), error=None)
-            self._emit(run_id, "workflow_step", {"step": sid, "status": "running"})
-            try:
-                if step.get("approval") == "required":
-                    if not await self._approve_step(run, ctx, step, params, results, stop):
-                        raise _StepFailed("declined by the user")
-                result = await self._run_step(run, ctx, step, params, results, stop)
-            except _StepFailed as e:
-                state[sid] = "failed"
-                self.store.set_step(run_id, sid, status="failed", error=str(e), ended_at=now())
-                self._emit(run_id, "workflow_step", {"step": sid, "status": "failed", "error": str(e)})
-                continue
-            except TemplateError as e:
-                state[sid] = "failed"
-                self.store.set_step(run_id, sid, status="failed", error=str(e), ended_at=now())
-                continue
-            results[sid] = result
-            state[sid] = "done"
-            self.store.set_step(run_id, sid, status="done", result=result, ended_at=now())
-            self._emit(run_id, "workflow_step", {"step": sid, "status": "done"})
+            ready = [s for s in defn["steps"] if s["id"] not in state and all(d in state for d in deps(s, defn))]
+            if not ready:
+                break
+            await asyncio.gather(*(self._one_step(run, ctx, s, params, results, state, stop) for s in ready))
         failed = [k for k, v in state.items() if v in ("failed", "blocked")]
         if stop.is_set():
             self.store.set_run(run_id, status="cancelled", error="Cancelled by the user.", ended_at=now())
@@ -835,6 +832,53 @@ class Engine:
         self.store.set_run(run_id, status="done", result=out, ended_at=now())
         self._close_tape(run_id, "done")
 
+    async def _one_step(self, run: dict[str, Any], ctx: dict[str, Any], step: dict[str, Any], params: dict[str, Any],
+                        results: dict[str, Any], state: dict[str, str], stop: asyncio.Event) -> None:
+        """One step from pending to its final state. Steps in a wave share `results` and `state` (each writes only its
+        own key) but work on their own copy of the context, so one step's taint or file grant never leaks into a
+        sibling mid-call; taint folds back into the run's context when the step ends, for the waves after it."""
+        run_id, sid = run["id"], step["id"]
+        defn = run["definition"]
+        bad = [d for d in deps(step, defn) if state.get(d) in ("failed", "blocked")]
+        if bad:
+            state[sid] = "blocked"
+            self.store.set_step(run_id, sid, status="blocked", error=f"needs {', '.join(bad)}, which did not finish", ended_at=now())
+            return
+        try:
+            if step.get("when") is not None and not truthy(render(step["when"], params, results)):
+                state[sid] = "skipped"
+                self.store.set_step(run_id, sid, status="skipped", result=None, ended_at=now())
+                return
+        except TemplateError as e:
+            state[sid] = "failed"
+            self.store.set_step(run_id, sid, status="failed", error=f"when: {e}", ended_at=now())
+            return
+        sctx = {**ctx, "taint_sources": list(ctx.get("taint_sources") or []), "allowed_urls": set(ctx.get("allowed_urls") or ())}
+        self.store.set_step(run_id, sid, status="running", started_at=now(), error=None)
+        self._emit(run_id, "workflow_step", {"step": sid, "status": "running"})
+        try:
+            if step.get("approval") == "required":
+                if not await self._approve_step(run, sctx, step, params, results, stop):
+                    raise _StepFailed("declined by the user")
+            result = await self._run_step(run, sctx, step, params, results, stop)
+        except _StepFailed as e:
+            state[sid] = "failed"
+            self.store.set_step(run_id, sid, status="failed", error=str(e), ended_at=now())
+            self._emit(run_id, "workflow_step", {"step": sid, "status": "failed", "error": str(e)})
+            return
+        except TemplateError as e:
+            state[sid] = "failed"
+            self.store.set_step(run_id, sid, status="failed", error=str(e), ended_at=now())
+            return
+        finally:
+            if sctx.get("tainted"):
+                ctx["tainted"] = True
+            ctx["taint_sources"].extend(sctx["taint_sources"][len(ctx.get("taint_sources") or []):])
+        results[sid] = result
+        state[sid] = "done"
+        self.store.set_step(run_id, sid, status="done", result=result, ended_at=now())
+        self._emit(run_id, "workflow_step", {"step": sid, "status": "done"})
+
     def _taints(self, step: dict[str, Any]) -> bool:
         if "tool" in step:
             return self.toolbox.taints(step["tool"])
@@ -846,7 +890,7 @@ class Engine:
             return await self._tool_step(run, ctx, step, render(step.get("args") or {}, params, results), stop)
         if "agent" in step:
             a = render(step["agent"], params, results)
-            return await self._agent(ctx, a, stop)
+            return await self._agent(ctx, a, stop, (run["id"], step["id"]))
         return await self._fan_out(run, ctx, step, params, results, stop)
 
     # ---- tool steps
@@ -918,8 +962,17 @@ class Engine:
                 raise _StepFailed(str(got.get("error") or got)[:500])
             return got
 
-    async def _agent(self, ctx: dict[str, Any], a: dict[str, Any], stop: asyncio.Event) -> str:
+    def _record_agent(self, key: tuple[str, str], cid: str) -> None:
+        """The step row remembers every child it spawned, so the run's tree survives the children's memory."""
+        lst = self.agents.setdefault(key, [])
+        if cid not in lst:
+            lst.append(cid)
+            self.store.set_step(key[0], key[1], agents=lst)
+
+    async def _agent(self, ctx: dict[str, Any], a: dict[str, Any], stop: asyncio.Event, key: tuple[str, str] | None = None) -> str:
         ch = await self._spawn(ctx, a, stop)
+        if key is not None:
+            self._record_agent(key, ch.id)
         try:
             await self.subagents._await(ch, ctx)
         finally:
@@ -960,7 +1013,7 @@ class Engine:
                     return
                 try:
                     a = render(f["agent"], params, results, vars={"item": item, "index": i})
-                    text = await self._agent(ctx, a, stop)
+                    text = await self._agent(ctx, a, stop, (run["id"], step["id"]))
                 except (_StepFailed, TemplateError) as e:
                     failures.append(f"item {i}: {e}")
                     return
@@ -1017,9 +1070,12 @@ class Engine:
             if b is not None:
                 b.paused += time.time() - t0
             self.store.set_step(run["id"], sid, status="running")
-            self.store.set_run(run["id"], status="running")
-            if self.runs is not None:
-                self.runs.update(run["id"], status="running")
+            # A sibling step in the same wave may still be parked on its own card: the run stays waiting for it.
+            cur = self.store.get_run(run["id"]) or {}
+            if not any(s["status"] == "waiting_approval" for s in cur.get("steps") or []):
+                self.store.set_run(run["id"], status="running")
+                if self.runs is not None:
+                    self.runs.update(run["id"], status="running")
         return decision in ("allow", "always_chat", "always_global")
 
 

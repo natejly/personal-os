@@ -305,14 +305,23 @@ export const useCanvas = create<CanvasState>((set, get) => {
       order: s.order.includes(c.id) ? s.order : [...s.order, c.id]
     }))
 
+  // Local writes (lock, viewport, window geometry) land in the store before their PUT. A list fetched before such a
+  // write resolves after it; `load` keeps the local row for any space written since that fetch began, or the lock
+  // the user just set would come back off.
+  let writeGen = 0
+  const writtenAt = new Map<string, number>()
+  const noteWrite = (canvasId: string): void => void writtenAt.set(canvasId, ++writeGen)
+
   const patchCanvas = (canvasId: string, patch: Partial<Canvas>): void =>
     set((s) => {
       const c = s.canvases[canvasId]
+      if (c) noteWrite(canvasId)
       return c ? { canvases: { ...s.canvases, [canvasId]: { ...c, ...patch } } } : {}
     })
 
   const putWindows = (canvasId: string, fn: (ws: CanvasWindow[]) => CanvasWindow[]): void =>
     set((s) => {
+      noteWrite(canvasId)
       const c = s.canvases[canvasId]
       if (!c) return {}
       return { canvases: { ...s.canvases, [canvasId]: { ...c, windows: fn(c.windows).sort(byZ) } } }
@@ -420,6 +429,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
 
     load: async () => {
       listen()
+      const since = writeGen
       let list: Canvas[]
       try {
         list = await api.canvases.list()
@@ -431,7 +441,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
       for (const c of list) canvases[c.id] = { ...c, windows: [...c.windows].sort(byZ) }
       const order = list.map((c) => c.id)
       set((s) => ({
-        canvases,
+        canvases: Object.fromEntries(Object.entries(canvases).map(([id, c]) => [id, (writtenAt.get(id) ?? 0) > since && s.canvases[id] ? s.canvases[id] : c])),
         order,
         activeCanvasId: s.activeCanvasId && canvases[s.activeCanvasId] ? s.activeCanvasId : order[0] ?? null,
         loaded: true,

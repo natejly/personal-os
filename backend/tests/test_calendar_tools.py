@@ -28,6 +28,19 @@ class _Recording(_Events):
         self.kw = kw
         return super().list(**kw)
 
+    def insert(self, **kw: Any) -> _Req:
+        self.kw = kw
+        return super().insert(**kw)
+
+
+def test_create_sends_rfc3339_datetimes_with_seconds() -> None:
+    """The API answers 400 Bad Request to the YYYY-MM-DDTHH:MM form the tool schema asks the model for."""
+    events = _Recording()
+    _google(events).calendar_create({"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00"})
+    body = events.kw["body"]
+    assert (body["start"]["dateTime"], body["end"]["dateTime"]) == ("2026-10-07T15:00:00", "2026-10-07T16:00:00")
+    assert body["start"]["timeZone"]  # naive wall-clock, so the user's zone rides along
+
 
 def test_a_naive_start_is_the_users_wall_clock_not_utc() -> None:
     events = _Recording()

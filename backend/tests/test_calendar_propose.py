@@ -110,7 +110,7 @@ class ProposeTests(Base):
         made = self.server.events[("primary", out["results"][0]["id"])]
         self.assertEqual(made["summary"], "Design sync")
         self.assertEqual(made["attendees"], [{"email": "mira@example.com"}])
-        self.assertEqual(self.server.events[("primary", e1)]["start"]["dateTime"], "2026-10-07T10:00")
+        self.assertEqual(self.server.events[("primary", e1)]["start"]["dateTime"], "2026-10-07T10:00:00")
         self.assertNotIn(("primary", e2), self.server.events)
 
     def test_partial_failure_is_reported_per_change_and_the_rest_still_run(self) -> None:
@@ -155,7 +155,7 @@ class ProposeTests(Base):
         out = self.call("calendar_propose", changes=edited)
         ev = self.server.events[("primary", out["results"][0]["id"])]
         self.assertEqual(ev["summary"], "Sync (Mira only)")
-        self.assertEqual(ev["start"]["dateTime"], "2026-10-07T16:00")
+        self.assertEqual(ev["start"]["dateTime"], "2026-10-07T16:00:00")
         self.assertEqual(ev["attendees"], [{"email": "a@x.com"}])
         self.assertEqual(len(self.server.events), 1)
 

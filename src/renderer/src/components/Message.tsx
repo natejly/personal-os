@@ -239,8 +239,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
-      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face. */}
-      {!isUser && <div className="avatar face-avatar"><Face name="Grain" status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
+      {!isUser && <div className="avatar face-avatar"><Face name={message.conversation_id} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (

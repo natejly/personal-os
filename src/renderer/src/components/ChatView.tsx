@@ -126,9 +126,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 ))}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} />)}
                 {draftPending && <PendingUserMessage text={draftPending.text} />}
-                {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}
+                {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
+                    A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
-                  <div className="msg assistant"><div className="avatar face-avatar"><Face name="Grain" status="streaming" /></div><div className="bubble"><Thinking /></div></div>
+                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face name={convo?.id ?? conversationId!} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
                 )}
                 {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>

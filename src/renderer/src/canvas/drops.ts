@@ -24,6 +24,9 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
   const projectId = st.canvases[cid]?.project_id ?? null
   const open = (kind: WidgetKind, ref: string | null = null, config?: Record<string, unknown>): Promise<CanvasWindow | null> =>
     useCanvas.getState().openWindow(kind, ref, t.at, config, cid)
+  // A referent already open in this space is surfaced, not duplicated: the same rule the Add menu and Send to space follow.
+  const ensure = async (kind: WidgetKind, ref: string, config?: Record<string, unknown>): Promise<CanvasWindow | null> =>
+    (await useCanvas.getState().ensureWindow(cid, kind, ref, config, t.at)).win
   const upload = async (): Promise<CanvasWindow | null> => {
     if (!t.files?.length) return null
     await useStore.getState().uploadDocuments(t.files, projectId)
@@ -32,14 +35,14 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
 
   if (!p) return upload()
   switch (p.kind) {
-    case 'conversation': return open('chat', p.id)
+    case 'conversation': return ensure('chat', p.id)
     case 'nav': return open(p.id as WidgetKind)
     case 'todo': return open('todos')
     case 'document': return open('documents')
     case 'memory': return open('memory')
-    case 'project': return open('project', p.id)
-    case 'note': return open('note', p.id)
-    case 'widget': return open('dashboard-widget', p.id, { dashboard_id: p.dashboardId })
+    case 'project': return ensure('project', p.id)
+    case 'note': return ensure('note', p.id)
+    case 'widget': return ensure('dashboard-widget', p.id, { dashboard_id: p.dashboardId })
     case 'file': return upload()
   }
   return null

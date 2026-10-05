@@ -9,6 +9,7 @@ import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
+import { chatModelIds } from '../lib/modelLabel'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
@@ -343,7 +344,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'provider' && <section>
               <h3>Provider</h3>
               <p className="muted">Grain talks to any OpenAI-compatible endpoint: Fireworks, OpenAI, Anthropic, OpenRouter, a local Ollama, or your own <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy.</p>
-              <label><span className="toggle-text"><b>Base URL</b></span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.fireworks.ai/inference/v1" spellCheck={false} /></label>
+              <label><span className="toggle-text"><b>Base URL</b></span><input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.fireworks.ai/inference/v1" spellCheck={false} /></label>
               {settings.apiKeySet && !replacingKey ? (
                 <div className="setting-row">
                   <span className="toggle-text"><b>API key</b><small>Key saved ••••</small></span>
@@ -676,7 +677,7 @@ export default function SettingsModal(): JSX.Element {
             </section>}
 
             {/* Outside the tabs: both the Provider and the Memory tab's model fields list from it. */}
-            <datalist id="model-options">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
+            <datalist id="model-options">{chatModelIds(models).map((id) => <option key={id} value={id} />)}</datalist>
           </div>
         </div>
 

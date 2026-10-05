@@ -164,6 +164,8 @@ export interface State {
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
   dashboard: TodayDashboard | null
   todos: Todo[]
+  /** Bumped (debounced) when the backend says todos changed elsewhere; the open Todos view re-reads on it. */
+  todosTick: number
   recap: Recap | null
   recapLoading: boolean
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
@@ -617,6 +619,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let todosSeq = 0
 
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 /** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
@@ -637,6 +640,8 @@ let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** Bumped by every local job write, so a slower list read that started before it cannot put the old list back. */
+let jobsEdits = 0
 /** What a doc save would send: each field only when it differs from the saved copy. */
 const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string | null): { content?: string; title?: string } | null => {
   const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
@@ -1026,10 +1031,12 @@ export const useStore = create<State>((set, get) => {
   const putDesk = (d: Desk): void =>
     set((st) => ({
       // A desk archived (or unarchived) leaves the list it no longer belongs to.
+      // A row older than the one held is dropped: a fetch that was in flight when a newer desk_status landed
+      // resolves afterwards, and applying it would put the rail back on a status the desk has already left.
       desks: Boolean(d.archived) !== st.deskShowArchived
         ? st.desks.filter((x) => x.id !== d.id)
-        : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
-      activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
+        : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id && x.updated_at <= d.updated_at ? d : x)) : st.desks,
+      activeDesk: st.activeDesk?.id === d.id && st.activeDesk.updated_at <= d.updated_at ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
   const queuedNote = (position: number): string => `Queued #${position}: it starts when another desk finishes`
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
@@ -1152,10 +1159,18 @@ export const useStore = create<State>((set, get) => {
    * row itself is folded in every time. The inbox refresh is coalesced across a burst of desks.
    */
   let inboxTimer: ReturnType<typeof setTimeout> | null = null
+  let todosTickTimer: ReturnType<typeof setTimeout> | null = null
+  let deskListLoading = false
   const onDeskChanged = (d: Desk): void => {
     const st = get()
     const before = (st.activeDesk?.id === d.id ? st.activeDesk : st.desks.find((x) => x.id === d.id))?.status
     putDesk(d)
+    // A desk started outside this window (an agent's desk_start, a scheduled job) is not on the rail yet. putDesk only
+    // updates rows it has, so ask the list, which applies the scope filter itself.
+    if (before === undefined && !deskListLoading) {
+      deskListLoading = true
+      void get().refreshDesks().finally(() => { deskListLoading = false })
+    }
     if (before === d.status) return
     if (st.activeDeskId === d.id) void get().openDesk(d.id)
     if (d.status === 'review') void get().loadDeskFiles(d.id)
@@ -1192,6 +1207,8 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'todos_changed') {
+            if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
@@ -1710,6 +1727,7 @@ export const useStore = create<State>((set, get) => {
     mailWatchKind: null,
     dashboard: null,
     todos: [],
+    todosTick: 0,
     recap: null,
     recapLoading: false,
     agentInbox: null,
@@ -1804,7 +1822,12 @@ export const useStore = create<State>((set, get) => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
       // shortcuts wired, and StrictMode's second mount must not add a second listener.
       wireMenu()
-      if (inited) return
+      if (inited) {
+        // "Try again" on the failed screen drops `ready` and calls init once more. After the app has loaded there
+        // is nothing left to fetch, only the screen to bring back; returning here left it on the boot logo for good.
+        if (loadedOnce && !get().ready) set({ ready: true })
+        return
+      }
       inited = true
       if (!stateWired && typeof window.os.onBackendState === 'function') {
         stateWired = true
@@ -2853,7 +2876,10 @@ export const useStore = create<State>((set, get) => {
 
     refreshDesks: async () => {
       try {
-        set({ desks: await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived) })
+        const fresh = await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived)
+        // A desk_status event can land while this request is in flight; the list was read before it, so a row the
+        // store already holds in a newer state wins, or the rail would sit on the old status until the next event.
+        set((st) => ({ desks: fresh.map((d) => { const cur = st.desks.find((x) => x.id === d.id); return cur && cur.updated_at > d.updated_at ? cur : d }) }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2883,7 +2909,9 @@ export const useStore = create<State>((set, get) => {
         const desk = await api.cowork.desks.get(id)
         // A slower fetch must not clobber a desk the user has since switched away from.
         if (get().activeDeskId !== id) return
-        set({ activeDesk: desk })
+        // The rail may already hold a newer status than this fetch read (see putDesk): the detail pane follows it.
+        const listed = get().desks.find((x) => x.id === id)
+        set({ activeDesk: listed && listed.updated_at > desk.updated_at ? { ...desk, ...listed } : desk })
         putDesk(desk)
         // `retainSession` is the detail pane's own effect pair: the 12-session LRU evicts by
         // `touchedAt`, and a desk pane is never `focusedConversationId`.
@@ -3204,19 +3232,31 @@ export const useStore = create<State>((set, get) => {
       }
     },
     startRecording: async (meetingId) => {
-      // Asked once per install, and nothing records until it is acknowledged. The click is
-      // remembered rather than dropped, so accepting the notice finishes what the user pressed.
-      if (!get().meetingStatus?.consented) {
-        consentIntent = meetingId
-        return set({ meetingConsentOpen: true })
-      }
+      // One start at a time: a double click must not create a second meeting that the backend then refuses.
+      if (get().meetingBusy) return
       set({ meetingBusy: true })
       try {
+        // A click that beats the first status load must not read "unknown" as "not consented".
+        if (!get().meetingStatus) await get().refreshMeetingStatus()
+        // Asked once per install, and nothing records until it is acknowledged. The click is
+        // remembered rather than dropped, so accepting the notice finishes what the user pressed.
+        if (!get().meetingStatus?.consented) {
+          consentIntent = meetingId
+          return set({ meetingConsentOpen: true })
+        }
         // Whatever is buffered belongs to the meeting being left behind, so it goes first.
         const outgoing = get().activeMeeting?.id ?? null
         await get().flushMeetingNotes()
+        const createdHere = meetingId === undefined
         const id = meetingId ?? (await api.meetings.create({ title: newMeetingTitle() })).id
-        const m = await api.meetings.start(id)
+        let m: FullMeeting
+        try {
+          m = await api.meetings.start(id)
+        } catch (e) {
+          // A refused start (consent, self-test, mic, busy) must not leave an empty meeting behind for each press.
+          if (createdHere) await api.meetings.del(id).catch(() => undefined)
+          throw e
+        }
         // Typing carried on through create+start; the reset below would otherwise discard it.
         const late = await flushOutgoing(outgoing)
         const same = late !== null && late.id === id
@@ -3738,6 +3778,8 @@ export const useStore = create<State>((set, get) => {
       try {
         const out = await api.activity.applyInsight(id)
         await get().loadActivityInsights()
+        // A second click on a suggestion that already wrote its todo or memory changes nothing.
+        if ((out as { already?: boolean }).already) return
         if (out.type === 'prompt' && out.prompt) {
           // Setting the thing up is a conversation with tool approvals in it, so the suggestion
           // hands the message over rather than acting: a fresh chat with the prompt in its
@@ -3835,8 +3877,10 @@ export const useStore = create<State>((set, get) => {
       }
     },
     refreshJobs: async () => {
+      const seen = jobsEdits
       try {
-        set({ jobs: await api.jobs.list() })
+        const list = await api.jobs.list()
+        if (seen === jobsEdits) set({ jobs: list })
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
       }
@@ -3844,6 +3888,7 @@ export const useStore = create<State>((set, get) => {
     createJob: async (input) => {
       try {
         const job = await api.jobs.create(input)
+        jobsEdits++
         set((s) => ({ jobs: [...s.jobs, job].sort((a, b) => a.name.localeCompare(b.name)) }))
         get().toast(`Scheduled: ${job.name}`, 'info')
         void get().refreshAgentInbox()
@@ -3856,6 +3901,7 @@ export const useStore = create<State>((set, get) => {
     deleteJob: async (id) => {
       try {
         await api.jobs.delete(id)
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }))
         void get().refreshAgentInbox()
       } catch (e) {
@@ -3865,6 +3911,7 @@ export const useStore = create<State>((set, get) => {
     setJobEnabled: async (id, enabled) => {
       try {
         const job = await api.jobs.update(id, { enabled })
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
         void get().refreshAgentInbox()
       } catch (e) {
@@ -3874,6 +3921,7 @@ export const useStore = create<State>((set, get) => {
     updateJob: async (id, patch) => {
       try {
         const job = await api.jobs.update(id, patch)
+        jobsEdits++
         set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
         void get().refreshAgentInbox()
         return null
@@ -4038,14 +4086,27 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },
 
-    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => set({ todos: await api.todos.list(scope, includeDone, '', sort) }),
+    // Latest request wins: a slower, older fetch (another scope, or the mount's) must not overwrite the one the view asked for last.
+    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => {
+      const n = ++todosSeq
+      const rows = await api.todos.list(scope, includeDone, '', sort)
+      if (n === todosSeq) set({ todos: rows })
+    },
     addTodo: async (t) => {
       await api.todos.create(t)
       await Promise.all([get().refreshTodos(), get().refreshDashboard()])
     },
     updateTodo: async (id, patch) => {
       const recurs = patch.done === true && !!get().todos.find((x) => x.id === id)?.repeat
-      const t = await api.todos.update(id, patch)
+      // Completing is shown at once (a 500-row list otherwise waits a full round trip to react); put back if the write fails.
+      const before = get().todos.find((x) => x.id === id)
+      const optimistic = typeof patch.done === 'boolean' && before
+      if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? { ...x, done: patch.done ? 1 : 0 } : x)) }))
+      let t
+      try { t = await api.todos.update(id, patch) } catch (e) {
+        if (optimistic) set((s) => ({ todos: s.todos.map((x) => (x.id === id ? before : x)) }))
+        throw e
+      }
       if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
       if ('done' in patch || 'due' in patch || 'clear_due' in patch) void get().refreshDashboard()  // todo_stats: the nav badge and Today card

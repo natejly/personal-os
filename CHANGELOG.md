@@ -25,6 +25,11 @@ This section also catches up on work merged between 2026-10-01 and 2026-10-03 th
 ### Changed
 
 - **One name: Files.** What the UI, the assistant's tool descriptions and its prompt called Docs, Documents or Notes is now "file": the files you write in the editor and the files you upload alike (uploads show as "Uploads" where a short label is needed). Sticky notes on the canvas keep their name. Routes, tables and tool names are unchanged. A project's "View all" tab and the Today project card now count editor files as well as uploads.
+- **Calendar changes run without a card.** Creating, updating, deleting and RSVPing to events are on by default and run on a plain yes in the conversation; every change is still read back, undoable and a proposal in unattended runs. Mail, Tasks and the other actions outside the app still ask each time.
+
+### Fixed
+
+- **Calendar events could not be created from chat.** The assistant's `YYYY-MM-DDTHH:MM` times were sent as-is and Google answered 400 Bad Request to every one; times are now sent with seconds.
 
 ### Security
 

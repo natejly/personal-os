@@ -171,7 +171,9 @@ export default function MeetingsView(): JSX.Element {
   } = useStore()
 
   const [transcriptOpen, setTranscriptOpen] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(true)
+  // Open by default beside the notepad; in a narrow window it floats over it, so it starts closed
+  // (the toolbar toggle opens it) rather than covering the notepad and the toolbar on arrival.
+  const [reviewOpen, setReviewOpen] = useState(() => window.matchMedia('(min-width: 1101px)').matches)
   const [reviewMode, setReviewMode] = useState<'compare' | 'diff'>('compare')
   const [dropped, setDropped] = useState<Record<string, boolean>>({})
 
@@ -182,10 +184,15 @@ export default function MeetingsView(): JSX.Element {
     setImporting(true)
     try {
       await api.meetings.importAudio(id, file)
+      // The 202 comes back before the background job has marked the row 'transcribing', so a first read
+      // that is not yet 'transcribing' means nothing started *yet*, not that it already finished.
+      let started = false
       for (let i = 0; i < 1200; i++) {
         await openMeeting(id)
-        if (useStore.getState().activeMeeting?.status !== 'transcribing') break
-        await new Promise((r) => setTimeout(r, 3000))
+        const cur = useStore.getState().activeMeeting
+        if (cur?.status === 'transcribing') started = true
+        else if (started || (cur?.segment_count ?? 0) > 0 || i >= 10 || cur?.error) break
+        await new Promise((r) => setTimeout(r, i < 10 ? 1000 : 3000))
       }
       await refreshMeetings()
     } catch (e) {

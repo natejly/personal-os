@@ -4,6 +4,7 @@ import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useStore } from '../store'
 import ChatPulse from './ChatPulse'
+import Face from './Face'
 import { api } from '../lib/api'
 import { copyMarkdown, downloadMarkdown } from '../features/notes/exportDoc'
 import type { Conversation } from '@shared/types'
@@ -76,6 +77,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         // A text field inside a draggable element cannot select by mouse: the drag wins.
         draggable={!renaming}
       >
+        <Face name={conv.id} size={sub ? 12 : 14} />
         <span className="convo-title">
           <ChatPulse conversationId={conv.id} />
           {lead}

@@ -437,6 +437,7 @@ class Google:
             ids = [c["id"] for c in self.calendars() if not c["hidden"]][:15]
         svc = self._svc("calendar", "v3")
         out: list[dict[str, Any]] = []
+        failures: list[Exception] = []
         try:
             for cid in ids:
                 try:
@@ -444,7 +445,10 @@ class Google:
                 except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
                     if len(ids) == 1:
                         raise
+                    failures.append(e)
                     log.warning("calendar %s skipped: %s", cid, e)
+            if failures and len(failures) == len(ids):
+                raise failures[0]  # every calendar failed: an empty grid would read as "no events"
         finally:
             self._reads.flush()
         out.sort(key=lambda e: e["start"] or "")
@@ -734,7 +738,10 @@ class Google:
                     body["start"].update({"dateTime": None, "timeZone": None})
                     body["end"].update({"dateTime": None, "timeZone": None})
             else:
-                body["start"], body["end"] = {"dateTime": start}, {"dateTime": str(end)}
+                # The API rejects a dateTime without seconds ("2026-10-04T10:00" is a 400 Bad Request), and the
+                # tool schema asks the model for exactly that form, so every timed value is reserialised.
+                start, end = _parse_iso(start).isoformat(), _parse_iso(str(end)).isoformat()
+                body["start"], body["end"] = {"dateTime": start}, {"dateTime": end}
                 naive = "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start)
                 tz = f.get("time_zone") or (_local_tz() if naive else None)
                 if tz:

@@ -297,6 +297,17 @@ def test_denial_streak():
     assert s.note() is None
 
 
+def test_fork_bombs_are_hardline_and_a_long_command_is_not_slow():
+    import time
+    for bomb in (":(){ :|:& };:", "bomb(){ bomb|bomb& };bomb", "x bomb ( ) { bomb | bomb & }"):
+        assert pr.hardline(bomb) == "a fork bomb"
+    assert pr.hardline("f(){f|f}") is None
+    t = time.time()  # the old pattern took minutes on 150 KB of one word (quadratic backtracking)
+    assert pr.hardline("echo " + "x" * 150_000 + " > big.txt; touch huge.txt") is None
+    assert pr.hardline("(){" * 50_000) is None
+    assert time.time() - t < 5
+
+
 def test_malformed_rules_are_skipped():
     rs = pr.load_rules({"allow": ["Bash(ls *)", "((", 5], "deny": "nope"})
     assert [r.text for r in rs.allow] == ["Bash(ls *)"] and not rs.deny

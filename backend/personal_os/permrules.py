@@ -567,7 +567,22 @@ def _shell_c(tokens: list[str]) -> str | None:
 
 # ---------------------------------------------------------------- hardline
 
-_FORK = re.compile(r"(:\(\)\{:\|:&?\}|(\w+)\(\)\{\2\|\2&\})")
+_FORK_COLON = re.compile(r":\(\)\{:\|:&?\}")
+_FORK_BODY = re.compile(r"(\w+)\|\1&\}")
+
+
+def _fork_bomb(text: str) -> bool:
+    r"""`:(){:|:&}` or `f(){f|f&}` (whitespace already removed). Anchored on each `(){` instead of searching for
+    `(\w+)\(\)\{\1...`, which tries every start of a long word and takes quadratic time on a long command."""
+    if _FORK_COLON.search(text):
+        return True
+    i = text.find("(){")
+    while i != -1:
+        m = _FORK_BODY.match(text, i + 3)
+        if m and text.endswith(m.group(1), 0, i):
+            return True
+        i = text.find("(){", i + 1)
+    return False
 SYSTEM_DIRS = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/Applications", "/private",
                "/opt", "/Users", "/dev", "/cores", "/Volumes"}
 
@@ -614,7 +629,7 @@ def _hardline_tokens(tokens: list[str], redirects: list[tuple[str, str]]) -> str
 def hardline(cmd: str, parsed: Parsed | None = None) -> str | None:
     """Why this command is never allowed to run, or None. Checked before everything; no rule or card lifts it."""
     text = normalize(cmd)
-    if _FORK.search(re.sub(r"\s+", "", text)):
+    if _fork_bomb(re.sub(r"\s+", "", text)):
         return "a fork bomb"
     p = parsed or split_command(cmd)
     for seg in p.segments + p.nested:

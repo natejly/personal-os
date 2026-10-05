@@ -1425,6 +1425,19 @@ class ChatIn(BaseModel):
     page_context: PageContextIn | None = None
     resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
     replace_from: str | None = None  # id of an earlier user message this one replaces: it and everything after it are hidden
+    attachments: list[str] | None = None  # ids of uploaded documents sent with this turn; their text is inlined for the model
+
+
+def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[dict[str, Any]]:
+    """The documents behind a turn's attachment ids, as the row stores them. 404 for an id the chat cannot see:
+    the file was deleted, or belongs to another project."""
+    out: list[dict[str, Any]] = []
+    for did in dict.fromkeys(ids or []):
+        d = documents.get(did)
+        if not d or (d["project_id"] and d["project_id"] != conv["project_id"]):
+            raise HTTPException(404, f"Attached file {did} is not available to this chat")
+        out.append({"id": d["id"], "name": d["name"], "mime": d["mime"], "size": d["size"]})
+    return out
 
 
 RENDER_HINT = """## Rendering
@@ -1806,7 +1819,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     if body.content is not None:
         user_text = body.content.strip()
-        if not user_text:
+        # Resolved again here (the route checked already): the run reads the documents rows, not client-sent names.
+        attachments = _resolve_attachments(conv, body.attachments) if body.attachments else []
+        if not user_text and not attachments:
             yield "error", {"message": "Empty message"}
             return
         edited_from: str | None = None
@@ -1844,10 +1859,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if first_user and first_user["id"] in hidden and conv["title"] == _title_from(first_user["content"]):
                 convos.update(conv_id, {"title": "New chat"})
                 conv = {**conv, "title": "New chat"}
-        um = convos.add_message(conv_id, "user", user_text)
+        um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None)
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
-            title = _title_from(user_text)
+            title = _title_from(user_text or attachments[0]["name"])
             convos.update(conv_id, {"title": title})
             placeholder_title = title
             yield "title", {"id": conv_id, "title": title}
@@ -2543,7 +2558,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": expand_command(um["content"], command_store)})
+                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store)})})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
@@ -3813,6 +3828,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
     if body.content is not None and (too_long := _message_too_long(body.content, settings())):
         raise HTTPException(413, too_long)
+    _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
     # A chat with a live run is never hidden: writing in an archived one brings it back.
     if row.get("archived_at"):
         convos.update(id, {"archived": False})
@@ -3838,6 +3854,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
 
 class SteerIn(BaseModel):
     content: str
+    attachments: list[str] | None = None
 
 
 @app.post("/conversations/{id}/steer")
@@ -3850,10 +3867,12 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     generator holds the other end of that: after its last steer check it awaits nothing before `done`
     (shell teardown runs after it), so a steer is either folded in or gets this 409 and becomes a new run.
     """
-    if not convos.get(id):
+    conv = convos.get(id, with_messages=False)
+    if not conv:
         raise HTTPException(404, "Conversation not found")
     text = (body.content or "").strip()
-    if not text:
+    attachments = _resolve_attachments(conv, body.attachments)
+    if not text and not attachments:
         raise HTTPException(400, "Empty message")
     if too_long := _message_too_long(text, settings()):
         raise HTTPException(413, too_long)
@@ -3865,7 +3884,7 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     # A stopping run breaks out of its loop before it reads steers: one taken here would never be answered.
     if run.stop.is_set():
         raise HTTPException(409, {"message": "That reply is stopping", "stopping": True})
-    um = convos.add_message(id, "user", text)
+    um = convos.add_message(id, "user", text, attachments=attachments or None)
     run.publish("user_message", um)
     run.steers.append(um)
     run.poke()

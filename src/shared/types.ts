@@ -612,6 +612,8 @@ export interface Message {
   conversation_id: string
   role: Role
   content: string
+  /** Uploaded files sent with a user turn; the server inlines their text for the model. */
+  attachments?: Attachment[] | null
   model: string | null
   error: string | null
   context_used: ContextUsed | null
@@ -803,6 +805,14 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
+}
+
+/** One uploaded file attached to a message or a draft: the documents row it points at. */
+export interface Attachment {
+  id: string
+  name: string
+  mime: string
+  size?: number
 }
 
 export interface Document {

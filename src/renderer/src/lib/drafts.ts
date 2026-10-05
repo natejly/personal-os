@@ -6,20 +6,23 @@
  * Its own small zustand store, like the onboarding and canvas stores: a keystroke here wakes the
  * one textarea on that key, not every selector in the app.
  *
- * Each key is one localStorage item (`grain.draft.<key>` = `{t, at, taint?}`), so a pop-out and
+ * Each key is one localStorage item (`grain.draft.<key>` = `{t, at, taint?, f?}`), so a pop-out and
  * the main window overwrite only the key they edited. Writes are debounced per key and flushed on
  * pagehide; another window's write arrives through the `storage` event. Every storage access is in
  * try/catch and behind a window guard, since store.test.ts imports the renderer under node.
  */
 import { useCallback } from 'react'
 import { create } from 'zustand'
+import type { Attachment } from '@shared/types'
 
 export interface DraftEntry {
   text: string
   /** Last edit, ms since the epoch: orders the prune and the sweep. */
   at: number
-  /** Set on a row-less draft that carries an upload note, so the send still marks the chat untrusted. */
+  /** Set on a row-less draft that carries an upload, so the send still marks the chat untrusted. */
   taint?: string
+  /** Uploaded files waiting to go with the next send, shown as chips above the text. */
+  files?: Attachment[]
 }
 
 export const DRAFT_PREFIX = 'grain.draft.'
@@ -71,10 +74,12 @@ function readItem(key: string): DraftEntry | null {
   try {
     const raw = localStorage.getItem(DRAFT_PREFIX + key)
     if (!raw) return null
-    const p = JSON.parse(raw) as { t?: unknown; at?: unknown; taint?: unknown }
-    if (typeof p.t !== 'string' || !p.t) return null
-    const entry: DraftEntry = { text: p.t, at: typeof p.at === 'number' ? p.at : Date.now() }
+    const p = JSON.parse(raw) as { t?: unknown; at?: unknown; taint?: unknown; f?: unknown }
+    const files = Array.isArray(p.f) ? (p.f as Attachment[]).filter((a) => a && typeof a.id === 'string' && typeof a.name === 'string') : []
+    if ((typeof p.t !== 'string' || !p.t) && !files.length) return null
+    const entry: DraftEntry = { text: typeof p.t === 'string' ? p.t : '', at: typeof p.at === 'number' ? p.at : Date.now() }
     if (typeof p.taint === 'string' && p.taint) entry.taint = p.taint
+    if (files.length) entry.files = files
     return entry
   } catch {
     return null
@@ -116,13 +121,14 @@ function writeNow(key: string): void {
   const entry = useDrafts.getState().drafts[key]
   // An over-long draft is kept in memory only; the stale item goes too, so an old version never
   // comes back after a relaunch in its place.
-  if (!entry || !entry.text || entry.text.length > MAX_PERSISTED_CHARS) {
+  if (!entry || (!entry.text && !entry.files?.length) || entry.text.length > MAX_PERSISTED_CHARS) {
     removeItem(key)
     return
   }
   try {
-    const item: { t: string; at: number; taint?: string } = { t: entry.text, at: entry.at }
+    const item: { t: string; at: number; taint?: string; f?: Attachment[] } = { t: entry.text, at: entry.at }
     if (entry.taint) item.taint = entry.taint
+    if (entry.files?.length) item.f = entry.files
     localStorage.setItem(DRAFT_PREFIX + key, JSON.stringify(item))
     prune()
   } catch { /* a full disk or a private window still has this session's copy */ }
@@ -176,19 +182,28 @@ export function getDraft(key: string): DraftEntry | undefined {
   return useDrafts.getState().drafts[key]
 }
 
-function put(key: string, text: string, taint?: string): void {
+function put(key: string, text: string, taint?: string, files?: Attachment[]): void {
   hydrate()
   useDrafts.setState((s) => {
     const drafts = { ...s.drafts }
-    if (text) {
+    const kept = files ?? s.drafts[key]?.files
+    if (text || kept?.length) {
       const entry: DraftEntry = { text, at: Date.now() }
-      const kept = taint ?? s.drafts[key]?.taint
-      if (kept) entry.taint = kept
+      const t = taint ?? s.drafts[key]?.taint
+      if (t) entry.taint = t
+      if (kept?.length) entry.files = kept
       drafts[key] = entry
     } else delete drafts[key]
     return { drafts }
   })
   schedule(key)
+}
+
+/** Replaces the files waiting on `key`; `taint` marks a row-less draft, as an upload note did. */
+export function setDraftFiles(key: string, next: Attachment[] | ((cur: Attachment[]) => Attachment[]), taint?: string): void {
+  const cur = getDraft(key)
+  const files = typeof next === 'function' ? next(cur?.files ?? []) : next
+  put(key, cur?.text ?? '', taint, files)
 }
 
 export function setDraft(key: string, next: string | ((cur: string) => string)): void {
@@ -224,10 +239,12 @@ export function appendToDraft(key: string, text: string, opts: { taint?: string;
 }
 
 /** Puts a refused send back, ahead of anything typed since, where `key` now lives (see moveDraft). */
-export function restoreDraft(key: string, text: string): void {
-  if (!text) return
+export function restoreDraft(key: string, text: string, files?: Attachment[]): void {
+  if (!text && !files?.length) return
   const target = redirect.get(key) ?? key
-  put(target, restoreInto(getDraft(target)?.text ?? '', text))
+  const cur = getDraft(target)
+  put(target, restoreInto(cur?.text ?? '', text), undefined,
+      files?.length ? [...files, ...(cur?.files ?? []).filter((a) => !files.some((f) => f.id === a.id))] : undefined)
 }
 
 /**
@@ -238,10 +255,11 @@ export function moveDraft(from: string, to: string): void {
   if (from === to) return
   redirect.set(from, to)
   const src = getDraft(from)
-  if (!src?.text) return
+  if (!src?.text && !src?.files?.length) return
   const dst = getDraft(to)
-  put(to, dst?.text?.trim() ? `${dst.text.replace(/\s+$/, '')}\n\n${src.text}` : src.text, dst?.taint ?? src.taint)
-  put(from, '')
+  put(to, dst?.text?.trim() ? `${dst.text.replace(/\s+$/, '')}\n\n${src.text}` : src.text, dst?.taint ?? src.taint,
+      [...(dst?.files ?? []), ...(src.files ?? [])])
+  put(from, '', undefined, [])
 }
 
 /** A send from `key` starts fresh: an earlier move must not steer this one's refusal elsewhere. */
@@ -273,6 +291,13 @@ export function useDraft(key: string): [string, (next: string | ((cur: string) =
   const text = useDrafts((s) => s.drafts[key]?.text ?? '')
   const set = useCallback((next: string | ((cur: string) => string)) => setDraft(key, next), [key])
   return [text, set]
+}
+
+const NO_FILES: Attachment[] = []
+/** The files waiting on `key`; re-renders only when its own key's files change. */
+export function useDraftFiles(key: string): Attachment[] {
+  hydrate()
+  return useDrafts((s) => s.drafts[key]?.files ?? NO_FILES)
 }
 
 /** Tests only: forget everything in memory, so the next access reads storage afresh. */

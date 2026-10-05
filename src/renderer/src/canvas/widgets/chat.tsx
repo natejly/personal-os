@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from 'lucide-react'
-import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
+import type { Attachment, CanvasWindow, DragKind, DragPayload } from '@shared/types'
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
@@ -8,6 +8,7 @@ import Face from '../../components/Face'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
+import { composerKey, setDraftFiles } from '../../lib/drafts'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
@@ -199,23 +200,25 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
     const draft = (text: string): void => {
       if (!appendDraft(root.current, text)) app.toast('Could not reach the composer', 'error')
     }
+    // This window's composer keeps its draft under the conversation's key (lib/drafts.ts).
+    const attachFiles = (added: Attachment[]): void =>
+      setDraftFiles(composerKey({ conversationId: convId }), (cur) => [...cur, ...added.filter((a) => !cur.some((c) => c.id === a.id))])
     if (!p || p.kind === 'file') {
       if (!files.length) return
       const saved = await app.uploadDocuments(files, convo?.project_id ?? null)
       if (!saved.length) return
       await app.noteUntrustedUpload(convId || undefined, 'draft')
-      const { note } = uploadNote(saved)
-      if (note) draft(note)
+      const { files: added } = uploadNote(saved)
+      if (added.length) attachFiles(added)
       return
     }
     switch (p.kind) {
       case 'todo':
         draft(`> ${p.label}`)
         break
-      // Contract §12.4: there is no per-conversation attachment, so the nearest real action is an
-      // instruction the model can execute itself.
+      // A stored file dropped from the Files view rides along as an attachment of the next send.
       case 'document':
-        draft(`Read uploaded file ${p.id} ("${p.label}") with read_document and use it as context.`)
+        attachFiles([{ id: p.id, name: p.label, mime: '' }])
         break
       case 'memory':
         await app.updateMemory(p.id, { pinned: true })

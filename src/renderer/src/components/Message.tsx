@@ -3,7 +3,7 @@ import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
+import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import ToolEvents from './ToolEvents'
@@ -246,7 +246,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><div className="user-text">{message.content}</div></div>
+            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <div className="user-text">{message.content}</div>}</div>
           )
         ) : (
           <div className="msg-body">
@@ -325,11 +325,25 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
 })
 
 /** A message sent and not yet confirmed by the run: the same bubble, dimmed, with no actions. */
-export function PendingUserMessage({ text }: { text: string }): JSX.Element {
+/** The files sent with a user turn. Each opens the stored document; the model read its text inline. */
+export function AttachmentChips({ files }: { files?: Attachment[] | null }): JSX.Element | null {
+  if (!files?.length) return null
+  return (
+    <div className="msg-files">
+      {files.map((a) => (
+        <button key={a.id} className="file-chip" title={`Open ${a.name}`} onClick={() => void useStore.getState().openDoc(a.id)}>
+          <FileText size={12} /><span>{a.name}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function PendingUserMessage({ text, attachments }: { text: string; attachments?: Attachment[] }): JSX.Element {
   return (
     <div className="msg user pending" aria-busy="true">
       <div className="avatar"><User size={14} /></div>
-      <div className="bubble"><div className="user-bubble"><div className="user-text">{text}</div></div></div>
+      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <div className="user-text">{text}</div>}</div></div>
     </div>
   )
 }

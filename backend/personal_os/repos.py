@@ -147,6 +147,10 @@ DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": T
 PRIVATE_OFF = {"useMemory": False, "useGraph": False, "useStyle": False, "autoLearn": False}
 
 
+# Per attached file, how much extracted text goes into the user turn; the rest is reachable through read_document.
+ATTACH_INLINE_CHARS = 40_000
+
+
 class Conversations:
     def __init__(self, db: Database):
         self.db = db
@@ -257,7 +261,7 @@ class Conversations:
                     "SELECT * FROM messages WHERE conversation_id=?\n"
                     "AND superseded_at IS NULL\n"
                     "ORDER BY created_at, rowid", (id,)).fetchall()
-                d["messages"] = [row_to_dict(m, ("context_used", "tool_events", "trace")) for m in rows]
+                d["messages"] = [row_to_dict(m, ("context_used", "tool_events", "trace", "attachments")) for m in rows]
                 self._attach_variants(c, id, d["messages"])
         return d
 
@@ -328,20 +332,51 @@ class Conversations:
         with self.db.tx() as c:
             c.execute("DELETE FROM conversations WHERE id=?", (id,))
 
-    def add_message(self, conv_id: str, role: str, content: str, model: str | None = None, *, variant_of: str | None = None) -> dict[str, Any]:
+    def add_message(self, conv_id: str, role: str, content: str, model: str | None = None, *, variant_of: str | None = None,
+                    attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         mid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of) VALUES(?,?,?,?,?,?,?)",
-                (mid, conv_id, role, content, model, t, variant_of),
+                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of,attachments) VALUES(?,?,?,?,?,?,?,?)",
+                (mid, conv_id, role, content, model, t, variant_of, json.dumps(attachments) if attachments else None),
             )
             c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
             # A row opened into an existing regenerate group announces its siblings, so the switcher shows on
             # the live event rather than after a reload.
             variants = self._variant_groups(c, conv_id).get(variant_of) if variant_of else None
         return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None,
-                "outcome": None, "error_kind": None, "variant_of": variant_of, "variants": variants}
+                "outcome": None, "error_kind": None, "variant_of": variant_of, "variants": variants, "attachments": attachments or None}
+
+    def for_model(self, row: dict[str, Any]) -> str:
+        """A message dict's content as the model reads it, attachments inlined (see model_content)."""
+        atts = row.get("attachments")
+        if not atts:
+            return row.get("content") or ""
+        with self.db.tx() as c:
+            return self.model_content(c, row.get("content") or "", json.dumps(atts))
+
+    def model_content(self, c: Any, content: str, attachments_json: str | None) -> str:
+        """What the model reads for a user row: the text as typed, then each attached file's extracted text
+        under a cap. Past the cap the model is told how to read the rest, so a long file still works."""
+        if not attachments_json:
+            return content
+        try:
+            atts = json.loads(attachments_json)
+        except ValueError:
+            return content
+        parts = [content] if content else []
+        for a in atts if isinstance(atts, list) else []:
+            if not isinstance(a, dict) or not a.get("id"):
+                continue
+            row = c.execute("SELECT name, text FROM documents WHERE id=? AND deleted_at IS NULL", (a["id"],)).fetchone()
+            name = str((row["name"] if row else None) or a.get("name") or "file")
+            text = (row["text"] if row else "") or ""
+            if len(text) > ATTACH_INLINE_CHARS:
+                text = (text[:ATTACH_INLINE_CHARS] + f"\n[... {len(text) - ATTACH_INLINE_CHARS} more characters; "
+                        f"read them with read_document id={a['id']} and an offset]")
+            parts.append(f'<attached_file name="{name}" id="{a["id"]}">\n{text or "(no readable text)"}\n</attached_file>')
+        return "\n\n".join(parts)
 
     MAX_VARIANTS = 5
 
@@ -381,7 +416,7 @@ class Conversations:
                 "variants": variants}
 
     def _hydrated_row(self, c: Any, conv_id: str, mid: str) -> dict[str, Any]:
-        row = row_to_dict(c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone(), ("context_used", "tool_events", "trace")) or {}
+        row = row_to_dict(c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone(), ("context_used", "tool_events", "trace", "attachments")) or {}
         self._attach_variants(c, conv_id, [row])
         return row
 
@@ -507,33 +542,35 @@ class Conversations:
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT role, content FROM messages WHERE conversation_id=? AND content != ''\n"
+                "SELECT role, content, attachments FROM messages WHERE conversation_id=?\n"
+                "AND (content != '' OR attachments IS NOT NULL)\n"
                 "AND superseded_at IS NULL\n"
                 "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in rows]
+            return [{"role": r["role"], "content": self.model_content(c, r["content"], r["attachments"])} for r in rows]
 
     def history_rows(self, conv_id: str) -> list[dict[str, Any]]:
         """history() with the ids and timestamps compaction needs to say where a summary ends, and the tool events
         of an assistant row (a reply that only ran tools has no prose but still happened)."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, role, content, created_at, tool_events FROM messages WHERE conversation_id=?\n"
-                "AND (content != '' OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
+                "SELECT id, role, content, created_at, tool_events, attachments FROM messages WHERE conversation_id=?\n"
+                "AND (content != '' OR attachments IS NOT NULL OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
                 "AND superseded_at IS NULL\n"
                 "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            try:
-                ev = json.loads(d["tool_events"]) if d["tool_events"] else None
-            except ValueError:
-                ev = None
-            d["tool_events"] = ev if isinstance(ev, list) else None
-            out.append(d)
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    ev = json.loads(d["tool_events"]) if d["tool_events"] else None
+                except ValueError:
+                    ev = None
+                d["tool_events"] = ev if isinstance(ev, list) else None
+                d["content"] = self.model_content(c, d["content"], d.pop("attachments"))
+                out.append(d)
         return out
 
 

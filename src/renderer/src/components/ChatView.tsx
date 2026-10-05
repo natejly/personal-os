@@ -19,6 +19,7 @@ import { firstPrompts } from './onboarding/steps'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
 import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
+import Face from './Face'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -127,7 +128,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {draftPending && <PendingUserMessage text={draftPending.text} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
-                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><Thinking /></div></div>
+                  <div className="msg assistant"><div className="avatar face-avatar"><Face name="Grain" status="streaming" /></div><div className="bubble"><Thinking /></div></div>
                 )}
                 {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>

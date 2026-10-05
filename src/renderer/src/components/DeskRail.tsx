@@ -1,8 +1,4 @@
 import { useEffect, useState } from 'react'
-import {
-  Ban, CircleCheck, CircleDashed, CircleHelp, CircleSlash, Clock, FileCheck2,
-  ListChecks, LoaderCircle, Pause, TriangleAlert
-} from 'lucide-react'
 import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 // The runtime values come from the relative path, not `@shared/*`: `npm test`'s esbuild line maps no
 // alias, so a component that ever becomes reachable from a bundled test would fail to build. store.ts
@@ -11,6 +7,7 @@ import { NEEDS_YOU } from '../../../shared/types'
 import { useStore } from '../store'
 import { queuePositions } from '../lib/deskFiles'
 import ChatPulse from './ChatPulse'
+import Face from './Face'
 
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
   { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
@@ -32,22 +29,6 @@ export const STATUS_LABEL: Record<DeskStatus, string> = {
   failed: 'Failed',
   stopped: 'Stopped',
   queued: 'Queued'
-}
-
-const STATUS_ICON: Record<DeskStatus, JSX.Element> = {
-  draft: <CircleDashed size={13} />,
-  planning: <ListChecks size={13} />,
-  awaiting_plan: <ListChecks size={13} />,
-  working: <LoaderCircle size={13} className="spin" />,
-  needs_approval: <CircleHelp size={13} />,
-  blocked: <CircleHelp size={13} />,
-  paused: <Pause size={13} />,
-  interrupted: <TriangleAlert size={13} />,
-  review: <FileCheck2 size={13} />,
-  done: <CircleCheck size={13} />,
-  failed: <Ban size={13} />,
-  stopped: <CircleSlash size={13} />,
-  queued: <Clock size={13} />
 }
 
 export const fmtDur = (seconds: number): string => {
@@ -116,7 +97,7 @@ function DeskRow({ desk, active, position, onOpen }: { desk: Desk; active: boole
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
     >
-      <span className={`desk-ring desk-ring-${desk.status}`} aria-hidden>{STATUS_ICON[desk.status]}</span>
+      <span className={`desk-ring desk-ring-${desk.status}`} title={STATUS_LABEL[desk.status]}><Face name={desk.id} status={desk.status} size={20} /></span>
       <span className="desk-row-main">
         <span className="desk-row-title">
           {title}

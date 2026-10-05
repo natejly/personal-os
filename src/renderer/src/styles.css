@@ -569,6 +569,9 @@ kbd {
   margin-top: 2px;
 }
 .msg.assistant .avatar { background: var(--accent-solid); color: var(--on-accent); }
+.msg .avatar.face-avatar { background: none; width: 30px; height: 30px; margin-top: 0; }
+.avatar.face-avatar .face { width: 100%; height: 100%; }
+.face { flex: none; display: block; }
 .bubble { min-width: 0; flex: 1; }
 /* An assistant reply: reasoning, tool rows and cards, then the text. The rhythm is set here so the
    cards share it without sitting inside .markdown, whose element rules would restyle their lists. */

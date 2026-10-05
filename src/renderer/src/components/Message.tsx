@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -16,6 +16,7 @@ import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import { statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
+import Face from './Face'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -226,8 +227,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
-      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a mark. */}
-      {!isUser && <div className="avatar"><Sparkles size={14} /></div>}
+      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face. */}
+      {!isUser && <div className="avatar face-avatar"><Face name="Grain" status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (

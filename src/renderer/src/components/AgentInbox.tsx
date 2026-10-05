@@ -19,6 +19,7 @@ import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 import { AUTONOMY } from './DeskRail'
+import Face from './Face'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -181,6 +182,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   return (
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-row">
+        <Face name={r.job} status={r.status} size={18} />
         <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
         <span className="inbox-line" title={line}>{line}</span>

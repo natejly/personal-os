@@ -516,7 +516,7 @@ class Skills:
 
     def delete(self, id: str) -> None:
         with self.db.tx() as c:
-            c.execute("DELETE FROM skills WHERE id=?", (id,))
+            c.execute("DELETE FROM skills WHERE id=? AND source != 'builtin'", (id,))  # the built-in guide (guide.py) stays
 
     def approved_block(self, project_id: str | None = None) -> str:
         """The only path from this table into a prompt. A candidate or a reject can never come out of it."""
@@ -564,7 +564,9 @@ def skills_seen(used: list[dict[str, Any]], tool_events: list[dict[str, Any]] | 
         for row in skills.list(status="approved", project_id=project_id):
             if row["id"].lower() in viewed or row["name"].lower() in viewed:
                 seen.setdefault(row["id"], row)
-    return [{"id": r["id"], "name": r["name"], "description": r.get("description") or ""} for r in seen.values()]
+    # The built-in guide is never feedback material: auto-learn must not judge it or draft revisions of it.
+    return [{"id": r["id"], "name": r["name"], "description": r.get("description") or ""} for r in seen.values()
+            if r.get("source") != "builtin" and r["name"] != "grain-guide"]
 
 
 def run_transcript(messages: list[dict[str, Any]], message_id: str | None = None) -> tuple[str | None, str | None]:
@@ -879,7 +881,7 @@ class LearnWorker:
             if not self.skills or fb["outcome"] != "failed" or len(fb["change"]) < 10:
                 continue
             row = self.skills.get(fb["id"])
-            if not row or row["status"] != "approved":
+            if not row or row["status"] != "approved" or row["source"] == "builtin":
                 continue
             revised_name = f"{row['name']} (revised)"[:MAX_SKILL_NAME]
             if any(s["name"] == revised_name and s["status"] == "candidate" for s in self.skills.list()):

@@ -50,7 +50,7 @@ from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
                    Scheduler, local_tz_name, next_fire, spent, valid_cron, valid_tz)
-from . import meeting_import, skillbuild, skillmd
+from . import guide, meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
@@ -475,6 +475,7 @@ async def _reliability_shutdown() -> None:
 work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
+guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
@@ -8065,6 +8066,9 @@ def patch_skill(skill_id: str, body: SkillPatch) -> dict[str, Any]:
 
 @app.delete("/skills/{skill_id}")
 def delete_skill(skill_id: str) -> dict[str, bool]:
+    row = skills.get(skill_id)
+    if row and row["source"] == "builtin":
+        raise HTTPException(409, "This skill is built into Grain and cannot be deleted. Revoke it to stop using it.")
     skills.delete(skill_id)
     return {"ok": True}
 

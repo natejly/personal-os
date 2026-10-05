@@ -42,7 +42,8 @@ function Findings({ findings }: { findings: SkillFinding[] | null }): JSX.Elemen
 const SOURCE_LABEL: Record<Skill['source'], string> = {
   induced: 'learned from a chat',
   proposed: 'suggested by the assistant',
-  user: 'written by you'
+  user: 'written by you',
+  builtin: 'built into Grain'
 }
 
 const ORDER: Skill['status'][] = ['candidate', 'approved', 'rejected']
@@ -112,7 +113,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         <span className="skill-name">{skill.name}</span>
         <span className="skill-desc muted">{skill.description}</span>
         <ProjectChip projectId={skill.project_id} showPersonal />
-        <small className="muted">{SOURCE_LABEL[skill.source]}</small>
+        <small className="muted">{SOURCE_LABEL[skill.source] ?? skill.source}</small>
         {!!skill.use_count && <small className="muted" title="Times the assistant read this skill">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
           {skill.status !== 'approved' && (
@@ -129,7 +130,9 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
           )}
           <button className="icon-btn ghost" aria-label={`Export ${skill.name} as SKILL.md`} title="Export as SKILL.md"
             onClick={() => void exportSkill()}><Download size={13} /></button>
-          <ConfirmDelete label={skill.name} onDelete={() => void deleteSkill(skill.id)} />
+          {skill.source === 'builtin'
+            ? <small className="muted" title="Part of Grain: revoke it to stop using it, it cannot be deleted">built in</small>
+            : <ConfirmDelete label={skill.name} onDelete={() => void deleteSkill(skill.id)} />}
         </div>
       </div>
       {open && (

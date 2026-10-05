@@ -1,6 +1,9 @@
 import { test, expect } from './fixtures.mjs'
 import { openLibrary, sendChat, resize, noOverflow } from './helpers/library.mjs'
 
+// The built-in 'grain-guide' skill is always there; the rest of the file is about the user's own.
+const mine = async (api) => (await api('/skills')).filter((s) => s.source !== 'builtin')
+
 const GOOD = { name: 'Weekly review', description: 'when I ask for a weekly review', procedure: '1. Pull the done todos.\n2. Check the calendar for what slipped.\n3. Draft the summary as bullets.' }
 
 test('library tabs persist across switches', async ({ grain }) => {
@@ -19,9 +22,9 @@ test('library tabs persist across switches', async ({ grain }) => {
 
 test('skills: create via UI, lint error blocks approval, good draft saves + approves + chat sees it', async ({ grain }) => {
   const { page, api, llm } = grain
-  expect(await api('/skills')).toEqual([])
+  expect(await mine(api)).toEqual([])
   await openLibrary(page, 'Skills')
-  await expect(page.getByText('No skills yet')).toBeVisible()
+  await expect(page.locator('.skill-row')).toHaveCount(1)
   await page.getByRole('button', { name: 'New skill' }).click()
   // bad draft: authority claim -> blocking finding; saves as an inert candidate but cannot be approved
   await page.getByLabel('Name', { exact: true }).fill('Sneaky')
@@ -33,7 +36,7 @@ test('skills: create via UI, lint error blocks approval, good draft saves + appr
   await sneaky.locator('.skill-head').click()
   await expect(sneaky.getByText('Blocks approval')).toBeVisible({ timeout: 10_000 })
   await expect(sneaky.getByRole('button', { name: 'Approve', exact: true })).toBeDisabled()
-  const [{ id }] = await api('/skills')
+  const [{ id }] = await mine(api)
   const r = await api(`/skills/${id}`, { method: 'PATCH', body: { status: 'approved' }, raw: true })
   expect(r.status).toBe(422)
 
@@ -77,11 +80,11 @@ test('skills: edit in place is re-linted, delete needs confirm, persists across 
   await row.getByRole('button', { name: 'Save', exact: true }).click()
   // an edit that makes an approved skill unapprovable is refused, so the stored text is unchanged
   await page.waitForTimeout(500)
-  expect((await api('/skills'))[0].name).toBe('Weekly review')
+  expect((await mine(api))[0].name).toBe('Weekly review')
   await row.getByRole('button', { name: 'Cancel', exact: true }).click()
   await row.getByLabel('Name', { exact: true }).fill('Weekly review v2')
   await row.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await api('/skills'))[0].name).toBe('Weekly review v2')
+  await expect.poll(async () => (await mine(api))[0].name).toBe('Weekly review v2')
 
   await grain.relaunch()
   await openLibrary(grain.page, 'Skills')
@@ -92,8 +95,8 @@ test('skills: edit in place is re-linted, delete needs confirm, persists across 
   await expect(row2).toBeVisible()
   await row2.getByRole('button', { name: /^Delete Weekly review v2/ }).click()
   await row2.getByRole('button', { name: /for good/, exact: false }).and(row2.locator('button.danger')).click()
-  await expect(grain.page.getByText('No skills yet')).toBeVisible()
-  expect(await api('/skills')).toEqual([])
+  await expect(grain.page.locator('.skill-row')).toHaveCount(1)
+  expect(await mine(api)).toEqual([])
 })
 
 test('skills: skill_view tool, import/export, 150 skills at 820x520', async ({ grain }) => {
@@ -102,7 +105,7 @@ test('skills: skill_view tool, import/export, 150 skills at 820x520', async ({ g
   await api(`/skills/${s.id}`, { method: 'PATCH', body: { status: 'approved' } })
   await sendChat(page, `!!tool skill_view {"skill":"Weekly review"}`)
   await expect(page.locator('.msg.assistant').last()).toContainText('tool done', { timeout: 30_000 })
-  await expect.poll(async () => (await api('/skills'))[0].use_count).toBeGreaterThan(0)
+  await expect.poll(async () => (await mine(api))[0].use_count).toBeGreaterThan(0)
 
   const exp = await api(`/skills/${s.id}/export`)
   expect(exp.text).toContain('weekly-review')
@@ -112,7 +115,7 @@ test('skills: skill_view tool, import/export, 150 skills at 820x520', async ({ g
   for (let i = 0; i < 150; i++) await api('/skills', { method: 'POST', body: { name: `Bulk skill ${i}`, description: `d${i}`, procedure: `1. step a ${i}\n2. step b` } })
   await resize(grain)
   await openLibrary(page, 'Skills')
-  await expect(page.locator('.skill-row')).toHaveCount(152, { timeout: 20_000 })
+  await expect(page.locator('.skill-row')).toHaveCount(153, { timeout: 20_000 })
   await noOverflow(page)
   expect(grain.consoleErrors).toEqual([])
 })
@@ -125,9 +128,21 @@ test('skills: huge procedure and double submit', async ({ grain }) => {
   await page.getByLabel('Steps').fill('1. ' + 'x'.repeat(60_000))
   await expect(page.getByText(/Longer than/)).toBeVisible({ timeout: 10_000 })
   await page.getByRole('button', { name: 'Add as candidate' }).dblclick()
-  await expect.poll(async () => (await api('/skills')).length).toBeGreaterThan(0)
+  await expect.poll(async () => (await mine(api)).length).toBeGreaterThan(0)
   await page.waitForTimeout(500)
-  const list = await api('/skills')
+  const list = await mine(api)
   expect(list.length).toBe(1)
   expect(list[0].procedure.length).toBeLessThanOrEqual(20_000)
+})
+
+test('skills: the built-in guide is approved, cannot be deleted, and hides its delete control', async ({ grain }) => {
+  const { page, api } = grain
+  const [g] = (await api('/skills')).filter((x) => x.source === 'builtin')
+  expect(g.name).toBe('grain-guide')
+  expect(g.status).toBe('approved')
+  expect((await api(`/skills/${g.id}`, { method: 'DELETE', raw: true })).status).toBe(409)
+  await openLibrary(page, 'Skills')
+  const row = page.locator('.skill-row', { hasText: 'grain-guide' })
+  await expect(row).toBeVisible()
+  await expect(row.getByRole('button', { name: /^Delete / })).toHaveCount(0)
 })

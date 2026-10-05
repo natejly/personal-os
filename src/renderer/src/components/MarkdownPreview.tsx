@@ -9,7 +9,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check } from 'lucide-react'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
 import { repairStreamingMarkdown } from '../lib/streamRepair'
-import { splitMarkdown } from '../lib/splitMarkdown'
+import { splitMarkdown, blockStartLine } from '../lib/splitMarkdown'
 import RenderBoundary from './RenderBoundary'
 import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
@@ -136,16 +136,21 @@ const REMARK = [remarkGfm, remarkMath, remarkAi]
 // which matters while someone is mid-formula and the markup is briefly invalid.
 const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never[]
 
-/** Which source line a rendered task checkbox belongs to (set by its `li`, read by its `input`). */
+/** Which line *within its block* a rendered task checkbox belongs to (set by its `li`, read by its `input`).
+ *  Block-local on purpose: a memoised block skips re-render when text elsewhere changes, so an absolute
+ *  line stored here would go stale. The absolute line is resolved at click time from the current source. */
 const TaskLine = createContext<number | null>(null)
-const TaskToggle = createContext<((line: number) => void) | null>(null)
+/** Index of the block being rendered, provided above each memoised block so it never forces a re-parse. */
+const BlockIdx = createContext(0)
+const TaskToggle = createContext<((blockIdx: number, localLine: number) => void) | null>(null)
 
 function TaskInput({ node, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { node?: unknown }): JSX.Element {
   void node
   const line = useContext(TaskLine)
+  const block = useContext(BlockIdx)
   const toggle = useContext(TaskToggle)
   if (props.type !== 'checkbox' || line === null || !toggle) return <input {...props} />
-  return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(line)} />
+  return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(block, line)} />
 }
 
 /** The default transform blanks unknown schemes; recording blocks are the one extra it must keep. */
@@ -208,10 +213,17 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
   const cite = !!onCite && !!cites?.size
   const tasks = !!onToggleTask
   const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
-  const lineMap = useMemo(() => (tasks ? taskLineMap(source, md) : null), [tasks, source, md])
-  const toggle = useCallback((line: number) => taskRef.current?.(line), [])
-  // Task toggles address a line of the whole source, so a document with live checkboxes stays one block.
-  const blocks = useMemo(() => (tasks ? [md] : splitMarkdown(md)), [tasks, md])
+  const blocks = useMemo(() => splitMarkdown(md), [md])
+  // A toggle resolves its absolute line against the *current* text, read through a ref: the checkbox
+  // only carries (block index, block-local line), which stays valid while its own block is unchanged.
+  const textRef = useRef({ source, md, blocks })
+  textRef.current = { source, md, blocks }
+  const toggle = useCallback((blockIdx: number, localLine: number) => {
+    const t = textRef.current
+    const line = blockStartLine(t.blocks, blockIdx) + localLine - 1
+    const src = taskLineMap(t.source, t.md).get(line)
+    if (src !== undefined) taskRef.current?.(src)
+  }, [])
 
   const remark = useMemo((): PluggableList => [...REMARK, ...(wiki ? [remarkWikilinks] : []),
     ...(cite ? [[remarkCites, { known: new Set(cites!.keys()) }] as never] : [])], [wiki, cite, cites])
@@ -244,18 +256,19 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
         const isTask = typeof rest.className === 'string' && rest.className.includes('task-list-item')
         const li = <li {...rest}>{children}</li>
         if (!isTask) return li
-        const line = lineMap?.get(node?.position?.start.line ?? -1) ?? null
-        return <TaskLine.Provider value={line}>{li}</TaskLine.Provider>
+        return <TaskLine.Provider value={node?.position?.start.line ?? null}>{li}</TaskLine.Provider>
       }
     }
     return c
-  }, [wiki, rec, tasks, cite, cites, known, lineMap])
+  }, [wiki, rec, tasks, cite, cites, known])
 
   const body = (
     <>
       {blocks.map((b, i) => (
-        <MdBlock key={i} source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components}
-          urlTransform={rec ? recUrl : undefined} />
+        <BlockIdx.Provider key={i} value={i}>
+          <MdBlock source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components}
+            urlTransform={rec ? recUrl : undefined} />
+        </BlockIdx.Provider>
       ))}
     </>
   )

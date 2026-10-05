@@ -45,3 +45,10 @@ export function splitMarkdown(src: string): string[] {
   out.push(lines.slice(start).join('\n'))
   return out
 }
+
+/** 1-based line (within the concatenated source) on which block `idx` starts. */
+export function blockStartLine(blocks: readonly string[], idx: number): number {
+  let line = 1
+  for (let k = 0; k < idx; k++) line += (blocks[k].match(/\n/g) ?? []).length
+  return line
+}

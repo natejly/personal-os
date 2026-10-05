@@ -24,3 +24,14 @@ LiteLLM on port 4000 is shared; if it is already up, dev reuses it. Sign in to G
 Copy `personal-os/data` into `Grain-dev` once for a realistic snapshot. Treat the copy as a snapshot: mail, calendar, and task writes from dev still go to the real Google account.
 
 Use the real data directory from dev only with the packaged app quit, and only to dogfood a change on the actual database. A backend reload drops in-flight runs.
+
+## Launching Electron to test
+
+Never run `./scripts/dev.sh`, `npm run dev`, or the packaged app as a foreground command: it blocks the session until the app quits. Start it as a background process with its output going to a log file, then poll the backend `/health` endpoint and the log to confirm it is up.
+
+```bash
+PERSONAL_OS_DATA_DIR="$HOME/Library/Application Support/Grain-dev/data" ./scripts/dev.sh > "$CLAUDE_JOB_DIR/tmp/dev.log" 2>&1 &
+open -g dist/mac-arm64/Grain.app   # packaged build: -g keeps it from stealing focus
+```
+
+Kill what you started when the check is done, so a stray backend does not stay attached to the data directory.

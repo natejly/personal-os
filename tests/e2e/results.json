@@ -6,7 +6,7 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "cowork-restart"
+      "cowork-review"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ade33448671f7be06/tests/e2e",
@@ -68,18 +68,18 @@
   },
   "suites": [
     {
-      "title": "cowork-restart.spec.mjs",
-      "file": "cowork-restart.spec.mjs",
+      "title": "cowork-review.spec.mjs",
+      "file": "cowork-review.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "backend crash while a chat approval waits: card is recorded, answering it is safe and runs nothing twice",
+          "title": "ask-as-it-goes desk: every change shows a card; Deny leaves the file unwritten and the desk alive; Approve writes it",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 360000,
+              "timeout": 300000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -89,12 +89,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 85096,
+                  "duration": 8843,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:03:49.572Z",
+                  "startTime": "2026-10-05T05:25:53.173Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -102,18 +102,18 @@
               "status": "expected"
             }
           ],
-          "id": "2a7eace91d4d1a81df66-a2b7e142077f02529337",
-          "file": "cowork-restart.spec.mjs",
-          "line": 11,
+          "id": "bee25b0741cb12271bed-df9fda75bc62a76b5b64",
+          "file": "cowork-review.spec.mjs",
+          "line": 23,
           "column": 1
         },
         {
-          "title": "desk mid-run when the backend dies: it is Interrupted, never silently resumed, and Resume finishes it once",
+          "title": "ask-as-it-goes desk: Approve writes the file once",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 360000,
+              "timeout": 300000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -123,12 +123,12 @@
                   "workerIndex": 1,
                   "parallelIndex": 1,
                   "status": "passed",
-                  "duration": 95283,
+                  "duration": 8393,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:03:49.519Z",
+                  "startTime": "2026-10-05T05:25:53.224Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -136,18 +136,52 @@
               "status": "expected"
             }
           ],
-          "id": "2a7eace91d4d1a81df66-ce3180665749c26e56a8",
-          "file": "cowork-restart.spec.mjs",
-          "line": 41,
+          "id": "bee25b0741cb12271bed-aefb6a7b06202e79d90b",
+          "file": "cowork-review.spec.mjs",
+          "line": 44,
           "column": 1
         },
         {
-          "title": "desk waiting on a question survives a backend crash; the answer still resumes it",
+          "title": "review: accept into a new doc, verified, the desk closes out and can be archived",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 360000,
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 15243,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:26:01.672Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-eda443ad44c25073d826",
+          "file": "cowork-review.spec.mjs",
+          "line": 60,
+          "column": 1
+        },
+        {
+          "title": "review: append to an existing doc keeps the old text",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -157,12 +191,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 61262,
+                  "duration": 8571,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:05:15.228Z",
+                  "startTime": "2026-10-05T05:26:02.097Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -170,33 +204,33 @@
               "status": "expected"
             }
           ],
-          "id": "2a7eace91d4d1a81df66-a29f9332e07fe3d1d889",
-          "file": "cowork-restart.spec.mjs",
-          "line": 71,
+          "id": "bee25b0741cb12271bed-b6829865b6da7722322c",
+          "file": "cowork-review.spec.mjs",
+          "line": 73,
           "column": 1
         },
         {
-          "title": "desk waiting on a plan survives a backend crash; approving afterwards carries the plan out",
+          "title": "review: reject with a note, and \"Send back\" wakes the desk with the feedback",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 360000,
+              "timeout": 300000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
               "projectName": "",
               "results": [
                 {
-                  "workerIndex": 1,
-                  "parallelIndex": 1,
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 59853,
+                  "duration": 6238,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:05:25.336Z",
+                  "startTime": "2026-10-05T05:26:10.752Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -204,18 +238,52 @@
               "status": "expected"
             }
           ],
-          "id": "2a7eace91d4d1a81df66-f6201cc13dbd1d769018",
-          "file": "cowork-restart.spec.mjs",
+          "id": "bee25b0741cb12271bed-f5d0cecccea379351860",
+          "file": "cowork-review.spec.mjs",
           "line": 91,
           "column": 1
         },
         {
-          "title": "relaunching Electron mid-run shows the live desk once, and a finished one unchanged",
+          "title": "review: rejecting all outputs marks them rejected and finishes the desk",
           "ok": true,
           "tags": [],
           "tests": [
             {
-              "timeout": 360000,
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 6279,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:26:16.993Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "bee25b0741cb12271bed-fec3c95deb29ae78882f",
+          "file": "cowork-review.spec.mjs",
+          "line": 103,
+          "column": 1
+        },
+        {
+          "title": "a file rewritten after it was delivered is stale: plain accept is refused, Accept current file ships the new bytes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
               "annotations": [],
               "expectedStatus": "passed",
               "projectId": "",
@@ -225,12 +293,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 28152,
+                  "duration": 6277,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:06:17.060Z",
+                  "startTime": "2026-10-05T05:26:16.999Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -238,8 +306,8 @@
               "status": "expected"
             }
           ],
-          "id": "2a7eace91d4d1a81df66-d9257fcfbaa638aac8da",
-          "file": "cowork-restart.spec.mjs",
+          "id": "bee25b0741cb12271bed-a9941bba3ded2c6c24bc",
+          "file": "cowork-review.spec.mjs",
           "line": 114,
           "column": 1
         }
@@ -248,9 +316,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:03:36.125Z",
-    "duration": 189447.007,
-    "expected": 5,
+    "startTime": "2026-10-05T05:25:52.044Z",
+    "duration": 31197.832,
+    "expected": 7,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

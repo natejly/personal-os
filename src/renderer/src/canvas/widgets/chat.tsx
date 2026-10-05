@@ -4,7 +4,7 @@ import type { Attachment, CanvasWindow, DragKind, DragPayload } from '@shared/ty
 import MessageView from '../../components/Message'
 import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
-import Face from '../../components/Face'
+import CrewRing from '../../components/CrewRing'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
@@ -47,37 +47,13 @@ const resizeTo = (win: CanvasWindow, size: Size, config?: Record<string, unknown
   if (config) void st.setWindowConfig(win.id, config)
 }
 
-/**
- * The blob's face, with the current run's subagents around it: the orchestrator in the middle, a small face per child
- * on a ring, a line to each. Clicking a child opens its transcript; the rest of the blob still opens the chat.
- */
-function CrewRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
+/** The blob's face with the current run's subagents around it; clicking a child opens its transcript. */
+function ChatRing({ convId, status, title }: { convId: string; status: string; title: string }): JSX.Element {
   const kids = Object.values(useSubagents(convId))
   const face = useChatFace(useConversation(convId))
   const openSubagent = useStore((s) => s.openSubagent)
-  if (kids.length === 0) return <Face name={face.name} hue={face.hue} status={status} size="fill" title={title} />
-  const R = 38 // ring radius, in % of the frame
-  const at = (i: number): { x: number; y: number } => {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / kids.length
-    return { x: 50 + R * Math.cos(a), y: 50 + R * Math.sin(a) }
-  }
-  return (
-    <span className="crew-ring">
-      <svg className="crew-lines" viewBox="0 0 100 100" aria-hidden>
-        {kids.map((k, i) => { const p = at(i); return <line key={k.id} x1={50} y1={50} x2={p.x} y2={p.y} /> })}
-      </svg>
-      <span className="crew-center"><Face name={face.name} hue={face.hue} status={status} size="fill" title={title} /></span>
-      {kids.map((k, i) => {
-        const p = at(i)
-        return (
-          <button key={k.id} className="crew-sat" style={{ left: `${p.x}%`, top: `${p.y}%` }} title={`${k.role}: ${k.now || k.state}`}
-            onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); openSubagent(k.id) }}>
-            <Face name={k.id} status={k.state} size="fill" />
-          </button>
-        )
-      })}
-    </span>
-  )
+  return <CrewRing center={{ name: face.name, hue: face.hue, status, title }}
+    kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
 }
 
 /** Fold a chat window to its blob, or grow it back to the size it had. */
@@ -313,7 +289,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
           const p = pressed.current
           if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) setBlob(win, false)
         }}>
-        <CrewRing convId={convId} status={status} title={convo?.title || 'Chat'} />
+        <ChatRing convId={convId} status={status} title={convo?.title || 'Chat'} />
       </button>
     )
   }

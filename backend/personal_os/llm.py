@@ -120,6 +120,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
+    "quickAskShortcut": "Alt+Space",
     # Hold this in the Files editor to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.

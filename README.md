@@ -42,6 +42,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 2. **Chat.** ⌘N opens a new chat. The model and effort pickers sit under the
    composer. Type `/` for slash commands: `/skill`, `/schedule`, `/loop`,
    `/compact`, `/skills`, `/commands` and `/plan` (⌘⇧P also cycles plan mode).
+   From any app, press ⌥Space (or the menubar item) for a small ask bar: type a
+   line, optionally attach your clipboard text, and the reply streams in place.
+   Open in chat continues it in the main window.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
    chat if the assistant should read or write files there; with none set, it
@@ -89,6 +92,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 
 ## Features
 
+- **Quick ask bar.** A global hotkey (⌥Space, editable in Settings) opens a floating
+  one-line composer that starts a new chat with the normal tools and approvals,
+  can quote your clipboard, and hands the chat to the main window.
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
   Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/compact`,

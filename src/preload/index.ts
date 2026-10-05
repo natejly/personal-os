@@ -40,6 +40,8 @@ const api: GrainApi = {
     setGather: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-gather', accelerator),
     capture: () => ipcRenderer.invoke('shortcuts:capture'),
     setCapture: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-capture', accelerator),
+    ask: () => ipcRenderer.invoke('shortcuts:ask'),
+    setAsk: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-ask', accelerator),
     onFailure: (cb) => listen<ShortcutState>('shortcuts:failed', cb)
   },
   data: {
@@ -48,6 +50,11 @@ const api: GrainApi = {
     chooseFolder: () => ipcRenderer.invoke('data:choose-folder'),
     reveal: (path: string) => ipcRenderer.invoke('data:reveal', path),
     relaunch: () => ipcRenderer.invoke('data:relaunch')
+  },
+  quickAsk: {
+    clipboard: () => ipcRenderer.invoke('quickask:clipboard'),
+    resize: (height: number) => ipcRenderer.invoke('quickask:resize', height),
+    openChat: (conversationId: string) => ipcRenderer.invoke('quickask:open', conversationId)
   },
   closeSelf: () => ipcRenderer.send('window:close-self'),
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),

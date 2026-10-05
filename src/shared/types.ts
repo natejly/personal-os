@@ -273,7 +273,7 @@ export interface PlanEdit {
   arguments?: Record<string, unknown>
 }
 
-export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule'
+export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule' | 'allow_host'
 
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {

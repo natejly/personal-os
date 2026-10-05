@@ -14,6 +14,7 @@ import secrets
 import shutil
 import sqlite3
 import time
+import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Callable, Literal
@@ -3130,6 +3131,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          question="" if c["name"] in QUESTION_TOOLS else None)
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
+                    if decision in ("allow", "allow_host") and forced:
+                        _approve_url(tool_ctx, args, decision == "allow_host")
+                    if decision == "allow_host":
+                        decision = "allow"
                     if decision == "always_session":
                         # Scoped to this chat and to exactly what the card named; a forced card is answered once.
                         if not forced:
@@ -4333,8 +4338,20 @@ async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
     return {"ok": bus.stop(id, run_id)}
 
 
+def _approve_url(ctx: dict[str, Any], args: dict[str, Any], keep_host: bool) -> None:
+    """Approving a forced (tainted) call that names a URL lets that exact URL through; `keep_host` also allow-lists its host."""
+    url = args.get("url")
+    if not isinstance(url, str):
+        return
+    tools._allow_url(ctx, url)
+    if keep_host and (host := egress.normalize_entry(urllib.parse.urlsplit(url.strip()).hostname or "")):
+        have = list(settings().get("fetchAllowlist") or [])
+        if host not in have:
+            db.set_settings({"fetchAllowlist": [*have, host]})
+
+
 class ApprovalIn(BaseModel):
-    decision: str  # allow | deny | always_chat | always_global | always_session | always_rule
+    decision: str  # allow | deny | always_chat | always_global | always_session | always_rule | allow_host
     # propose_plan only: the steps of the plan the user is authorising, as [{idx, arguments?}]. A step left out is
     # dropped (it asks again if the model calls it); replacement arguments re-derive that step's digest, so the
     # edited values are what gets authorised.
@@ -4437,7 +4454,7 @@ def revoke_session_grant(conv_id: str, key: str | None = None) -> dict[str, Any]
 async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     """Record the decision on the approval row (first decision wins), then wake the run if one is waiting in this
     process. A run that died while waiting does not resume: the decision is recorded and its card is settled."""
-    if body.decision not in ("allow", "deny", "always_chat", "always_global", "always_session", "always_rule"):
+    if body.decision not in ("allow", "deny", "always_chat", "always_global", "always_session", "always_rule", "allow_host"):
         raise HTTPException(400, "Bad decision")
     pending = run_store.approval(call_id)
     is_plan = bool(pending and pending["tool"] == PLAN_TOOL)

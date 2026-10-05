@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { browserAllowLabel, browserApprovalSentence, browserSentence, chatBrowserSession, deskBrowserSession, hostPath, latestBrowserCall, latestBrowserMessage } from './browserApproval'
+import { allowHostOf, browserAllowLabel, browserApprovalSentence, browserSentence, chatBrowserSession, deskBrowserSession, hostPath, latestBrowserCall, latestBrowserMessage } from './browserApproval'
 
 test('a plain chat watches conv:<conversation>, a desk transcript watches desk:<desk> (browser.py session_of)', () => {
   assert.equal(chatBrowserSession('c1'), 'conv:c1')
@@ -66,4 +66,10 @@ test('the one-string form reads as the same sentence and takes anything', () => 
 test('an unparseable url still yields a host, never throws', () => {
   assert.equal(browserSentence({ action: 'open', url: 'not a url' }).host, 'not a url')
   assert.doesNotThrow(() => browserSentence({}))
+})
+
+test('the allow-host button names the url host and hides without one', () => {
+  assert.equal(allowHostOf({ url: 'https://docs.z.ai/guide?x=1' }), 'docs.z.ai')
+  assert.equal(allowHostOf({ url: 'file:///etc/passwd' }), '')
+  assert.equal(allowHostOf({ query: 'x' }), '')
 })

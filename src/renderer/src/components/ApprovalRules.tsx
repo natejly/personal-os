@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { askLocked, type ApprovalDecision, type ToolEvent } from '@shared/types'
 import { useStore } from '../store'
+import { allowHostOf } from '../lib/browserApproval'
 
 /** The action rows of an ask card: why it asked, Approve / Deny (only when `decide` is given; a dedicated card
  *  has its own), then one quiet "Don't ask again" line holding the grants: "in this chat", and the rules it can
@@ -21,6 +22,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
   const wholeTool = !event.forced && !askLocked(tool ?? perm?.danger)
+  const host = event.forced ? allowHostOf(event.arguments) : ''
   const anyGrant = wholeTool || canSave
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return
@@ -49,6 +51,8 @@ export default function ApprovalRules({ event, conversationId, decide }: {
         <div className="approval-actions">
           <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
           <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
+          {host && <button type="button" className="ghost-btn" disabled={busy} title="Approve and add this host to Allowed hosts"
+            onClick={() => void grant('allow_host')()}>Allow {host} from now on</button>}
         </div>
       )}
       <div className="approval-more">

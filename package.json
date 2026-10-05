@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@types/d3-force": "^3.0.10",
+    "blobatar": "^2.7.0",
     "d3-force": "^3.0.0",
     "electron-updater": "^6.8.9",
     "katex": "^0.16.47",

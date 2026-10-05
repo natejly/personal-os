@@ -297,7 +297,7 @@
    gutter spend most of the window on whitespace, so a window shows two turns instead of four. */
 .widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
 .widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
-.widget .messages-inner .avatar svg { width: 11px; height: 11px; }
+.widget .messages-inner .avatar .lucide { width: 11px; height: 11px; }
 .widget .messages-inner .msg.user .user-bubble { padding: 6px 10px; }
 .widget .messages-inner .msg-actions { margin-top: 2px; }
 .widget .messages-inner .markdown > :first-child { margin-top: 0; }

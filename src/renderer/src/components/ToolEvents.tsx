@@ -19,6 +19,7 @@ import { latestBrowserCall } from '../lib/browserApproval'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
+import Face from './Face'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
@@ -185,7 +186,7 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
     <div className="tool-doc-diff agent-run">
       <button className="tool-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
-        <Bot size={13} />
+        <Face name={id} status={status} size={18} />
         <span className="tool-name">subagent {id.slice(-4)}</span>
         <span className={`tag ${status === 'error' ? 'unproven' : ''}`}>{status === 'awaiting_approval' ? 'needs approval' : status}</span>
         {cost !== null && cost > 0 && <span className="tool-ms">${cost.toFixed(3)}</span>}

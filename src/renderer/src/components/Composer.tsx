@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Command } from '@shared/types'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { Command, Skill } from '@shared/types'
+import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
-import { composerSlash, slashMenuKey } from '../features/notes/slash'
-import { ArrowUp, Square, Paperclip, Loader2, EyeOff } from 'lucide-react'
+import { slashMenuKey } from '../features/notes/slash'
+import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
+import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
@@ -15,7 +17,7 @@ import { dictationText } from '../features/docrec/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
-import { compactCommand, compactNow } from '../lib/compact'
+import { compactNow } from '../lib/compact'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
@@ -67,15 +69,71 @@ export default function Composer({ conversationId, footer, compact = false, onSe
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
-  // Saved commands for the '/' menu, read once per mount. Picking one types `/name `; the backend fills the
-  // template when the turn goes to the model (commands.expand), so nothing runs until the user sends.
+  // The '/' menu: built-ins (lib/slashCommands.ts) beside the saved commands, read once per mount. Picking one
+  // types `/name `; a built-in the UI handles runs on send, the rest the backend fills when the turn goes to the
+  // model (commands.expand), so nothing runs until the user sends.
   const [commands, setCommands] = useState<Command[]>([])
   useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
+  const skills = useStore((s) => s.skills)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
-  const found = slashClosedAt === text ? null : composerSlash(text, commands)
-  const slash = found?.length ? found : null
+  const slash = slashClosedAt === text ? null : slashItems(text, commands, skills)
   useEffect(() => setSlashActive(0), [text])
+
+  // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,
+  // one popular skill to import (it lands as a candidate). The page agent panel has no skills of its own.
+  const suggested = useMemo(() => (onSend ? [] : suggestSkills(text, skills.filter((s) => s.status === 'approved'))), [text, skills, onSend])
+  const presetHint = useMemo(() => (onSend || suggested.length ? [] : suggestSkills(text,
+    SKILL_PRESETS.filter((p) => !skills.some((s) => skillSlug(s.name) === p.name)).map((p) => ({ ...p, description: p.blurb })), 1)),
+    [text, skills, onSend, suggested.length])
+  const [importingPreset, setImportingPreset] = useState<string | null>(null)
+  const useSkill = (s: Skill): void => {
+    setText(`/skill ${skillSlug(s.name)} ${text}`)
+    box.current?.querySelector('textarea')?.focus()
+  }
+  const importPreset = async (p: SkillPreset): Promise<void> => {
+    const { toast, refreshSkills } = useStore.getState()
+    setImportingPreset(p.name)
+    try {
+      const r = await api.skills.importMd({ url: p.url })
+      await refreshSkills()
+      toast(`Imported “${r.skill.name}” as a candidate. Approve it under Library → Skills before it is used.`, 'info',
+        { label: 'Open Skills', run: () => { useStore.getState().setLibraryTab('skills'); useStore.getState().setView('library') } })
+    } catch (e) {
+      toast(`Could not import ${p.name}: ${(e as Error).message}`, 'error')
+    } finally {
+      setImportingPreset(null)
+    }
+  }
+
+  /** A built-in the UI handles itself (/compact, /skills, /commands, /plan). The draft is dropped once it has run. */
+  const runClient = async ({ name, args }: { name: string; args: string }, k0: string): Promise<void> => {
+    const s = useStore.getState()
+    if (name === 'compact') {
+      // "/compact [focus]" summarizes this chat's history instead of sending a message.
+      if (!activeId) return s.toast('Nothing to compact yet: this chat has no history.', 'info')
+      try {
+        const res = await compactNow(activeId, args)
+        dropDraft(k0)
+        s.toast(res.compacted ? 'Earlier messages were summarized.' : 'Nothing old enough to compact yet.', 'info')
+      } catch (e) {
+        s.toast(`Could not compact: ${(e as Error).message}`, 'error')
+      }
+      return
+    }
+    dropDraft(k0)
+    if (name === 'skills' || name === 'commands') {
+      s.setLibraryTab(name === 'skills' ? 'skills' : 'automations')
+      s.setView('library')
+    } else if (name === 'plan') {
+      const modes = ['off', 'auto', 'always'] as const
+      type Mode = (typeof modes)[number]
+      const cur: Mode = (activeId ? s.sessions[activeId]?.conversation.settings.planMode : s.draftChatSettings.planMode) ?? s.settings.planMode ?? 'off'
+      const want: Mode = (modes as readonly string[]).includes(args) ? (args as Mode) : modes[(modes.indexOf(cur) + 1) % modes.length]
+      await setChatSettings({ planMode: want }, conversationId).catch((e: unknown) => s.toast((e as Error).message, 'error'))
+      s.toast(`Plan mode: ${want}`, 'info')
+    }
+  }
 
   /** Up/Down through this chat's earlier prompts (lib/promptHistory.ts); null when not recalling. */
   const recall = useRef<Recall | null>(null)
@@ -188,20 +246,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const k0 = key
     const t = getDraft(k0)?.text ?? ''
     if (!t.trim()) return
-    // "/compact [focus]" summarizes this chat's history instead of sending a message.
-    const focus = onSend ? null : compactCommand(t)
-    if (focus !== null) {
-      const { toast } = useStore.getState()
-      if (!activeId) return toast('Nothing to compact yet: this chat has no history.', 'info')
-      try {
-        const res = await compactNow(activeId, focus)
-        dropDraft(k0)
-        toast(res.compacted ? 'Earlier messages were summarized.' : 'Nothing old enough to compact yet.', 'info')
-      } catch (e) {
-        toast(`Could not compact: ${(e as Error).message}`, 'error')
-      }
-      return
-    }
+    const client = onSend ? null : clientCommand(t)
+    if (client) return runClient(client, k0)
     const entry = getDraft(k0)
     // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
     // relaunch only the draft remembers it, so it is re-armed here before the send reads it.
@@ -234,8 +280,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
    */
   const submit = (mod = false): void => {
     if (!text.trim()) return
-    // "/compact" runs now, never queued: it is not a message for the reply.
-    const action = queueId && compactCommand(text) === null ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
+    // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
+    const action = queueId && !clientCommand(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
     if (action === 'queue' && queueId) {
       updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID()))
       clearRedirect(key)
@@ -280,6 +326,22 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         <QueueTray conversationId={queueId} busy={streaming} onSendNow={sendNow} onResume={resume}
           onEdit={(t) => { appendToDraft(key, t); box.current?.querySelector('textarea')?.focus() }} />
       )}
+      {(suggested.length > 0 || presetHint.length > 0) && (
+        <div className="skill-hints" aria-label="Skills that fit this message">
+          {suggested.map((s) => (
+            <button key={s.id} className="ghost-btn xs" title={`${s.description}\nPuts /skill ${skillSlug(s.name)} in front of your message.`} onClick={() => useSkill(s)}>
+              <Sparkles size={11} /> Use {s.name}
+            </button>
+          ))}
+          {presetHint.map((p) => (
+            <button key={p.name} className="ghost-btn xs" disabled={importingPreset === p.name}
+              title={`${p.blurb}\nA popular skill from ${p.source} (${p.license}). Imports as a candidate you approve under Library → Skills.`}
+              onClick={() => void importPreset(p)}>
+              <Download size={11} /> {importingPreset === p.name ? 'Importing…' : `Import the ${p.name} skill`}
+            </button>
+          ))}
+        </div>
+      )}
       {confirm && (
         <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
           Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
@@ -314,7 +376,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             if (act) {
               e.preventDefault()
               if (act.kind === 'move') setSlashActive(act.active)
-              else if (act.kind === 'pick') setText(`/${slash![slashActive].name} `)
+              else if (act.kind === 'pick') setText(slash![slashActive].insert)
               else setSlashClosedAt(text)
             }
             else if (onRecallKey(e)) return
@@ -325,9 +387,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           }}
         />
         {slash && (
-          <CaretMenu label="Saved commands" active={slashActive} onHover={setSlashActive}
-            onPick={(i) => setText(`/${slash[i].name} `)}
-            items={slash.map((c) => ({ key: c.id, label: `/${c.name}`, hint: ((c.subtask ? 'subtask · ' : '') + c.description).slice(0, 48) }))} />
+          <CaretMenu label="Commands" active={slashActive} onHover={setSlashActive}
+            onPick={(i) => setText(slash[i].insert)}
+            items={slash.map((c) => ({ key: c.key, label: c.label, hint: c.hint }))} />
         )}
         {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
             typing mid-reply never changes the width of the text box; Stop sits beside it. */}

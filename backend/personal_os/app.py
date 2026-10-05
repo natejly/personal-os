@@ -90,7 +90,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import ASK_LOCKED_DANGER, Toolbox, page_title, summarize_result, times_body
+from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -2265,7 +2265,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
-            hist = expand_commands(hist, command_store)  # `/name args` turns carry their filled command (commands.py)
+            hist = expand_commands(hist, command_store, skills)  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
             return head + [dict(n) for n in run_notes]
@@ -2543,7 +2543,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": expand_command(um["content"], command_store)})
+                        messages.append({"role": "user", "content": expand_command(um["content"], command_store, skills)})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
@@ -8192,16 +8192,42 @@ def _lint_skill(name: str, description: str, procedure: str, skill_id: str | Non
 
 
 class SkillImportIn(BaseModel):
-    text: str
+    text: str = ""
+    url: str | None = None  # a SKILL.md, its folder, or a GitHub page for either (skillmd.raw_url); fetched instead of `text`
     references: dict[str, str] = {}
     project_id: str | None = None
 
 
-@app.post("/skills/import")
-def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
-    """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
+SKILL_URL_MAX = 200_000
+
+
+async def _fetch_skill_md(url: str) -> str:
+    """The text at a skill URL, fetched with the same SSRF guard as fetch_url. Only a 200 with text comes back."""
+    import httpx
+
+    target = skillmd.raw_url(url)
     try:
-        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id),
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False, headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
+            r = await guarded_request(c, "GET", target)
+    except UrlBlocked as e:
+        raise HTTPException(422, str(e))
+    except (httpx.HTTPError, OSError) as e:
+        raise HTTPException(502, f"Could not fetch {target}: {e}")
+    if r.status_code != 200:
+        raise HTTPException(422, f"{target} answered {r.status_code}" + (": no SKILL.md there" if r.status_code == 404 else ""))
+    if len(r.content) > SKILL_URL_MAX:
+        raise HTTPException(422, f"{target} is over {SKILL_URL_MAX // 1000} KB; that is not a SKILL.md")
+    return r.content.decode("utf-8", "replace")
+
+
+@app.post("/skills/import")
+async def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
+    """Paste a SKILL.md, or point at one by URL. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
+    text = await _fetch_skill_md(body.url) if body.url else body.text
+    if not text.strip():
+        raise HTTPException(422, "Paste a SKILL.md or give its URL")
+    try:
+        return skillmd.import_text(skills, _lint_skill, text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id),
                                 references=body.references)
     except skillmd.ImportError_ as e:
         raise HTTPException(422, "; ".join(e.errors))

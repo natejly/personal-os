@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Download, Eye, Plus, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useStore } from '../store'
 import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
+import { PRESET_KIND_LABEL, SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import ProjectChip from './ProjectChip'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
 import { debounceLatest, LINT_DELAY_MS, skillDisclosure } from '../lib/skillLint'
+import { skillSlug } from '../lib/slashCommands'
 
 type SkillText = { name: string; description: string; procedure: string }
 
@@ -155,6 +157,9 @@ export default function SkillsPanel(): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [importing, setImporting] = useState(false)
   const [mdText, setMdText] = useState('')
+  const [mdUrl, setMdUrl] = useState('')
+  const [browsing, setBrowsing] = useState(false)
+  const [fetching, setFetching] = useState<string | null>(null) // the preset (or URL) being imported
   const [form, setForm] = useState({ name: '', description: '', procedure: '' })
   const formFindings = useSkillLint(form, adding)
   const [intent, setIntent] = useState('')
@@ -197,20 +202,35 @@ export default function SkillsPanel(): JSX.Element {
     setAdding(false)
   }
 
-  const importMd = async (): Promise<void> => {
+  /** Pasted text or a URL; a popular skill is a URL import too. Everything lands as a candidate. */
+  const importFrom = async (src: { text?: string; url?: string }, label: string): Promise<boolean> => {
+    setFetching(label)
     try {
-      const r = await api.skills.importMd(mdText)
+      const r = await api.skills.importMd(src)
       await refreshSkills()
       const notes = [...r.warnings, ...r.findings.map((f) => f.message)]
       toast(`Imported “${r.skill.name}” as a candidate.${notes.length ? ' ' + notes.join(' ') : ''}`, notes.length ? 'error' : undefined)
-      setMdText('')
-      setImporting(false)
+      return true
     } catch (e) {
       toast((e as Error).message, 'error')
+      return false
+    } finally {
+      setFetching(null)
     }
   }
 
-  const empty = skills.length === 0 && !adding && !importing
+  const importMd = async (): Promise<void> => {
+    const url = mdUrl.trim()
+    if (await importFrom(url ? { url } : { text: mdText }, url || 'text')) {
+      setMdText('')
+      setMdUrl('')
+      setImporting(false)
+    }
+  }
+
+  const importPreset = (p: SkillPreset): Promise<boolean> => importFrom({ url: p.url }, p.name)
+
+  const empty = skills.length === 0 && !adding && !importing && !browsing
 
   return (
     <div className="library-panel">
@@ -221,9 +241,39 @@ export default function SkillsPanel(): JSX.Element {
           <div className="library-toolbar-row">
             <button className="primary-btn" aria-expanded={adding} onClick={() => setAdding(!adding)}><Plus size={14} /> New skill</button>
             <button className={`ghost-btn${importing ? ' on' : ''}`} aria-expanded={importing} onClick={() => setImporting(!importing)}><Upload size={14} /> Import skill file</button>
+            <button className={`ghost-btn${browsing ? ' on' : ''}`} aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}><Globe size={14} /> Popular skills</button>
             <button className={`ghost-btn${preview ? ' on' : ''}`} aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
           </div>
-          <p className="muted small">A skill is a way of doing a task. It stays off until you approve it.</p>
+          <p className="muted small">A skill is a way of doing a task. It stays off until you approve it. In a chat, type <code>/skill</code> to use one on purpose.</p>
+        </div>
+      )}
+      {browsing && (
+        <div className="skill-body standalone">
+          <p className="muted small">
+            Skills the open-source community publishes in the SKILL.md format. Import fetches the file from its repository and
+            adds it here as a candidate for you to read and approve; bundled scripts and assets are not imported, so a skill
+            that calls them may need editing. Any other skill: Import skill file takes a link to a SKILL.md, its folder, or a page for either.
+          </p>
+          {(Object.keys(PRESET_KIND_LABEL) as SkillPreset['kind'][]).map((kind) => (
+            <section key={kind} className="preset-group">
+              <h5>{PRESET_KIND_LABEL[kind]}</h5>
+              {SKILL_PRESETS.filter((p) => p.kind === kind).map((p) => {
+                const have = skills.some((s) => skillSlug(s.name) === p.name)
+                return (
+                  <div key={p.name} className="preset-row">
+                    <div className="preset-text">
+                      <strong>{p.name}</strong> <span className="muted">{p.blurb}</span>
+                      <small className="muted">{p.source} · {p.license} · {p.chars < 1000 ? `${p.chars} characters` : `${Math.round(p.chars / 1000)}k characters`}</small>
+                    </div>
+                    <button className="ghost-btn sm" disabled={have || fetching === p.name} onClick={() => void importPreset(p)}
+                      title={have ? 'Already in your skills' : `Fetch from ${p.url}`}>
+                      {have ? <><Check size={13} /> Imported</> : fetching === p.name ? 'Importing…' : <><Download size={13} /> Import</>}
+                    </button>
+                  </div>
+                )
+              })}
+            </section>
+          ))}
         </div>
       )}
       {preview && (
@@ -242,11 +292,16 @@ export default function SkillsPanel(): JSX.Element {
       )}
       {importing && (
         <div className="skill-body standalone">
-          <label>Paste a SKILL.md
-            <textarea rows={10} autoFocus value={mdText} placeholder={'---\nname: weekly-review\ndescription: Use when the user asks for a weekly review\n---\n\n1. Pull the done todos.'} onChange={(e) => setMdText(e.target.value)} />
+          <label>Link to a SKILL.md, its folder, or a repository page for either
+            <input autoFocus value={mdUrl} placeholder="https://github.com/owner/repo/tree/main/skills/weekly-review"
+              onChange={(e) => setMdUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && mdUrl.trim() && !fetching) void importMd() }} />
+          </label>
+          <label>…or paste a SKILL.md
+            <textarea rows={8} value={mdText} disabled={!!mdUrl.trim()} placeholder={'---\nname: weekly-review\ndescription: Use when the user asks for a weekly review\n---\n\n1. Pull the done todos.'} onChange={(e) => setMdText(e.target.value)} />
           </label>
           <div className="row-actions">
-            <button className="primary-btn sm" disabled={!mdText.trim()} onClick={() => void importMd()}>Import as candidate</button>
+            <button className="primary-btn sm" disabled={!(mdUrl.trim() || mdText.trim()) || !!fetching} onClick={() => void importMd()}>{fetching ? 'Importing…' : 'Import as candidate'}</button>
             <button className="ghost-btn sm" onClick={() => setImporting(false)}>Cancel</button>
             <span className="muted small">Imported skills wait for your approval; allowed-tools and bundled files are ignored.</span>
           </div>
@@ -280,6 +335,7 @@ export default function SkillsPanel(): JSX.Element {
           <div className="library-toolbar-row">
             <button className="primary-btn" onClick={() => setAdding(true)}><Plus size={14} /> New skill</button>
             <button className="ghost-btn" onClick={() => setImporting(true)}><Upload size={14} /> Import skill file</button>
+            <button className="ghost-btn" onClick={() => setBrowsing(true)}><Globe size={14} /> Popular skills</button>
           </div>
         </div>
       )}

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from personal_os import skillbuild, skillmd  # noqa: E402
 from personal_os.context import build_context  # noqa: E402
 from personal_os.db import Database  # noqa: E402
-from personal_os.learn import SKILLS_MANIFEST_HEADER, Skills, skill_block  # noqa: E402
+from personal_os.learn import MAX_SKILL_PROCEDURE, SKILLS_MANIFEST_HEADER, Skills, skill_block  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, Projects  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 
@@ -72,9 +72,9 @@ class ParseTest(unittest.TestCase):
         name, desc, body, warnings = skillmd.to_skill_fields(skillmd.parse(FULL))
         self.assertEqual(name, "Weekly review")
         self.assertIn("bundled files are not imported", " ".join(warnings))
-        p = skillmd.parse("---\nname: big\ndescription: d\n---\n" + "x" * 4001)
+        p = skillmd.parse("---\nname: big\ndescription: d\n---\n" + "x" * (MAX_SKILL_PROCEDURE + 1))
         skillmd.to_skill_fields(p)
-        self.assertTrue(any("4000" in e for e in p["errors"]))
+        self.assertTrue(any(str(MAX_SKILL_PROCEDURE) in e for e in p["errors"]))
 
     def test_round_trip(self) -> None:
         skill = {"name": "Weekly review", "description": "Use when: weekly, \"quoted\"", "procedure": "1. a\n2. b", "status": "approved"}

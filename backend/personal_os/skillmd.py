@@ -40,10 +40,15 @@ def parse(text: str) -> dict[str, Any]:
     if end is None:
         return {"frontmatter": {}, "body": "", "errors": ["the frontmatter block is never closed with ---"], "warnings": []}
     current: str | None = None
+    block: str | None = None  # a `>` (folded) or `|` (literal) scalar: the indented lines that follow are its value
     for raw in lines[1:end]:
-        if not raw.strip() or raw.lstrip().startswith("#"):
+        if not raw.strip() or (raw.lstrip().startswith("#") and not block):
             continue
         indented = raw[0] in " \t"
+        if indented and current and current != "metadata" and (block or ":" not in raw):
+            # Published skills often write a long description as a block scalar or wrap it onto further lines.
+            fm[current] = (str(fm.get(current) or "") + ("\n" if block == "|" else " ") + raw.strip()).strip()
+            continue
         key, sep, val = raw.strip().partition(":")
         if not sep:
             errors.append(f"cannot read frontmatter line: {raw.strip()[:60]}")
@@ -53,8 +58,13 @@ def parse(text: str) -> dict[str, Any]:
                 fm["metadata"][key.strip()] = _unquote(val)
             continue
         current = key.strip()
-        if current == "metadata" and not val.strip():
+        block = None
+        v = val.strip()
+        if current == "metadata" and not v:
             fm["metadata"] = {}
+        elif v and v[0] in ">|" and v.rstrip("-+") == v[0]:
+            block = v[0]
+            fm[current] = ""
         else:
             fm[current] = _unquote(val)
     body = "\n".join(lines[end + 1:]).strip()
@@ -115,6 +125,21 @@ def render(skill: dict[str, Any]) -> str:
     return (f"---\nname: {slug(skill.get('name') or '')}\ndescription: {_quote(desc)}\n"
             f"metadata:\n  source: grain\n  status: {skill.get('status') or 'candidate'}\n---\n\n"
             f"{(skill.get('procedure') or '').strip()}\n")
+
+
+_GH_PAGE = re.compile(r"^https?://(?:www\.)?github\.com/([^/]+)/([^/]+)/(?:blob|tree)/([^/]+)/?(.*)$")
+
+
+def raw_url(url: str) -> str:
+    """The URL whose body is the SKILL.md text. A GitHub page for a file or folder becomes its raw file; a URL that
+    does not name a .md file is taken as the skill's folder and gets /SKILL.md. Anything else is fetched as given."""
+    u = (url or "").strip()
+    if m := _GH_PAGE.match(u):
+        owner, repo, ref, path = m.groups()
+        u = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}".rstrip("/")
+    if not u.lower().endswith(".md"):
+        u = u.rstrip("/") + "/SKILL.md"
+    return u
 
 
 class ImportError_(ValueError):

@@ -2184,6 +2184,8 @@ export interface JobRunSummary {
   late_seconds: number
   missed_slots: number
   manual: boolean
+  /** A test run before enabling: a manual run labelled as such. */
+  test?: boolean
   /** 1 for the first launch of a slot; 2+ for a retry of the run `retry_of`. */
   attempt: number
   retry_of: string | null
@@ -2215,6 +2217,8 @@ export interface JobRunRecord {
   manual: boolean
   /** A read-only preview, not a real run; left out of the stats. */
   dry_run: boolean
+  /** A test run before enabling; counts toward neither retries nor the failure streak. */
+  test?: boolean
   tool_calls: number
   proposals: { pending: number; accepted: number; rejected: number }
   cost: number | null

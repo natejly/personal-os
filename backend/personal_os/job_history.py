@@ -47,7 +47,7 @@ def summarize_run(run: dict[str, Any], event_counts: dict[str, int] | None = Non
         "duration_s": round(dur, 3) if dur is not None else None,
         "due_at": inp.get("due_at"), "late": bool(inp.get("late")), "missed_slots": int(inp.get("missed_slots") or 0),
         "attempt": int(inp.get("attempt") or 1), "retry_of": inp.get("retry_of"),
-        "manual": bool(inp.get("manual")), "dry_run": bool(inp.get("dry_run")),
+        "manual": bool(inp.get("manual")), "dry_run": bool(inp.get("dry_run")), "test": bool(inp.get("test")),
         "tool_calls": (event_counts or {}).get("tool_result", 0),
         "proposals": {k: int(mine.get(k, 0)) for k in ("pending", "accepted", "rejected")},
         "cost": budget.get("cost") if budget and budget.get("cost") is not None else None,

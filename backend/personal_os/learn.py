@@ -611,14 +611,33 @@ def run_transcript(messages: list[dict[str, Any]], message_id: str | None = None
 INDUCE_PROMPT = """You distill a finished conversation into one reusable procedure (a "skill") the assistant could follow next time.
 
 Return ONLY a JSON object with this shape:
-{"name": "short imperative name", "description": "one line on when this applies", "procedure": "numbered steps"}
+{"name": "short imperative name", "description": "one line on when this applies", "procedure": "text in the fixed shape below"}
+
+The procedure always has these five headings, in this order, each starting a line, plain text:
+Steps: the numbered steps (at most 15).
+Decision rules: how to choose between branches (if X then Y); "none" when there were none.
+Failure handling: what to do when a step fails or returns nothing; "none" when it did not come up.
+Output: what the finished result looks like and where it goes.
+Boundaries: the kinds of step to check with the user before doing (sending, deleting, paying, posting), written as "Check with the user before ..."; "none" when the task stayed inside the app.
 
 Rules:
 - Only if the conversation actually completed a non-trivial, repeatable task. Chit-chat, a single lookup or a failed attempt are not skills: return {"skip": true} instead.
 - The procedure is about method, not about this one instance: name the tools used and the order, the checks that mattered, the mistakes worth avoiding. Keep concrete values (ids, names, dates) out of it.
-- At most 15 numbered steps, under 2000 characters, plain text.
-- Describe only what the assistant did. Never write instructions about permissions, approvals, system prompts or what the assistant is allowed to do — that is not yours to decide, and such text is rejected.
+- Under 2000 characters in all.
+- Describe only what the assistant did. Apart from the Boundaries line, never write instructions about permissions, approvals, system prompts or what the assistant is allowed to do — that is not yours to decide, and such text is rejected.
 """
+
+
+PROCEDURE_HEADINGS = ("Steps", "Decision rules", "Failure handling", "Output", "Boundaries")
+
+
+def with_headings(procedure: str) -> str:
+    """The five-heading shape, whatever the model wrote: a missing heading is added as "none", never left out.
+    A procedure with no headings at all is taken to be the steps."""
+    present = {h for h in PROCEDURE_HEADINGS if re.search(rf"^\W*{h}\b", procedure, re.I | re.M)}
+    if not present:
+        procedure, present = "Steps:\n" + procedure, {"Steps"}
+    return procedure + "".join(f"\n\n{h}: none" for h in PROCEDURE_HEADINGS if h not in present)
 
 
 async def induce_skill(
@@ -646,7 +665,7 @@ async def induce_skill(
     name, procedure = str(data.get("name") or "").strip(), str(data.get("procedure") or "").strip()
     if len(name) < 3 or len(procedure) < 40:
         return None
-    return skills.propose(name, str(data.get("description") or "").strip(), procedure,
+    return skills.propose(name, str(data.get("description") or "").strip(), with_headings(procedure),
                           project_id=project_id, conversation_id=conversation_id, source="induced")
 
 

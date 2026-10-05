@@ -239,7 +239,7 @@ export const api = {
       return r.text()
     },
     /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
-    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
+    runNow: (id: string, test = false) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run${test ? '?test=1' : ''}`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

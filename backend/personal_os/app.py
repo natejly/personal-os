@@ -5036,15 +5036,17 @@ def delete_job(id: str) -> dict[str, bool]:
 
 
 @app.post("/jobs/{id}/run")
-async def run_job_now(id: str) -> dict[str, Any]:
+async def run_job_now(id: str, test: bool = False) -> dict[str, Any]:
     """Fire a job by hand, disabled or not. It is still a job run: proposal-only, on the job budget. The schedule
-    is untouched, so the next cron slot still fires on its own."""
+    is untouched, so the next cron slot still fires on its own. `test=1` labels the run "test" in the inbox and the
+    history; like any manual run it is never retried and never counts toward the failure streak."""
     job = jobs.get(id)
     if not job:
         raise HTTPException(404, "No such job")
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
-            "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True}
+            "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True,
+            **({"test": True} if test else {})}
     ok, why = await job_policy.admit(job, fire)
     if not ok:
         raise HTTPException(409, f"Not started: {why}")
@@ -5274,7 +5276,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "job_id": fire.get("job_id"), "job": fire.get("job") or "Scheduled job", "kind": fire.get("kind") or "cron",
             "due_at": fire.get("due_at"), "fired_at": fire.get("fired_at") or r["started_at"],
             "late": bool(fire.get("late")), "late_seconds": fire.get("late_seconds") or 0.0,
-            "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")),
+            "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")), "test": bool(fire.get("test")),
             "attempt": int(fire.get("attempt") or 1), "retry_of": fire.get("retry_of"),
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),

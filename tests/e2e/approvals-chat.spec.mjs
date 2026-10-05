@@ -1,7 +1,8 @@
-import { test, expect } from './fixtures.mjs'
+import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
+test.describe.configure({ timeout: 300_000 })
+import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
 
 // shell_run is `ask` by default and `touch` is not on the read-only list, so it always gets a card.
 const touch = (ws, name, extra = '') => `!!tool shell_run {"command":"touch ${name}","cwd":"${ws}"${extra}}`

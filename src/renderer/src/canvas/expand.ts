@@ -4,7 +4,7 @@ import { viewHidden } from '../moduleToggles'
 import { useStore } from '../store'
 
 /** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */
-const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project'])
+const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
 
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Views). Memory lives in
  * Settings → Memory and uploads in Files, neither of which can be hidden. */
@@ -18,7 +18,7 @@ export const canExpand = (w: CanvasWindow): boolean => {
   const view = HIDEABLE_VIEW[w.kind]
   if (view && viewHidden(useStore.getState().settings, view)) return false
   // A chat or project window without its referent has nothing to expand to.
-  if (w.kind === 'chat' || w.kind === 'project') return !!w.ref_id
+  if (w.kind === 'chat' || w.kind === 'project' || w.kind === 'crew') return !!w.ref_id
   return true
 }
 
@@ -56,6 +56,11 @@ export function expandWindow(w: CanvasWindow): void {
       break
     case 'project':
       if (w.ref_id) app.openProject(w.ref_id)
+      break
+    case 'crew':
+      // A desk opens in Cowork; a workflow or one of its runs opens in the Library's automations tab.
+      if (w.config.ref_kind === 'desk' && w.ref_id) { app.setView('cowork'); void app.openDesk(w.ref_id) }
+      else { app.setLibraryTab('automations'); app.setView('library') }
       break
   }
 }

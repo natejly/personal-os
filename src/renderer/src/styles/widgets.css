@@ -347,3 +347,49 @@
 .chat-blob:hover .face { transform: scale(1.06); }
 .win.dragging .chat-blob .face { transform: none; }
 .chat-blob:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+
+/* ---- Crew: a desk or workflow run and the agents under it, as a small tree ---- */
+.crew-head { gap: 8px; }
+.crew-head .crew-title { font-weight: 500; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 45%; }
+.crew-now {
+  flex: none; padding: 4px var(--widget-pad) 0; font-size: 11px; color: var(--text-muted);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.crew-tree { display: flex; flex-direction: column; gap: 2px; }
+.crew-row {
+  display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 3px 7px;
+  border-radius: var(--win-radius-sm); color: var(--text); transition: background var(--dur-hover) ease;
+}
+.crew-row:not(.step) { cursor: pointer; }
+.crew-row:not(.step):hover, .crew-row.on { background: var(--widget-row-hover); }
+.crew-row .crew-name { font-weight: 500; white-space: nowrap; }
+.crew-row .crew-what { flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.crew-row .crew-mark { flex: none; width: 14px; text-align: center; font-size: 11px; color: var(--text-muted); }
+.crew-state { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.crew-state.working, .crew-mark.working { color: var(--st-working); }
+.crew-state.needs-you, .crew-mark.needs-you { color: var(--st-needs-you); }
+.crew-state.done, .crew-mark.done { color: var(--st-done); }
+.crew-state.failed, .crew-mark.failed { color: var(--st-failed); }
+/* The card under a clicked row: the task, the live tool call and the numbers. */
+.crew-pop {
+  margin: 0 7px 4px 7px; padding: 8px 10px; border-radius: var(--win-radius-sm);
+  background: var(--widget-row); border: 1px solid var(--border); font-size: 12px; line-height: 1.4;
+}
+.crew-pop p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.crew-pop .crew-pop-now { color: var(--st-working); }
+.crew-pop .crew-pop-err { color: var(--st-failed); }
+.crew-run-form { padding: 4px 0; }
+/* Fires once when the root finishes while the window is open; stays until clicked. */
+.crew-signal {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--signal, var(--border-strong)); color: var(--signal, var(--text)); background: color-mix(in srgb, var(--signal, var(--border)) 14%, transparent);
+  font-size: 11px; font-weight: 500; cursor: pointer; animation: crew-pulse 1.1s ease-out 3;
+}
+.crew-signal.done { --signal: var(--st-done); }
+.crew-signal.failed { --signal: var(--st-failed); }
+.crew-signal.needs-you { --signal: var(--st-needs-you); }
+.crew-signal.idle { --signal: var(--st-idle); }
+@keyframes crew-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal, var(--border)) 60%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}

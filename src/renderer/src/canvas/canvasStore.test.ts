@@ -79,7 +79,7 @@ test('the web widget address bar takes a URL, a bare domain, or words for search
 
 test('the registry still marks exactly these kinds heavy, which is what the cap counts', () => {
   const heavy = Object.values(WIDGETS).filter((d) => d.heavy).map((d) => d.kind)
-  assert.deepEqual([...heavy].sort(), ['artifact', 'calendar', 'dashboard-widget', 'graph', 'usage', 'web'])
+  assert.deepEqual([...heavy].sort(), ['artifact', 'calendar', 'crew', 'dashboard-widget', 'graph', 'usage', 'web'])
 })
 
 /** Canvas.tsx renders every window up front (`EAGER`), so the heavy cap is held in reserve, not applied. */

@@ -9,8 +9,9 @@ in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
 
 Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
 `dashboard-widget`, `memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `web`,
-`artifact` or `face` (a `todos` window has a list and a board view; a `face` window is just the assistant's
-creature, thinking while any chat answers and surprised while something waits on you). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
+`artifact`, `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
+creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
+desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
 each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
@@ -24,6 +25,19 @@ off, grid, alignment guides, or both, with a grid pitch in points; a guide match
 which beats the grid.
 
 A space can be bound to a project, so a chat opened in it belongs to that project.
+
+## Crew
+
+Drag a desk from the Cowork rail, or a saved workflow or one of its runs from the Library, onto a space
+and it opens as a crew window: the desk or run at the head, and under it the agents working for it as a
+small tree (a workflow nests each agent under the step that spawned it; a desk nests subagents under the
+agent that asked for them). Every row is a face posed by its status and one line of what it is on right
+now, which for a live subagent is the tool call in flight or "thinking". Clicking a row opens a card with
+the task, the live call, rounds, calls and cost. When the root finishes while the window is open, a pill
+appears at the head and stays until clicked. The head also carries the run's own controls (approve the
+plan, cancel, resume, run again) and a link to the desk or the Library. A desk's status and every
+workflow run or step write arrive over the app's event stream; a live tree also polls every two seconds,
+since a child's "now" line moves without an announcement.
 
 ## Pop-outs
 

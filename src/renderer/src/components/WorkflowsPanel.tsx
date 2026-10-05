@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronRight, Pencil, Play, Plus, RotateCw, Square,
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
+import { dragProps } from '../canvas/dnd'
 import { ConfirmDelete } from './SkillsPanel'
 import type { Workflow, WorkflowRun, WorkflowRunStatus, WorkflowStepStatus } from '@shared/types'
 
@@ -48,7 +49,8 @@ function RunCard({ run, onChange }: { run: WorkflowRun; onChange: () => void }):
 
   return (
     <div className={`skill-row wf-run ${run.status}`}>
-      <div className="skill-head" aria-expanded={open} {...rowButton(() => setOpen(!open))}>
+      <div className="skill-head" aria-expanded={open} {...rowButton(() => setOpen(!open))}
+        {...dragProps({ kind: 'workflow_run', id: run.id, label: run.name })}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className={`wf-dot ${RUN_TONE[run.status]}`} aria-hidden />
         <span className="skill-name">{run.name}</span>
@@ -138,7 +140,7 @@ function Editor({ wf, onDone }: { wf: Workflow | null; onDone: () => void }): JS
   )
 }
 
-function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => void }): JSX.Element {
+export function ParamForm({ wf, onProposed }: { wf: Workflow; onProposed: () => void }): JSX.Element {
   const { toast } = useStore()
   const [vals, setVals] = useState<Record<string, string>>({})
   const propose = async (): Promise<void> => {
@@ -182,6 +184,12 @@ export default function WorkflowsPanel(): JSX.Element {
     const t = setInterval(() => { void load().catch(() => undefined) }, 2000)
     return () => clearInterval(t)
   }, [active, load])
+  // Every run or step write is announced app-wide; the poll above only covers a backend that never says so.
+  useEffect(() => {
+    const on = (): void => { void load().catch(() => undefined) }
+    window.addEventListener('grain-crew', on)
+    return () => window.removeEventListener('grain-crew', on)
+  }, [load])
 
   const remove = async (w: Workflow): Promise<void> => {
     try { await api.workflows.delete(w.id); await load() } catch (e) { toast((e as Error).message, 'error') }
@@ -216,7 +224,7 @@ export default function WorkflowsPanel(): JSX.Element {
           <h4>Saved workflows <span className="count">{wfs.length}</span></h4>
           {wfs.map((w) => (
             <div key={w.id} className="skill-row">
-              <div className="skill-head static">
+              <div className="skill-head static" {...dragProps({ kind: 'workflow', id: w.id, label: w.name })}>
                 <span className="skill-name">{w.name}</span>
                 <span className="skill-desc muted">{w.description}</span>
                 <div className="skill-actions no-drag">

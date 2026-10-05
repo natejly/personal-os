@@ -1,7 +1,7 @@
 import { useCallback, type FC, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   Brain, Calendar, CheckSquare, FileText, LayoutDashboard, MessageSquare, Network,
-  Notebook, FolderKanban, Sparkles, Gauge, MonitorDot, Globe, AppWindow, Smile } from 'lucide-react'
+  Notebook, FolderKanban, Sparkles, Gauge, MonitorDot, Globe, AppWindow, Smile, Users } from 'lucide-react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'
@@ -23,7 +23,8 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   activity: 'Activity',
   web: 'Web',
   artifact: 'Artifact',
-  face: 'Face'
+  face: 'Face',
+  crew: 'Crew'
 }
 
 export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
@@ -41,7 +42,8 @@ export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
   activity: <MonitorDot size={18} />,
   web: <Globe size={18} />,
   artifact: <AppWindow size={18} />,
-  face: <Smile size={18} />
+  face: <Smile size={18} />,
+  crew: <Users size={18} />
 }
 
 /** A row the backend accepted that this build has no widget for: still titled, still closable. */

@@ -44,6 +44,8 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
     case 'note': return ensure('note', p.id)
     case 'widget': return ensure('dashboard-widget', p.id, { dashboard_id: p.dashboardId })
     case 'file': return upload()
+    // A desk or a workflow lands as its crew: the agents under it, nested, each saying what it is on.
+    case 'desk': case 'workflow': case 'workflow_run': return open('crew', p.id, { ref_kind: p.kind })
   }
   return null
 }

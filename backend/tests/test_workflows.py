@@ -662,6 +662,78 @@ def test_routes() -> None:
     check(appmod.delete_workflow(saved["id"]) == {"ok": True}, "DELETE /workflows")
 
 
+def test_waves_record_agents_and_announce() -> None:
+    """Independent steps run side by side, each agent step remembers the children it spawned, every write is
+    announced through on_change, and GET /crew/{run} returns the tree the Spaces widget draws."""
+    reset()
+    DELAY["s"] = 0.15
+    d = {"name": "two-up", "steps": [
+        {"id": "a", "agent": {"role": "researcher", "task": "Look into A"}},
+        {"id": "b", "agent": {"role": "researcher", "task": "Look into B"}},
+        {"id": "join", "tool": "wf_write", "args": {"path": "/x", "text": "{{a.result}} {{b.result}}"}},
+    ]}
+    w = save(d)
+    seen: list[dict[str, Any]] = []
+    prev = store.on_change
+    store.on_change = seen.append
+
+    async def go() -> None:
+        r = store.create_run(w, {})
+        engine.approve(r["id"], r["plan_digest"])
+        mid = await until(lambda: (g := store.get_run(r["id"])) and sum(1 for s in g["steps"] if s["status"] == "running") == 2 and g)
+        check([s["step_id"] for s in mid["steps"] if s["status"] == "running"] == ["a", "b"], "both independent agent steps run in one wave")
+        crew = appmod.crew_view(r["id"])
+        check(crew["root"]["kind"] == "workflow_run" and crew["root"]["status"] == "running", "the crew route finds the run")
+        check(crew["root"]["now"] == "a, b", "the root's now line names the live steps")
+        live = [a for a in crew["agents"] if a["state"] == "running"]
+        check(len(live) == 2 and all(a["parent_id"] is None and a["now"] == "thinking" for a in live), "two live children hang off the root, each saying what it does")
+        done = await until(lambda: (g := store.get_run(r["id"]))["status"] == "done" and g)
+        check(LIVE["peak"] == 2, "the two agents answered at the same time")
+        by = {s["step_id"]: s for s in done["steps"]}
+        check(len(by["a"]["agents"]) == 1 and len(by["b"]["agents"]) == 1 and by["join"]["agents"] is None, "agent steps record their child; a tool step records none")
+        check(by["a"]["agents"][0] != by["b"]["agents"][0] and by["a"]["agents"][0].startswith("sa_"), "each step names its own subagent run")
+        check(CALLS["wf_write"] == 1, "the join ran once, after both")
+        crew = appmod.crew_view(r["id"])
+        ids = {a["id"] for a in crew["agents"]}
+        check(ids == {by["a"]["agents"][0], by["b"]["agents"][0]}, "the finished tree lists exactly the recorded children")
+        check(all(a["status"] == "done" and a["task"].startswith("Look into") for a in crew["agents"]), "finished children come from their rows")
+        check(seen and seen[-1]["id"] == r["id"] and seen[-1]["status"] == "done", "every write is announced; the last says done")
+        check("result" not in seen[-1] and "result" not in seen[-1]["steps"][0], "the announcement carries no payloads")
+        by_wf = appmod.crew_view(w["id"])
+        check(by_wf["root"]["kind"] == "workflow_run" and by_wf["workflow"]["id"] == w["id"], "a saved workflow resolves to its latest run")
+
+    try:
+        run(go())
+    finally:
+        store.on_change = prev
+
+
+def test_sibling_approvals_keep_the_run_waiting() -> None:
+    """Two steps in one wave both park on a card: answering one leaves the run waiting for the other."""
+    reset()
+    d = {"name": "two-cards", "steps": [
+        {"id": "w1", "tool": "wf_write", "approval": "required", "args": {"path": "/one"}},
+        {"id": "w2", "tool": "wf_write", "approval": "required", "args": {"path": "/two"}},
+    ]}
+    w = save(d)
+
+    async def go() -> None:
+        r = store.create_run(w, {})
+        engine.approve(r["id"], r["plan_digest"])
+        await until(lambda: len(pending(r["id"])) == 2)
+        cards = sorted(pending(r["id"]), key=lambda c: c["args"]["path"])
+        runs.decide(cards[0]["call_id"], "allow")
+        await until(lambda: CALLS.get("wf_write") == 1)
+        await asyncio.sleep(0.1)
+        cur = store.get_run(r["id"])
+        check(cur["status"] == "waiting_approval", "the run still waits on the other card")
+        runs.decide(cards[1]["call_id"], "allow")
+        done = await until(lambda: (g := store.get_run(r["id"]))["status"] == "done" and g)
+        check(CALLS["wf_write"] == 2 and all(s["status"] == "done" for s in done["steps"]), "both writes ran once each")
+
+    run(go())
+
+
 def test_reserved_names() -> None:
     from personal_os.mcp_servers import RESERVED_TOOL_NAMES
     for n in ("workflow_run", "workflow_resume", "workflow_list", "command_run", "command_list"):

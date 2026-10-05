@@ -99,7 +99,7 @@ def test_cwd_must_be_inside_a_granted_root(tmp_path: Path, box: Box) -> None:
     r = box.run("shell_run", command="pwd", cwd=str(other))
     assert r["error"] and "outside" in r["error"]
     box.settings["workspaceRoots"] = []
-    assert "Workspace roots" in box.run("shell_run", command="pwd")["error"]
+    assert "Workspace folders" in box.run("shell_run", command="pwd")["error"]
 
 
 def test_desk_workspace_is_the_default_root(tmp_path: Path) -> None:

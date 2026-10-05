@@ -6,9 +6,7 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "shell-panels",
-      "-g",
-      "theme"
+      "onboarding"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-ad79c6c90e00696e3/tests/e2e",
@@ -22,7 +20,7 @@
     "grepInvert": null,
     "maxFailures": 0,
     "metadata": {
-      "actualWorkers": 1
+      "actualWorkers": 2
     },
     "preserveOutput": "always",
     "projects": [
@@ -31,7 +29,7 @@
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
-          "actualWorkers": 1
+          "actualWorkers": 2
         },
         "id": "",
         "name": "",
@@ -70,13 +68,13 @@
   },
   "suites": [
     {
-      "title": "shell-panels.spec.mjs",
-      "file": "shell-panels.spec.mjs",
+      "title": "onboarding-wizard.spec.mjs",
+      "file": "onboarding-wizard.spec.mjs",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "theme: Settings switches light/dark/system; system follows prefers-color-scheme",
+          "title": "first run: wizard walks every step, seeds a pinned memory, finishes, and never returns after relaunch",
           "ok": true,
           "tags": [],
           "tests": [
@@ -91,12 +89,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 23550,
+                  "duration": 13434,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-05T05:00:04.186Z",
+                  "startTime": "2026-10-05T05:09:16.297Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -104,9 +102,111 @@
               "status": "expected"
             }
           ],
-          "id": "84ca3fbf9ff554d8dda0-8d240d9d34bc6ee1587a",
-          "file": "shell-panels.spec.mjs",
-          "line": 193,
+          "id": "8b07bf2943ac60a7848e-137372e527548e5d8f64",
+          "file": "onboarding-wizard.spec.mjs",
+          "line": 17,
+          "column": 1
+        },
+        {
+          "title": "wizard keyboard: Enter continues, Esc goes back, Enter on a provider card advances; Set up later closes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 15359,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:09:16.235Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8b07bf2943ac60a7848e-3408c86716c4662814a7",
+          "file": "onboarding-wizard.spec.mjs",
+          "line": 107,
+          "column": 1
+        },
+        {
+          "title": "wizard: a bad endpoint fails the test step readably, Back fixes it, Try again recovers; switching provider drops the old key",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16126,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:09:29.800Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8b07bf2943ac60a7848e-da2891e0ed6c66b4179b",
+          "file": "onboarding-wizard.spec.mjs",
+          "line": 143,
+          "column": 1
+        },
+        {
+          "title": "wizard: Settings → Run setup reopens it seeded with the current provider",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 15749,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:09:31.782Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "8b07bf2943ac60a7848e-eabf2110e730c9e5a11f",
+          "file": "onboarding-wizard.spec.mjs",
+          "line": 176,
           "column": 1
         }
       ]
@@ -114,9 +214,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:00:00.229Z",
-    "duration": 27907.188000000002,
-    "expected": 1,
+    "startTime": "2026-10-05T05:09:11.078Z",
+    "duration": 36534.417,
+    "expected": 4,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

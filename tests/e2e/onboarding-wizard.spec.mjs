@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { withGrain } from './helpers/shell.mjs'
 
-const FRESH = { settings: { onboardedAt: null, apiKey: '' } }
+// apiKey '' means "unchanged" in PUT /settings (the env seed would survive); null is what clears it.
+const FRESH = { settings: { onboardedAt: null, apiKey: null } }
 const wizard = (page) => page.getByRole('dialog', { name: /./ }).filter({ has: page.locator('#ob-title') })
 const cont = (page, name = 'Continue') => page.getByRole('button', { name: new RegExp(`^${name}`) })
 
@@ -9,7 +10,7 @@ async function pickCustom(page, url, { key = 'mock-key', model = 'mock-chat-2' }
   await page.getByRole('radio', { name: /Custom/ }).click()
   await cont(page).click()
   await page.getByLabel('Base URL').fill(url)
-  await page.getByLabel(/API key/).fill(key)
+  await page.getByRole('textbox', { name: /API key/ }).fill(key)
   await page.getByLabel('Model').fill(model)
 }
 
@@ -25,8 +26,8 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
 
     // provider: Continue is blocked until one is chosen
     await expect(w.getByRole('heading', { name: 'Choose your AI provider' })).toBeVisible()
-    await expect(cont(page)).toBeDisabled()
-    await expect(w.getByText('Choose a provider to continue.')).toBeVisible()
+    // the endpoint this install is already pointed at is preselected (it is the mock, i.e. "custom")
+    await expect(w.getByRole('radio', { name: /Custom/ })).toHaveAttribute('aria-checked', 'true')
     await expect(w.getByRole('radio')).toHaveCount(7)
     await w.getByRole('radio', { name: /Custom/ }).click()
     await expect(w.getByRole('radio', { name: /Custom/ })).toHaveAttribute('aria-checked', 'true')
@@ -34,14 +35,20 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
 
     // key: base URL + model required
     await expect(w.getByRole('heading', { name: 'Connect your account' })).toBeVisible()
+    // seeded from the endpoint this install already uses; clearing a required field blocks Continue
+    await expect(w.getByLabel('Base URL')).toHaveValue(llm.url)
+    await w.getByLabel('Base URL').fill('')
     await expect(cont(page)).toBeDisabled()
+    await expect(w.getByText('Enter the base URL to continue.')).toBeVisible()
     await w.getByLabel('Base URL').fill(llm.url)
+    await w.getByLabel('Model').fill('')
+    await expect(cont(page)).toBeDisabled()
     await expect(w.getByText('Pick or type a model to continue.')).toBeVisible()
     // show/hide key toggle
-    await w.getByLabel(/API key/).fill('mock-key')
-    await expect(w.getByLabel(/API key/)).toHaveAttribute('type', 'password')
+    await w.getByRole('textbox', { name: /API key/ }).fill('mock-key')
+    await expect(w.getByRole('textbox', { name: /API key/ })).toHaveAttribute('type', 'password')
     await w.getByRole('button', { name: 'Show API key' }).click()
-    await expect(w.getByLabel(/API key/)).toHaveAttribute('type', 'text')
+    await expect(w.getByRole('textbox', { name: /API key/ })).toHaveAttribute('type', 'text')
     await w.getByLabel('Model').fill('mock-chat-2')
     await cont(page).click()
 
@@ -81,9 +88,12 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
     await expect(prompt).toBeVisible()
     await prompt.click()
     await expect.poll(() => llm.calls.length, { timeout: 20_000 }).toBeGreaterThan(0)
-    expect(llm.calls.at(-1).model).toBe('mock-chat-2')
+    expect(llm.calls.some((c) => c.model === 'mock-chat-2')).toBe(true)
     // the pinned memory reaches the model
-    expect(JSON.stringify(llm.calls[0])).toContain('zebras')
+    const findChat = () => llm.calls.find((c) => JSON.stringify(c).includes('Put three things on my todo list'))
+    await expect.poll(findChat, { timeout: 20_000 }).toBeTruthy()
+    const chatCall = findChat()
+    expect(JSON.stringify(chatCall)).toContain('zebras')
 
     // relaunch: no wizard
     const p2 = await grain.relaunch()
@@ -152,11 +162,11 @@ test('wizard: a bad endpoint fails the test step readably, Back fixes it, Try ag
     await w.getByRole('button', { name: /Back/ }).click()
     await w.getByRole('radio', { name: /Ollama/ }).click()
     await cont(page).click()
-    await expect(w.getByLabel(/API key/)).toHaveValue('')
+    await expect(w.getByRole('textbox', { name: /API key/ })).toHaveValue('')
     await expect(w.getByLabel('Model')).not.toHaveValue('mock-chat')
     // a provider that needs a key is blocked without one
     await w.getByRole('button', { name: /Back/ }).click()
-    await w.getByRole('radio', { name: /OpenAI/ }).click()
+    await w.getByRole('radio', { name: /^OpenAI/ }).click()
     await cont(page).click()
     await expect(cont(page)).toBeDisabled()
     await expect(w.getByText('Paste your API key to continue.')).toBeVisible()

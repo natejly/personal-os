@@ -64,12 +64,15 @@ def test_ask_rule_stays_ask() -> None:
     check(len(T.cards(ev)) == 1 and not T.RAN, "ask rule leaves ask")
 
 
-def test_tainted_external_stays_forced_ask() -> None:
-    ev = run([[call(0, "t_ext")], []], tainted=True, mode="on")
+def test_tainted_always_ask_tool_stays_forced_ask() -> None:
+    ev = run([[call(0, "t_ext")], []], tainted=True, mode="on", alwaysAsk=["t_ext"])
     c = T.cards(ev)
-    check(len(c) == 1 and c[0]["forced"] and not CALLS, "tainted external asks, forced")
-    ev = run([[call(0, "t_ext")], []])
-    check(len(T.cards(ev)) == 1 and not CALLS, "external asks even untainted")
+    check(len(c) == 1 and c[0]["forced"] and not CALLS, "tainted alwaysAsk tool asks, forced")
+    ev = run([[call(0, "t_ext")], []], alwaysAsk=["t_ext"])
+    check(len(T.cards(ev)) == 1 and not CALLS, "alwaysAsk tool asks even untainted")
+    ev = run([[call(0, "t_ext")], []], tainted=True, mode="on", alwaysAsk=[])
+    check(not T.cards(ev) and CALLS == ["a"], "an external tool not under alwaysAsk runs on, tainted or not")
+    appmod.db.set_settings({"alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
 
 
 def test_fs_ask_stays() -> None:

@@ -11,7 +11,7 @@ import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
 import { chatModelIds } from '../lib/modelLabel'
 import type { Settings, ShortcutState } from '@shared/types'
-import { ToolGlobalToggles } from './ToolPermissions'
+import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
@@ -509,9 +509,9 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'tools' && <section>
               <h3>Tools</h3>
-              <p className="muted"><b>On</b> runs automatically, <b>Ask</b> pauses the reply for your approval, <b>Off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
+              <p className="muted"><b>On</b> runs automatically, <b>Ask</b> pauses the reply for your approval, <b>Off</b> hides the tool. Tools that act outside the app (email, calendar, Google Tasks, local files) run on a plain yes unless they are listed under Always ask.</p>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, ordinary tools run without an approval card. A deny rule still refuses, and these still ask: ask rules, mail and other external actions, shell commands, writes outside granted folders, calls made after untrusted content, repeated calls, a plan and a desk question. Scheduled jobs and other unattended runs never skip: a call that would still ask is refused by default. A chat can turn this off for itself.</small></span>
+                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, ordinary tools run without an approval card. A deny rule still refuses, and these still ask: ask rules, the tools under Always ask, shell commands, writes outside granted folders, calls made after untrusted content, repeated calls, a plan and a desk question. Scheduled jobs and other unattended runs never skip: a call that would still ask is refused by default. A chat can turn this off for itself.</small></span>
                 <input type="checkbox" checked={!!draft.skipPermissions} onChange={(e) => patch({ skipPermissions: e.target.checked })} /><span className="switch" />
               </label>
               <div className="setting-row">
@@ -521,6 +521,9 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
                 </div>
               </div>
+              <h4>Always ask</h4>
+              <p className="muted">These show a card every time, whatever a chat or project says, and a card never grants one for good. Anything that reads untrusted content (mail, the web) first also has to ask before one runs. Keep what you cannot take back here.</p>
+              <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
               <h4>Tool permissions</h4>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />

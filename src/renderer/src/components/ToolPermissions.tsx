@@ -18,7 +18,7 @@ export const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask
 const toolLabel = (name: string): string => describeCall(name, null).verb
 
 export const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
-const LOCKED_TIP = 'Actions outside the app always ask'
+const LOCKED_TIP = 'Listed under Always ask'
 /** A legacy stored 'on' for an ask-locked tool reads as what the backend runs: ask. */
 const capped = (t: ToolInfo, m: ToolMode): ToolMode => (m === 'on' && askLocked(t) ? 'ask' : m)
 
@@ -56,7 +56,27 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   )
 }
 
-/** Global modes (Settings). Missing = the tool's default (external actions ask; everything else on). */
+/** The tools that always show a card: no mode switches one on, no card grants it whole-tool, and untrusted content
+ *  in the reply forces its card. Only tools that act outside the app or book unattended work can be listed. */
+export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+  const tools = useStore((s) => s.tools)
+  // calendar_propose is itself the review card, so it is locked whatever this list says.
+  const lockable = tools.filter((t) => (t.danger === 'external' || t.danger === 'schedules') && t.name !== 'calendar_propose')
+  const toggle = (name: string, on: boolean): void => onChange(on ? [...value.filter((n) => n !== name), name] : value.filter((n) => n !== name))
+  return (
+    <div className="tool-perms">
+      {lockable.map((t) => (
+        <label key={t.name} className={`toggle-row plain ${!t.available ? 'unavailable' : ''}`}>
+          <span className="toggle-text"><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+          <input type="checkbox" checked={value.includes(t.name)} onChange={(e) => toggle(t.name, e.target.checked)} /><span className="switch" />
+        </label>
+      ))}
+      {lockable.length === 0 && <p className="muted small">No tool here acts outside the app yet.</p>}
+    </div>
+  )
+}
+
+/** Global modes (Settings). Missing = the tool's default (Always ask tools ask; everything else on). */
 export function ToolGlobalToggles({ value, onChange }: { value: Record<string, ToolMode | boolean>; onChange: (next: Record<string, ToolMode>) => void }): JSX.Element {
   const tools = useStore((s) => s.tools)
   const [q, setQ] = useState('')

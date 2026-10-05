@@ -864,6 +864,10 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = toolbox.cap_modes(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "alwaysAsk":
+            if not all(isinstance(x, str) for x in v):
+                raise HTTPException(422, "alwaysAsk must be a list of tool names")
+            clean[k] = list(dict.fromkeys(v))
         elif k in HOST_LIST_SETTINGS:
             # Bare hostnames only, the rule the egress proxy matches by: a URL, wildcard, IP or lone TLD stored
             # here would be ignored at best and widen an allowlist at worst.
@@ -2841,8 +2845,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         mode, forced = "ask", True
                 # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
-                # External and schedules tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on'
-                # into a forced card for them: a tainted run forces it here, so the card buys no grant or allow rule.
+                # An alwaysAsk tool tops out at ask (Toolbox.effective), so gate() does not turn an 'on' into a forced
+                # card for it; and an external tool the user set to ask is 'ask' before the gate too. A tainted run
+                # forces either here, so the card buys no grant or allow rule.
                 # That alone does not stop an approved plan step from standing in for the card: taint the plan did
                 # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
                 taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
@@ -3124,7 +3129,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # An external write, or booking unattended work, is never granted whole-tool: only a patterned rule
                     # (always_rule) can stand. Toolbox.effective would cap such a grant back to ask anyway.
                     standing = granted and not forced and c["name"] != PLAN_TOOL and (
-                        spec is None or not spec.ask_locked)  # a connector tool (no spec) keeps its schema-bound grant
+                        spec is None or not toolbox.ask_locked(spec))  # a connector tool (no spec) keeps its schema-bound grant
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":

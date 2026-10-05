@@ -83,9 +83,9 @@ class ProposeTests(Base):
     def test_modes_and_tiers(self) -> None:
         sp = self.box.specs
         self.assertEqual(sp["calendar_propose"].danger, "external")
-        self.assertEqual(sp["calendar_propose"].default_mode, "ask")
+        self.assertEqual(self.box.default_mode(sp["calendar_propose"]), "ask")
         for n in ("calendar_find_time", "calendar_free_busy"):
-            self.assertEqual(sp[n].default_mode, "on", n)
+            self.assertEqual(self.box.default_mode(sp[n]), "on", n)
 
     def test_a_tainted_run_still_asks_for_propose(self) -> None:
         self.assertEqual(self.box.gate("calendar_propose", "on", {"tainted": True}), "ask")

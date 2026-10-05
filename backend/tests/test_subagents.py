@@ -822,7 +822,7 @@ def test_plan_mode_does_not_prestart() -> None:
 
 def test_desk_start_asks_and_plans() -> None:
     reset()
-    check(appmod.toolbox.specs["desk_start"].default_mode == "ask", "desk_start asks by default")
+    check(appmod.toolbox.default_mode(appmod.toolbox.specs["desk_start"]) == "ask", "desk_start asks by default")
     check(appmod.toolbox.effective({}, None, None)["desk_start"] == "ask", "and is ask in the effective modes")
     bad = run(appmod.toolbox.call("desk_start", {"title": "t", "brief": "b", "mode": "ask"}, mkctx(new_conv())))
     check("error" in bad, "a looser mode than plan is refused")

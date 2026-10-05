@@ -215,9 +215,10 @@ except grain_tools.ToolError as e:
 
 
 def test_taint_upgrades_on_to_ask_for_bridged_calls_too(tmp_path: Path) -> None:
-    """The gate is Toolbox.gate: an external-tier tool in a tainted run asks even when its mode is on."""
+    """The gate is Toolbox.gate: an alwaysAsk tool in a tainted run asks even when its mode is on."""
     r = Rig(tmp_path)
     r.tb.specs["fs_edit"].danger = "external"  # stand-in: any external-tier tool the gate upgrades
+    r.tb.settings = lambda: {"alwaysAsk": ["fs_edit"]}
     r.ctx["tainted"] = True
     asked: list[str] = []
 

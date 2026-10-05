@@ -100,6 +100,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
+    # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
+    # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
+    # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.
+    "alwaysAsk": ["gmail_send", "calendar_delete", "trash_local_file", "move_local_file", "run_shortcut",
+                  "python_install", "schedule_task"],
     "toolReadRetries": 2,  # extra attempts for a read-only tool after a transient network error (0 = never retry)
     "parallelReads": 4,  # read-only tool calls of one round that run together (1 = one at a time)
     # Chats with no own skipPermissions follow this. Off: tools that ask still show a card. On: those

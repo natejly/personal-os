@@ -182,7 +182,7 @@ export interface ToolInfo {
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
   taints?: boolean
-  /** Capped at 'ask' and never granted whole-tool (external and schedules tools, minus the ungated calendar writes). */
+  /** Capped at 'ask' and never granted whole-tool: an external or schedules tool under the alwaysAsk setting. */
   ask_locked?: boolean
 }
 
@@ -1288,6 +1288,8 @@ export interface Settings {
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
+  /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
+  alwaysAsk?: string[]
   /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
   skipPermissions?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */

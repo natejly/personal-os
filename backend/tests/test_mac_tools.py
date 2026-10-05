@@ -398,7 +398,8 @@ def test_file_writes_ask_first_and_errors_are_shaped(home: Path) -> None:
     tb = make_toolbox()
     modes = tb.effective({}, None, None)
     for n in ("write_local_file", "move_local_file", "trash_local_file"):
-        assert modes[n] == "ask", n          # danger "external": never silent
+        # Moving and trashing are under alwaysAsk by default; a write runs, and still asks outside a granted folder.
+        assert modes[n] == ("on" if n == "write_local_file" else "ask"), n
         assert tb.available(n), n            # plain file work, no Mac-only binary
         assert tb.specs[n].group == "files"
     out = asyncio.run(tb.call("write_local_file", {"path": "~/Library/x.txt", "content": "x"}, {}))

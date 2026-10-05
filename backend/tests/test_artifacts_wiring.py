@@ -148,7 +148,7 @@ def test_tool_creates_and_links_to_conversation_run_and_reload() -> None:
 
 def test_artifact_tools_are_in_app_tier() -> None:
     for n in ("artifact_create", "artifact_update"):
-        assert appmod.toolbox.specs[n].danger == "writes" and appmod.toolbox.specs[n].default_mode == "on"
+        assert appmod.toolbox.specs[n].danger == "writes" and appmod.toolbox.default_mode(appmod.toolbox.specs[n]) == "on"
     assert appmod.toolbox.specs["artifact_read"].danger == "safe"
 
 

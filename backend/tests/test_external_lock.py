@@ -1,5 +1,6 @@
-"""Actions outside the app, and booking unattended work, always ask: no Settings, Project or Chat map can switch an
-external or schedules tool to 'on', and a card's 'Always' does not grant one whole-tool. 'off' is still honoured."""
+"""The alwaysAsk setting: an external or schedules tool listed there always asks (no Settings, Project or Chat map
+can switch it to 'on', and a card's 'Always' does not grant it whole-tool; 'off' is still honoured), while every
+other tool that acts outside the app runs on a plain yes."""
 from __future__ import annotations
 
 import asyncio
@@ -54,9 +55,9 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
     return r.json()
 
 
-def test_effective_caps_external_and_schedules_at_ask_at_every_level() -> None:
+def test_effective_caps_always_ask_tools_at_ask_at_every_level() -> None:
     assert tb.specs["gmail_send"].danger == "external" and tb.specs["schedule_task"].danger == "schedules"
-    for name in ("gmail_send", "gmail_draft", "schedule_task"):
+    for name in ("gmail_send", "calendar_delete", "schedule_task"):
         on = {name: "on"}
         assert tb.effective(on, None, None)[name] == "ask"
         assert tb.effective({}, on, None)[name] == "ask"
@@ -68,17 +69,42 @@ def test_effective_caps_external_and_schedules_at_ask_at_every_level() -> None:
     assert tb.effective({}, None, {"web_search": "on"})["web_search"] == "on"
 
 
-def test_calendar_writes_are_external_but_not_locked() -> None:
-    """Calendar changes run on a plain yes in the conversation (tools.UNGATED_EXTERNAL): on by default and settable
-    to on at every level, while keeping the external tier's read-back, undo and proposal-only handling."""
-    for name in ("calendar_create", "calendar_update", "calendar_delete", "calendar_respond"):
+def test_external_tools_outside_always_ask_run_on_a_plain_yes() -> None:
+    """Not listed: on by default and settable to on at every level, while keeping the external tier's read-back,
+    undo and proposal-only handling."""
+    for name in ("calendar_create", "calendar_update", "calendar_respond", "gmail_draft", "gmail_modify", "cancel_scheduled_task"):
         spec = tb.specs[name]
-        assert spec.danger == "external" and not spec.ask_locked and spec.default_mode == "on"
+        assert spec.danger in ("external", "schedules") and not tb.ask_locked(spec) and tb.default_mode(spec) == "on", name
         assert tb.effective({}, None, None)[name] == "on"
         assert tb.effective({name: "ask"}, None, None)[name] == "ask", "a user can still make it ask"
         assert tb.gate(name, "on", {"tainted": True}) == "on", "untrusted content in the reply does not force a card"
-    assert tb.specs["calendar_propose"].ask_locked, "a batch proposal is the user's review card and stays one"
+    assert tb.ask_locked(tb.specs["calendar_propose"]), "a batch proposal is the user's review card and stays one"
     assert tb.gate("gmail_send", "on", {"tainted": True}) == "ask"
+    assert tb.gate("fetch_url", "on", {"tainted": True}) == "ask", "a tainted run still asks before reaching the internet"
+
+
+def test_the_always_ask_setting_moves_the_lock() -> None:
+    j("PUT", "/settings", {"alwaysAsk": ["gmail_modify", "gmail_modify", "calendar_propose"]})
+    try:
+        assert appmod.settings()["alwaysAsk"] == ["gmail_modify", "calendar_propose"], "deduplicated"
+        assert tb.ask_locked(tb.specs["gmail_modify"]) and tb.effective({"gmail_modify": "on"}, None, None)["gmail_modify"] == "ask"
+        assert tb.gate("gmail_modify", "on", {"tainted": True}) == "ask"
+        assert not tb.ask_locked(tb.specs["gmail_send"]) and tb.effective({}, None, None)["gmail_send"] == "on", "unlisted mail send runs"
+        assert tb.ask_locked(tb.specs["calendar_propose"])
+        j("PUT", "/settings", {"alwaysAsk": []})
+        assert tb.ask_locked(tb.specs["calendar_propose"]), "the review card cannot be unlisted"
+        assert not tb.ask_locked(tb.specs["gmail_send"])
+        assert not tb.ask_locked(tb.specs["todo_delete"]), "an in-app tool is never locked"
+        j("PUT", "/settings", {"alwaysAsk": ["todo_delete"]})
+        assert not tb.ask_locked(tb.specs["todo_delete"]) and tb.effective({}, None, None)["todo_delete"] == "on"
+        j("PUT", "/settings", {"alwaysAsk": "gmail_send"}, expect=422)
+        j("PUT", "/settings", {"alwaysAsk": [1]}, expect=422)
+        tools = {t["name"]: t for t in j("GET", "/tools")["tools"]}
+        assert tools["gmail_send"]["ask_locked"] is False and tools["gmail_send"]["default_mode"] == "on"
+    finally:
+        j("PUT", "/settings", {"alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
+    tools = {t["name"]: t for t in j("GET", "/tools")["tools"]}
+    assert tools["gmail_send"]["ask_locked"] is True and tools["gmail_send"]["default_mode"] == "ask"
 
 
 def test_saving_on_for_an_external_tool_stores_ask() -> None:
@@ -88,8 +114,8 @@ def test_saving_on_for_an_external_tool_stores_ask() -> None:
     j("PUT", "/settings", {"tools": {}})
 
     pid = j("POST", "/projects", {"name": "Lock"})["id"]
-    proj = j("PUT", f"/projects/{pid}", {"tools": {"calendar_create": "on", "gmail_draft": "on", "gmail_send": "off"}})
-    assert proj["tools"] == {"calendar_create": "on", "gmail_draft": "ask", "gmail_send": "off"}, "calendar writes are not locked"
+    proj = j("PUT", f"/projects/{pid}", {"tools": {"calendar_create": "on", "calendar_delete": "on", "gmail_send": "off"}})
+    assert proj["tools"] == {"calendar_create": "on", "calendar_delete": "ask", "gmail_send": "off"}, "only alwaysAsk tools are locked"
 
     cid = j("POST", "/conversations", {})["id"]
     conv = j("PATCH", f"/conversations/{cid}", {"settings": {"tools": {"gmail_send": "on", "todo_add": "off"}}})

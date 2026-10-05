@@ -374,6 +374,11 @@ def build_context(
     # inside the prompt: a model-written procedure is data, never a second set of instructions.
     if skills is not None and conv_settings.get("useSkills", True):
         approved = [s for s in skills.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
+        # The built-in guide is long and read on demand: it never rides inline or in the index, one prompt line points at it.
+        if any(s["source"] == "builtin" for s in approved) and conv_settings.get("useTools", True):
+            from .guide import PROMPT_HINT
+            parts.append(PROMPT_HINT)
+        approved = [s for s in approved if s["source"] != "builtin"]
         if approved:
             from .learn import MAX_INJECTED_SKILLS, MAX_MANIFEST_SKILLS, skill_block, skill_manifest
 

@@ -18,8 +18,12 @@ log = logging.getLogger("personal_os.db")
 
 # Settings whose values live in the secret store, not in SQLite (the settings row is left blank).
 SECRET_SETTINGS = ("apiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
-# googleToken is a dict; only these fields are secret, the rest (email, expiry, scopes) stays in SQLite.
-GOOGLE_TOKEN_SECRET_FIELDS = ("token", "refresh_token", "client_secret")
+# These settings are dicts; only the listed fields are secret, the rest (email, expiry, scopes) stays in SQLite.
+TOKEN_SECRET_FIELDS = {
+    "googleToken": ("token", "refresh_token", "client_secret"),
+    "microsoftToken": ("access_token", "refresh_token"),
+}
+GOOGLE_TOKEN_SECRET_FIELDS = TOKEN_SECRET_FIELDS["googleToken"]
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -546,15 +550,16 @@ class Database:
                     self.set_settings({k: v})
                 except Exception as e:  # noqa: BLE001 - keep the plaintext rather than lose the key
                     log.warning("Could not move %s into the secret store: %s", k, e)
-        try:
-            tok = json.loads(rows["googleToken"]) if "googleToken" in rows else None
-        except ValueError:
-            tok = None
-        if isinstance(tok, dict) and any(tok.get(f) for f in GOOGLE_TOKEN_SECRET_FIELDS):
+        for k, fields in TOKEN_SECRET_FIELDS.items():
             try:
-                self.set_settings({"googleToken": tok})
-            except Exception as e:  # noqa: BLE001
-                log.warning("Could not move the Google token into the secret store: %s", e)
+                tok = json.loads(rows[k]) if k in rows else None
+            except ValueError:
+                tok = None
+            if isinstance(tok, dict) and any(tok.get(f) for f in fields):
+                try:
+                    self.set_settings({k: tok})
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Could not move %s into the secret store: %s", k, e)
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:
@@ -643,13 +648,14 @@ class Database:
         for k in SECRET_SETTINGS:
             if k in out or self.secrets.get(k):
                 out[k] = self.secrets.get(k) or out.get(k) or ""  # the SQLite value is only a not-yet-migrated legacy
-        tok = out.get("googleToken")
-        if isinstance(tok, dict) and tok:
-            try:
-                tok = {**tok, **json.loads(self.secrets.get("googleToken") or "{}")}
-            except ValueError:
-                pass
-            out["googleToken"] = tok
+        for k in TOKEN_SECRET_FIELDS:
+            tok = out.get(k)
+            if isinstance(tok, dict) and tok:
+                try:
+                    tok = {**tok, **json.loads(self.secrets.get(k) or "{}")}
+                except ValueError:
+                    pass
+                out[k] = tok
         return out
 
     def set_settings(self, patch: dict[str, Any]) -> None:
@@ -663,14 +669,15 @@ class Database:
                 else:
                     self.secrets.delete(k)
                 v = ""
-            elif k == "googleToken":
+            elif k in TOKEN_SECRET_FIELDS:
+                fields = TOKEN_SECRET_FIELDS[k]
                 if isinstance(v, dict):
-                    hidden = {f: v[f] for f in GOOGLE_TOKEN_SECRET_FIELDS if v.get(f)}
+                    hidden = {f: v[f] for f in fields if v.get(f)}
                     if hidden:
                         self.secrets.set(k, json.dumps(hidden))
                     else:
                         self.secrets.delete(k)
-                    v = {f: x for f, x in v.items() if f not in GOOGLE_TOKEN_SECRET_FIELDS}
+                    v = {f: x for f, x in v.items() if f not in fields}
                 else:
                     self.secrets.delete(k)
             rows[k] = v

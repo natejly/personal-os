@@ -1043,7 +1043,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* ---------- Sidebar spaces ---------- */
 .section-actions { display: flex; gap: 2px; align-items: center; }
 .space-row .space-hint { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.space-row .space-row-icon { color: var(--text-faint); flex-shrink: 0; }
 .space-row .ghost { opacity: 0; }
 .space-row:hover .ghost, .space-row:focus-within .ghost { opacity: 1; }
 .space-row input { width: 100%; font: inherit; color: var(--text); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; outline: none; }

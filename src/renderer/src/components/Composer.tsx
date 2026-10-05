@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
-import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
+import { ArrowUp, AudioLines, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import WorkingFolder from './WorkingFolder'
@@ -14,6 +14,8 @@ import { hasModelKey } from '../lib/modelLabel'
 import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import MicButton from './MicButton'
+import { useVoiceLoop } from './useVoiceLoop'
+import { VOICE_LABEL } from '../lib/voiceLoop'
 import { dictationText } from '../features/docrec/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
@@ -78,6 +80,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const [commands, setCommands] = useState<Command[]>([])
   useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
   const skills = useStore((s) => s.skills)
+  const voice = useVoiceLoop(activeId, !onSend)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
   const slash = slashClosedAt === text ? null : slashItems(text, commands, skills)
@@ -125,7 +128,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       return
     }
     dropDraft(k0)
-    if (name === 'skills' || name === 'commands') {
+    if (name === 'voice') voice.toggle()
+    else if (name === 'skills' || name === 'commands') {
       s.setLibraryTab(name === 'skills' ? 'skills' : 'automations')
       s.setView('library')
     } else if (name === 'plan') {
@@ -409,7 +413,16 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
             typing mid-reply never changes the width of the text box; Stop sits beside it. */}
         <div className="composer-actions">
-          <MicButton scope={box} onText={dictate} />
+          {voice.state.phase !== 'idle' && <span className="mic-pill" role="status" title="Voice chat. Esc or the button ends it.">{VOICE_LABEL[voice.state.phase]}</span>}
+          {voice.state.phase === 'idle' && <MicButton scope={box} onText={dictate} />}
+          {!onSend && (
+            <button className={voice.state.phase !== 'idle' ? 'icon-btn mic-btn recording' : 'icon-btn mic-btn'} type="button" aria-pressed={voice.state.phase !== 'idle'}
+              aria-label={voice.state.phase !== 'idle' ? 'End voice chat' : 'Start voice chat'}
+              title={voice.state.phase !== 'idle' ? 'End voice chat (Esc)' : 'Voice chat: talk, and the reply is read aloud (/voice)'}
+              onMouseDown={(e) => e.preventDefault()} onClick={voice.toggle}>
+              <AudioLines size={16} />
+            </button>
+          )}
           {streaming && (
             <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}

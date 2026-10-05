@@ -15,7 +15,8 @@ export const BUILTIN: { name: string; args?: string; hint: string; client?: bool
   { name: 'compact', args: '[focus]', hint: 'Summarize the earlier messages of this chat', client: true },
   { name: 'skills', hint: 'Open Library → Skills', client: true },
   { name: 'commands', hint: 'Open Library → Automations', client: true },
-  { name: 'plan', hint: 'Cycle plan mode: off → auto → always', client: true }
+  { name: 'plan', hint: 'Cycle plan mode: off → auto → always', client: true },
+  { name: 'voice', hint: 'Talk hands-free: listen, send, read the reply aloud, repeat', client: true }
 ]
 
 /** The menu shows at most this many rows: the built-ins plus a few saved commands. */

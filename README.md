@@ -45,6 +45,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    From any app, press ⌥Space (or the menubar item) for a small ask bar: type a
    line, optionally attach your clipboard text, and the reply streams in place.
    Open in chat continues it in the main window.
+   The speaker button on a reply reads it aloud (voice and speed in Settings →
+   Chat). `/voice`, or the waveform button by the mic, starts hands-free voice
+   chat: speak, pause, and the message is sent and the reply read back, then it
+   listens again until Esc, the button, or the turn cap; an open approval card
+   pauses it.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
    chat if the assistant should read or write files there; the **Style** picker

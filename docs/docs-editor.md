@@ -13,7 +13,7 @@ upload. The internal names below are unchanged.
 | --- | --- | --- |
 | **Uploaded files** | files you upload, chunked and indexed so replies can quote them | `repos.Documents`, `/documents` |
 | **Editor files** | prose you write and keep editing | `docs.Docs`, `/docs` |
-| **Sticky notes** | canvas mode's sticky notes: a body and a colour, no history | `notes.Notes`, `/notes`; "Save to Files" on the widget copies one into Files |
+| **Sticky notes** | sticky notes on a space: a body and a colour, no history | `notes.Notes`, `/notes`; "Save to Files" on the widget copies one into Files |
 
 The editor files took the `/docs` prefix, so FastAPI's own Swagger UI moved to `/api-docs`
 (`docs_url` in `app.py`). Its OAuth redirect, which also defaults to a path

@@ -45,7 +45,7 @@ The assistant can add to a space but never close or delete anything on one.
 | Tool | Does |
 |---|---|
 | `space_list` | Lists the spaces and the windows on each. |
-| `space_add_widget` | Puts a view, or an existing chat, board, note, page, dashboard widget or project, in the next free grid cell of a space. |
+| `space_add_widget` | Puts a view, or an existing chat, note, page, dashboard widget or project, in the next free grid cell of a space. |
 | `space_arrange` | Tiles (`grid`) or stacks (`cascade`) a space's open windows. Moves and resizes only. |
 | `widget_create` | Builds a live chart, stat or table widget from a data source. The layout is generated once; refreshes re-read the source with no model call. |
 | `widget_place` | Puts a widget from `widget_create` on a space (the first one when none is named). |

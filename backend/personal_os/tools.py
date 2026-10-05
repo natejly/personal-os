@@ -91,7 +91,7 @@ ALWAYS_CARD = frozenset({"calendar_propose"})
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
-    "doc_create", "doc_edit",
+    "doc_create", "doc_edit", "doc_delete",
     "todo_add", "todo_delete", "todo_update",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
@@ -190,6 +190,7 @@ ALTERNATIVE = {
     "skill_from_run": "skill_draft with the steps written out, so the user can save it in Library → Skills",
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
+    "doc_delete": "doc_edit to change part of the file, or leave it",
     "find_files": "search_documents for files the user uploaded, or ask the user where the file is",
     "read_local_file": "ask the user to upload the file or paste the text",
     "write_local_file": "put the text in your reply so the user can save it themselves",
@@ -694,6 +695,7 @@ class Toolbox:
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
+        self.trash: Any = None  # soft delete (trash.py); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
         self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
@@ -2552,6 +2554,18 @@ def _register_docs(self: Toolbox) -> None:
               "title": {"type": "string"},
               "summary": {"type": "string", "description": "Short description of the change, shown to the user"}}, ["doc"]),
         doc_edit, "docs", "writes"))
+
+    async def doc_delete(ctx: dict[str, Any], doc: str) -> Any:
+        d = _find(ctx, doc)
+        if not d:
+            return _missing(ctx, doc)
+        self.trash.trash("doc", d["id"])
+        return _scrub_strings({"deleted": d["title"] or "", "doc_id": d["id"],
+                               "note": "Moved to the trash; the user can restore it from Settings → Trash for 30 days."})
+    spec = ToolSpec("doc_delete", "Delete a file from Files by id or title. It goes to the trash and the user can restore it for 30 days. Prefer doc_edit for a partial change; delete only when the user asks to remove the file.",
+        _obj({"doc": {"type": "string", "description": "File id or title"}}, ["doc"]), doc_delete, "docs", "writes")
+    spec.default = "ask"
+    R("doc_delete", spec)
 
 
 def _register_meetings(self: Toolbox) -> None:

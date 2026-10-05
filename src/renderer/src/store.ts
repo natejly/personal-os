@@ -1481,6 +1481,10 @@ export const useStore = create<State>((set, get) => {
           break
         // The sidebar's Files count and pending badge read the store, which only the Files view refreshed.
         case 'tool_result':
+          if (ev.data.name === 'doc_delete') {
+            const open = get().activeDoc
+            get().refreshDocs().then(() => { if (open && !get().docs.some((d) => d.id === open.id)) { set({ docDraft: null, docTitleDraft: null }); void get().closeDocTab(open.id) } }).catch(() => undefined)
+          }
           if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
           break
       }

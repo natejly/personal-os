@@ -504,6 +504,7 @@ async def _start_retrieval() -> None:
     retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
+toolbox.trash = trash
 toolbox.style_relearn = queue_style_relearn
 toolbox.memory_index = memory_index
 toolbox.meeting_index = meeting_index

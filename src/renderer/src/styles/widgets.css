@@ -313,11 +313,28 @@
 .widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
 .widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
 .widget .messages-inner .avatar .lucide { width: 11px; height: 11px; }
+/* The assistant's face: the page sizes it to 30px, which out-ranks the 20px above by stylesheet order. */
+.widget .messages-inner .avatar.face-avatar { width: 22px; height: 22px; margin-top: 0; }
+/* Rows that line up with the reply text, re-aligned to the 22px face + 8px gap (the page uses 38px). */
+.widget .regen-row { padding-left: 30px; margin-top: -8px; }
+.widget .run-error-row { margin-left: 30px; font-size: 12px; }
+.widget .messages-inner .msg-actions { min-height: 22px; }
+/* Page-sized headings read as shouting in a panel, and an image wider than the window scrolls it sideways. */
+.widget .markdown h1 { font-size: 15px; }
+.widget .markdown h2 { font-size: 14px; }
+.widget .markdown h3 { font-size: 13px; }
+.widget .markdown h1, .widget .markdown h2, .widget .markdown h3, .widget .markdown h4 { margin: 12px 0 6px; }
+.widget .markdown img { max-width: 100%; height: auto; }
 .widget .messages-inner .msg.user .user-bubble { padding: 6px 10px; }
 .widget .messages-inner .msg-actions { margin-top: 2px; }
 .widget .messages-inner .markdown > :first-child { margin-top: 0; }
 .widget .messages-inner .markdown > :last-child { margin-bottom: 0; }
-.widget .chat-head { height: 26px; padding: 0 8px; }
+.widget .chat-head { height: 26px; padding: 0 12px 0 8px; }
+/* The frame's 22px move strip lies over this head and swallows clicks. Stop it short of the head's
+   buttons (rename, face toggle, switcher; the right padding keeps them off the resize corner), and
+   start the title past the status glyph the strip draws while the chat is busy. */
+.win[data-kind='chat'] .win-move { right: 68px; }
+.win:has(.win-grip .ring) .chat-head { padding-left: 30px; }
 
 /* Face: the creature alone, centred, scaled to the frame with a little air around it. */
 .face-widget { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }

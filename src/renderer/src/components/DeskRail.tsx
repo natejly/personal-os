@@ -7,7 +7,6 @@ import { NEEDS_YOU } from '../../../shared/types'
 import { useStore } from '../store'
 import { queuePositions } from '../lib/deskFiles'
 import { dragProps } from '../canvas/dnd'
-import ChatPulse from './ChatPulse'
 import Face from './Face'
 
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
@@ -103,7 +102,6 @@ function DeskRow({ desk, active, position, onOpen }: { desk: Desk; active: boole
       <span className="desk-row-main">
         <span className="desk-row-title">
           {title}
-          {desk.live && <ChatPulse conversationId={desk.conversation_id} />}
         </span>
         {/* The status in words on every row: the ring's colour and glyph are not left to carry it. */}
         <span className="desk-row-meta">

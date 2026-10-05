@@ -43,7 +43,7 @@ export function expandWindow(w: CanvasWindow): void {
       app.openFiles('dashboards')
       break
     case 'memory':
-      app.openMemory('split')
+      app.openMemory('list')
       break
     case 'graph':
       app.openMemory('graph')

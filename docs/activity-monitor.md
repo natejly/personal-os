@@ -226,7 +226,7 @@ where "everything" reaches the derived rows too: habits, their memories, the
 suggestions and the day aggregates. A purge that left habits behind would be a
 purge that lied.
 
-The raw log is browsable in the panel with per-row delete, because the only way
+The raw log is browsable on the Signals tab with per-row delete, because the only way
 this feature is reasonable to run is if you can see exactly what it knows.
 
 ## Permissions

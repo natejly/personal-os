@@ -26,9 +26,7 @@ const TABS = [
   { key: 'overview', label: 'Overview' },
   { key: 'insights', label: 'Insights' },
   { key: 'signals', label: 'Signals' },
-  { key: 'privacy', label: 'Privacy' },
-  { key: 'context', label: 'Context file' },
-  { key: 'log', label: 'Raw log' }
+  { key: 'privacy', label: 'Privacy' }
 ] as const
 type Tab = (typeof TABS)[number]['key']
 
@@ -752,7 +750,6 @@ export default function ActivityView(): JSX.Element {
           {TABS.map((t) => (
             <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
               {t.label}
-              {t.key === 'log' && <span className="count">{events.length}</span>}
               {t.key === 'insights' && (insights?.counts.open ?? 0) > 0 && <span className="count">{insights?.counts.open}</span>}
             </button>
           ))}
@@ -764,7 +761,7 @@ export default function ActivityView(): JSX.Element {
           {/* Two sentences; the file's path is one click away on the tab that shows the file. */}
           <p className="muted small act-intro">
             Watches what you do on this Mac and summarizes it every {cfg.rollupMinutes} minutes into
-            the <button className="link" title={st.md_path} onClick={() => setTab('context')}>context file</button> your
+            the <button className="link" title={st.md_path} onClick={() => setTab('privacy')}>context file</button> your
             chats read. Raw samples are deleted after {cfg.retentionHours}h, and the only thing that leaves this
             machine is the summarization request to your own model endpoint.
           </p>
@@ -1020,6 +1017,23 @@ export default function ActivityView(): JSX.Element {
               {st.audio_devices.length === 0 && <p className="act-fix"><AlertTriangle size={12} /> No audio inputs visible. Grant Microphone permission to the app and reopen this panel.</p>}
             </>
           )}
+
+          <h4 className="act-h">Raw log <span className="count">{events.length}</span></h4>
+          <p className="muted small">
+            Every sample held right now, newest first — the complete record, before summarization. Greyed rows have
+            already been folded into a summary. Delete any row you would rather the monitor had not seen.
+          </p>
+          {events.length === 0 && <p className="empty-hint">Nothing recorded in the last 24 hours.</p>}
+          {events.length > 0 && (
+            <div className="act-log">
+              <table>
+                <thead><tr><th>Time</th><th>Kind</th><th>App</th><th>Detail</th><th>For</th><th>Text captured</th><th /></tr></thead>
+                <tbody>
+                  {events.map((e) => <EventRow key={e.id} e={e} onDelete={() => void deleteActivityEvent(e.id)} />)}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -1093,11 +1107,8 @@ export default function ActivityView(): JSX.Element {
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {tab === 'context' && (
-        <div className="page-body">
+          <h4 className="act-h">Context file</h4>
           <p className="muted small">
             This is the file the monitor maintains, at <code>{st.md_path}</code>. It is plain markdown — read it,
             back it up, or delete it.
@@ -1105,33 +1116,13 @@ export default function ActivityView(): JSX.Element {
           <h4 className="act-h">What chats actually receive</h4>
           {context?.injected
             ? <pre className="act-injected">{context.injected}</pre>
-            : <p className="empty-hint">Nothing is being injected right now{cfg.injectContext ? '' : ' (injection is off in Privacy)'}.</p>}
+            : <p className="empty-hint">Nothing is being injected right now{cfg.injectContext ? '' : ' (feeding summaries into chats is off, above)'}.</p>}
           <h4 className="act-h">activity.md</h4>
           <div className="act-md">
             {context?.markdown
               ? <Markdown remarkPlugins={[remarkGfm]}>{context.markdown}</Markdown>
               : <p className="muted">The file has not been written yet.</p>}
           </div>
-        </div>
-      )}
-
-      {tab === 'log' && (
-        <div className="page-body">
-          <p className="muted small">
-            Every sample held right now, newest first — the complete record, before summarization. Greyed rows have
-            already been folded into a summary. Delete any row you would rather the monitor had not seen.
-          </p>
-          {events.length === 0 && <p className="empty-hint">Nothing recorded in the last 24 hours.</p>}
-          {events.length > 0 && (
-            <div className="act-log">
-              <table>
-                <thead><tr><th>Time</th><th>Kind</th><th>App</th><th>Detail</th><th>For</th><th>Text captured</th><th /></tr></thead>
-                <tbody>
-                  {events.map((e) => <EventRow key={e.id} e={e} onDelete={() => void deleteActivityEvent(e.id)} />)}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
     </main>

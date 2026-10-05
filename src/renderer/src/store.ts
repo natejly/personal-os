@@ -52,7 +52,7 @@ export const readDocMode = (): DocMode => {
   } catch { return 'split' }
 }
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
-export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
+export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
  *  'memory' holds the Memory panel above the learning and search-index controls.
@@ -1728,7 +1728,7 @@ export const useStore = create<State>((set, get) => {
     projects: [],
     view: 'home',
     lastClassicView: 'home',
-    memoryMode: 'split',
+    memoryMode: 'list',
     projectViewId: null,
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,

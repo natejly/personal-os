@@ -959,7 +959,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .knowledge-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .knowledge-body .memory-panel.embedded .memory-body { min-height: 0; }
 .knowledge-body .memory-toolbar { padding: 8px 12px; }
-.knowledge-body .memory-body.mode-split .mem-pane { width: 340px; }
 .knowledge-body > .page-body { padding: 12px 14px 24px; max-width: none; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
@@ -1343,21 +1342,12 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body .graph-body { flex: 1; min-width: 0; }
 .mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
 .memory-body.mode-list .mem-pane { flex: 1; }
-.memory-body.mode-split .mem-pane { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); }
-.memory-body.mode-split .mem-body { max-width: none; padding: 14px 16px 32px; }
-.memory-body.mode-split .mem-body .add-row { flex-wrap: wrap; }
-.memory-body.mode-split .mem-body .add-row > input { flex: 1 1 100%; }
-.memory-body.mode-split .mem-body .add-row select { margin-left: auto; }
-.memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
-.memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
-.memory-body.mode-split .empty-hint.big { padding: 32px 0; }
 /* Voice takes the whole panel: a profile has nothing to sit beside. */
 .memory-body.mode-style { overflow: hidden; }
 .memory-body.mode-style .style-body { max-width: 760px; }
 
 /* Three columns (graph + inspector + memories) need a narrower list on small windows. */
-@media (max-width: 1400px) { .memory-body.mode-split .mem-pane { width: 340px; } }
-.memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+@media (max-width: 1400px) { .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }
 .memory-toolbar > .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

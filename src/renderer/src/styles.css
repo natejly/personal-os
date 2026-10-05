@@ -1152,6 +1152,8 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .empty-hint.center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .add-row { display: flex; gap: 8px; align-items: center; }
 .add-row:has(.smart-ta) { align-items: flex-start; }
+.add-row:has(.date-input) { flex-wrap: wrap; }
+.add-row:has(.date-input) > :first-child { flex: 1 1 220px; min-width: 220px; }
 /* Controls in one row share one height (the single-line field's), so the row reads as a toolbar. */
 .add-row > input, .add-row > select, .add-row > button { height: 38px; flex-shrink: 0; }
 .add-row > input[type=text], .add-row > input:not([type]) { flex-shrink: 1; }
@@ -1510,11 +1512,11 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo.done .todo-check { background: var(--ok); border-color: var(--ok); }
 .todo-check:hover { background: var(--hover); }
 .todo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.todo-title { cursor: text; line-height: 1.4; }
+.todo-title { cursor: text; line-height: 1.4; overflow-wrap: anywhere; }
 /* The edit field's border and padding are pulled back out with negative margins, and it keeps the
    title's line height, so the text stays exactly where it was and the row does not grow. */
 .todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; margin: -4px -7px; min-width: 0; outline: 0; font: inherit; line-height: 1.4; }
-.todo-notes { font-size: 12px; color: var(--text-muted); }
+.todo-notes { overflow-wrap: anywhere; font-size: 12px; color: var(--text-muted); }
 .todo-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; font-size: 11px; color: var(--text-faint); padding: 2px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .todo-due:hover { background: var(--hover); color: var(--text); }

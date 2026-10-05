@@ -443,6 +443,21 @@ desks = Desks(db, workspace)
 _loop: asyncio.AbstractEventLoop | None = None
 
 
+def _todos_changed() -> None:
+    """Any todo write (routes, assistant tools, sync, meetings) tells open windows to re-read the list.
+    Sync routes run in a threadpool, so off-loop calls are handed to the loop like _desk_changed."""
+    try:
+        asyncio.get_running_loop()
+        events.publish("todos_changed", {})
+    except RuntimeError:
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(events.publish, "todos_changed", {})
+
+
+_todos_prev_change = todos.on_change
+todos.on_change = lambda: (_todos_prev_change() if _todos_prev_change else None, _todos_changed())[-1]
+
+
 def _desk_changed(row: dict[str, Any]) -> None:
     """Every desk write lands on the app topic as `desk_status`, so the rail, the badge and the Today
     card stay live for desks nobody is watching. Topic queues belong to the event loop and sync routes

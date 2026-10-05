@@ -1386,6 +1386,8 @@ export interface Settings {
   compactChats?: boolean
   /** A small Explain / Summarize / Verify / Ask bubble over text selected in a chat, note, mail or the page agent. Missing reads as on. */
   selectionToolbar?: boolean
+  /** Interface zoom in percent, 80-160. Missing reads as 100. */
+  uiZoom?: number
   /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
   notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
@@ -1597,6 +1599,8 @@ export interface GrainApi {
   openLogs: () => Promise<string>
   platform: NodeJS.Platform
   onMenu: (cb: (action: string) => void) => () => void
+  /** Page zoom of this window, in percent. */
+  setZoom: (percent: number) => Promise<void>
   popout: {
     open: (windowId: string, req?: PopoutOpenRequest) => Promise<boolean>
     close: (windowId: string) => Promise<boolean>

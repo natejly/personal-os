@@ -18,6 +18,7 @@ const api: GrainApi = {
   openLogs: () => ipcRenderer.invoke('backend:open-logs'),
   platform: process.platform,
   onMenu: (cb) => listen<string>('menu', cb),
+  setZoom: (percent: number) => ipcRenderer.invoke('ui:zoom', percent),
   popout: {
     open: (windowId: string, req?: PopoutOpenRequest) => ipcRenderer.invoke('popout:open', windowId, req ?? {}),
     close: (windowId: string) => ipcRenderer.invoke('popout:close', windowId),

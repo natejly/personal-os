@@ -7,6 +7,8 @@ import QuickAsk from './features/ask/QuickAsk'
 import QuickCapture from './features/notes/QuickCapture'
 import RootBoundary from './RootBoundary'
 import { installFileDropGuard } from './lib/fileDrop'
+import { useStore } from './store'
+import { clampZoom } from './lib/zoom'
 import './styles.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 
@@ -22,6 +24,11 @@ const params = (): URLSearchParams => {
 
 // Before anything mounts, in every window: a file dropped off-target must never load in place of the app.
 installFileDropGuard(window)
+
+// Every surface applies the saved zoom as its own page zoom factor once settings load and whenever they change.
+useStore.subscribe((s, prev) => {
+  if (s.settings.uiZoom !== prev.settings.uiZoom && s.settings.uiZoom !== undefined) void window.os.setZoom(clampZoom(s.settings.uiZoom))
+})
 
 const q = params()
 const capture = q.get('surface') === 'capture'

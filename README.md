@@ -90,7 +90,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    page, approve the card or click **Allow <host> from now on**. Modules: which
    views appear, and whether each sits in the sidebar, the title bar or nowhere.
    Data: daily backups (the newest 7 plus one a week), **Back up now**, restore
-   on next start, and **Export all data** as a zip.
+   on next start, and **Export all data** as a zip. Behavior → Appearance: theme, accent and Zoom (80-160%, ⌘= / ⌘−, ⌥⌘0 to reset).
 
 ## Features
 

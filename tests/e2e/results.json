@@ -6,9 +6,7 @@
       "test",
       "-c",
       "playwright.config.mjs",
-      "blocks-tools",
-      "-g",
-      "calendar|doc_edit|Stop"
+      "artifacts-fence"
     ],
     "configFile": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e/playwright.config.mjs",
     "rootDir": "/Users/natejly/Desktop/Personal OS/.claude/worktrees/agent-afa0646302c3687f3/tests/e2e",
@@ -70,206 +68,223 @@
   },
   "suites": [
     {
-      "title": "blocks-tools.spec.mjs",
-      "file": "blocks-tools.spec.mjs",
+      "title": "artifacts-fence.spec.mjs",
+      "file": "artifacts-fence.spec.mjs",
       "column": 0,
       "line": 0,
-      "specs": [],
-      "suites": [
+      "specs": [
         {
-          "title": "calendar card",
-          "file": "blocks-tools.spec.mjs",
-          "line": 68,
-          "column": 6,
-          "specs": [
+          "title": "an html fence previews in a sandboxed srcdoc frame with a CSP, never in the app origin",
+          "ok": true,
+          "tags": [],
+          "tests": [
             {
-              "title": "edit a title in the proposal, approve all: the backend records the edited changes",
-              "ok": true,
-              "tags": [],
-              "tests": [
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
                 {
-                  "timeout": 120000,
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10476,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:43.763Z",
                   "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "",
-                  "projectName": "",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 8708,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-05T05:11:59.513Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
+                  "attachments": []
                 }
               ],
-              "id": "0e41205da28746df18a6-bc5920dee2dc298b8423",
-              "file": "blocks-tools.spec.mjs",
-              "line": 74,
-              "column": 3
-            },
-            {
-              "title": "unticking a change drops it from what is approved; Deny declines everything",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 120000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "",
-                  "projectName": "",
-                  "results": [
-                    {
-                      "workerIndex": 1,
-                      "parallelIndex": 1,
-                      "status": "passed",
-                      "duration": 11304,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-05T05:11:59.534Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "0e41205da28746df18a6-8f49bc6d41849c51823c",
-              "file": "blocks-tools.spec.mjs",
-              "line": 89,
-              "column": 3
-            },
-            {
-              "title": "a 40-change proposal renders and stays inside an 820x520 window",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 120000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "",
-                  "projectName": "",
-                  "results": [
-                    {
-                      "workerIndex": 2,
-                      "parallelIndex": 2,
-                      "status": "passed",
-                      "duration": 9345,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-05T05:11:59.536Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "0e41205da28746df18a6-1c80c38c68f1fd9bf14d",
-              "file": "blocks-tools.spec.mjs",
-              "line": 107,
-              "column": 3
+              "status": "expected"
             }
-          ]
+          ],
+          "id": "194f2f48de9146d4562c-a2a6fa5b3c199f4d070a",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 15,
+          "column": 1
         },
         {
-          "title": "trace, diff and outcomes",
-          "file": "blocks-tools.spec.mjs",
-          "line": 119,
-          "column": 6,
-          "specs": [
+          "title": "an svg fence draws as an image and its scripts are refused",
+          "ok": true,
+          "tags": [],
+          "tests": [
             {
-              "title": "a doc_edit shows its diff in the chat; Accept applies it, Reject leaves the doc alone",
-              "ok": true,
-              "tags": [],
-              "tests": [
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
                 {
-                  "timeout": 120000,
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 10482,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:43.773Z",
                   "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "",
-                  "projectName": "",
-                  "results": [
-                    {
-                      "workerIndex": 0,
-                      "parallelIndex": 0,
-                      "status": "passed",
-                      "duration": 8352,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-05T05:12:08.277Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
+                  "attachments": []
                 }
               ],
-              "id": "0e41205da28746df18a6-c0a4e516d30cc076ad6a",
-              "file": "blocks-tools.spec.mjs",
-              "line": 140,
-              "column": 3
-            },
-            {
-              "title": "Stop marks the reply as stopped and hands the composer back",
-              "ok": true,
-              "tags": [],
-              "tests": [
-                {
-                  "timeout": 120000,
-                  "annotations": [],
-                  "expectedStatus": "passed",
-                  "projectId": "",
-                  "projectName": "",
-                  "results": [
-                    {
-                      "workerIndex": 2,
-                      "parallelIndex": 2,
-                      "status": "passed",
-                      "duration": 6755,
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [],
-                      "retry": 0,
-                      "startTime": "2026-10-05T05:12:08.927Z",
-                      "annotations": [],
-                      "attachments": []
-                    }
-                  ],
-                  "status": "expected"
-                }
-              ],
-              "id": "0e41205da28746df18a6-8b29ac7b8010dea0083a",
-              "file": "blocks-tools.spec.mjs",
-              "line": 162,
-              "column": 3
+              "status": "expected"
             }
-          ]
+          ],
+          "id": "194f2f48de9146d4562c-54b1c5a63de77694ec95",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 40,
+          "column": 1
+        },
+        {
+          "title": "Save as artifact files it once (double click), the Pages view lists it, and it renders with its script",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 2,
+                  "status": "passed",
+                  "duration": 10458,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:43.792Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "194f2f48de9146d4562c-2f1336fe0542b7928c73",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 51,
+          "column": 1
+        },
+        {
+          "title": "a malformed or empty html fence does not crash the message",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10559,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:54.274Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "194f2f48de9146d4562c-07aaa6e4483746df5899",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 69,
+          "column": 1
+        },
+        {
+          "title": "artifact_update adds a version; the card survives a relaunch with a fresh signed URL; deleting it leaves a friendly note",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 2,
+                  "status": "passed",
+                  "duration": 26836,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:54.290Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "194f2f48de9146d4562c-60674d260ab6c4ac1d9f",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 79,
+          "column": 1
+        },
+        {
+          "title": "the Pages view survives 150 artifacts and an unreachable backend",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 1,
+                  "status": "passed",
+                  "duration": 23498,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T05:15:54.296Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "194f2f48de9146d4562c-9b94f4e43edf678f6ba1",
+          "file": "artifacts-fence.spec.mjs",
+          "line": 97,
+          "column": 1
         }
       ]
     }
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-05T05:11:58.039Z",
-    "duration": 18678.137,
-    "expected": 5,
+    "startTime": "2026-10-05T05:15:43.196Z",
+    "duration": 37965.763999999996,
+    "expected": 6,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

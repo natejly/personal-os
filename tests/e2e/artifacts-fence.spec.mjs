@@ -3,7 +3,7 @@ import { newChat, say, reply, smallWindow, realErrors } from './helpers/chat.mjs
 
 const fence = (lang, body) => '```' + lang + '\n' + body + '\n```'
 const last = (page) => page.locator('.msg.assistant').last()
-const fenceFrame = (page) => page.frames().find((f) => f !== page.mainFrame() && f.url() === 'about:srcdoc')
+const fenceFrame = (page) => page.frames().find((f) => f !== page.mainFrame() && !/\/artifacts\//.test(f.url()) && f.parentFrame() === page.mainFrame())
 
 async function start(grain, settings = {}) {
   await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, ...settings } })
@@ -105,8 +105,8 @@ test('the Pages view survives 150 artifacts and an unreachable backend', async (
   await smallWindow(grain.app)
   await page.getByLabel('Search artifacts').fill('')
   grain.backend.child.kill('SIGKILL')
-  await page.locator('.art-row').nth(3).click()
-  await expect(page.getByText(/Something went wrong|Minified React/i)).toHaveCount(0)
   await page.getByLabel('Search artifacts').fill('zzz')
-  await expect(page.locator('.art-list')).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: /Could not load artifacts/ })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('No artifacts yet.')).toHaveCount(0)
+  await expect(page.getByText(/Something went wrong|Minified React/i)).toHaveCount(0)
 })

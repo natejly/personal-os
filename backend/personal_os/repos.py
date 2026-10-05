@@ -54,7 +54,8 @@ def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
         t = raw.lower()
         if t not in seen:
             seen.append(t)
-    seen = seen[:max_terms]
+            if len(seen) >= max_terms:  # the rest is dropped anyway; a pasted 150 KB message made this list quadratic
+                break
     star = "*" if prefix else ""
     return " OR ".join(f'"{t}"{star}' for t in seen)
 

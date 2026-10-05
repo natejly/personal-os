@@ -10,9 +10,13 @@ export default function ArtifactsView(): JSX.Element {
   const [list, setList] = useState<Artifact[] | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const rows = await api.artifacts.list({ q }).catch(() => [] as Artifact[])
+    // A failed fetch keeps what is on screen and says so, instead of passing off an outage as "No artifacts yet".
+    const rows = await api.artifacts.list({ q }).catch((e: Error) => { setErr(e.message || 'The backend did not answer'); return null })
+    if (!rows) { setList((cur) => cur ?? []); return }
+    setErr('')
     setList(rows)
     setSel((cur) => (cur && rows.some((r) => r.id === cur) ? cur : rows[0]?.id ?? null))
   }, [q])
@@ -22,7 +26,8 @@ export default function ArtifactsView(): JSX.Element {
     <div className="art-split">
       <aside className="art-list">
         <input className="search" value={q} placeholder="Search artifacts" aria-label="Search artifacts" onChange={(e) => setQ(e.target.value)} />
-        {list === null ? <p className="muted small">Loading…</p> : list.length === 0 ? (
+        {err && <p className="muted small" role="alert">Could not load artifacts: {err}</p>}
+        {list === null ? <p className="muted small">Loading…</p> : list.length === 0 && err ? null : list.length === 0 ? (
           <div className="empty-state">
             <Package size={20} />
             <p>No artifacts yet.</p>

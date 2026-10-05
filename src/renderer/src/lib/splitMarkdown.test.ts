@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
-import { splitMarkdown } from './splitMarkdown'
+import { splitMarkdown, blockStartLine } from './splitMarkdown'
 import { normalizeMathBlocks } from './mathBlocks'
 
 const whole = (s: string): void => assert.equal(splitMarkdown(s).join(''), s)
@@ -113,4 +113,18 @@ test('raw HTML that can span blank lines keeps one block', () => {
 test('an unterminated fence swallows the rest', () => {
   const b = splitMarkdown('Intro\n\n```js\nlet a\n\nlet b')
   assert.equal(b.length, 2)
+})
+
+test('blockStartLine addresses the concatenated source', () => {
+  const src = '# One\n\n- [ ] first task\n\ntext\n\n## Two\n\n- [x] second task\n- [ ] third task\n'
+  const blocks = splitMarkdown(src)
+  assert.ok(blocks.length > 1)
+  const lines = src.split('\n')
+  for (let i = 0; i < blocks.length; i++) {
+    assert.equal(lines[blockStartLine(blocks, i) - 1], blocks[i].split('\n')[0])
+  }
+  // A task's absolute line = block start + local line - 1, as the toggle handler computes it.
+  const bi = blocks.findIndex((b) => b.includes('third task'))
+  const local = blocks[bi].split('\n').findIndex((l) => l.includes('third task')) + 1
+  assert.equal(lines[blockStartLine(blocks, bi) + local - 2], '- [ ] third task')
 })

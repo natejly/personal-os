@@ -6,7 +6,7 @@ const settle = (grain) => grain.api('/settings', { method: 'PUT', body: { toolDe
 const decided = async (api, tool) => (await api('/approvals?status=all')).filter((a) => a.tool === tool).pop()
 
 async function start(grain, settings = {}) {
-  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, ...settings } })
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, tools: { gmail_draft: 'ask' }, ...settings } })
   await grain.page.reload()
   await newChat(grain.page)
   return grain.page
@@ -137,12 +137,11 @@ test.describe('trace, diff and outcomes', () => {
     if (otlp) expect(JSON.stringify(otlp)).toContain('resourceSpans')
   })
 
-  test('a doc_edit shows its diff in the chat; Accept applies it, Reject leaves the doc alone', async ({ grain }) => {
+  test('a doc_edit shows its diff in the chat with no card in front of it; Accept applies it, Reject leaves the doc alone', async ({ grain }) => {
     const { api } = grain
     const d = await api('/docs', { method: 'POST', body: { title: 'Plan', content: 'line one\nline two\nline three\n' } })
     const page = await start(grain, { docEditMode: 'review' })
     await say(page, '!!tool doc_edit ' + JSON.stringify({ doc: d.id, edits: [{ find: 'line two', replace: 'line 2 edited' }] }), { wait: false })
-    await page.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 30_000 })
     const diff = page.locator('.tool-doc-diff').last()
     await expect(diff).toBeVisible({ timeout: 20_000 })
     await expect(diff).toContainText('line 2 edited')
@@ -151,7 +150,6 @@ test.describe('trace, diff and outcomes', () => {
     await diff.getByRole('button', { name: 'Accept' }).click()
     await expect.poll(async () => (await api(`/docs/${d.id}`)).content, { timeout: 15_000 }).toContain('line 2 edited')
     await say(page, '!!tool doc_edit ' + JSON.stringify({ doc: d.id, edits: [{ find: 'line three', replace: 'line 3 rejected' }] }), { wait: false })
-    await page.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 30_000 })
     const diff2 = page.locator('.tool-doc-diff').last()
     await expect(diff2.getByRole('button', { name: 'Reject' })).toBeVisible({ timeout: 20_000 })
     await diff2.getByRole('button', { name: 'Reject' }).click()

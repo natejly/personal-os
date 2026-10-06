@@ -981,20 +981,34 @@ def test_a_prompt_that_looks_like_a_flag_stays_the_prompt() -> None:
 
 
 # ---------------- 9. ember-1 ----------------
-def test_ember_1_is_the_default_model_and_a_saved_one_wins() -> None:
-    assert llm.DEFAULT_SETTINGS["defaultModel"] == "ember-1"
-    preset = next(p for p in providers.PROVIDERS if p["id"] == "litellm")
-    assert preset["defaultModel"] == "ember-1" and preset["models"][0] == "ember-1"
-    with appmod.db.tx() as c:
-        c.execute("DELETE FROM settings WHERE key='defaultModel'")
-    assert appmod.settings()["defaultModel"] == "ember-1", "nothing saved: the code default"
-    appmod.db.set_settings({"defaultModel": "my-own-model"})
-    assert appmod.settings()["defaultModel"] == "my-own-model", "a saved choice is never overwritten"
-    assert client.get("/settings").json()["defaultModel"] == "my-own-model"
-    client.put("/settings", json={"autoLearn": False})
-    assert appmod.settings()["defaultModel"] == "my-own-model", "saving other settings leaves it alone"
-    with appmod.db.tx() as c:
-        c.execute("DELETE FROM settings WHERE key='defaultModel'")
+def test_ember_1_is_the_default_model_per_provider_and_a_saved_one_wins() -> None:
+    assert llm.DEFAULT_SETTINGS["defaultModel"] == "", "no provider alias is hardcoded for every provider"
+    by = {p["id"]: p for p in providers.PROVIDERS}
+    assert by["litellm"]["defaultModel"] == "ember-1" and by["litellm"]["models"][0] == "ember-1"
+    assert by["fireworks"]["defaultModel"] == "accounts/fireworks/models/ember-1"
+    assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/ember-1"
+    assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "ember-1"
+    assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "ember-1", "an inferred proxy too"
+    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5-mini", "no Ember there: its own default"
+    assert providers.default_model({}) == "", "no provider yet: nothing"
+    saved = {k: v for k, v in appmod.db.get_settings().items() if k in ("provider", "baseUrl", "defaultModel")}
+    try:
+        with appmod.db.tx() as c:
+            c.execute("DELETE FROM settings WHERE key='defaultModel'")
+        appmod.db.set_settings({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"})
+        assert appmod.settings()["defaultModel"] == "accounts/fireworks/models/ember-1", "nothing saved: Ember 1 as Fireworks names it"
+        appmod.db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000"})
+        assert appmod.settings()["defaultModel"] == "ember-1", "nothing saved: Ember 1 as the proxy names it"
+        appmod.db.set_settings({"defaultModel": "my-own-model"})
+        assert appmod.settings()["defaultModel"] == "my-own-model", "a saved choice is never overwritten"
+        assert client.get("/settings").json()["defaultModel"] == "my-own-model"
+        client.put("/settings", json={"autoLearn": False})
+        assert appmod.settings()["defaultModel"] == "my-own-model", "saving other settings leaves it alone"
+    finally:
+        with appmod.db.tx() as c:
+            c.execute("DELETE FROM settings WHERE key IN ('provider','baseUrl','defaultModel')")
+        if saved:
+            appmod.db.set_settings(saved)
 
 
 def test_the_new_default_model_does_not_skip_onboarding() -> None:

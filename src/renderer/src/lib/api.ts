@@ -11,10 +11,8 @@ import type {
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
   McpCatalog, McpEffective, McpImportSource, McpRegistryResult, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
-  ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
-  ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
-  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
+  PermissionGrantResult, VoiceConfig,
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
   TeachDraft, TeachRecording
@@ -24,7 +22,7 @@ import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
-export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
+export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
 export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
 /** Reply tracker settings (modules/mailwatch.py). */
@@ -46,8 +44,6 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
-/** Route of one kept segment's audio. */
-export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
 /** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 export const getToken = (): string => token
 
@@ -171,7 +167,7 @@ const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include
 
 export interface MemoryExport { grain_memories: number; memories: { content: string; kind: string; pinned: boolean }[] }
 
-export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
+export interface DocHit { doc_id: string; title: string; snippet: string }
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
@@ -185,6 +181,8 @@ export const api = {
     status: () => req<SetupStatus>('/setup/status'),
     providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
     test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
+    /** The provider's own model list; `models` is null when it could not be read (see `error`). */
+    models: (body: SetupBody) => req<{ models: string[] | null; error: string | null }>('/setup/models', { method: 'POST', body: json(body) }),
     complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
@@ -452,9 +450,7 @@ export const api = {
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
-    cleanDictation: (text: string) =>
-      req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
-    /** One mic clip (WAV, at most 2 minutes) through the meetings transcription backend. A backend failure is `error`, not a throw. */
+    /** One mic clip (WAV, at most 2 minutes) through the configured transcription backend. A backend failure is `error`, not a throw. */
     transcribe: (audio: Blob, prompt = '') => {
       const fd = new FormData()
       fd.append('audio', audio, 'clip.wav')
@@ -695,6 +691,11 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    /** An office file as HTML (word-processor formats) or the extracted markdown (sheets, slides, the rest). */
+    preview: (id: string) => req<{ kind: 'html'; html: string } | { kind: 'markdown'; text: string }>(`/documents/${id}/preview`),
+    /** Hand the stored original to the default app / show it in Finder. A 400 carries why not (e.g. the file can run code). */
+    open: (id: string) => req<{ ok: boolean }>(`/documents/${id}/open`, { method: 'POST' }),
+    reveal: (id: string) => req<{ ok: boolean }>(`/documents/${id}/reveal`, { method: 'POST' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
     /** Re-chunk every uploaded file with the current chunker. */
     reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),
@@ -705,40 +706,16 @@ export const api = {
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
   system: {
     access: () => req<BackendAccess>('/system/access'),
-    shellCheck: () => req<ShellCheck>('/system/shell-check', { method: 'POST' })
+    shellCheck: () => req<ShellCheck>('/system/shell-check', { method: 'POST' }),
+    /** Asks macOS for a grant (`screen_recording`, `microphone`, ...). The system dialog appears at most once per app. */
+    requestPermission: (id: string, browser = '') => req<{ result: PermissionGrantResult }>('/system/permissions/request', { method: 'POST', body: json({ id, browser }) }),
+    /** Opens the matching System Settings pane. */
+    openPermissionSettings: (id: string) => req<{ ok: boolean }>('/system/permissions/open', { method: 'POST', body: json({ id }) })
   },
-  activity: {
-    status: () => req<ActivityStatus>('/activity/status'),
-    config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),
-    start: () => req<ActivityStatus>('/activity/start', { method: 'POST' }),
-    stop: () => req<ActivityStatus>('/activity/stop', { method: 'POST' }),
-    pause: (minutes = 30) => req<ActivityStatus>('/activity/pause', { method: 'POST', body: json({ minutes }) }),
-    resume: () => req<ActivityStatus>('/activity/resume', { method: 'POST' }),
-    events: (hours = 24, limit = 200, kind = '') => req<ActivityEvent[]>(`/activity/events?hours=${hours}&limit=${limit}&kind=${encodeURIComponent(kind)}`),
-    deleteEvent: (id: string) => req(`/activity/events/${id}`, { method: 'DELETE' }),
-    summaries: (days = 7) => req<ActivitySummary[]>(`/activity/summaries?days=${days}`),
-    deleteSummary: (id: string) => req(`/activity/summaries/${id}`, { method: 'DELETE' }),
-    /** Summarize what is pending now instead of waiting for the interval. */
-    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }, NO_TIMEOUT),
-    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }, NO_TIMEOUT),
-    context: () => req<ActivityContextFile>('/activity/context'),
-    requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
-    openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
-    categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
-    setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
-    categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
-    redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
-    recordEverything: (on: boolean) => req<ActivityStatus>('/activity/record-everything', { method: 'POST', body: json({ on }) }),
-    purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
-    /** Habits and automation suggestions mined from the same data. */
-    insights: () => req<ActivityInsights>('/activity/insights'),
-    /** Re-mine the patterns with no model call: free, offline, and the evidence the panel shows. */
-    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }, NO_TIMEOUT),
-    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }, NO_TIMEOUT),
-    setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
-      req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
-    applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
-    forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
+  /** Voice input (dictation) settings; a partial patch comes back as the whole config. */
+  voice: {
+    getConfig: () => req<VoiceConfig>('/voice/config'),
+    setConfig: (patch: Partial<VoiceConfig>) => req<VoiceConfig>('/voice/config', { method: 'PUT', body: json(patch) })
   },
   cowork: {
     desks: {
@@ -844,67 +821,6 @@ export const api = {
     /** `body` edits the text (own comments only); `resolved` closes or reopens the whole thread. */
     patchComment: (cid: string, patch: { body?: string; resolved?: boolean }) => req<DocComment>(`/docs/comments/${cid}`, { method: 'PATCH', body: json(patch) }),
     deleteComment: (cid: string) => req(`/docs/comments/${cid}`, { method: 'DELETE' })
-  },
-  /** Recorded calls. `status`/`preflight`/`pending` are the only ones safe to poll; everything else is a user action. */
-  meetings: {
-    /** `includeDocs` adds recordings made inside a doc; the Meetings rail shows them, Home does not. */
-    list: (s: Scope = 'all', q = '', includeDocs = false) => req<Meeting[]>(`/meetings?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}&include_docs=${includeDocs}`),
-    get: (id: string) => req<FullMeeting>(`/meetings/${id}`),
-    create: (m: { title?: string; project_id?: string | null; template?: string; status?: string; calendar_event_id?: string | null; calendar_id?: string | null; calendar_link?: string; conference_link?: string; attendees?: unknown[]; scheduled_start?: number | null; scheduled_end?: number | null }) =>
-      req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
-    /** PUT, not PATCH — notes autosave through here, and `status` is the service's to write, not a body's. */
-    patch: (id: string, patch: { title?: string; notes?: string; enhanced?: string; summary?: string; template?: string; keep_audio?: boolean; conversation_id?: string | null; project_id?: string | null; clear_project?: boolean }) =>
-      req<FullMeeting>(`/meetings/${id}`, autosave(patch)),
-    del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
-    status: () => req<MeetingStatusInfo>('/meetings/status'),
-    preflight: (force = false) => req<MeetingPreflight>(`/meetings/preflight?force=${force}`),
-    config: () => req<MeetingConfig>('/meetings/config'),
-    /** Returns the whole status, like `/activity/config` does — the config is under `.config`. */
-    setConfig: (patch: Partial<MeetingConfig>) => req<MeetingStatusInfo>('/meetings/config', { method: 'PUT', body: json(patch) }),
-    consent: () => req<MeetingStatusInfo>('/meetings/consent', { method: 'POST' }),
-    /** The whole preflight, not just its `selftest` key: a passing round trip also clears what it blocked. */
-    selftest: () => req<MeetingPreflight>('/meetings/selftest', { method: 'POST' }),
-    suggest: () => req<MeetingCandidate[]>('/meetings/suggest'),
-    pending: () => req<{ pending: number }>('/meetings/pending'),
-    start: (id: string) => req<FullMeeting>(`/meetings/${id}/start`, { method: 'POST' }),
-    /** Blocks while the transcription backlog drains (up to `drainSeconds`), so give it time. */
-    stop: (id: string) => req<FullMeeting>(`/meetings/${id}/stop`, { method: 'POST' }),
-    pause: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/pause`, { method: 'POST' }),
-    resume: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/resume`, { method: 'POST' }),
-    /** `since` is a rowid cursor: 0 is the whole tail with cursors, then pass back the last row's. */
-    segments: (id: string, since = 0, limit = 200) => req<MeetingSegment[]>(`/meetings/${id}/segments?since=${since}&limit=${limit}`),
-    /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
-    enhance: (id: string, force = false, template?: string) =>
-      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }, NO_TIMEOUT),
-    accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
-    reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
-    actions: (id: string) => req<MeetingActionItem[]>(`/meetings/${id}/actions`),
-    /** Empty `ids` promotes every item still proposed. Returns the full list afterwards. */
-    addTodos: (id: string, ids: string[] = [], projectId?: string | null) =>
-      req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
-    dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
-    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }, NO_TIMEOUT),
-    /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
-    segmentAudio: async (id: string, segId: string): Promise<string> => {
-      const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-      return URL.createObjectURL(await r.blob())
-    },
-    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
-    /** Typed-line marks for a doc recording: `line` is the line's first characters, `t` the recording offset in seconds. */
-    putNoteMarks: (id: string, marks: { line: string; t: number }[]) =>
-      req<{ marks: { line: string; t: number }[] }>(`/meetings/${id}/note-marks`, { method: 'PUT', body: json({ marks }) }),
-    /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
-    setSpeakers: (id: string, names: Record<string, string>) =>
-      req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
-    /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
-    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }, NO_TIMEOUT),
-    /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
-    importAudio: (id: string, file: File) => {
-      const fd = new FormData()
-      fd.append('file', file)
-      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd }, NO_TIMEOUT)
-    }
   },
   /** Space presets (`/canvas-presets`): named templates of a canvas. */
   presets: {

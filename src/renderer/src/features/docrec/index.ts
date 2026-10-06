@@ -1,8 +1,0 @@
-export { default as DocRecordButton } from './DocRecordButton'
-export { default as DocRecorderBar } from './DocRecorderBar'
-export { default as RecordingsPanel } from './RecordingsPanel'
-export { useDocRec } from './store'
-export { useDictation, useNoteMarks } from './hooks'
-export { usePreview } from './preview'
-export { liveDoc } from './segments'
-export { setRecordingBlockSink } from './store'

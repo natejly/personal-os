@@ -1,8 +1,9 @@
-"""`opencode_run`: hand a coding task to the opencode CLI inside the working folder.
+"""`opencode_run`: hand a coding task to the opencode CLI in any folder on this Mac.
 
 opencode is a terminal coding agent; its headless mode (`opencode run "<prompt>"`) reads and edits files, runs
-commands and reports back. Here it runs the way shell_run does: under the OS sandbox (sandbox.shell_profile), writes
-confined to the working folder, under the same job registry (shell.ShellJobs) so timeouts, background promotion,
+commands and reports back. Here it runs the way shell_run does: under the OS sandbox (sandbox.shell_profile: it may
+write anywhere but Grain's own data folder and app, the credential stores and the files that run code later), starting
+in the desk workspace in a desk, else the home folder, under the same job registry (shell.ShellJobs) so timeouts, background promotion,
 shell_poll and shell_kill all apply. Two things differ from a plain shell command, which is why this is its own tool:
 
 - Model: opencode talks to the model endpoint Grain itself uses (settings baseUrl / apiKey / defaultModel), via an
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from . import providers, sandbox, shell
+from . import mac, providers, sandbox, shell
 
 PROVIDER_ID = "grain"
 # Where the binary usually lands: Homebrew, the official installer (~/.opencode/bin), npm -g, ~/.local/bin.
@@ -166,7 +167,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     base_url, api_key, default_model = ep
     use_model = str(model or "").strip() or default_model
     dr = _desk_root(tb, ctx)
-    where, root = shell.resolve_cwd(cwd, shell.granted_roots(s, dr))
+    where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
     timeout = None if no_timeout else timeout or default_timeout(s, None, background)
     data_dir = getattr(getattr(getattr(tb, "results", None), "db", None), "data_dir", None)
     state = state_dir(Path(data_dir) if data_dir else Path(tempfile.gettempdir()) / "grain-opencode", state_key)
@@ -183,7 +184,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     if continue_session:
         argv.append("--continue")
     argv.append(prompt)
-    writable = [str(root), tmp, str(state)]
+    writable = [tmp, str(state)]  # the state dir is inside the app data folder, which the profile lets back in
     if dr:
         writable.append(str(dr))
     # loopback: `opencode run` spawns a private server on a random local port and talks to it
@@ -263,15 +264,15 @@ def register(tb: Any) -> None:
         return out
 
     spec = ToolSpec("opencode_run",
-                    "Hand a coding task to opencode, a terminal coding agent, inside the working folder (the desk workspace or a "
-                    "workspace root). It reads and edits files there and runs commands, all under the OS sandbox (writes stay "
-                    "inside that folder), using the same model endpoint as this app. Give it a complete, self-contained task "
+                    "Hand a coding task to opencode, a terminal coding agent, in a folder on this Mac (default: the desk workspace in a "
+                    "desk, else the home folder). It reads and edits files and runs commands, all under the OS sandbox (Grain's own data "
+                    "folder and app, credential stores and the files that run code later are off limits), using the same model endpoint as this app. Give it a complete, self-contained task "
                     "with the files or folder it concerns; it does not see this conversation. continue_session=true carries on "
                     "its previous session in this desk/chat. The result is its narration and final answer; check the files it "
                     "changed afterwards (fs_grep, desk_read_file, shell_run `git diff`). Default timeout 300s (max 600s), then "
                     "in a desk it carries on as a background job you follow with shell_poll; background=true starts it that way.",
                     _obj({"prompt": {"type": "string", "description": "The task, with the files or folder it concerns"},
-                          "cwd": {"type": "string", "description": "A folder inside the working folder, usually a repo"},
+                          "cwd": {"type": "string", "description": "The folder to work in, usually a repo; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 300}, "background": {"type": "boolean", "default": False},
                           "continue_session": {"type": "boolean", "default": False},
                           "model": {"type": "string", "description": "Override the model id at the same endpoint"}},

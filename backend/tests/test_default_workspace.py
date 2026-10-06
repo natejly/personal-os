@@ -1,4 +1,4 @@
-"""With no workspaceRoots, settings() falls back to ~/Grain so shell/file tools have a folder; a user root wins."""
+"""No ~/Grain: with no folder named, a shell starts in the home folder (or the desk's workspace), and nothing creates a default folder."""
 from __future__ import annotations
 
 import os
@@ -11,15 +11,13 @@ tmp = tempfile.mkdtemp()
 os.environ["HOME"] = tmp
 os.environ["PERSONAL_OS_DATA_DIR"] = str(Path(tmp) / "data")
 
-from personal_os import app, shell  # noqa: E402
+from personal_os import app, mac, shell  # noqa: E402
 
-s = app.settings()
-roots = shell.granted_roots(s, None)
-assert roots and roots[0].name == "Grain" and roots[0].is_dir(), roots
-assert shell.resolve_cwd(None, roots)[0] == roots[0]
-
-mine = Path(tmp) / "proj"
-mine.mkdir()
-app.db.set_settings({"workspaceRoots": [str(mine)]})
-assert app.settings()["workspaceRoots"] == [str(mine)]
+app.settings()
+assert not (Path(tmp) / "Grain").exists()
+assert not hasattr(mac, "default_workspace") and not hasattr(shell, "granted_roots")
+assert shell.resolve_cwd(None, mac.home()) == Path(tmp).resolve()
+proj = Path(tmp) / "proj"
+proj.mkdir()
+assert shell.resolve_cwd("proj", mac.home()) == proj.resolve()
 print("ok")

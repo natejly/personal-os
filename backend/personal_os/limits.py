@@ -29,8 +29,8 @@ MESSAGE_WINDOW_FRACTION = 0.5      # one message may fill at most this share of 
 MCP_DEFER_ABOVE = 12               # offer connector tools through search once more than this many are ready (0 = send all)
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
 # Share of the context window each injected block may take. They match the old fixed token counts (1500, 800, 2000,
-# 800, 800, 3000, 1000, ~1500 for skills) at CONTEXT_WINDOW_FALLBACK to within 4%; the memory code reads them only through context_shares().
-CONTEXT_SHARES = {"memories": .012, "graph": .006, "chunks": .016, "activity": .006, "meetings": .006, "pinned": .023,
+# 3000, 1000, ~1500 for skills) at CONTEXT_WINDOW_FALLBACK to within 4%; the memory code reads them only through context_shares().
+CONTEXT_SHARES = {"memories": .012, "graph": .006, "chunks": .016, "pinned": .023,
                   "profile": .008, "skills": .012}
 
 # ---- Reply loop (stuck detection, no caps) ----

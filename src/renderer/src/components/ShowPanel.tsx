@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { X, Download, FileWarning, RefreshCw, FolderOpen, ExternalLink, Columns2, PanelTop } from 'lucide-react'
+import { X, Download, RefreshCw, FolderOpen, ExternalLink, Columns2, PanelTop } from 'lucide-react'
 import type { ShowItem } from '@shared/types'
 import { isOpenable } from '@shared/openable'
 import { useStore } from '../store'
-import { fetchRaw, saveDownload } from '../lib/api'
-import { fileViewer, fmtBytes, headerMeta, pdfPageCount, pdfSrc, rawPath, textLang } from '../lib/showPanel'
+import { saveDownload } from '../lib/api'
+import { fileViewer, headerMeta, rawPath } from '../lib/showPanel'
 import { entryOf, type Entry, type Pane, type PanelState } from '../lib/panelPanes'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
+import FileView, { UploadActions } from './FileView'
 import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
@@ -18,8 +19,9 @@ import ResizeHandle from './ResizeHandle'
  * pane or two side by side. Inline kinds reuse the reply's own block renderers, so the trust boundary is the
  * same one: model HTML and SVG run in the sandboxed srcdoc frame, mermaid in strict mode, chart specs through
  * the parser. A file on this Mac is fetched with the app token and shown by type: a PDF in the built-in viewer
- * (a blob: frame of the renderer's own origin), an image as an image, text as a fence, HTML/SVG through the
- * sandbox again. A file is re-read on Refresh and when the window regains focus.
+ * (a blob: frame of the renderer's own origin), an image as an image, audio and video natively, text as a fence (CSV as a
+ * table), HTML/SVG through the sandbox again; an upload comes from its stored original (FileView). A local
+ * file is re-read on Refresh and when the window regains focus.
  */
 export default function ShowPanel({ conversationId }: { conversationId: string }): JSX.Element | null {
   const state = useStore((s) => s.shows[conversationId])
@@ -52,11 +54,11 @@ function Pane({ conversationId, state, pane, entry, split, children }: { convers
   useEffect(() => { setPages(null); setToolbar(false) }, [entry.id])
   // Coming back to the window re-reads a file that may have changed. Not a PDF: that would reload the viewer under the reader.
   useEffect(() => {
-    if (item.kind !== 'file' || viewer === 'pdf' || viewer === 'other') return
+    if (item.kind !== 'file' || item.documentId || viewer === 'pdf' || viewer === 'audio' || viewer === 'video' || viewer === 'other') return
     const onFocus = (): void => setTick((n) => n + 1)
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [item.kind, viewer])
+  }, [item.kind, item.documentId, viewer])
 
   const meta = headerMeta(item, viewer, entry.at, pages)
   const isFile = item.kind === 'file' && !!item.path
@@ -79,6 +81,7 @@ function Pane({ conversationId, state, pane, entry, split, children }: { convers
           {viewer === 'pdf' && (
             <button className={`icon-btn ${toolbar ? 'on' : ''}`} title="PDF toolbar" aria-label="Toggle PDF toolbar" aria-pressed={toolbar} onClick={() => setToolbar((v) => !v)}><PanelTop size={14} /></button>
           )}
+          {item.documentId && <UploadActions item={item} />}
           {isFile && viewer !== 'other' && (
             <button className="icon-btn" title="Refresh from disk" aria-label="Refresh" onClick={() => setTick((n) => n + 1)}><RefreshCw size={14} /></button>
           )}
@@ -90,7 +93,7 @@ function Pane({ conversationId, state, pane, entry, split, children }: { convers
         </span>
       </header>
       <div className="show-body">
-        <ShowBody key={item.kind === 'file' ? item.path : item.source} item={item} tick={tick} toolbar={toolbar} onPages={setPages} />
+        <ShowBody key={item.kind === 'file' ? item.documentId ?? item.path : item.source} item={item} tick={tick} toolbar={toolbar} onPages={setPages} />
       </div>
       {children}
     </section>
@@ -106,63 +109,6 @@ function ShowBody({ item, tick, toolbar, onPages }: { item: ShowItem; tick: numb
     case 'chart': return <ChartBlock source={src} streaming={false} />
     case 'interactive': return <InteractiveBlock source={src} streaming={false} />
     case 'markdown': return <div className="markdown"><MarkdownPreview source={src} /></div>
-    case 'file': return <FileBody item={item} tick={tick} toolbar={toolbar} onPages={onPages} />
-  }
-}
-
-type Loaded = { kind: 'url'; url: string } | { kind: 'text'; text: string } | { kind: 'error'; text: string }
-
-function FileBody({ item, tick, toolbar, onPages }: { item: ShowItem; tick: number; toolbar: boolean; onPages: (n: number | null) => void }): JSX.Element {
-  const viewer = fileViewer(item)
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
-  const path = item.path ?? ''
-  const asText = viewer === 'html' || viewer === 'svg' || viewer === 'markdown' || viewer === 'text'
-
-  // Re-runs on Refresh / focus (`tick`); the previous content stays up until the new read lands.
-  useEffect(() => {
-    if (!path || viewer === 'other') return
-    let url: string | null = null
-    let gone = false
-    void (async () => {
-      try {
-        const r = await fetchRaw(rawPath(path))
-        if (asText) {
-          const text = await r.text()
-          if (!gone) setLoaded((cur) => (cur?.kind === 'text' && cur.text === text ? cur : { kind: 'text', text }))
-        } else {
-          const blob = await r.blob()
-          if (viewer === 'pdf') onPages(pdfPageCount(new Uint8Array(await blob.arrayBuffer())))
-          url = URL.createObjectURL(blob)
-          if (!gone) setLoaded({ kind: 'url', url })
-        }
-      } catch (e) {
-        if (!gone) setLoaded({ kind: 'error', text: (e as Error).message })
-      }
-    })()
-    return () => { gone = true; if (url) URL.revokeObjectURL(url) }
-  }, [path, viewer, asText, tick, onPages])
-
-  const name = item.name || item.title
-  if (viewer === 'other') {
-    return (
-      <div className="show-nopreview empty-state">
-        <FileWarning size={22} />
-        <p>No preview for this kind of file.</p>
-        <button className="ghost-btn" onClick={() => void saveDownload(rawPath(path), name)}><Download size={13} /> Save a copy</button>
-      </div>
-    )
-  }
-  if (!loaded) return <div className="show-loading">Loading {name}…</div>
-  if (loaded.kind === 'error') return <div className="show-nopreview empty-state"><FileWarning size={22} /><p>Could not load {name}: {loaded.text}</p></div>
-  if (loaded.kind === 'url') {
-    // The fragment is part of the iframe src, so the toolbar toggle reloads the viewer once, by design.
-    if (viewer === 'pdf') return <div className="show-pdf-frame"><iframe className="show-pdf" title={name} src={pdfSrc(loaded.url, toolbar)} /></div>
-    return <figure className="show-image"><img src={loaded.url} alt={name} /><figcaption>{name} · {fmtBytes(item.size)}</figcaption></figure>
-  }
-  switch (viewer) {
-    case 'html': return <HtmlBlock source={loaded.text} streaming={false} />
-    case 'svg': return <SvgBlock source={loaded.text} streaming={false} />
-    case 'markdown': return <div className="markdown"><MarkdownPreview source={loaded.text} /></div>
-    default: return <div className="markdown"><MarkdownPreview source={'```' + textLang(name) + '\n' + loaded.text.replace(/```/g, '`​``') + '\n```'} /></div>
+    case 'file': return <FileView item={item} tick={tick} toolbar={toolbar} onPages={onPages} />
   }
 }

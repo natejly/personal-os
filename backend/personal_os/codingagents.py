@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import opencode, shell
+from . import mac, opencode, shell
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
@@ -261,9 +261,8 @@ def summary(row: dict[str, Any], tail: int | None = 1500) -> dict[str, Any]:
 
 class CodingSessions:
     def __init__(self, db: Any, jobs: shell.ShellJobs, run: Runner, publish: Callable[[str, Any], None],
-                 settings: Callable[[], dict[str, Any]], roots: Callable[[], list[Path]], tb: Any = None,
-                 claude_home: Path | None = None):
-        self.db, self.jobs, self.run, self.publish, self.settings, self.roots = db, jobs, run, publish, settings, roots
+                 settings: Callable[[], dict[str, Any]], tb: Any = None, claude_home: Path | None = None):
+        self.db, self.jobs, self.run, self.publish, self.settings = db, jobs, run, publish, settings
         self.tb = tb                    # the Toolbox: opencode.launch needs its model settings, data dir and workspace
         self.claude_home = claude_home or Path.home() / ".claude" / "jobs"
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
@@ -370,12 +369,12 @@ class CodingSessions:
                            session_id=row.get("session_id") or session)
 
     # ---- verbs ----
-    def check_repo(self, repo_path: str) -> Path:
+    def check_repo(self, repo_path: str, desk: Path | None = None) -> Path:
         p = str(repo_path or "").strip()
         if not p or not os.path.isabs(os.path.expanduser(p)):
             raise CodingError("repo_path must be an absolute path to the repository folder.")
         try:
-            where, _root = shell.resolve_cwd(p, self.roots())
+            where = shell.resolve_cwd(p, desk or mac.home(), desk)
         except shell.ShellError as e:
             raise CodingError(shell._scrub(str(e))) from e
         if not (where / ".git").exists():
@@ -407,7 +406,7 @@ class CodingSessions:
         model = (str(model).strip() or None) if model else None
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
-        repo = self.check_repo(repo_path)
+        repo = self.check_repo(repo_path, opencode._desk_root(self.tb, ctx))
         self._check_capacity()
         name = " ".join(str(name or prompt).split())[:60].lstrip("- ") or "coding session"
         sid, wt, want = new_id(), repo, branch
@@ -631,12 +630,12 @@ def register(tb: Any, sessions: CodingSessions) -> None:
 
     spec = ToolSpec("coding_session_start",
                     "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code) or 'opencode' "
-                    f"(installed here: {installed()}). repo_path must be a git repo inside a workspace folder; new_worktree=true gives "
+                    f"(installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
                     "untouched. Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
-                    "(status needs_you; the user answers with `claude attach <id>`). OpenCode runs inside the OS sandbox, writing "
-                    "only within the workspace folder that holds the repo. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
+                    "(status needs_you; the user answers with `claude attach <id>`). OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
+                    "files that run code later are off limits). permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},

@@ -108,18 +108,18 @@ test('a new chat defaults to no project, and only an explicit choice files it in
 })
 
 test('accept/restore: typing during the request survives an append and yields to a replacement', () => {
-  const appended = { id: 'd', content: 'notes\n\n## Recording summary\nbody\n' } as never
+  const appended = { id: 'd', content: 'notes\n\n## Summary\nbody\n' } as never
   // nothing typed since the pre-request flush: the server body wins and the draft clears
   assert.deepEqual(adoptServerDoc(null, appended, null, 'notes\n'), { activeDoc: appended, docDraft: null })
   assert.deepEqual(adoptServerDoc('notes\n', appended, 'notes\n', 'notes\n'), { activeDoc: appended, docDraft: null })
-  // typed (or dictated) while an append was being accepted: both the typing and the section stay,
+  // typed while an append was being accepted: both the typing and the section stay,
   // so the next autosave cannot drop the summary that was just accepted
   const merged = adoptServerDoc('notes\nmore', appended, 'notes\n', 'notes\n')
   assert.equal(merged.activeDoc, appended)
-  assert.equal(merged.docDraft, 'notes\nmore\n\n## Recording summary\nbody\n')
+  assert.equal(merged.docDraft, 'notes\nmore\n\n## Summary\nbody\n')
   // an append onto an empty doc has no separator of its own
-  const first = { id: 'd', content: '## Recording summary\nbody\n' } as never
-  assert.equal(adoptServerDoc('typed', first, null, '').docDraft, 'typed\n\n## Recording summary\nbody\n')
+  const first = { id: 'd', content: '## Summary\nbody\n' } as never
+  assert.equal(adoptServerDoc('typed', first, null, '').docDraft, 'typed\n\n## Summary\nbody\n')
   // the body was replaced outright: nothing to merge the typing into, the server wins
   const replaced = { id: 'd', content: 'a different body' } as never
   assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
@@ -271,24 +271,6 @@ test('opening a doc at a cited line leaves the jump for the editor', async () =>
     assert.equal(useStore.getState().docJump, null, 'a plain open asks for no jump')
   } finally {
     Object.assign(docs, orig)
-  }
-})
-
-test('a meeting whose notes failed to save is not navigated away from', async () => {
-  const { api } = await import('./lib/api')
-  const meetings = api.meetings as unknown as Stubs
-  const orig = { ...meetings }
-  let opened = 0
-  meetings.patch = async () => { throw new Error('offline') }
-  meetings.get = async () => { opened++; return { id: 'm2', notes: '' } }
-  try {
-    useStore.setState({ activeMeeting: { id: 'm1', notes: 'a' } as never, meetingNotesDraft: 'a typed', toasts: [] })
-    await useStore.getState().openMeeting('m2')
-    assert.equal(opened, 0)
-    assert.equal(useStore.getState().activeMeeting?.id, 'm1')
-    assert.equal(useStore.getState().meetingNotesDraft, 'a typed')
-  } finally {
-    Object.assign(meetings, orig)
   }
 })
 
@@ -930,6 +912,33 @@ test('a draft parks chat settings instead of writing the global ones, and send a
   assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { planMode: 'always', skipPermissions: true, useMemory: false } })
   assert.equal(calls.some((c) => c.path.includes('/settings')), false)
   assert.deepEqual(useStore.getState().draftChatSettings, {})
+})
+
+test('the first send of a chat armed autonomous makes its desk and sends through it, not as a plain run', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ desk: { id: 'd1', conversation_id: 'c9' }, conversation_id: 'c9' })
+    : m === 'POST' && p.endsWith('/cowork/desks/d1/message') ? json({ ok: true, steered: false })
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks'))?.body, { conversation_id: 'c9', autonomy: 'ask', brief: 'hi', start: false })
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks/d1/message'))?.body, { content: 'hi' })
+  assert.equal(calls.some((c) => c.path.includes('/chat')), false, 'no plain run')
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, 'd1')
+  assert.equal(useStore.getState().focusedConversationId, 'c9')
+})
+
+test('when the desk cannot be made, the first send falls back to a plain chat and says why', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ detail: 'no desks today' }, 500)
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.ok(calls.some((c) => c.path.includes('/chat')), 'the message still goes as a normal run')
+  assert.match(useStore.getState().toasts[0].text, /no desks today/)
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, undefined)
 })
 
 test('a failed PATCH of parked chat settings refuses the run and keeps them on the draft', async (t) => {

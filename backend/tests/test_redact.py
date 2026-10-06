@@ -1,4 +1,4 @@
-"""Named redaction rules: the subsets, the order, and what meetings must NOT lose.
+"""Named redaction rules: the subsets, the order, and what the credential subset must NOT lose.
 
 Pure regex, so there is nothing to stub: every test here is a string in and a string out.
 The order tests matter most - the rule list is security-relevant and `REDACTIONS` is
@@ -40,7 +40,7 @@ def test_token_rule_marker() -> None:
 
 
 def test_secret_assign_eats_its_own_marker() -> None:
-    """Inherited from activity.py: "token" is a SECRET_ASSIGN trigger word, so the [token]
+    """"token" is a SECRET_ASSIGN trigger word, so the [token]
     the token rule just inserted matches on the next pass. The value is still gone, the
     marker is just [secret] instead. Pinned so a future fix is a deliberate decision."""
     assert redact.scrub_secrets(KEY) == "[[secret]"
@@ -84,14 +84,14 @@ def test_other_rules() -> None:
 
 
 def test_rule_order_is_the_contract() -> None:
-    """activity.Gate.scrub applies REDACTIONS positionally, so the dict order IS behaviour."""
+    """REDACTIONS is applied positionally, so the dict order IS behaviour."""
     assert redact.ALL_RULES == (
         "private_key", "url_userinfo", "url_secret_param", "email", "card", "ssn", "token", "aws_key",
         "github_pat", "google_api", "google_oauth", "slack_webhook", "jwt", "phone", "entropy",
     )
     assert redact.REDACTIONS == [redact.RULES[k] for k in redact.ALL_RULES]
     assert tuple(redact.RULES.values()) == tuple(redact.REDACTIONS)
-    # The two rules meetings must never apply, named explicitly rather than inferred.
+    # The two rules scrub_secrets must never apply, named explicitly rather than inferred.
     assert "email" not in redact.SECRET_RULES
     assert "phone" not in redact.SECRET_RULES
     assert set(redact.SECRET_RULES) < set(redact.ALL_RULES)
@@ -99,7 +99,7 @@ def test_rule_order_is_the_contract() -> None:
 
 def test_scrub_matches_the_redactions_pipeline() -> None:
     """Regression guard: scrub() with the defaults must stay byte-identical to what
-    activity.Gate.scrub did - every pattern in REDACTIONS order, then SECRET_ASSIGN."""
+    the default scrub - every pattern in REDACTIONS order, then SECRET_ASSIGN."""
     text = (
         f"mail {EMAIL} call {PHONE} key {KEY} aws AKIAIOSFODNN7EXAMPLE "
         f"ssn 123-45-6789 card 4111-1111-1111-1111 password hunter2hunter2 "

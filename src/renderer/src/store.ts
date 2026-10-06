@@ -3,9 +3,10 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
+import type { DraftAutonomy } from './lib/autonomyDefault'
 import { markRunsSeen } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
@@ -19,12 +20,10 @@ import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, o
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
-import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
-import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
 import type { Attention, CodingSession, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
@@ -47,7 +46,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'memory' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'memory' | 'project' | 'canvas'
 /** Which tab a project page shows. */
 export type ProjectTab = 'chats' | 'artifacts' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
@@ -219,6 +218,8 @@ export interface State {
   draftChatSettings: Partial<ConversationSettings>
   /** The next new chat is private: it is created with `private`, which only creation can set. */
   draftPrivate: boolean
+  /** Autonomy picked on a draft. Null follows `settings.autonomousByDefault`; `send` starts the new chat's desk with it. */
+  draftAutonomy: DraftAutonomy
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -267,6 +268,8 @@ export interface State {
   /** The Advanced group to open when Settings opens on the Advanced tab. */
   settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
+  /** The upload the standalone viewer shows (an upload opened with no chat to put it beside). */
+  uploadPreview: string | null
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
@@ -333,37 +336,6 @@ export interface State {
   /** A doc just made by New or Today's note: DocsView puts the caret in its editor once, then clears it. */
   docFocusId: string | null
 
-  /** Meetings: recorded calls. List rows, plus the one open in the notepad. */
-  meetings: Meeting[]
-  activeMeeting: FullMeeting | null
-  /** `null` until the first status poll lands; `.active` is the live recording, if any. */
-  meetingStatus: MeetingStatusInfo | null
-  /** The open meeting's transcript tail, de-duplicated by `applyCursor`. */
-  meetingSegments: MeetingSegment[]
-  /** Rowid cursor the next `/segments` poll resumes from. 0 = the whole tail. */
-  meetingCursor: number
-  meetingPreflight: MeetingPreflight | null
-  /** Enhance proposals awaiting review, across every meeting — the sidebar badge. */
-  meetingsPending: number
-  /** The rail's search box, held here rather than in the view: `refreshMeetings` is called from the
-   *  recorder bar's 5s tick and from the autosave too, and those must not drop the user's filter. */
-  meetingQuery: string
-  /** Notepad buffer for the open meeting: what the user has typed but autosave has not flushed. */
-  meetingNotesDraft: string | null
-  meetingSaving: boolean
-  /** A lifecycle call (start/stop/enhance/retranscribe) is in flight; every such button disables. */
-  meetingBusy: boolean
-  meetingConsentOpen: boolean
-
-  /** Activity monitor. `null` until the first status poll lands. */
-  activity: ActivityStatus | null
-  activityEvents: ActivityEvent[]
-  activitySummaries: ActivitySummary[]
-  activityContext: ActivityContextFile | null
-  activityBusy: boolean
-  activityInsights: ActivityInsights | null
-  activityInsightsBusy: boolean
-
   /** Desks behind chats working autonomously: every row, the open chat's desk whole, and its files. */
   desks: Desk[]
   /** Set the moment a desk is opened, so a slower `desks.get` cannot land on a desk since left. */
@@ -399,8 +371,9 @@ export interface State {
   /** Open the help overlay on a section; null closes it. */
   openHelp: (section: 'shortcuts' | 'guide' | null) => void
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
-  openSettings: (tab: SettingsTab | LegacySettingsTab) => void
+  openSettings: (tab: SettingsTab | LegacySettingsTab, group?: AdvancedGroup) => void
   setProjectModal: (m: State['projectModal']) => void
+  openUploadPreview: (id: string | null) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
@@ -455,7 +428,9 @@ export interface State {
   askAboutEmail: (id: string, subject: string | null | undefined) => Promise<boolean>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   /** `attachments`: uploaded files going with this turn; the row keeps them and the model reads their text. */
-  send: (text: string, conversationId?: string, attachments?: Attachment[]) => Promise<boolean>
+  /** `autonomy`: only the main new-chat composer passes it (lib/autonomyDefault.ts); a chat that exists already ignores it. */
+  send: (text: string, conversationId?: string, attachments?: Attachment[], autonomy?: DeskAutonomy | null) => Promise<boolean>
+  setDraftAutonomy: (a: DraftAutonomy) => void
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string, attachments?: Attachment[]) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
@@ -550,34 +525,6 @@ export interface State {
   addStyleSample: (text: string) => Promise<void>
   deleteStyleSample: (id: string) => Promise<void>
 
-  /** Status only - cheap enough to poll while the Activity panel is open. */
-  refreshActivity: () => Promise<void>
-  /** Status plus the event log, summaries and activity.md. */
-  loadActivity: () => Promise<void>
-  setActivityConfig: (patch: Partial<ActivityConfig>) => Promise<void>
-  toggleActivitySignal: (signal: ActivitySignal) => Promise<void>
-  startActivity: () => Promise<void>
-  stopActivity: () => Promise<void>
-  pauseActivity: (minutes?: number) => Promise<void>
-  resumeActivity: () => Promise<void>
-  rollupActivity: () => Promise<void>
-  refreshActivityProfile: () => Promise<void>
-  deleteActivityEvent: (id: string) => Promise<void>
-  deleteActivitySummary: (id: string) => Promise<void>
-  purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
-  /** Ask macOS for one permission. Returns the note to show; '' when it went through silently. */
-  grantActivityPermission: (id: string, browser?: string) => Promise<void>
-  openActivitySettings: (id: string) => Promise<void>
-  /** Record everything, or put back the settings record-everything mode replaced. */
-  setRecordEverything: (on: boolean) => Promise<void>
-  /** Habits noticed and automations on offer. */
-  loadActivityInsights: () => Promise<void>
-  /** `deep` runs the model pass; without it the patterns are just re-mined locally, for free. */
-  refreshActivityInsights: (deep?: boolean) => Promise<void>
-  setInsightStatus: (id: string, status: InsightStatus, note?: string) => Promise<void>
-  /** Apply one suggestion. A `prompt` action does not act: it opens a chat with the message. */
-  applyInsight: (id: string) => Promise<void>
-  forgetActivityHabit: (id: string) => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
@@ -654,47 +601,11 @@ export interface State {
   rejectRevision: (revId: string) => Promise<void>
   restoreRevision: (revId: string) => Promise<void>
 
-  /** No argument re-issues the filter the rail is currently showing, never the unfiltered list. */
-  refreshMeetings: (query?: string) => Promise<void>
-  /** Type in the rail's search box. The view's effect does the fetch. */
-  setMeetingQuery: (query: string) => void
-  /** Status only — cheap enough to poll, and it keeps its own 5s tick while a recording is live. */
-  refreshMeetingStatus: () => Promise<void>
-  refreshMeetingsPending: () => Promise<void>
   /** Pending memory tidy-up proposals in every scope: the Settings and Tidy-up badge. */
   memoryProposals: number
   refreshMemoryProposals: () => Promise<void>
   /** Toast one learn pass with an Undo, and refresh what it touched. */
   onLearned: (l: Learned) => void
-  openMeeting: (id: string) => Promise<void>
-  /** No id creates a meeting first. Opens the consent modal instead when the notice is unacknowledged. */
-  startRecording: (meetingId?: string) => Promise<void>
-  /** There is only ever one live recording, so none of these four takes an id. */
-  stopRecording: () => Promise<void>
-  pauseMeeting: () => Promise<void>
-  resumeMeeting: () => Promise<void>
-  /** Adopt a calendar candidate (find-or-create on its event id) and start recording it. */
-  recordCandidate: (candidate: MeetingCandidate) => Promise<void>
-  /** Type into the open meeting's notes. Buffers locally and flushes on a debounce. */
-  editMeetingNotes: (next: string) => void
-  /** Flush the buffer now (⌘S, switching meetings, leaving the view, unmount). */
-  flushMeetingNotes: () => Promise<void>
-  /** The 2s tick: the live status plus the segment tail from `meetingCursor`. */
-  pollMeetingLive: () => Promise<void>
-  enhanceMeeting: (id: string, force?: boolean) => Promise<void>
-  acceptMeetingRevision: (revisionId: string) => Promise<void>
-  rejectMeetingRevision: (revisionId: string) => Promise<void>
-  promoteActionItems: (meetingId: string, actionIds: string[]) => Promise<void>
-  dismissActionItem: (meetingId: string, actionId: string) => Promise<void>
-  deleteMeeting: (id: string) => Promise<void>
-  setMeetingConfig: (patch: Partial<MeetingConfig>) => Promise<void>
-  loadMeetingPreflight: (force?: boolean) => Promise<void>
-  retranscribeMeeting: (id: string) => Promise<void>
-  /** No id deletes every retained wav: there is no bulk route, so this loops the list. */
-  deleteMeetingAudio: (meetingId?: string) => Promise<void>
-  setMeetingConsentOpen: (open: boolean) => void
-  /** Stamps `consentedAt`, closes the modal and starts what the user clicked Record on. */
-  acceptMeetingConsent: () => Promise<void>
 }
 
 let toastSeq = 0
@@ -740,10 +651,10 @@ const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string |
 /**
  * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
  * before the request and `base` the body the editor showed then, so a draft that differs now was
- * typed or dictated while the request was in flight.
+ * typed while the request was in flight.
  *
  * What happens to that text depends on what the server did. When the new body is the old one with
- * something added after it (an accepted recording summary), the typing is kept and the addition is
+ * something added after it, the typing is kept and the addition is
  * put back after it: keeping the draft alone would autosave over the section just accepted. When
  * the body was replaced outright there is nothing to merge the typing into, so the server wins, as
  * it always has.
@@ -758,25 +669,6 @@ export function adoptServerDoc(
   const kept = draft.trimEnd()
   return { activeDoc: doc, docDraft: stem || !kept ? kept + added : `${kept}\n\n${added}` }
 }
-/** The same debounce for the meeting notepad, on its own timer: typing notes during a call must not
- *  be cancelled by, or cancel, an autosave in the Docs editor. */
-const MEETING_SAVE_DEBOUNCE_MS = 1200
-let meetingSaveTimer: ReturnType<typeof setTimeout> | null = null
-/** While a recording is live the sidebar indicator is mounted in every view but only the Meetings
- *  view polls, so the status poll keeps its own tick. Cleared the moment `active` goes null. */
-let meetingLiveTimer: ReturnType<typeof setInterval> | null = null
-/**
- * Epoch ms the post-stop watch window closes at.
- *
- * `POST /meetings/{id}/stop` answers with the row already finalized to `ready` and only THEN
- * schedules the enhance pass, so the status poll right after a stop sees no live session and a
- * settled status, and would tear the tick down a moment before the revision, the action items and
- * the late transcriptions land. The window keeps it ticking across that gap; it is bounded so a
- * stop can never leave a poll running for the rest of the session.
- */
-let meetingSettleUntil = 0
-const MEETING_SETTLE_MS = 90_000
-
 /**
  * A pop-out renderer (`?surface=widget`). Same lookup as main.tsx: dev serves the query off
  * `location.search`, and the href fallback covers one that arrived behind a hash.
@@ -795,51 +687,6 @@ const clearHold = (convId: string): void => {
     holds.delete(convId)
   }
 }
-
-/** Statuses that are still moving on their own: the capture, the transcription queue or the enhance
- *  pass is running, so one tick keeps the sidebar indicator and the open meeting from freezing. */
-const SETTLING: MeetingStatus[] = ['recording', 'stopped', 'transcribing', 'enhancing']
-
-/** A hand-started meeting has no calendar event to take a title from. */
-const newMeetingTitle = (): string =>
-  `Meeting ${new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
-
-/** Google's ISO timestamps as the epoch seconds `POST /meetings` wants. */
-const epochSeconds = (iso: string): number | null => {
-  const t = Date.parse(iso)
-  return Number.isFinite(t) ? t / 1000 : null
-}
-
-/** The newest rowid in a `?since=` batch, which is what the next poll resumes from. */
-const lastCursor = (rows: MeetingSegment[], from = 0): number =>
-  rows.reduce((n, r) => Math.max(n, r.cursor ?? 0), from)
-
-/**
- * A blocked `POST /meetings/{id}/start` is a 409 whose body is the capability checklist. `req()`
- * JSON-encodes a non-string `detail` into the error message, exactly as a `RunConflict` arrives, so
- * naming the first blocker and its fix is what turns "409" into "install a loopback device".
- */
-const startBlockers = (e: unknown): MeetingCapability[] => {
-  try {
-    const d = JSON.parse((e as Error).message) as { blockers?: MeetingCapability[] }
-    return Array.isArray(d?.blockers) ? d.blockers : []
-  } catch {
-    return []
-  }
-}
-const startFailure = (e: unknown): string => {
-  const first = startBlockers(e).find((b) => !b.ok)
-  return first ? `${first.label}: ${first.detail}${first.fix ? ` — ${first.fix}` : ''}` : (e as Error).message
-}
-
-/**
- * What the consent modal does once accepted, when the Record click that opened it was for a doc.
- * `startRecording` opens the Meetings view, which a note must not do, so the doc recorder parks its
- * own start here and `acceptMeetingConsent` runs it instead. Dismissing the modal drops it, for the
- * same reason `consentIntent` is dropped. Module-level rather than state: a closure must not
- * cross the IPC bus or be serialised.
- */
-export const consentResume: { run: (() => void) | null } = { run: null }
 
 /** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
 const runConflict = (e: unknown): RunConflict | null => {
@@ -1055,17 +902,11 @@ export const useStore = create<State>((set, get) => {
    */
   let menuWired = false
   let inited = false
-  /** Which meeting the Record click that opened the consent modal was for; `undefined` means
-   *  "create one". Kept out of state because the modal must not be able to re-target it. */
-  let consentIntent: string | undefined
-  /** The meeting `openMeeting` is currently fetching, so a slower response cannot clobber one the
-   *  user has since switched away from. */
-  let openingMeeting: string | null = null
 
   const wireMenu = (): void => {
     if (menuWired) return
     menuWired = true
-    // ⌘B (Toggle Sidebar), ⌘K (Command Palette) and ⇧⌘M (Meetings) are menu accelerators, and a menu accelerator never
+    // ⌘B (Toggle Sidebar) and ⌘K (Command Palette) are menu accelerators, and a menu accelerator never
     // reaches the page: inside the Markdown editor they would hide the sidebar, open the palette or leave the doc instead
     // of bold / link / maths. While the editor has focus, hand the chord back to it as the keystroke it was.
     const toEditor = (key: string, shift: boolean): boolean => {
@@ -1077,7 +918,6 @@ export const useStore = create<State>((set, get) => {
     window.os.onMenu((action) => {
       const s = get()
       if (action === 'toggle-sidebar' && toEditor('b', false)) return
-      if (action === 'view:meetings' && toEditor('M', true)) return
       if (action === 'palette' && toEditor('k', false)) return
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
@@ -1168,6 +1008,20 @@ export const useStore = create<State>((set, get) => {
       const rest = s.pendingSends.filter((p) => p.key !== key)
       return { ...s, pendingSends: rest.length ? rest : undefined }
     })
+  /** A message for a chat working autonomously: it goes to its desk, which steers a live turn or wakes the next one,
+   *  and attached files are copied into the desk's inputs/ folder rather than inlined. */
+  const sendToDesk = async (convId: string, deskId: string, text: string, ids: string[] | undefined, key: number): Promise<boolean> => {
+    try {
+      if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+      dropPending(convId, key)
+      return false
+    }
+    const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
+    dropPending(convId, key)
+    return ok
+  }
   /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
   const settleSteer = (convId: string, message: Message | undefined): void => {
     if (message) patchSession(convId, (s) => applyEvent(s, { event: 'user_message', data: message } as ChatEvent, get().focusedConversationId === convId))
@@ -1233,7 +1087,6 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void get().refreshTodos()
       void get().refreshDocsPending()
-      void get().refreshActivity()
       refreshAll()
       // Runs did not survive the process: the conversation list, the live-run map and every session
       // that was not streaming (its in-flight reply may have been closed out as interrupted) are stale.
@@ -1358,9 +1211,6 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'workflow_run') {
             // Crew windows and the Library's run list re-read the run; the event itself carries no payloads.
             window.dispatchEvent(new Event('grain-crew'))
-          } else if (ev.event === 'preview') {
-            const data = ev.data
-            void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))
           } else if (ev.event === 'run_state') {
             const info = ev.data
             const prevStatus = get().liveRuns[info.conversation_id]?.status
@@ -1380,10 +1230,6 @@ export const useStore = create<State>((set, get) => {
               if (sess && !sess.streaming) void get().openSession(ev.data.id).catch(() => undefined)
               void get().refreshConversations().catch(() => undefined)
             }
-          } else if (ev.event === 'recording') {
-            // Lazy: the docrec store imports this one, so a static import here would be a cycle.
-            const data = ev.data
-            void import('./features/docrec/store').then((m) => m.useDocRec.getState().handleEvent(data))
           }
         }
       } catch {
@@ -1394,28 +1240,6 @@ export const useStore = create<State>((set, get) => {
     }
   }
 
-  /**
-   * The whole segment tail, cursor reset. A `?since=` poll is keyed on rowid and an UPDATE does not
-   * move one, so a segment whose TEXT changed — exactly what retranscribe does — is never
-   * re-delivered incrementally. Opening a meeting and replaying one both have to reload.
-   */
-  const loadSegments = async (meetingId: string): Promise<void> => {
-    // Paged, because one request is capped: an hour on two channels at the default 20s clips is
-    // ~360 rows, and a single `?since=0` page would show the first half of the call and stop
-    // mid-sentence with nothing on screen saying so.
-    const page = await fetchSegmentPages((since, limit) => api.meetings.segments(meetingId, since, limit)).catch(() => null)
-    if (page === null || get().activeMeeting?.id !== meetingId) return
-    set({ meetingSegments: page.segments, meetingCursor: page.cursor })
-  }
-
-  /**
-   * Keystrokes aimed at the meeting being left behind.
-   *
-   * A switch is two round trips long and the notepad accepts input for the whole of it, so the
-   * flush at the top of `openMeeting`/`startRecording` is not the last word: without this second
-   * flush the unconditional `meetingNotesDraft: null` that follows eats everything typed since the
-   * click. Returns the saved row when it flushed one, so the caller can adopt its notes.
-   */
   const docUnsaved = (): boolean => {
     const { activeDoc: d, docDraft, docTitleDraft } = get()
     const left = !!d && ((docDraft !== null && docDraft !== d.content) || (docTitleDraft !== null && !!docTitleDraft.trim() && docTitleDraft !== d.title))
@@ -1423,44 +1247,6 @@ export const useStore = create<State>((set, get) => {
     if (left) get().toast('This doc has edits that could not be saved. Copy them out or retry before leaving it.', 'error')
     return left
   }
-  const meetingUnsaved = (): boolean => {
-    const { activeMeeting: m, meetingNotesDraft: draft } = get()
-    const left = !!m && draft !== null && draft !== m.notes
-    if (left) get().toast('These notes could not be saved. Copy them out or retry before leaving the meeting.', 'error')
-    return left
-  }
-
-  const flushOutgoing = async (outgoing: string | null): Promise<FullMeeting | null> => {
-    if (outgoing === null || get().activeMeeting?.id !== outgoing || get().meetingNotesDraft === null) return null
-    await get().flushMeetingNotes()
-    const after = get().activeMeeting
-    return after?.id === outgoing ? after : null
-  }
-
-  /**
-   * The 5s tick that runs while anything is still settling. The Meetings view polls the segment tail
-   * itself, so this exists for every OTHER view: the sidebar indicator's clock, and a meeting whose
-   * transcript and enhance pass land minutes after Stop returned.
-   */
-  const liveTick = async (): Promise<void> => {
-    await get().refreshMeetingStatus()
-    const m = get().activeMeeting
-    // The post-stop window counts as settling: the row is already `ready` while the enhance pass
-    // and the last transcriptions are still landing on it.
-    if (!m || !(SETTLING.includes(m.status) || Date.now() < meetingSettleUntil)) return
-    // Never mid-autosave: a read that lands between the PUT and its merge-back would put the
-    // pre-save notes back on screen and the next keystroke would diff against them.
-    if (get().meetingSaving) return
-    const fresh = await api.meetings.get(m.id).catch(() => null)
-    if (fresh && get().activeMeeting?.id === fresh.id) {
-      set({ activeMeeting: fresh })
-      // A clip that transcribed after Stop kept its rowid, so `meetingCursor` will never re-deliver
-      // it: the tail has to be reloaded whole or those words never appear.
-      if (needsSegmentReload(get().meetingSegments, fresh.segment_count)) await loadSegments(fresh.id)
-    }
-    void get().refreshMeetingsPending()
-  }
-
   /** An assistant edit proposed on the open doc: its review banner and badge show now, not on the next open. */
   const adoptDocProposal = (preview: string): void => {
     let id: unknown
@@ -1914,6 +1700,7 @@ export const useStore = create<State>((set, get) => {
     draftFast: false,
     draftChatSettings: {},
     draftPrivate: false,
+    draftAutonomy: null,
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -1932,19 +1719,7 @@ export const useStore = create<State>((set, get) => {
     docSaving: false,
     docJump: null,
     docFocusId: null,
-    meetings: [],
-    activeMeeting: null,
-    meetingStatus: null,
-    meetingSegments: [],
-    meetingCursor: 0,
-    meetingPreflight: null,
-    meetingsPending: 0,
     memoryProposals: 0,
-    meetingQuery: '',
-    meetingNotesDraft: null,
-    meetingSaving: false,
-    meetingBusy: false,
-    meetingConsentOpen: false,
     sidebarOpen: true,
     sidebarSearchTick: 0,
     shows: {},
@@ -1969,6 +1744,7 @@ export const useStore = create<State>((set, get) => {
     settingsTab: 'model',
     settingsGroup: null,
     projectModal: null,
+    uploadPreview: null,
     toasts: [],
     paletteOpen: false,
     helpOpen: false,
@@ -1992,14 +1768,6 @@ export const useStore = create<State>((set, get) => {
     style: null,
     styleSamples: [],
     styleLearning: false,
-
-    activity: null,
-    activityEvents: [],
-    activitySummaries: [],
-    activityContext: null,
-    activityBusy: false,
-    activityInsights: null,
-    activityInsightsBusy: false,
 
     init: async () => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
@@ -2054,7 +1822,6 @@ export const useStore = create<State>((set, get) => {
       // The recap is a model call: only make it for a card that is on (Regenerate and the canvas widget still can).
       if (homeModuleOn(get().settings, 'recap')) void get().refreshRecap()
       void get().refreshDocsPending()
-      void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
       if (!isPopout() && !watching) {
         watching = true
@@ -2067,10 +1834,6 @@ export const useStore = create<State>((set, get) => {
       // The desk notifier watches `desks`, and `desk_status` events only update rows already loaded: without this
       // a desk finishing before its chat was first opened raised no notification.
       void get().refreshDesks()
-      // Both for the sidebar: the review badge, and the indicator that says a recording is running.
-      // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
-      void get().refreshMeetingsPending()
-      void get().refreshMeetingStatus()
       void get().refreshMemoryProposals()
     },
 
@@ -2091,7 +1854,7 @@ export const useStore = create<State>((set, get) => {
       set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
       // Which tools are capped at ask follows this list, and the tool rows read it from the tools listing.
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
-      if ('baseUrl' in patch || 'apiKey' in patch) void get().loadModels()
+      if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
       if ('microsoftClientId' in patch || 'microsoftTenant' in patch) void get().refreshMicrosoft()
       // Mail and Calendar now read from the other account: drop what the first one cached.
@@ -2105,7 +1868,6 @@ export const useStore = create<State>((set, get) => {
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()
-      if (cur === 'meetings' && view !== 'meetings') void get().flushMeetingNotes()
       if (view === 'canvas' && cur !== 'canvas') set({ view, lastClassicView: cur })
       else set({ view })
       // Coming back to the chat view shows the focused conversation, so what it finished while away is read.
@@ -2117,14 +1879,8 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocs()
         void get().refreshDocsPending()
       }
-      if (view === 'meetings') {
-        void get().refreshMeetings()
-        void get().refreshMeetingStatus()
-        void get().refreshMeetingsPending()
-      }
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
-      if (view === 'activity') void get().loadActivity()
     },
     leaveCanvas: () => {
       const s = get()
@@ -2181,8 +1937,9 @@ export const useStore = create<State>((set, get) => {
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
     setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'model', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
-    openSettings: (id) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: r.group ?? null }) },
+    openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
+    openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
@@ -2272,7 +2029,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2486,7 +2243,8 @@ export const useStore = create<State>((set, get) => {
       return get().send(emailAsk(id, subject))
     },
 
-    send: async (text, conversationId, attachments) => {
+    setDraftAutonomy: (draftAutonomy) => set({ draftAutonomy }),
+    send: async (text, conversationId, attachments, autonomy) => {
       const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
       if (!text.trim() && !ids) return false
       // Checked first: an oversized send creates no chat and never reaches the steer-then-409 fallthrough.
@@ -2516,17 +2274,7 @@ export const useStore = create<State>((set, get) => {
         // A chat working autonomously: the message goes to its desk, which steers a live turn or wakes the next one,
         // and attached files are copied into the desk's inputs/ folder rather than inlined.
         const deskId = get().sessions[id]?.conversation.settings.deskId
-        if (deskId) {
-          try {
-            if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
-          } catch (e) {
-            get().toast((e as Error).message, 'error')
-            return fail()
-          }
-          const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
-          dropPending(id, pend.key)
-          return ok
-        }
+        if (deskId) return sendToDesk(id, deskId, text, ids, pend.key)
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
@@ -2616,14 +2364,26 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
       }))
       void get().refreshProjects()
+      // A new chat that starts autonomous: its desk is made now, asleep, and the first message wakes it.
+      let deskId = ''
+      if (autonomy) {
+        try {
+          const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
+          bindDesk(c.id, desk.id)
+          await get().refreshDesks()
+          deskId = desk.id
+        } catch (e) {
+          get().toast(`Could not start working autonomously: ${(e as Error).message}`, 'error')
+        }
+      }
       // Released once the run has started, so a waiting send sees it streaming and steers it.
-      const ok = await runStream(c.id, { content: text, attachments: ids }, pend.key)
+      const ok = deskId ? await sendToDesk(c.id, deskId, text, ids, pend.key) : await runStream(c.id, { content: text, attachments: ids }, pend.key)
       if (!ok) dropPending(c.id, pend.key)
       draftCreate = null
       created(c.id)
@@ -3415,37 +3175,6 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
-    // ---- meetings ----
-    refreshMeetings: async (query) => {
-      // Defaulting to the stored query rather than '' is the whole point: the recorder bar's 5s
-      // tick and the notes autosave both call this with no argument, and an unfiltered answer
-      // would replace the list under a search box that still reads "budget".
-      const q = query ?? get().meetingQuery
-      if (q !== get().meetingQuery) set({ meetingQuery: q })
-      try {
-        set({ meetings: await api.meetings.list(get().dataScope, q, true) })
-      } catch { /* the recorder bar re-runs this every 5s; one flaky request must not toast */ }
-    },
-    setMeetingQuery: (query) => set({ meetingQuery: query }),
-    refreshMeetingStatus: async () => {
-      try {
-        const meetingStatus = await api.meetings.status()
-        set({ meetingStatus })
-        const m = get().activeMeeting
-        // `counts.pending` covers the one path the 90s window cannot: when `stop` abandons the
-        // drain, the row is finalized 'ready' straight away and a background watcher waits up to
-        // 15 minutes for the segments to settle before re-rolling the transcript and enhancing.
-        // 'ready' is not in SETTLING, so without this the tick dies at 90s and neither the late
-        // transcript nor the enhanced-notes proposal ever reaches the open meeting.
-        const draining = meetingStatus.counts.pending > 0
-        const settling = !!meetingStatus.active || draining || (m !== null && SETTLING.includes(m.status)) || Date.now() < meetingSettleUntil
-        if (settling && !meetingLiveTimer) meetingLiveTimer = setInterval(() => void liveTick(), 5000)
-        if (!settling && meetingLiveTimer) {
-          clearInterval(meetingLiveTimer)
-          meetingLiveTimer = null
-        }
-      } catch { /* the panel shows whatever it last had; a failed poll is not worth a toast */ }
-    },
     refreshMemoryProposals: async () => {
       try {
         set({ memoryProposals: (await api.memories.proposals('all')).length })
@@ -3480,373 +3209,6 @@ export const useStore = create<State>((set, get) => {
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
-    refreshMeetingsPending: async () => {
-      try {
-        set({ meetingsPending: (await api.meetings.pending()).pending })
-      } catch { /* a badge is not worth a toast */ }
-    },
-    openMeeting: async (id) => {
-      const outgoing = get().activeMeeting?.id ?? null
-      if (outgoing !== id) {
-        await get().flushMeetingNotes()
-        if (meetingUnsaved()) return
-      }
-      openingMeeting = id
-      set({ view: 'meetings' })
-      try {
-        const m = await api.meetings.get(id)
-        if (openingMeeting !== id) return
-        // Anything typed during the two round trips still belongs to the outgoing meeting, and the
-        // reset below is about to drop it.
-        const late = await flushOutgoing(outgoing)
-        if (openingMeeting !== id) return
-        // Reopening the row that is already open: the flush just saved newer notes than the GET
-        // above returned, and a draft that arrived during the PUT is still unsaved.
-        const same = late !== null && late.id === id
-        const draft = get().meetingNotesDraft
-        set({
-          activeMeeting: same ? { ...m, notes: late.notes } : m,
-          meetingNotesDraft: same ? draft : null,
-          meetingSegments: [],
-          meetingCursor: 0
-        })
-        await loadSegments(id)
-        // A meeting that is still recording or settling gets the tick; one that is finished does
-        // not, and would otherwise poll a row nothing is writing to.
-        if (SETTLING.includes(m.status)) void get().refreshMeetingStatus()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    startRecording: async (meetingId) => {
-      // One start at a time: a double click must not create a second meeting that the backend then refuses.
-      if (get().meetingBusy) return
-      set({ meetingBusy: true })
-      try {
-        // A click that beats the first status load must not read "unknown" as "not consented".
-        if (!get().meetingStatus) await get().refreshMeetingStatus()
-        // Asked once per install, and nothing records until it is acknowledged. The click is
-        // remembered rather than dropped, so accepting the notice finishes what the user pressed.
-        if (!get().meetingStatus?.consented) {
-          consentIntent = meetingId
-          return set({ meetingConsentOpen: true })
-        }
-        // Whatever is buffered belongs to the meeting being left behind, so it goes first.
-        const outgoing = get().activeMeeting?.id ?? null
-        await get().flushMeetingNotes()
-        const createdHere = meetingId === undefined
-        const id = meetingId ?? (await api.meetings.create({ title: newMeetingTitle() })).id
-        let m: FullMeeting
-        try {
-          m = await api.meetings.start(id)
-        } catch (e) {
-          // A refused start (consent, self-test, mic, busy) must not leave an empty meeting behind for each press.
-          if (createdHere) await api.meetings.del(id).catch(() => undefined)
-          throw e
-        }
-        // Typing carried on through create+start; the reset below would otherwise discard it.
-        const late = await flushOutgoing(outgoing)
-        const same = late !== null && late.id === id
-        const draft = get().meetingNotesDraft
-        // Claims the open slot: an `openMeeting` still in flight for another row must not land on
-        // top of the one that just started recording.
-        openingMeeting = id
-        set({
-          view: 'meetings',
-          activeMeeting: same ? { ...m, notes: late.notes } : m,
-          meetingNotesDraft: same ? draft : null,
-          meetingSegments: [],
-          meetingCursor: 0
-        })
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus()])
-      } catch (e) {
-        get().toast(startFailure(e), 'error')
-        // Whatever blocked it is now ten minutes stale in the cached checklist; re-probe so the
-        // panel's rows agree with the toast the user just read.
-        void get().loadMeetingPreflight(true)
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    stopRecording: async () => {
-      const id = get().meetingStatus?.active?.meeting_id
-      if (!id) return
-      set({ meetingBusy: true })
-      try {
-        // Blocks while the transcription backlog drains, so the button stays disabled for as long
-        // as the request runs rather than looking idle with ffmpeg still up.
-        const m = await api.meetings.stop(id)
-        set((st) => (st.activeMeeting?.id === id ? { activeMeeting: m } : {}))
-        get().toast('Recording stopped. The transcript and the enhanced notes finish in the background.')
-        // /stop answers with the row already `ready` and schedules the enhance pass afterwards, so
-        // without this the status poll below would conclude nothing is settling and stop the tick
-        // seconds before the proposal, the action items and the last transcriptions arrive.
-        meetingSettleUntil = Date.now() + MEETING_SETTLE_MS
-        await loadSegments(id)
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus(), get().refreshMeetingsPending()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-        void get().refreshMeetingStatus()
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    pauseMeeting: async () => {
-      const id = get().meetingStatus?.active?.meeting_id
-      if (!id) return
-      try {
-        set({ meetingStatus: await api.meetings.pause(id) })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    resumeMeeting: async () => {
-      const id = get().meetingStatus?.active?.meeting_id
-      if (!id) return
-      try {
-        set({ meetingStatus: await api.meetings.resume(id) })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    recordCandidate: async (candidate) => {
-      let id = candidate.meeting_id
-      if (!id) {
-        set({ meetingBusy: true })
-        try {
-          // Find-or-create: the partial unique index on calendar_event_id makes a second POST for
-          // one event hand back the row that already exists, so there is no adopt route to call.
-          const m = await api.meetings.create({
-            title: candidate.title,
-            calendar_event_id: candidate.event_id,
-            calendar_id: candidate.calendar_id,
-            conference_link: candidate.conference_link,
-            scheduled_start: epochSeconds(candidate.start),
-            scheduled_end: epochSeconds(candidate.end)
-          })
-          id = m.id
-        } catch (e) {
-          return get().toast((e as Error).message, 'error')
-        } finally {
-          set({ meetingBusy: false })
-        }
-      }
-      await get().startRecording(id)
-    },
-    editMeetingNotes: (next) => {
-      if (!get().activeMeeting) return
-      set({ meetingNotesDraft: next })
-      if (meetingSaveTimer) clearTimeout(meetingSaveTimer)
-      meetingSaveTimer = setTimeout(() => { void get().flushMeetingNotes() }, MEETING_SAVE_DEBOUNCE_MS)
-    },
-    flushMeetingNotes: async () => {
-      if (meetingSaveTimer) {
-        clearTimeout(meetingSaveTimer)
-        meetingSaveTimer = null
-      }
-      const { activeMeeting: m, meetingNotesDraft: draft } = get()
-      if (!m || draft === null || draft === m.notes) return set({ meetingNotesDraft: null })
-      set({ meetingSaving: true })
-      try {
-        const saved = await api.meetings.patch(m.id, { notes: draft })
-        // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
-        set((st) => {
-          if (st.activeMeeting?.id !== m.id) return { meetingSaving: false }
-          const newer = st.meetingNotesDraft !== null && st.meetingNotesDraft !== draft
-          return {
-            activeMeeting: newer ? { ...saved, notes: st.meetingNotesDraft as string } : saved,
-            meetingNotesDraft: newer ? st.meetingNotesDraft : null,
-            meetingSaving: false
-          }
-        })
-        void get().refreshMeetings()
-      } catch (e) {
-        set({ meetingSaving: false })
-        get().toast(`Could not save: ${(e as Error).message}`, 'error')
-      }
-    },
-    pollMeetingLive: async () => {
-      try {
-        await get().refreshMeetingStatus()
-        const id = get().activeMeeting?.id
-        if (!id) return
-        const rows = await api.meetings.segments(id, get().meetingCursor)
-        if (!rows.length || get().activeMeeting?.id !== id) return
-        set((st) => ({ meetingSegments: applyCursor(st.meetingSegments, rows), meetingCursor: lastCursor(rows, st.meetingCursor) }))
-      } catch { /* a 2s poll that toasts would paper the screen over one flaky request */ }
-    },
-    enhanceMeeting: async (id, force = false) => {
-      set({ meetingBusy: true })
-      try {
-        // The pass reads the notes, so an unflushed paragraph would be missing from the proposal.
-        await get().flushMeetingNotes()
-        const rev = await api.meetings.enhance(id, force)
-        // An auto-applied revision comes back `applied` with the meeting's `pending` already null,
-        // so the meeting is re-fetched rather than patched from the revision.
-        const m = await api.meetings.get(id)
-        if (get().activeMeeting?.id === id) set({ activeMeeting: m })
-        if (rev.degraded) get().toast('The model call failed — these are mechanically enhanced notes', 'error')
-        else get().toast(rev.status === 'pending' ? 'Enhanced notes are waiting for review' : 'Enhanced notes ready')
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    acceptMeetingRevision: async (revisionId) => {
-      try {
-        // No flush first, unlike `acceptRevision`: accepting writes `enhanced` and nothing else, so
-        // a buffered note is in no danger and stays buffered.
-        const m = await api.meetings.accept(revisionId)
-        if (get().activeMeeting?.id === m.id) set({ activeMeeting: m })
-        get().toast('Enhanced notes applied')
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    rejectMeetingRevision: async (revisionId) => {
-      try {
-        const m = await api.meetings.reject(revisionId)
-        if (get().activeMeeting?.id === m.id) set({ activeMeeting: m })
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    promoteActionItems: async (meetingId, actionIds) => {
-      set({ meetingBusy: true })
-      try {
-        const was = (get().activeMeeting?.actions ?? []).filter((a) => a.status === 'added').length
-        const actions = await api.meetings.addTodos(meetingId, actionIds)
-        set((st) => (st.activeMeeting?.id === meetingId ? { activeMeeting: { ...st.activeMeeting, actions } } : {}))
-        const added = actions.filter((a) => a.status === 'added').length - was
-        get().toast(added > 0 ? `${added} action item${added === 1 ? '' : 's'} added to your todos` : 'Those items are already todos')
-        await Promise.all([get().refreshTodos(), get().refreshDashboard()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    dismissActionItem: async (meetingId, actionId) => {
-      try {
-        const item = await api.meetings.dismissAction(meetingId, actionId)
-        set((st) => (st.activeMeeting?.id === meetingId
-          ? { activeMeeting: { ...st.activeMeeting, actions: st.activeMeeting.actions.map((a) => (a.id === item.id ? item : a)) } }
-          : {}))
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    deleteMeeting: async (id) => {
-      try {
-        // Stop first. DELETE only drops the row, and the recorder bar — the only Stop, Pause and
-        // Resume in the app — is mounted on the open meeting, so deleting the live row would leave
-        // ffmpeg capturing with no control anywhere that can reach it.
-        if (get().meetingStatus?.active?.meeting_id === id) await get().stopRecording()
-        await api.meetings.del(id)
-        if (get().activeMeeting?.id === id) {
-          // The buffered notes belong to a row that no longer exists.
-          if (meetingSaveTimer) {
-            clearTimeout(meetingSaveTimer)
-            meetingSaveTimer = null
-          }
-          openingMeeting = null
-          set({ activeMeeting: null, meetingNotesDraft: null, meetingSegments: [], meetingCursor: 0 })
-        }
-        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    setMeetingConfig: async (patch) => {
-      try {
-        set({ meetingStatus: await api.meetings.setConfig(patch) })
-        // A device or backend change invalidates what preflight concluded up to ten minutes ago.
-        if (['micDevice', 'outputDevice', 'sources', 'sttBackend', 'sttModel', 'whisperModelPath'].some((k) => k in patch)) {
-          void get().loadMeetingPreflight(true)
-        }
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    loadMeetingPreflight: async (force = false) => {
-      try {
-        set({ meetingPreflight: await api.meetings.preflight(force) })
-      } catch (e) {
-        // Only the Re-check button passes `force`; the mount-time probe stays quiet and the panel
-        // keeps whatever checklist it last had.
-        if (force) get().toast((e as Error).message, 'error')
-      }
-    },
-    retranscribeMeeting: async (id) => {
-      set({ meetingBusy: true })
-      try {
-        const { settled, meeting } = await api.meetings.retranscribe(id)
-        if (get().activeMeeting?.id === id) set({ activeMeeting: meeting })
-        if (settled > 0) get().toast(`${settled} clip${settled === 1 ? '' : 's'} transcribed`)
-        else get().toast('Nothing could be transcribed — the audio is gone, or the provider is still failing', 'error')
-        // The replayed rows kept their rowids, so the cursor would never re-deliver them.
-        await loadSegments(id)
-        await get().refreshMeetings()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    deleteMeetingAudio: async (meetingId) => {
-      set({ meetingBusy: true })
-      try {
-        if (meetingId) {
-          const m = await api.meetings.deleteAudio(meetingId)
-          if (get().activeMeeting?.id === meetingId) set({ activeMeeting: m })
-          get().toast('Recorded audio deleted')
-        } else {
-          // There is no bulk route — the audio directory is per meeting — so the sweep is a loop
-          // over a freshly loaded rail rather than over whatever it happened to be showing.
-          await get().refreshMeetings()
-          const rows = get().meetings
-          for (const r of rows) await api.meetings.deleteAudio(r.id).catch(() => undefined)
-          const open = get().activeMeeting?.id
-          if (open) {
-            const m = await api.meetings.get(open).catch(() => null)
-            if (m && get().activeMeeting?.id === open) set({ activeMeeting: m })
-          }
-          get().toast(`Deleted the recorded audio of ${rows.length} meeting${rows.length === 1 ? '' : 's'}`)
-        }
-        await get().refreshMeetings()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ meetingBusy: false })
-      }
-    },
-    setMeetingConsentOpen: (open) => {
-      // Dismissing the notice drops the Record click it was gating: a recording never starts by
-      // default, and a remembered intent would make the next acknowledgement record something
-      // the user did not just ask for.
-      if (!open) { consentIntent = undefined; consentResume.run = null }
-      set({ meetingConsentOpen: open })
-    },
-    acceptMeetingConsent: async () => {
-      try {
-        set({ meetingStatus: await api.meetings.consent() })
-      } catch (e) {
-        return get().toast((e as Error).message, 'error')
-      }
-      const intent = consentIntent
-      consentIntent = undefined
-      set({ meetingConsentOpen: false })
-      // A doc's Record click resumes as a doc recording, not as a meeting in the Meetings view.
-      const resume = consentResume.run
-      consentResume.run = null
-      if (resume) return resume()
-      await get().startRecording(intent)
-    },
-
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),
     addMemory: async (content, kind, projectId) => {
       await api.memories.create({ project_id: projectId, content, kind })
@@ -3938,182 +3300,6 @@ export const useStore = create<State>((set, get) => {
       await get().refreshStyle()
     },
 
-    // ---- activity monitor ----
-    refreshActivity: async () => {
-      try {
-        set({ activity: await api.activity.status() })
-      } catch {
-        /* the panel shows whatever it last had; a failed poll is not worth a toast */
-      }
-    },
-    loadActivity: async () => {
-      await get().refreshActivity()
-      const [events, summaries, context] = await Promise.all([
-        api.activity.events(24, 300).catch(() => []),
-        api.activity.summaries(7).catch(() => []),
-        api.activity.context().catch(() => null)
-      ])
-      set({ activityEvents: events, activitySummaries: summaries, activityContext: context })
-    },
-    setActivityConfig: async (patch) => {
-      try {
-        set({ activity: await api.activity.config(patch) })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    toggleActivitySignal: async (signal) => {
-      const cur = get().activity?.config.signals
-      if (!cur) return
-      await get().setActivityConfig({ signals: { ...cur, [signal]: !cur[signal] } })
-    },
-    startActivity: async () => {
-      try {
-        set({ activity: await api.activity.start() })
-        get().toast('Activity monitor on')
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    stopActivity: async () => {
-      set({ activity: await api.activity.stop() })
-      get().toast('Activity monitor off')
-    },
-    grantActivityPermission: async (id, browser = '') => {
-      try {
-        const { result, status } = await api.activity.requestPermission(id, browser)
-        set({ activity: status })
-        // macOS shows each of these at most once per app, so the note matters more than the state:
-        // it is what tells the user to go to the pane by hand, or to restart the app.
-        if (result.note) get().toast(result.note, result.prompted ? 'info' : 'error')
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    openActivitySettings: async (id) => {
-      try {
-        await api.activity.openPermissionSettings(id)
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    setRecordEverything: async (on) => {
-      try {
-        set({ activity: await api.activity.recordEverything(on) })
-        get().toast(on ? 'Record everything on' : 'Record everything off — previous settings restored')
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    pauseActivity: async (minutes = 30) => set({ activity: await api.activity.pause(minutes) }),
-    resumeActivity: async () => set({ activity: await api.activity.resume() }),
-    rollupActivity: async () => {
-      set({ activityBusy: true })
-      try {
-        const { summary, status } = await api.activity.rollup()
-        set({ activity: status })
-        get().toast(summary ? `Summarized: ${summary.headline}` : 'Nothing new to summarize')
-        await get().loadActivity()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ activityBusy: false })
-      }
-    },
-    refreshActivityProfile: async () => {
-      set({ activityBusy: true })
-      try {
-        await api.activity.refreshProfile()
-        get().toast('Rebuilt the work profile')
-        await get().loadActivity()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ activityBusy: false })
-      }
-    },
-    deleteActivityEvent: async (id) => {
-      await api.activity.deleteEvent(id)
-      set((s) => ({ activityEvents: s.activityEvents.filter((e) => e.id !== id) }))
-    },
-    deleteActivitySummary: async (id) => {
-      await api.activity.deleteSummary(id)
-      set((s) => ({ activitySummaries: s.activitySummaries.filter((x) => x.id !== id) }))
-      set({ activityContext: await api.activity.context().catch(() => get().activityContext) })
-    },
-    purgeActivity: async (scope) => {
-      const { deleted, status } = await api.activity.purge(scope)
-      set({ activity: status })
-      get().toast(`Deleted ${deleted.events} samples and ${deleted.summaries} summaries`)
-      await Promise.all([get().loadActivity(), get().loadActivityInsights()])
-    },
-    loadActivityInsights: async () => {
-      try {
-        set({ activityInsights: await api.activity.insights() })
-      } catch {
-        /* same as the status poll: the panel keeps what it had */
-      }
-    },
-    refreshActivityInsights: async (deep = false) => {
-      set({ activityInsightsBusy: true })
-      try {
-        const out = deep ? await api.activity.refreshInsights() : await api.activity.mineInsights()
-        set({ activityInsights: out })
-        const open = out.counts?.open ?? 0
-        get().toast(deep
-          ? (open ? `${open} suggestion${open === 1 ? '' : 's'} waiting` : 'Nothing new worth suggesting')
-          : `Re-read ${out.patterns.length} patterns`)
-        if (deep) await get().refreshMemories()   // habits land in the memory panel
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      } finally {
-        set({ activityInsightsBusy: false })
-      }
-    },
-    setInsightStatus: async (id, status, note = '') => {
-      try {
-        await api.activity.setInsightStatus(id, status, note)
-        await get().loadActivityInsights()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    applyInsight: async (id) => {
-      try {
-        const out = await api.activity.applyInsight(id)
-        await get().loadActivityInsights()
-        // A second click on a suggestion that already wrote its todo or memory changes nothing.
-        if ((out as { already?: boolean }).already) return
-        if (out.type === 'prompt' && out.prompt) {
-          // Setting the thing up is a conversation with tool approvals in it, so the suggestion
-          // hands the message over rather than acting: a fresh chat with the prompt in its
-          // composer, sent only when the user presses send.
-          get().newChat(null)
-          insertIntoComposer(out.prompt)
-          return
-        }
-        if (out.type === 'todo' && out.todo) {
-          await get().refreshTodos()
-          get().toast(`Added todo: ${out.todo.title}`)
-        } else if (out.type === 'memory' && out.memory) {
-          await get().refreshMemories()
-          get().toast('Saved to memory')
-        } else {
-          get().toast('Marked as accepted')
-        }
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    forgetActivityHabit: async (id) => {
-      try {
-        await api.activity.forgetHabit(id)
-        await Promise.all([get().loadActivityInsights(), get().refreshMemories()])
-        get().toast('Forgotten, memory and all')
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
     uploadDocuments: async (files, projectId) => {
       const saved: UploadOutcome[] = []
       for (const f of Array.from(files)) {

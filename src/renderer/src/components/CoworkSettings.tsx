@@ -57,7 +57,7 @@ function SignIns(): JSX.Element | null {
   )
 }
 
-/** A list of hostnames, following WorkspaceRoots: type, Enter or Add, remove with the x. An entry also allows its subdomains. */
+/** A list of hostnames, type, Enter or Add, remove with the x. An entry also allows its subdomains. */
 export function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -235,23 +235,15 @@ export function DeskGates({ draft, patch }: { draft: Settings; patch: (p: Partia
 
 export default function CoworkSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const saved = useStore((s) => s.settings)
-  const models = useStore((s) => s.models)
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
+      <Toggle title="Start new chats working autonomously" help="A new chat hands its task to a desk that works on its own at Ask as it goes, until it is done or needs you. Switch it off per chat under the composer."
+        checked={draft.autonomousByDefault !== false} onChange={(autonomousByDefault) => patch({ autonomousByDefault })} />
       <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
         checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
-
-      <h4>Vision</h4>
-      <label>
-        <span>Model that reads pictures</span>
-        <input list="cowork-vision-models" value={draft.visionModel ?? ''} placeholder="Same as the chat model" spellCheck={false}
-          onChange={(e) => patch({ visionModel: e.target.value })} />
-        <datalist id="cowork-vision-models">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
-        <small className="muted">Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.</small>
-      </label>
 
       <h4>Work environment</h4>
       <WorkEnv draft={draft} saved={saved} patch={patch} />

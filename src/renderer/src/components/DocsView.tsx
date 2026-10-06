@@ -15,8 +15,6 @@ import ResizeHandle from './ResizeHandle'
 import { oneLine } from '../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
-import { DocRecordButton, DocRecorderBar, liveDoc, RecordingsPanel, setRecordingBlockSink, useDictation, useDocRec, useNoteMarks, usePreview } from '../features/docrec'
-import { useDictationChord } from '../features/docrec/useChord'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import FormatBar from '../features/notes/FormatBar'
@@ -42,7 +40,7 @@ const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
   try { return parsePanelState(localStorage.getItem(PANEL_KEY)) } catch { return parsePanelState(null) }
 }
-const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', comments: 'Comments', recordings: 'Recordings', links: 'Links', history: 'History' }
+const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', comments: 'Comments', links: 'Links', history: 'History' }
 
 // A doc opens in the reading view; Edit is a choice remembered per doc (the edit/split/preview mode
 // stays one global preference, as before). The newest 200 ids are kept.
@@ -102,13 +100,9 @@ export default function DocsView(): JSX.Element {
     setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography
   } = useStore()
   const globalType = useStore((s) => s.settings.docTypography)
-  // Select the status itself, not `liveDoc(status)`: that builds a new object on every call, and a
-  // selector whose result is never identical re-renders forever the moment a recording is live.
-  const meetingStatus = useStore((s) => s.meetingStatus)
-  const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
 
   const [query, setQuery] = useState('')
-  // One tabbed panel in the right-hand column (Outline, Recordings, Links, History).
+  // One tabbed panel in the right-hand column (Outline, Comments, Links, History).
   const [panel, setPanelState] = useState<PanelState>(readPanel)
   const setPanel = useCallback((next: PanelState): void => {
     setPanelState(next)
@@ -198,7 +192,6 @@ export default function DocsView(): JSX.Element {
 
   // The editor shows the buffer while typing and the saved body otherwise.
   const body = docDraft ?? activeDoc?.content ?? ''
-  useNoteMarks(activeDoc?.id ?? '', body)
   const title = docTitleDraft ?? activeDoc?.title ?? ''
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
@@ -237,20 +230,13 @@ export default function DocsView(): JSX.Element {
     (docTitleDraft !== null && docTitleDraft !== activeDoc?.title)
 
   const docId = activeDoc?.id ?? ''
-  const liveHere = live && live.docId === docId ? live : null
-  const recs = useDocRec((s) => s.recordings[docId])
-  const recordingCount = recs?.length ?? 0
-  // Ids the agent can hand to meeting_read, which also answers mid-recording from the transcript so far.
-  const recList = (recs ?? []).slice(0, 5).map((r) => `\`${r.id}\` ${r.title || 'Untitled'} (${r.status}, summary ${r.summary_state})`).join('; ')
 
   // ---- editor wiring ----
-  // Slash-menu entries that need the recorder; the editor's own commands are built in. Memoised
+  // Slash-menu entries beyond the editor's own commands. Memoised
   // because the editor re-derives its command list from this array's identity.
   const userTpls = useMemo(() => userTemplates(docs), [docs])
   const extraCommands = useMemo((): SlashCommand[] => (docId
     ? ([
-        { id: 'record', label: 'Record and summarize', hint: 'mic', keywords: ['record', 'transcribe', 'meeting', 'summary'], run: () => void useDocRec.getState().start(docId, 'record') },
-        { id: 'dictate', label: 'Dictate into file', hint: 'mic', keywords: ['dictate', 'speak', 'voice', 'talk'], run: () => void useDocRec.getState().start(docId, 'dictate') },
         { id: 'daily', label: 'Daily file', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
       ] as SlashCommand[])
     : [] as SlashCommand[]).concat(userTpls.map((t): SlashCommand => ({
@@ -262,17 +248,6 @@ export default function DocsView(): JSX.Element {
         }).catch(() => {})
       }
     }))), [docId, openDailyNote, userTpls, activeDoc?.title])
-  // Starting a recording writes its block at the caret, through the editor's own undo-safe insert.
-  useEffect(() => {
-    setRecordingBlockSink((id, make) => {
-      const h = editor.current
-      if (id !== docId || !h) return
-      const t = h.getText()
-      const { start, end } = h.getSelection()
-      h.insertQuietly(make(t.slice(0, start), t.slice(end)))
-    })
-    return () => setRecordingBlockSink(null)
-  }, [docId])
   // A link can point at any other titled doc. The list may be narrowed by the tree's search box; that
   // only shortens the picker.
   const linkTargets = useMemo(
@@ -281,38 +256,6 @@ export default function DocsView(): JSX.Element {
   )
   const knownTitles = useMemo(() => new Set(docs.map((d) => d.title).filter((t) => t.trim())), [docs])
 
-  // Dictated clips go through the editor's own insert, which fires a real input event, so they take
-  // the same editDoc autosave path as typing.
-  useDictation(
-    docId,
-    // Never focuses: the user may have clicked into the chat or the title since the clip was said.
-    (text) => editor.current?.insertQuietly(text) ?? false,
-    () => {
-      const h = editor.current
-      if (!h) return ''
-      const { start } = h.getSelection()
-      return h.getText().slice(Math.max(0, start - 80), start)
-    },
-    // "scratch that": range-checked, so text typed since the clip is never eaten.
-    (text) => {
-      const h = editor.current
-      if (!h || !text) return
-      const { start } = h.getSelection()
-      if (h.getText().slice(0, start).endsWith(text)) h.replaceRange(start - text.length, start, '')
-    }
-  )
-
-  // Dictation types into the editor, so a reading or preview-only view has nowhere to put the words.
-  const dictatingHere = liveHere?.mode === 'dictate'
-  const previewText = usePreview((s) => (dictatingHere && liveHere ? s.byId[liveHere.meetingId]?.text ?? '' : ''))
-  // Hold-to-talk. Not while an assistant revision waits for review: the words would land under a diff.
-  useDictationChord(docId, pending.length === 0, dictatingHere)
-  useEffect(() => {
-    if (!dictatingHere) return
-    if (!editing) setEditing(true)
-    if (docMode === 'preview') setDocMode('split')
-  }, [dictatingHere, docMode, setDocMode, editing, setEditing])
-
   // Comments live on the rendered text. A click on a mark opens the panel on its thread.
   const comments = useDocComments(docId, body, previewRef, paneKey, panelOpen && panel.tab === 'comments',
     () => setPanel({ open: true, tab: 'comments' }))
@@ -320,17 +263,6 @@ export default function DocsView(): JSX.Element {
     comments.startDraft(anchor)
     setPanel({ open: true, tab: 'comments' })
   }
-
-  // A recording that starts on THIS doc opens the Recordings tab, so the live transcript is in view.
-  // Seeded per doc, so merely opening a doc that is already recording does not move the panel.
-  const liveSeen = useRef({ doc: '', id: '' })
-  const liveId = liveHere?.meetingId ?? ''
-  const liveMode = liveHere?.mode
-  useEffect(() => {
-    const prev = liveSeen.current
-    liveSeen.current = { doc: docId, id: liveId }
-    if (liveId && prev.doc === docId && prev.id !== liveId && liveMode === 'record') setPanel({ open: true, tab: 'recordings' })
-  }, [docId, liveId, liveMode, setPanel])
 
   // An outline jump from the reading or preview-only view brings the editor up first; it mounts on the
   // next render, so the jump waits for it.
@@ -371,7 +303,7 @@ export default function DocsView(): JSX.Element {
     ? {
         view: 'docs',
         label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${oneLine(liveHere.meetingId, 80)}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${oneLine(recList, 600)}` : ''}. ` : ''}${comments.openCount ? `${comments.openCount} open comment thread${comments.openCount === 1 ? '' : 's'} on this file: doc_comments reads them, doc_comment_reply answers in one. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${comments.openCount ? `${comments.openCount} open comment thread${comments.openCount === 1 ? '' : 's'} on this file: doc_comments reads them, doc_comment_reply answers in one. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this file', 'Tighten the writing', 'Pull out the action items as todos']
       }
@@ -381,7 +313,7 @@ export default function DocsView(): JSX.Element {
         detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a file for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList, comments.openCount])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, comments.openCount])
 
   return (
     <main className="page docs-page">
@@ -449,7 +381,7 @@ export default function DocsView(): JSX.Element {
                 onBlur={() => void flushDoc()}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
-              {(docSaving || dirty) && <span className="dr-dot doc-save-state" title={docSaving ? 'Saving…' : 'Unsaved changes'} aria-label="Unsaved changes" />}
+              {(docSaving || dirty) && <span className="doc-save-state" title={docSaving ? 'Saving…' : 'Unsaved changes'} aria-label="Unsaved changes" />}
               <span className="spacer" />
               <button className={`ghost-btn xs doc-edit-toggle ${editing ? 'on' : ''}`} title={editing ? 'Back to reading (⌘E)' : 'Edit (⌘E)'} aria-pressed={editing}
                 onClick={() => setEditing(!editing)}>
@@ -477,18 +409,15 @@ export default function DocsView(): JSX.Element {
                   {docMode === 'split' && <button role="menuitemcheckbox" aria-checked={linked} className="notes-menu-row" onClick={() => setLinked((l) => !l)}>{linked ? '✓ ' : ''}Link scrolling</button>}
                 </ViewMenu>
               )}
-              <DocRecordButton docId={activeDoc.id} />
               <ExportMenu title={title} content={body} projectId={activeDoc.project_id ?? null} />
               {/* One toggle for the whole panel; the tab strip inside picks what it shows. The dot
                   keeps counting assistant edits waiting for review, whatever tab is open. */}
-              <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} title={panelOpen ? 'Hide side panel' : 'Show outline, recordings, links and history'}
+              <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} title={panelOpen ? 'Hide side panel' : 'Show outline, comments, links and history'}
                 aria-label="Toggle side panel" aria-pressed={panelOpen} onClick={() => setPanel({ ...panel, open: !panelOpen })}>
                 <PanelRight size={14} />
                 {pending.length > 0 && <span className="dot-badge">{pending.length}</span>}
               </button>
             </div>
-
-            <DocRecorderBar docId={activeDoc.id} />
 
             {pending.length > 0 && !historyOpen && (
               <div className="doc-review">
@@ -522,7 +451,6 @@ export default function DocsView(): JSX.Element {
                   smartPaste
                   imageDocId={activeDoc?.id}
                   richStatus
-                  previewText={previewText}
                   onCaretLine={setCaretLine}
                   focusMode={writeFlags.focus}
                   typewriter={writeFlags.typewriter}
@@ -537,7 +465,6 @@ export default function DocsView(): JSX.Element {
                         source={body}
                         knownTitles={knownTitles}
                         onWikilink={(t) => void openWikilink(t)}
-                        onRecording={(id) => { setPanel({ open: true, tab: 'recordings' }); void useDocRec.getState().select(docId, id) }}
                         onToggleTask={(line) => {
                           const next = toggleTaskAt(body, line)
                           if (next !== null) editDoc(next)
@@ -561,7 +488,6 @@ export default function DocsView(): JSX.Element {
                   {PANEL_LABEL[t]}
                   {t === 'history' && pending.length > 0 && <span className="docs-panel-count">{pending.length}</span>}
                   {t === 'comments' && comments.openCount > 0 && <span className="docs-panel-count">{comments.openCount}</span>}
-                  {t === 'recordings' && liveHere && <span className="docs-panel-live" aria-label="Recording" />}
                 </button>
               ))}
               <span className="spacer" />
@@ -570,7 +496,6 @@ export default function DocsView(): JSX.Element {
 
             {panel.tab === 'outline' && <DocOutline source={body} onJump={jumpToLine} activeLine={showEditor ? caretLine : undefined} />}
             {panel.tab === 'comments' && <CommentsPanel state={comments} />}
-            {panel.tab === 'recordings' && <RecordingsPanel docId={activeDoc.id} />}
             {panel.tab === 'links' && <Backlinks docId={activeDoc.id} onOpen={(id) => void openDoc(id)} />}
             {panel.tab === 'history' && (
               <>

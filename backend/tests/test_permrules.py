@@ -194,22 +194,36 @@ def test_denied_path_is_refused_by_resolve(tmp_path):
 
 # ---- external directories
 
-def test_external_directory_asks_before_the_command_runs(tmp_path):
+def test_external_directory_asks_when_a_command_touches_a_credential_store_or_grains_own_data(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     out = tmp_path / "out"
-    ws.mkdir(), out.mkdir()
+    ssh = tmp_path / ".ssh"
+    data = tmp_path / "appdata"
+    for d in (ws, out, ssh, data):
+        d.mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
     ok = pr.evaluate("shell_run", {"command": "mkdir -p sub && touch sub/a"}, rules(allow=["Bash(mkdir *)", "Bash(touch *)"]), roots=[str(ws)])
     assert ok.action == "allow"
-    bad = pr.evaluate("shell_run", {"command": f"rm {out}/x"}, rules(allow=["Bash(rm *)"]), roots=[str(ws)])
-    assert bad.action == "ask" and bad.kind == "external_directory" and bad.external == [os.path.realpath(out)]
-    red = pr.evaluate("shell_run", {"command": f"echo hi > {out}/f"}, rules(), roots=[str(ws)])
-    assert red.action == "ask"
-    cd = pr.evaluate("shell_run", {"command": "cd /"}, rules(allow=["Bash(cd *)"]), roots=[str(ws)])
-    assert cd.action == "ask"
-    allowed_dir = pr.evaluate("shell_run", {"command": f"rm {out}/x"}, rules(allow=["Bash(rm *)", f"external_directory({out}/**)"]), roots=[str(ws)])
-    assert allowed_dir.action == "allow"
+    # a folder outside the working folder is ordinary now: no roots, no card
+    assert pr.evaluate("shell_run", {"command": f"rm {out}/x"}, rules(allow=["Bash(rm *)"]), roots=[str(ws)]).action == "allow"
+    assert pr.evaluate("shell_run", {"command": f"echo hi > {out}/f"}, rules(allow=["Bash(echo *)"])).action == "allow"
+    assert pr.evaluate("shell_run", {"command": "cd /"}, rules(allow=["Bash(cd *)"]), roots=[str(ws)]).action == "allow"
+    assert pr.evaluate("shell_run", {"command": "rm $SOMEDIR/x"}, rules(allow=["Bash(rm *)"])).action == "allow"  # unresolved: not judged
+    # a credential store (a file, not just a folder) or Grain's own data asks, with or without roots
+    for cmd, target in ((f"rm {ssh}/id_rsa", ssh / "id_rsa"), (f"cp x {ws}/.env", ws / ".env"), (f"echo hi > {ssh}/config", ssh / "config"),
+                        (f"rm {data}/personal-os.db", data / "personal-os.db"), (f"mv x {data}/uploads", data / "uploads")):
+        for kw in ({}, {"roots": [str(ws)]}):
+            v = pr.evaluate("shell_run", {"command": cmd}, rules(allow=["Bash(rm *)", "Bash(cp *)", "Bash(mv *)", "Bash(echo *)"]), **kw)
+            assert v.action == "ask" and v.kind == "external_directory" and v.external == [os.path.realpath(target)], (cmd, v)
+    # the card's rule suggestion and a stored allow rule still pre-approve it
+    v = pr.evaluate("shell_run", {"command": f"rm {ssh}/id_rsa"}, rules(allow=["Bash(rm *)"]))
+    assert v.suggestions[-1] == f"external_directory({os.path.realpath(ssh / 'id_rsa')}/**)"
+    allowed = pr.evaluate("shell_run", {"command": f"rm {ssh}/id_rsa"}, rules(allow=["Bash(rm *)", f"external_directory({ssh}/**)"]))
+    assert allowed.action == "allow"
+    denied = pr.evaluate("shell_run", {"command": f"rm {ssh}/id_rsa"}, rules(allow=["Bash(rm *)"], deny=[f"external_directory({ssh}/**)"]))
+    assert denied.action == "deny"
     assert pr.evaluate("shell_run", {"command": "chmod 755 f"}, rules(allow=["Bash(chmod *)"]), roots=[str(ws)]).action == "allow"
-    assert pr.evaluate("shell_run", {"command": "rm /tmp/x"}, rules(allow=["Bash(rm *)"])).action == "allow"  # no roots: nothing to judge against
+    assert pr.evaluate("shell_run", {"command": "rm /tmp/x"}, rules(allow=["Bash(rm *)"])).action == "allow"
 
 
 # ---- suggestions

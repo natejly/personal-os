@@ -1,7 +1,7 @@
 import { useCallback, type FC, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   Brain, Calendar, CheckSquare, FileText, MessageSquare, Network,
-  FolderKanban, Sparkles, Gauge, MonitorDot, FilePen, Smile, Users } from 'lucide-react'
+  FolderKanban, Sparkles, Gauge, FilePen, Smile, Users } from 'lucide-react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'
@@ -18,7 +18,6 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   recap: 'Recap',
   project: 'Project',
   usage: 'Usage',
-  activity: 'Activity',
   doc: 'Doc',
   face: 'Face',
   crew: 'Crew'
@@ -34,7 +33,6 @@ export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
   recap: <Sparkles size={18} />,
   project: <FolderKanban size={18} />,
   usage: <Gauge size={18} />,
-  activity: <MonitorDot size={18} />,
   doc: <FilePen size={18} />,
   face: <Smile size={18} />,
   crew: <Users size={18} />

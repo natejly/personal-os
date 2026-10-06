@@ -19,11 +19,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from . import blobs
 from .db import Database, now
 from .docs import Docs, drop_doc_windows
 from .migrations import sync_memories_fts
@@ -85,7 +85,7 @@ class Trash:
     @staticmethod
     def _demote(c: Any, project_id: str) -> None:
         """What the FK's ON DELETE SET NULL used to do when a project row was erased: docs, todos, notes,
-        boards, canvases, presets, meetings, jobs... drop to personal. The row now stays, so do it by hand,
+        boards, canvases, presets, jobs... drop to personal. The row now stays, so do it by hand,
         for every table that declares it rather than a list that goes stale."""
         tables = [r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
         for t in tables:
@@ -162,9 +162,8 @@ class Trash:
                     paths.append(r["path"])
                 c.execute("DELETE FROM chunks_fts WHERE document_id=?", (did,))
                 c.execute("DELETE FROM documents WHERE id=?", (did,))
-        for p in paths:
-            with contextlib.suppress(OSError):
-                Path(p).unlink()
+        for p in paths:  # after the commit: a blob shared with a surviving row (live or trashed) stays
+            blobs.release(self.db, p)
 
     def _purge_project(self, id: str) -> None:
         with self.db.tx() as c:

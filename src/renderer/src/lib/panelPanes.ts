@@ -19,7 +19,7 @@ export interface PanelState {
 }
 
 /** What identifies an item: the same file or the same source is one entry, not a second row in the picker. */
-export const itemKey = (i: ShowItem): string => `${i.kind}:${i.kind === 'file' ? i.path : i.source}`
+export const itemKey = (i: ShowItem): string => `${i.kind}:${i.kind === 'file' ? (i.documentId ? `doc:${i.documentId}` : i.path) : i.source}`
 
 export function entryOf(s: PanelState, pane: Pane): Entry | undefined {
   const id = pane === 'left' ? s.left : s.right

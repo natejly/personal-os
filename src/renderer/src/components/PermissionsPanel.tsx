@@ -10,7 +10,7 @@ function CliLine({ name, cli }: { name: string; cli: Cli }): JSX.Element {
 }
 
 /** Every macOS grant Grain can use, one row each. Reads never prompt; only a Grant button does. */
-export function PermissionsPanel({ compact, onEditFolders }: { compact?: boolean; onEditFolders?: () => void }): JSX.Element {
+export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Element {
   const sys = window.os?.sysAccess
   const [main, setMain] = useState<MainStatus>(UNKNOWN)
   const [backend, setBackend] = useState<BackendAccess | null>(null)
@@ -47,8 +47,7 @@ export function PermissionsPanel({ compact, onEditFolders }: { compact?: boolean
     const row = rows.find((r) => r.id === id)
     if (!row) return
     try {
-      if (id === 'inputMonitoring') await api.activity.requestPermission('input_monitoring')
-      else if (id === 'fullDisk') await sys?.openPane(row.pane ?? '')
+      if (id === 'fullDisk') await sys?.openPane(row.pane ?? '')
       else if (sys) {
         const r = await sys.grant(id)
         if (!alive.current) return
@@ -98,11 +97,10 @@ export function PermissionsPanel({ compact, onEditFolders }: { compact?: boolean
 
       <h4>Terminal</h4>
       <p className="small">{shell === null ? 'Checking the agent\'s shell…' : shell.ok ? `The agent's shell runs (cwd ${shell.cwd ?? 'unknown'}).` : `The agent's shell failed: ${shell.error ?? 'unknown error'}`}</p>
-      <p className="small">Workspace folders{backend?.roots.defaulted ? ' (~/Grain is used while the list is empty)' : ''}:</p>
-      <ul className="small">{(backend?.roots.roots ?? []).map((p) => <li key={p}><code>{p}</code></li>)}</ul>
-      {onEditFolders
-        ? <button type="button" className="link-btn" onClick={onEditFolders}>Workspace folders</button>
-        : <p className="muted small">Settings → Workspace folders</p>}
+      <h4>Where Grain works</h4>
+      <p className="small">Grain can read and write anywhere on this Mac, in every permission mode. Two kinds of place are held back.</p>
+      <p className="small"><b>Off limits</b> (never, in any mode): {backend?.scope?.protected.length ? backend.scope.protected.join(', ') : 'its own data folder and the Grain app'}.</p>
+      <p className="small"><b>Always asks first</b> (reads and writes, in every mode): {backend?.scope?.sensitive.length ? backend.scope.sensitive.join(', ') : 'passwords, keys and sign-in files'}.</p>
       {backend && <ul className="small"><CliLine name="claude" cli={backend.clis.claude} /><CliLine name="opencode" cli={backend.clis.opencode} /></ul>}
 
       <p className="muted small">Some grants only take effect after Grain restarts. Rows marked Unknown are ones macOS gives no way to check; Grant opens the right pane.</p>

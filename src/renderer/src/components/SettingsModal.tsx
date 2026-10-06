@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, FolderOpen, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, type LucideIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
@@ -17,9 +17,9 @@ import { chatModelIds } from '../lib/modelLabel'
 import { RESPONSE_STYLES, RESPONSE_STYLE_TEXT_MAX } from '../lib/responseStyle'
 import type { Settings, ShortcutState } from '@shared/types'
 import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
+import ProviderSettings from './ProviderSettings'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
-import { WorkspaceRoots } from './WorkspaceRoots'
 import { PermissionsPanel } from './PermissionsPanel'
 import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
@@ -28,7 +28,7 @@ import SandboxSettings from './SandboxSettings'
 import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
-import MeetingSettings from './MeetingSettings'
+import VoiceInputSettings from './VoiceInputSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
@@ -43,8 +43,8 @@ type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
-  { id: 'workspace', label: 'Workspace folders', icon: FolderOpen },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'texting', label: 'Texting', icon: MessageSquare },
   { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -53,7 +53,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 ]
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'workspace'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -154,10 +154,6 @@ export default function SettingsModal(): JSX.Element {
   const [saving, setSaving] = useState(false)
   // Set while the footer asks whether to throw the draft away; it remembers what the answer leads to.
   const [pending, setPending] = useState<'close' | 'setup' | null>(null)
-  const [showKey, setShowKey] = useState(false)
-  // The saved key never reaches the renderer: with one saved the field stays hidden until Replace is pressed.
-  const [replacingKey, setReplacingKey] = useState(false)
-  const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [capShortcut, setCapShortcut] = useState<ShortcutState | null>(null)
   const [askShortcut, setAskShortcut] = useState<ShortcutState | null>(null)
@@ -256,19 +252,6 @@ export default function SettingsModal(): JSX.Element {
     document.documentElement.dataset.accent = accentId(saved.accent)
   }, [])
 
-  const testConnection = async (): Promise<void> => {
-    setTest({ state: 'testing' })
-    // Tests the draft without saving it: Cancel must still discard it. A blank key means the saved one.
-    try {
-      const r = await api.setup.test({ provider: 'custom', baseUrl: draft.baseUrl, apiKey: draft.apiKey || null, model: draft.defaultModel })
-      if (!r.ok) return setTest({ state: 'fail', msg: r.error ?? 'The connection test failed.' })
-      const n = r.models?.length
-      setTest({ state: 'ok', msg: n == null ? 'Connected.' : `Connected. ${n} model${n === 1 ? '' : 's'} available.` })
-    } catch (e) {
-      setTest({ state: 'fail', msg: (e as Error).message })
-    }
-  }
-
   const showShortcuts = (): void => { setTab('advanced'); toggleGroup('voice', true) }
 
   /** A rejected accelerator keeps the modal open: it is the only place the reason is readable. */
@@ -355,33 +338,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'model' && <section>
               <h3>Model</h3>
               <p className="muted">Grain talks to any OpenAI-compatible endpoint: Fireworks, OpenAI, Anthropic, OpenRouter, a local Ollama, or your own <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy.</p>
-              <label><span className="toggle-text"><b>Provider address</b><small>Where Grain sends model requests.</small></span><input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.fireworks.ai/inference/v1" spellCheck={false} /></label>
-              {settings.apiKeySet && !replacingKey ? (
-                <div className="setting-row">
-                  <span className="toggle-text"><b>API key</b><small>Key saved ••••. Stored on this Mac.</small></span>
-                  <div className="button-row">
-                    <button className="ghost-btn" type="button" onClick={() => setReplacingKey(true)}>Replace</button>
-                    <button className="ghost-btn" type="button" onClick={() => void saveSettings({ apiKey: null } as unknown as Partial<Settings>)}>Remove</button>
-                  </div>
-                </div>
-              ) : (
-                <label><span className="toggle-text"><b>API key</b><small>Stored on this Mac.</small></span>
-                  <div className="input-row">
-                    <input type={showKey ? 'text' : 'password'} value={draft.apiKey} onChange={(e) => patch({ apiKey: e.target.value })} placeholder="sk-…" spellCheck={false} />
-                    <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} title={showKey ? 'Hide API key' : 'Show API key'} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                  </div>
-                </label>
-              )}
-              <div className="test-row">
-                <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
-                {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
-              </div>
-              <label><span className="toggle-text"><b>Chat model</b><small>Used for new chats.</small></span>
-                <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="Model id" spellCheck={false} />
-              </label>
-              <label><span className="toggle-text"><b>Fast model</b><small>Used for short, simple messages. Leave empty to always use the chat model.</small></span>
-                <input list="model-options" value={draft.fastModel ?? ''} onChange={(e) => patch({ fastModel: e.target.value })} placeholder="None" spellCheck={false} />
-              </label>
+              <ProviderSettings draft={draft} settings={settings} patch={patch} models={models} />
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Use the fast model for short messages</b><small>New chats start this way. Long, analytical or tool-heavy messages always use the chat model.</small></span>
                 <input type="checkbox" checked={!!draft.autoRoute} onChange={(e) => patch({ autoRoute: e.target.checked })} /><span className="switch" />
@@ -392,11 +349,17 @@ export default function SettingsModal(): JSX.Element {
               </div>
             </section>}
 
+            {tab === 'usage' && <section className="usage-tab">
+              <h3>Usage</h3>
+              <p className="muted">Every model call is logged on this Mac with its tokens and, when the price is known, its cost. Information only: nothing here limits Grain.</p>
+              <UsageView />
+            </section>}
+
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
               <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
               <PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} />
-              <p className="muted small">Whatever the mode, Grain only writes inside your <button type="button" className="link-btn" onClick={() => setTab('workspace')}>workspace folders</button>; anywhere else needs the folder added first. Per-tool rules and the always-ask list are under Advanced.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
@@ -406,8 +369,6 @@ export default function SettingsModal(): JSX.Element {
                 </details>
               )}
             </section>}
-
-            {tab === 'workspace' && <section className="workspace-tab"><WorkspaceRoots /></section>}
 
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
@@ -432,8 +393,6 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>
                 <button className="ghost-btn" type="button" onClick={() => { useStore.getState().setLibraryTab('connectors'); setView('library'); setSettingsOpen(false) }}>Open Library</button>
               </div>
-              <h4>Meetings</h4>
-              <MeetingSettings />
               <PlannerMailSettings />
             </section>}
 
@@ -486,7 +445,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'system' && <section className="system-tab">
               <h3>System access</h3>
-              <PermissionsPanel onEditFolders={() => setTab('workspace')} />
+              <PermissionsPanel />
             </section>}
 
             {tab === 'advanced' && <section>
@@ -505,30 +464,10 @@ export default function SettingsModal(): JSX.Element {
                 {draft.responseStyle === 'custom' && <label><span className="toggle-text"><small>Your own instruction for how replies should read.</small></span>
                   <textarea rows={4} maxLength={RESPONSE_STYLE_TEXT_MAX} value={draft.responseStyleText ?? ''} onChange={(e) => patch({ responseStyleText: e.target.value })} />
                 </label>}
-                <label><span className="toggle-text"><b>Helper model</b><small>Writes titles, memories and suggestions. Empty uses the chat model.</small></span>
-                  <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the chat model" spellCheck={false} />
-                </label>
-                <label><span className="toggle-text"><b>Image generation model</b><small>Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.</small></span>
-                  <input list="model-options" value={draft.imageModel ?? ''} onChange={(e) => patch({ imageModel: e.target.value })} placeholder="Not set" spellCheck={false} />
-                </label>
                 <Switch title="Name new chats" help="Write a short title after the first reply. A title you typed is never replaced." checked={draft.autoTitle !== false} onChange={(autoTitle) => patch({ autoTitle })} />
                 <Switch title="Suggest next questions" help="Show a few follow-up chips under replies." checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
                 <Switch title="Selection toolbar" help="Explain, summarize, verify or ask about selected text." checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
                 <Switch title="Summarize old messages automatically" help="When a chat gets long. Off: only when you ask (type /compact)." checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
-                {(() => {
-                  // Settings.digest is not in the shared type yet; the backend default is {enabled: true, hour: 8}.
-                  const dg = { enabled: true, hour: 8, ...draft.digest }
-                  const set = (p: { enabled?: boolean; hour?: number }): void => patch({ digest: { ...dg, ...p } } as Partial<Settings>)
-                  return <>
-                    <Switch title="Daily digest" help="Once a day in the Agent Inbox: meetings recorded, notes waiting for review and where your time went. No notification." checked={dg.enabled} onChange={(enabled) => set({ enabled })} />
-                    <div className="setting-row">
-                      <label className="toggle-text" htmlFor="digest-hour"><b>Written at</b><small>Or at the first launch after this hour.</small></label>
-                      <select id="digest-hour" value={dg.hour} disabled={!dg.enabled} onChange={(e) => set({ hour: Number(e.target.value) })}>
-                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>)}
-                      </select>
-                    </div>
-                  </>
-                })()}
               </AdvGroup>
 
               <AdvGroup id="approvals" title="Approvals" {...gp}>
@@ -578,18 +517,10 @@ export default function SettingsModal(): JSX.Element {
                 <p className="muted small">Your memories, voice and knowledge graph live on the Memory page. <button className="link" onClick={() => useStore.getState().openMemory()}>Open Memory</button></p>
                 <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
                 <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
-                <label><span className="toggle-text"><b>Search model</b><small>After changing it, Save, then press Rebuild search index.</small></span>
-                  <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
-                </label>
                 <IndexStatusLine />
                 <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                 <AdvancedRetrieval draft={draft} patch={patch} models={models} />
                 <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
-              </AdvGroup>
-
-              <AdvGroup id="usage" title="Usage" {...gp}>
-                <p className="muted">Every model call is logged locally with its token counts and cost.</p>
-                <UsageView />
               </AdvGroup>
 
               <AdvGroup id="desks" title="Desks and background" {...gp}>
@@ -629,9 +560,10 @@ export default function SettingsModal(): JSX.Element {
                 {shortcut && !shortcut.ok && <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`}</p>}
                 {capShortcut && !capShortcut.ok && <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>}
                 {askShortcut && !askShortcut.ok && <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`}</p>}
-                <label><span className="toggle-text"><b>Dictation key</b><small>In a file: hold to dictate, tap to keep it on.</small></span>
+                <label><span className="toggle-text"><b>Dictation key</b><small>In the chat box: hold to dictate, tap to keep it on.</small></span>
                   <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })} placeholder="Control+Alt+D" spellCheck={false} />
                 </label>
+                <VoiceInputSettings />
                 <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac: brings every detached widget to the front and back again.</small></span>
                   <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })} placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
                 </label>

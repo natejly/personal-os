@@ -46,8 +46,7 @@ def make(tmp_path: Path, fake: Fake) -> tuple[ship.Ship, list[dict[str, Any]], P
     (repo / ".git").mkdir(parents=True)
     events: list[dict[str, Any]] = []
     s = ship.Ship(Database(tmp_path / "data"), fake, lambda ev, row: events.append({"event": ev, "status": row["status"],
-                                                                                   "steps": [x["status"] for x in row["steps"]]}),
-                  roots=lambda: [tmp_path.resolve()])
+                                                                                   "steps": [x["status"] for x in row["steps"]]}))
     return s, events, repo
 
 
@@ -102,6 +101,16 @@ def test_red_step_stops_and_skips_the_rest(tmp_path: Path) -> None:
     asyncio.run(go())
 
 
+def test_a_repo_may_be_anywhere_but_grains_own_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    s, _events, repo = make(tmp_path, Fake())
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(tmp_path / "appdata"))  # `repo` is no longer inside it, and needs no grant
+    assert s.create(repo_path=str(repo), branch="feature")["repo_path"] == str(repo.resolve())
+    inner = tmp_path / "appdata" / "repo"
+    (inner / ".git").mkdir(parents=True)
+    with pytest.raises(ship.ShipError, match="off limits"):
+        s.create(repo_path=str(inner), branch="feature")
+
+
 def test_refuses_main_force_and_refspecs(tmp_path: Path) -> None:
     s, _events, repo = make(tmp_path, Fake())
     for bad in ("main", "master", "Main", "+feature", "feature:main", "refs/heads/main", "-f", "a..b"):
@@ -112,7 +121,7 @@ def test_refuses_main_force_and_refspecs(tmp_path: Path) -> None:
     with pytest.raises(ship.ShipError):
         s.create(repo_path=str(repo), branch="feature", test_command="npm test && git push --force origin feature")
     with pytest.raises(ship.ShipError):
-        s.create(repo_path="/", branch="feature")  # outside the workspace roots
+        s.create(repo_path="/", branch="feature")  # not a git repository
     for argv in (["git", "push", "--force", "origin", "x"], ["git", "push", "--force-with-lease"], ["git", "push", "origin", "+x"],
                  ["git", "push", "origin", "x:main"], ["git", "push", "origin", "refs/heads/x:refs/heads/master"]):
         with pytest.raises(ship.ShipError):
@@ -161,7 +170,6 @@ def test_routes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     c = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    monkeypatch.setattr(appmod.ship_runner, "roots", lambda: [tmp_path.resolve()])
     row = appmod.ship_runner.create(repo_path=str(repo), branch="feature")
     assert c.get(f"/ship/{row['id']}").json()["branch"] == "feature"
     assert c.post(f"/ship/{row['id']}/confirm").status_code == 409

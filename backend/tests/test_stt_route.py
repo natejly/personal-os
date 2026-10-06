@@ -20,7 +20,7 @@ import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as app_mod, stt  # noqa: E402
-from personal_os.app import AUTH_TOKEN, app, db, meeting_svc  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, db  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
@@ -46,7 +46,7 @@ def stub(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(stt, "transcribe", fake)
     monkeypatch.setattr(stt, "resolve_backend", lambda cfg, data_dir: box["backend"])
-    monkeypatch.setattr(meeting_svc, "config", lambda: box["cfg"])
+    monkeypatch.setattr(stt, "config_for", lambda stored: {**stt.DEFAULT_CONFIG, **box["cfg"]})
     return box
 
 

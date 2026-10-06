@@ -19,6 +19,50 @@ The editor files took the `/docs` prefix, so FastAPI's own Swagger UI moved to `
 (`docs_url` in `app.py`). Its OAuth redirect, which also defaults to a path
 under `/docs`, is switched off.
 
+## Reading first
+
+A doc opens as its rendered page. Editing is a choice: the **Edit** button in the
+toolbar, `⌘E`, or a double-click on the text; the same button (or `⌘E`) goes back to
+reading. The choice is remembered per doc (`grain.docs.editing` in `localStorage`,
+the newest 200 ids), while the editor-only / split / preview-only mode stays the one
+global preference it always was and only applies while editing. A doc made by New or
+Today's note opens in Edit with the caret at its end; dictation and an outline or
+citation jump bring the editor up on their own.
+
+## Type
+
+The **Font** button (the `Aa` icon) sets the doc's face (Serif, Sans, Mono, Book),
+size and line width; Book is a serif with a narrower default measure and more
+leading. The choice is stored on the doc (`docs.typography`, JSON `{font, size,
+measure}`, saved through `PATCH /docs/{id}`) and **Use default** clears it. Settings →
+Behavior → Files holds the global default (`docTypography`) that docs without their own
+choice follow; a doc's keys win over the global ones one by one. `typography.ts` turns
+the result into `--doc-*` custom properties on the pane that holds both views: the
+rendered page reads them directly and the editor reads them as the fallbacks of its own
+`--ed-*` metrics, so an unset key leaves each view at its default.
+
+## Comments
+
+Select text in the rendered page and press the **Comment** bubble (in the editor, the
+comment button in the toolbar takes the selection). The thread opens in the side
+panel's **Comments** tab; replies, Resolve / Reopen, Edit (your own) and Delete live on
+the card, and resolved threads are hidden behind a **Show resolved** toggle.
+
+A thread's anchor is the quoted text plus up to 32 characters either side and the
+offset it was made at, all taken from the rendered text (what the reader saw, not the
+markdown). `comments.ts` finds it again by exact match first (several hits are told
+apart by their context and distance from the hint), then by a context-scored fuzzy
+match, so a thread follows its passage through rewording; nothing close enough marks
+the thread **detached**, still listed, just not highlighted. Marks are painted with
+the CSS highlight registry (`::highlight(doc-comment)`), which colours ranges without
+wrapping the rendered DOM; a click on a mark opens its thread, and the quote on a card
+scrolls the page to its passage.
+
+The page agent sees the open-thread count in its context and has two tools:
+`doc_comments` (safe) reads a file's threads and `doc_comment_reply` (writes) answers in
+one as the assistant. It never resolves, edits or deletes a thread, and the assistant's
+replies cannot be edited through the route either.
+
 ## The editing surface
 
 A textarea sits on top of a highlighted mirror of the same text. The textarea
@@ -135,7 +179,7 @@ the same reason.
 
 ## The side panel
 
-One toggle in the title bar opens a panel in the right-hand column with four tabs.
+One toggle in the title bar opens a panel in the right-hand column with five tabs.
 Which tab is open, and whether the panel is open at all, is remembered per
 browser profile (`grain.docs.panel` in `localStorage`); a malformed value falls
 back to closed. Its width is the same resizable pane the History view used.
@@ -143,6 +187,7 @@ back to closed. Its width is the same resizable pane the History view used.
 | tab | what it shows |
 | --- | --- |
 | **Outline** | the headings, indented by nesting (a jump from `#` to `###` indents once). Clicking one moves the caret there; from preview-only mode it switches to the split view first. While the editor is visible the heading holding the caret is marked. Headings inside fenced code and `$$` blocks are skipped |
+| **Comments** | the doc's comment threads in document order, detached ones last. The badge counts open threads |
 | **Recordings** | recordings made in this doc, with a Transcript and a Summary tab for the selected one. See below |
 | **Links** | docs that link here |
 | **History** | the revision list, unchanged. The count badge is the assistant edits waiting for review, whatever tab is open |
@@ -390,6 +435,15 @@ New in this feature. The rest of `/docs` is unchanged.
 | `POST /meetings/{id}/summarize` | Propose a summary of a doc recording into its doc. `{template?, focus?, force?}`. 400 for a recording with no doc. A model failure is a 200 with `error` |
 | `GET /meetings?doc_id=&include_docs=` | Doc recordings are hidden unless asked for |
 | `GET /events` | Carries `recording` events as well as the existing ones |
+| `GET /docs/{id}/comments` | The doc's comment rows, flat, by creation; `include_resolved=false` drops resolved threads and their replies |
+| `POST /docs/{id}/comments` | A new thread. `{body, quote, prefix, suffix, offset_hint}` |
+| `POST /docs/comments/{cid}/replies` | A reply in the thread `cid` belongs to. `{body}` |
+| `PATCH /docs/comments/{cid}` | `{body}` edits (own comments only, 403 for the assistant's); `{resolved}` closes or reopens the thread |
+| `DELETE /docs/comments/{cid}` | A thread with its replies, or one reply |
+| `PATCH /docs/{id}` | Also takes `typography` ({font, size, measure}; `{}` clears) |
+
+Migration 10 (`doc_comments_typography`) adds the `doc_comments` table and the
+`docs.typography` column; comments go with the doc when the trash purges it.
 
 `POST /meetings/{id}/enhance` is a 400 for a doc recording: the doc is its notes,
 and `summarize` is its pass. `POST /meetings` accepts `doc_id` and `doc_mode`, which
@@ -402,6 +456,7 @@ is how an audio import gets its target row. `GET /meetings/status` reports `doc_
 backend/.venv/bin/python backend/tests/test_docs.py             # store, routes, tools
 backend/.venv/bin/python backend/tests/test_doc_notes.py        # daily note, backlinks
 backend/.venv/bin/python backend/tests/test_doc_recordings.py   # the link, the proposed summary, trash and purge
+backend/.venv/bin/python backend/tests/test_doc_comments.py     # migration 10, comment routes, typography, the comment tools
 cd backend && uv run --with pytest pytest tests/test_meeting_recorder.py tests/test_meeting_vad.py tests/test_doc_recordings.py -q
 npm test                                                        # diff engine, maths, editor features, recording logic
 ```

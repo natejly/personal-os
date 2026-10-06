@@ -32,6 +32,8 @@ export default function CommandPalette(): JSX.Element {
     ...VIEWS.filter((v) => !viewHidden(settings, v.view)).map((v) => ({ key: `view:${v.view}`, label: v.label, hint: 'Go to', run: () => s.setView(v.view) })),
     { key: 'new-chat', label: 'New chat', hint: 'Create', run: () => s.newChat(null) },
     { key: 'new-file', label: 'New file', hint: 'Create', run: () => void s.createDoc({}) },
+    { key: 'help', label: 'Help and keyboard shortcuts', hint: 'Help', run: () => s.openHelp('shortcuts') },
+    { key: 'help:guide', label: 'Using Grain', hint: 'Help', run: () => s.openHelp('guide') },
     ...recent(conversations).map((c) => ({ key: `chat:${c.id}`, label: c.title || 'Untitled chat', hint: 'Chat', run: () => void s.selectChat(c.id) })),
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) }))

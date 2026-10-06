@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
+import { PIM_SETTINGS_TAB, pimConnected, pimLabel } from '../../lib/pim'
 import { useCanvas } from '../store'
 import { api } from '../../lib/api'
 import CalendarWeek, { addDays, dayKey, fmtTime, localDay, slotIso, startOfWeek, withoutTodoEvents, type Slot } from '../../components/CalendarWeek'
@@ -21,7 +22,8 @@ const ACCEPTS: DragKind[] = ['todo']
 const readMode = (v: unknown): CalMode => (MODES.includes(v as CalMode) ? (v as CalMode) : 'agenda')
 
 const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Element => {
-  const connected = useStore((s) => s.google?.connected ?? false)
+  const connected = useStore(pimConnected)
+  const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)
   const toast = useStore((s) => s.toast)
   const openTodos = (): void => void useCanvas.getState().ensureWindow(win.canvas_id, 'todos')
@@ -195,7 +197,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
         )}
         <span className="spacer" />
         {connected && <button className="widget-chip" title="New event" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={11} /></button>}
-        {!connected && <button className="widget-chip" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button>}
+        {!connected && <button className="widget-chip" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button>}
         {error && <span className="widget-meta" title={error}>offline</span>}
       </div>
 

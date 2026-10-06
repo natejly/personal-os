@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import egress, mac, redact, sandbox
+from . import egress, mac, permissions, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path
     """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder `mac.allowed_root` accepts,
     so a root stored before that check (the home folder, "/") never widens what the shell may write."""
     out: list[Path] = [_real(desk_root)] if desk_root else []
-    for r in settings.get("workspaceRoots") or []:
+    for r in permissions.get(settings, "workspaceRoots") or []:
         if isinstance(r, str) and r.strip() and os.path.isabs(os.path.expanduser(r.strip())):
             try:
                 p = mac.allowed_root(r)
@@ -137,8 +137,8 @@ def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
 
 def reaches_out(settings: dict[str, Any]) -> bool:
     """True when a sandboxed command could send something off this Mac: open network, or a proxy with any allowed host."""
-    return bool(settings.get("shellNetwork")) or bool(
-        egress.allowed_set(settings.get("shellRegistryAccess", True), settings.get("shellAllowedDomains")))
+    return bool(permissions.get(settings, "shellNetwork")) or bool(
+        egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains")))
 
 
 def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any], roots: list[Any]) -> bool:
@@ -150,11 +150,11 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     refusals of its own: open network (the sandbox then protects nothing from leaving) and a reply that has read untrusted
     content while a proxy would let a command out (a card is cheap there, an exfiltration is not)."""
     from .tools import Toolbox
-    if not ctx.get("desk_id") or not roots or ctx.get("proposal_only") or not settings.get("deskShellAuto", True):
+    if not ctx.get("desk_id") or not roots or ctx.get("proposal_only") or not permissions.get(settings, "deskShellAuto"):
         return False
-    if args.get("unsandboxed") or settings.get("shellNetwork"):
+    if args.get("unsandboxed") or permissions.get(settings, "shellNetwork"):
         return False
-    layers = [settings.get("tools") or {}, ctx.get("tool_overrides") or {}]
+    layers = [permissions.get(settings, "tools") or {}, ctx.get("tool_overrides") or {}]
     if any(Toolbox._norm(layer.get("shell_run")) is not None for layer in layers if isinstance(layer, dict)):
         return False  # the user set a mode for this tool somewhere: that choice stands
     if ctx.get("tainted") and reaches_out(settings):
@@ -664,7 +664,7 @@ def register(tb: Any) -> None:
                     pass
         except ShellError as e:
             return tool_error(_scrub(str(e)))
-        network = bool(s.get("shellNetwork"))
+        network = bool(permissions.get(s, "shellNetwork"))
         usable = sandbox_available()
         if unsandboxed and usable and not jobs.sandbox_failed:
             return tool_error("The OS sandbox is available, so this runs sandboxed; unsandboxed is only for a machine where "
@@ -687,7 +687,7 @@ def register(tb: Any) -> None:
         wrapped = f"trap {shlex.quote('pwd -P >' + shlex.quote(os.path.join(tmp, CWD_FILE)) + ' 2>/dev/null')} EXIT\n{command}"
         argv = [shell_bin, "-c", wrapped]
         env = scrubbed_env(tmp)
-        allowed = egress.allowed_set(s.get("shellRegistryAccess", True), s.get("shellAllowedDomains"))
+        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"))
         proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
         token: str | None = None
         port: int | None = None

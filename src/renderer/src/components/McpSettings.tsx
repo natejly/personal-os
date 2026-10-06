@@ -168,8 +168,9 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
   )
 }
 
-/** A tool's project and chat grants (an approval card's "always for this chat" lands here), each revocable. */
-function ScopedGrants({ tool, grants, onRevoke }: { tool: McpTool; grants: McpGrant[]; onRevoke: (g: McpGrant) => void }): JSX.Element | null {
+/** A tool's project and chat grants (an approval card's "always for this chat" lands here). Revoked from Settings >
+ *  Permissions > Grants, the one place every standing grant is taken back. */
+function ScopedGrants({ tool, grants }: { tool: McpTool; grants: McpGrant[] }): JSX.Element | null {
   const projects = useStore((s) => s.projects)
   const conversations = useStore((s) => s.conversations)
   if (!grants.length) return null
@@ -181,15 +182,15 @@ function ScopedGrants({ tool, grants, onRevoke }: { tool: McpTool; grants: McpGr
         <li key={g.id} className="small">
           <span className="muted">{g.scope === 'project' ? 'Project' : 'Chat'}</span> {title(g)}: <b>{g.mode}</b>
           {g.schema_hash && g.schema_hash !== tool.schema_hash && <span className="tag ask">stale</span>}
-          <button className="ghost-btn small" onClick={() => onRevoke(g)}>Revoke</button>
         </li>
       ))}
+      <li className="small muted">Revoke these in Settings → Permissions → Grants.</li>
     </ul>
   )
 }
 
-function ToolRow({ tool, grants, onMode, onAccept, onRevoke }: {
-  tool: McpTool; grants: McpGrant[]; onMode: (mode: ToolMode) => void; onAccept: () => void; onRevoke: (g: McpGrant) => void
+function ToolRow({ tool, grants, onMode, onAccept }: {
+  tool: McpTool; grants: McpGrant[]; onMode: (mode: ToolMode) => void; onAccept: () => void
 }): JSX.Element {
   const eff = tool.effective
   const gone = !!tool.missing_since
@@ -204,7 +205,7 @@ function ToolRow({ tool, grants, onMode, onAccept, onRevoke }: {
         <small>{tool.description || <i className="muted">no description</i>}</small>
         <small className="muted mono">{tool.slug}</small>
         <DriftBanner tool={tool} onAccept={onAccept} />
-        <ScopedGrants tool={tool} grants={grants} onRevoke={onRevoke} />
+        <ScopedGrants tool={tool} grants={grants} />
       </span>
       <div className="seg" role="group" aria-label={`Permission for ${tool.name}`}>
         {(['on', 'ask', 'off'] as ToolMode[]).map((m) => (
@@ -339,12 +340,6 @@ export default function McpSettings(): JSX.Element {
       await refresh()
     })
 
-  const revokeGrant = (g: McpGrant): Promise<void> =>
-    run(`revoke-${g.id}`, async () => {
-      await api.mcp.clearGrant(g.tool_slug, g.scope, g.scope_id)
-      await refresh()
-    })
-
   const acceptChange = (slug: string): Promise<void> =>
     run(`accept-${slug}`, async () => {
       await api.mcp.acceptChange(slug)
@@ -463,7 +458,7 @@ export default function McpSettings(): JSX.Element {
                   <div className="tool-perms">
                     <h5>Tools</h5>
                     {s.tools.map((t) => <ToolRow key={t.slug} tool={t} grants={grants.filter((g) => g.tool_slug.toLowerCase() === t.slug.toLowerCase())}
-                      onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} onRevoke={(g) => void revokeGrant(g)} />)}
+                      onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} />)}
                   </div>
                 ) : (
                   <p className="muted empty">{s.live.ready ? 'This server offers no tools.' : 'Tools appear once the server connects.'}</p>

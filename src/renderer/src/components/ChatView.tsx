@@ -16,6 +16,7 @@ import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { firstPrompts } from './onboarding/steps'
+import { pimConnected } from '../lib/pim'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
 import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
@@ -48,7 +49,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const retitleChat = useStore((s) => s.retitleChat)
   const send = useStore((s) => s.send)
   const showFirstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
-  const google = useStore((s) => s.google)
+  const pimOn = useStore(pimConnected)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
   // The chips are for the first empty chat only; once any conversation is open they are spent.
   useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
@@ -132,7 +133,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {project && <p>New chat in {project.name}</p>}
                 {showFirstPrompts && (
                   <div className="ob-first-prompts" role="group" aria-label="Things to try">
-                    {firstPrompts(!!google?.connected).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
+                    {firstPrompts(pimOn).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
                   </div>
                 )}
               </div>

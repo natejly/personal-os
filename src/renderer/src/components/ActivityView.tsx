@@ -958,7 +958,8 @@ export default function ActivityView(): JSX.Element {
       {tab === 'signals' && (
         <div className="page-body">
           <p className="muted small">
-            Each signal is separate and off until you switch it on. Read what a signal captures before enabling it —
+            Each signal is separate. Only app names and input counts start on, and those wait for the macOS
+            permissions in Capabilities; the rest are off until you switch them on. Read what a signal captures before enabling it —
             the heavier ones are marked, and they mean exactly what they say.
           </p>
           {st.recordEverything && (

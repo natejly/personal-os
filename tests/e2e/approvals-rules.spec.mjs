@@ -16,7 +16,7 @@ test('Settings → Tools: add rules in the UI, bad rules are refused, the tester
   const { page } = grain
   await resize(grain)
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Tools' }).click()
+  await page.getByRole('tab', { name: 'Permissions' }).click()
   const add = async (kind, text, ok = true) => {
     const input = page.getByLabel(`New ${kind} rule`)
     await input.scrollIntoViewIfNeeded()
@@ -36,7 +36,7 @@ test('Settings → Tools: add rules in the UI, bad rules are refused, the tester
   await expect.poll(async () => (await grain.api('/settings')).permissionRules).toMatchObject({ allow: ['Bash(touch *)'], deny: ['Bash(touch blocked*)'], ask: ['Bash(touch ask*)'] })
   // Save closes the modal: reopen it so the tester runs against what was saved
   await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Tools' }).click()
+  await page.getByRole('tab', { name: 'Permissions' }).click()
   // the tester reads saved rules
   const test1 = async (cmd) => {
     await page.getByLabel('Command: command to test').fill(cmd)

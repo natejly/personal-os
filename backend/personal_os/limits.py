@@ -85,7 +85,7 @@ RETRIEVAL_PER_DOC_CAP = 3          # passages per document
 RETRIEVAL_CANDIDATES = 20          # candidates per ranker
 CONSOLIDATE_EVERY = 25             # propose a memory tidy-up after this many new auto memories (0 = manual only)
 VOICE_LOOP_MAX_TURNS = 20          # hands-free safety stop: a mic left on would keep looping (not a reply budget)
-IMESSAGE_LONG_RUN_MINUTES = 3      # when a text-started run counts as long
+TELEGRAM_LONG_RUN_MINUTES = 3      # when a run not started from Telegram counts as long
 
 # Accepted ranges for PUT /settings (finite numbers only). The keys in AUTOMATIC also accept 0, meaning "derive it".
 AUTOMATIC = ("contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
@@ -118,7 +118,7 @@ RANGES: dict[str, tuple[float, float]] = {
     "retrievalPerDocCap": (1, 10),
     "retrievalCandidates": (5, 50),
     "fetchCacheSeconds": (0, 86_400),
-    "imessageLongRunMinutes": (1, 1440),
+    "telegramLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
     "codingSessionMaxConcurrent": (1, 20),
 }

@@ -47,8 +47,8 @@ const withoutLegacyMode = (s: Settings): Settings => {
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'memory' | 'project' | 'canvas'
-/** Which tab a project page shows; the sidebar's View all picks Chats or Files. */
-export type ProjectTab = 'chats' | 'files' | 'instructions' | 'memory'
+/** Which tab a project page shows. */
+export type ProjectTab = 'chats' | 'artifacts' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads'

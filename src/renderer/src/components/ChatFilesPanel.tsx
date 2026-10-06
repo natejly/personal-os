@@ -50,7 +50,7 @@ export function ChatFileRow({ file, jump, showChat, onDone, onOpen, onPin }: { f
   )
 }
 
-/** The chat header's Files button and its popover: this chat's files, grouped by kind. */
+/** The chat header's Documents button and its popover: this chat's files, grouped by kind. */
 export default function ChatFilesButton({ conversationId }: { conversationId?: string }): JSX.Element {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null)
   const [files, setFiles] = useState<ChatFile[] | null>(null)
@@ -66,13 +66,13 @@ export default function ChatFilesButton({ conversationId }: { conversationId?: s
   const close = (): void => setAt(null)
   return (
     <>
-      <button className={`icon-btn no-drag${at ? ' on' : ''}`} title="Files in this chat" aria-label="Files in this chat" aria-haspopup="dialog" aria-expanded={!!at} disabled={!conversationId}
+      <button className={`icon-btn no-drag${at ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-haspopup="dialog" aria-expanded={!!at} disabled={!conversationId}
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt({ x: r.right - 320, y: r.bottom + 4 }) }}><Files size={15} /></button>
       {at && (
         <Popover at={at} onClose={close} className="cf-pop">
           {problem && <p className="empty-hint" role="alert">{problem}</p>}
           {!problem && files === null && <p className="empty-hint">Loading…</p>}
-          {files?.length === 0 && <p className="empty-hint">No files in this chat yet.</p>}
+          {files?.length === 0 && <p className="empty-hint">No documents in this chat yet.</p>}
           {files && groupByKind(files).map((g) => (
             <section key={g.kind}>
               <h4>{g.label}</h4>

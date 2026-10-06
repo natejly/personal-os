@@ -134,7 +134,6 @@ export default function Sidebar(): JSX.Element {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
   const [chatsTab, setChatsTab] = useState<'chats' | 'files'>('chats')
-  const [filesProjects, setFilesProjects] = useState<Set<string>>(new Set())  // project groups showing Files instead of Chats
   useChatFileCountsSync()
   const [jobsOpen, setJobsOpen] = useState(true)
   const [needsOnly, setNeedsOnly] = useState(readNeeds)
@@ -290,7 +289,6 @@ export default function Sidebar(): JSX.Element {
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
             const rows = chatsByProject[p.id] ?? []
-            const showFiles = filesProjects.has(p.id)
             const pinned = activeProjectId === p.id
             const open = pinned || !collapsed.has(p.id)
             return (
@@ -306,22 +304,12 @@ export default function Sidebar(): JSX.Element {
                     <ChevronRight size={13} className={`twist-chevron${open ? ' rot90' : ''}`} />
                   </button>
                   <span className="project-name">{p.name}</span>
-                  {open && (
-                    <span className="cf-seg" role="group" aria-label={`Chats or files in ${p.name}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                      {(['chats', 'files'] as const).map((m) => (
-                        <button key={m} className={showFiles === (m === 'files') ? 'on' : ''} aria-pressed={showFiles === (m === 'files')}
-                          onClick={() => setFilesProjects((prev) => { const n = new Set(prev); if (m === 'files') n.add(p.id); else n.delete(p.id); return n })}>{m === 'files' ? 'Files' : 'Chats'}</button>
-                      ))}
-                    </span>
-                  )}
                 </div>
                 {open && (
                   <div className="project-rows">
-                    {showFiles ? <SidebarChatFiles scope={{ projectId: p.id }} limit={PROJECT_ROWS} jump={openConversation} /> : <>
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {rows.slice(0, PROJECT_ROWS).map((c) => <ChatRow key={c.id} conv={c} sub active={c.id === focusedId && view === 'chat'} />)}
-                    </>}
-                    {(showFiles || rows.length > 0) && <button className="project-viewall" onClick={() => openProject(p.id, showFiles ? 'files' : 'chats')}>View all</button>}
+                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id, 'chats')}>View all</button>}
                   </div>
                 )}
               </div>
@@ -332,14 +320,14 @@ export default function Sidebar(): JSX.Element {
 
       <div className="section-row">
         <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
-          {/* The Chats | Files switch beside it names the section, so the toggle carries no word of its own. */}
+          {/* The Chats | Documents switch beside it names the section, so the toggle carries no word of its own. */}
           <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} />
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
-        <span className="cf-seg" role="group" aria-label="Chats or files">
+        <span className="cf-seg" role="group" aria-label="Chats or documents">
           <button className={chatsTab === 'chats' ? 'on' : ''} aria-pressed={chatsTab === 'chats'} aria-label="Chat list" onClick={() => { setChatsOpen(true); setChatsTab('chats') }}>Chats</button>
-          <button className={chatsTab === 'files' ? 'on' : ''} aria-pressed={chatsTab === 'files'} aria-label="Files from personal chats" onClick={() => { setChatsOpen(true); setChatsTab('files') }}>Files</button>
+          <button className={chatsTab === 'files' ? 'on' : ''} aria-pressed={chatsTab === 'files'} aria-label="Documents from personal chats" onClick={() => { setChatsOpen(true); setChatsTab('files') }}>Documents</button>
         </span>
         {chatsTab === 'chats' && <>
         <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}

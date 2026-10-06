@@ -34,6 +34,9 @@ def _mod(source: str) -> PlannerModule:
         def settings(self):
             return {}
 
+        def set_settings(self, patch):
+            pass
+
         def sid(self, project_id):
             return project_id
 

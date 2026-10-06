@@ -17,7 +17,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import mcp_servers  # noqa: E402
+from personal_os import codingagents, mcp_servers, ship  # noqa: E402
 from personal_os.modules.health import HealthModule
 from personal_os.modules.mailwatch import MailWatchModule
 from personal_os.modules.planner import PlannerModule
@@ -75,14 +75,18 @@ def full_toolbox(meetings: Any = None, google: Any = None, activity: Any = None)
     Every collaborator Toolbox takes has to be passed: a tool group whose object is None never
     registers, and this file's whole point is comparing the registered set against the reserved
     one. A new optional integration therefore belongs in this call too, or its tools silently
-    stop being checked.
+    stop being checked. The ship and coding-session groups register outside the constructor (app.py
+    calls their register() after building the Toolbox), so they are added here the same way.
     """
-    return Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                   modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
-                            stub_module(PlannerModule)], google=google or Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
-                   docs=Stub(), activity=activity or Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
-                   skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
-                   desks=Stub(), workspace=Stub())
+    tb = Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
+                 modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
+                          stub_module(PlannerModule)], google=google or Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
+                 docs=Stub(), activity=activity or Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
+                 skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
+                 desks=Stub(), workspace=Stub())
+    ship.register(tb, Stub())  # type: ignore[arg-type]
+    codingagents.register(tb, Stub())  # type: ignore[arg-type]
+    return tb
 
 
 def test_reserved_list_matches_registered_tools() -> None:

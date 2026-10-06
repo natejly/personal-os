@@ -289,6 +289,13 @@ def scope_key(project_id: str | None) -> str:
     return (project_id or "").strip()
 
 
+def drop_doc_windows(c: Any, ids: list[str]) -> None:
+    """ref_id has no foreign key, so a trashed doc's Space windows are swept here, as for chats and
+    projects. Docs-only databases (unit tests) have no canvas_windows table."""
+    if ids and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='canvas_windows'").fetchone():
+        c.execute(f"DELETE FROM canvas_windows WHERE kind='doc' AND ref_id IN ({','.join('?' * len(ids))})", ids)
+
+
 def word_count(text: str) -> int:
     return len(re.findall(r"\S+", text))
 
@@ -795,9 +802,11 @@ class Docs:
         proj_args: tuple[Any, ...] = () if sc == "" else (sc,)
         with self.db.tx() as c:
             if delete_docs:
-                c.execute(
-                    f"UPDATE docs SET deleted_at=?, deleted_with=NULL WHERE deleted_at IS NULL"
-                    f" AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}", (now(), src, len(src) + 1, src + "/", *proj_args))
+                hit = f" WHERE deleted_at IS NULL AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}"
+                hit_args = (src, len(src) + 1, src + "/", *proj_args)
+                ids = [r["id"] for r in c.execute("SELECT id FROM docs" + hit, hit_args).fetchall()]
+                c.execute("UPDATE docs SET deleted_at=?, deleted_with=NULL" + hit, (now(), *hit_args))
+                drop_doc_windows(c, ids)
                 c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
                           (sc, src, len(src) + 1, src + "/"))
                 return self.folders()

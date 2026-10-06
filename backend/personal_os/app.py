@@ -6362,7 +6362,7 @@ def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
 
 def _too_big(n: int) -> str | None:
     if n > MAX_UPLOAD_BYTES:
-        return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"
+        return f"Files must be {limits.MAX_UPLOAD_MB} MB or smaller"
     return None
 
 
@@ -6383,7 +6383,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
     # The project is resolved first so an upload for a deleted project leaves no file behind, and the file is
-    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 20 MB
+    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 50 MB
     # PDF on the event loop would stall every SSE stream.
     pid = wsid(project_id)
     safe = safe_upload_name(name)

@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -49,7 +49,9 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
       type="button"
       className="ctx-chip"
       disabled={busy}
-      title="Turn this run into a skill for you to review. It is not used until you approve it."
+      title="Save as skill: turn this run into a skill for you to review. It is not used until you approve it."
+      aria-label={busy ? 'Saving skill…' : 'Save as skill'}
+      aria-busy={busy || undefined}
       onClick={() => {
         setBusy(true)
         void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
@@ -271,7 +273,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
-  const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
+  // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
+  const ctxCount = ctx?.nodes.length ?? 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
   const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeInfo(c)])), [chunks])
@@ -342,9 +345,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && ctx && ctxCount > 0 && (
               <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-                {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
-                {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
-                {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
+                <span><Share2 size={11} />{ctx.nodes.length}</span>
               </button>
             )}
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
@@ -352,9 +353,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
             {!isUser && !streaming && message.content.trim() && (
-              <button type="button" className="ctx-chip" title="Repeat this on a schedule. It starts switched off, and you can test-run it first."
-                onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
-                <CalendarClock size={11} /> Schedule as routine…
+              <button type="button" className="ctx-chip" title="Schedule as routine: repeat this on a schedule. It starts switched off, and you can test-run it first."
+                aria-label="Schedule as routine" onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
+                <CalendarClock size={11} />
               </button>
             )}
             {showContextChips && <TraceChip message={message} />}

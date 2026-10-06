@@ -32,13 +32,19 @@ export function useChatFileCountsSync(): void {
 }
 
 const TEXTISH = new Set(['markdown', 'text'])
+const SHOW_MAX_BYTES = 200_000
 
 /** Outputs sit in the app's own data folder, which the panel's file route refuses; small text is fetched and shown, the rest is saved. */
 async function showOutput(f: ChatFile): Promise<void> {
   const rel = f.rel ?? `outputs/${f.name}`
   const kind = fileViewer({ name: f.name, path: rel, mime: '' })
   if (!TEXTISH.has(kind)) return api.conversations.downloadOutput(f.conversation_id, rel)
-  const text = await (await fetchRaw(`/conversations/${f.conversation_id}/outputs/download?path=${encodeURIComponent(rel)}`)).text()
+  const res = await fetchRaw(`/conversations/${f.conversation_id}/outputs/download?path=${encodeURIComponent(rel)}`)
+  if (Number(res.headers.get('content-length') || 0) > SHOW_MAX_BYTES) {  // a multi-MB CSV would stall the panel
+    void res.body?.cancel()
+    return api.conversations.downloadOutput(f.conversation_id, rel)
+  }
+  const text = await res.text()
   const source = kind === 'markdown' ? text : `\`\`\`\n${text.replace(/```/g, "'''")}\n\`\`\``
   useStore.getState().openShow(f.conversation_id, { kind: 'markdown', title: f.name, source })
 }

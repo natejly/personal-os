@@ -63,7 +63,7 @@ def migrate(c: sqlite3.Connection) -> None:
     # Finalize runs only after a successful write (capture inserts first, discard deletes on failure), and a restore is not "the chat's file".
     if _has(c, "file_snapshots"):
         c.execute(f"""CREATE TRIGGER IF NOT EXISTS chat_files_local AFTER UPDATE OF after_digest ON file_snapshots
-      WHEN new.conversation_id IS NOT NULL AND new.op IN {_LOCAL_OPS} BEGIN
+      WHEN new.conversation_id IS NOT NULL AND new.after_digest IS NOT NULL AND new.op IN {_LOCAL_OPS} BEGIN
       {_INSERT}VALUES(lower(hex(randomblob(16))), new.conversation_id, 'local', new.path, {_BASENAME.format(p='new.path')},
         CASE WHEN new.op='create' THEN 'created' ELSE 'edited' END, new.message_id, new.created_at); END""")
     if _has(c, "coding_sessions"):
@@ -115,6 +115,7 @@ class ChatFiles:
 
     def backfill(self) -> int:
         """The triggers' work over rows that predate them. Idempotent and cheap to re-run; returns rows inserted."""
+        found = self._output_files()  # the walk runs before the transaction, so it never holds the write lock
         with self.db.tx() as c:
             before = c.total_changes
             c.execute(_INSERT + _upload_select("m").replace("FROM json_each", "FROM messages m, json_each", 1))
@@ -124,18 +125,18 @@ class ChatFiles:
             if _has(c, "coding_sessions"):
                 c.execute(f"""{_INSERT}SELECT lower(hex(randomblob(16))), conversation_id, 'coding', worktree, name, 'created', NULL, created_at
                   FROM coding_sessions WHERE conversation_id IS NOT NULL AND conversation_id NOT LIKE 'coding:%'""")
-            for cid, p, mtime in self._output_files(c):
+            known = {r["id"] for r in c.execute("SELECT id FROM conversations").fetchall()}
+            for cid, p, mtime in (f for f in found if f[0] in known):
                 c.execute(_INSERT + "VALUES(?,?,?,?,?,?,?,?)", (new_id(), cid, "output", str(p), p.name, "saved", None, mtime))
             return c.total_changes - before
 
-    def _output_files(self, c: sqlite3.Connection) -> list[tuple[str, Path, float]]:
-        """chats/<conversation_id>/outputs/** regular files of conversations that still exist."""
+    def _output_files(self) -> list[tuple[str, Path, float]]:
+        """chats/<conversation_id>/outputs/** regular files; backfill keeps those of conversations that still exist."""
         if self.root is None or not self.root.is_dir():
             return []
-        known = {r["id"] for r in c.execute("SELECT id FROM conversations").fetchall()}
         out: list[tuple[str, Path, float]] = []
         for d in self.root.iterdir():
-            if d.name not in known or d.is_symlink() or not (d / "outputs").is_dir():
+            if d.is_symlink() or not (d / "outputs").is_dir():
                 continue
             for dirpath, dirnames, filenames in os.walk(d / "outputs"):
                 dirnames[:] = [x for x in dirnames if not x.startswith(".") and not Path(dirpath, x).is_symlink()]

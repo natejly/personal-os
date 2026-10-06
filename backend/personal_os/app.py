@@ -77,7 +77,7 @@ from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from .presets import CanvasPresets
-from . import resume
+from . import limits, resume
 from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
@@ -360,12 +360,15 @@ def _check_usage_alert(cfg: dict[str, Any]) -> None:
             events.publish("usage_alert", {"period": k, **st[k]})
 # One message may fill at most this share of the context window: past it the row would be replayed
 # on every later turn (the first user message always survives compaction) and the chat is unusable.
-MESSAGE_WINDOW_FRACTION = 0.5
+MESSAGE_WINDOW_FRACTION = limits.MESSAGE_WINDOW_FRACTION
 
 
-def _message_too_long(text: str, cfg: dict[str, Any]) -> str | None:
-    """A plain sentence when `text` is over the per-message bound, else None. Mirrors lib/messageLimit.ts."""
-    limit = int(_int_setting(cfg, "contextWindow", 128000) * 4 * MESSAGE_WINDOW_FRACTION)
+def _message_too_long(text: str, cfg: dict[str, Any], model: str = "") -> str | None:
+    """A plain sentence when `text` is over the per-message bound, else None. Same derived window as compaction;
+    lib/messageLimit.ts mirrors it with the stored override or the fallback."""
+    model = model or str(cfg.get("defaultModel") or "")
+    window = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens") if model else None)
+    limit = int(window * 4 * limits.MESSAGE_WINDOW_FRACTION)
     if len(text) <= limit:
         return None
     return (f"That message is about {len(text):,} characters. One message can hold {limit:,} with the current "
@@ -778,43 +781,9 @@ def get_settings() -> dict[str, Any]:
     return public_settings()
 
 
-# Numeric settings the Budget reads. A clamp keeps a cleared or mistyped field from becoming "unlimited"
-# (0) or from wedging every reply (a string the int() in Budget cannot parse).
-NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
-    "maxToolRounds": (1, 60),
-    "uiZoom": (80, 160),
-    "maxRunTokens": (0, 10_000_000),
-    "maxRunSeconds": (0, 86_400),
-    "subagentMaxConcurrent": (1, 20),
-    "subagentMaxDepth": (0, 3),
-    "subagentMaxRounds": (1, 60),
-    "subagentStaleSeconds": (0, 86_400),
-    "subagentToolSeconds": (0, 86_400),
-    "fileSnapshotMaxBytes": (0, 100_000_000),
-    "fileSnapshotRetainDays": (1, 365),
-    "fileSnapshotBudgetMB": (1, 20_000),
-    "llmRetries": (0, 10),
-    "llmIdleSeconds": (10, 3_600),
-    "retainUsageDays": (7, 3_650),
-    "contextWindow": (1000, 4_000_000),
-    "compactAt": (0.1, 0.95),
-    "microAt": (0.05, 0.95),
-    "compactKeepRecent": (2, 200),
-    "microKeep": (0, 50),
-    "retainTraceDays": (1, 3_650),
-    "retainToolResultDays": (1, 3_650),
-    "retainApprovalDays": (1, 3_650),
-    "toolReadRetries": (0, 5),
-    "parallelReads": (1, 8),
-    "browserMaxTabs": (1, 12),
-    "browserIdleSeconds": (30, 86_400),
-    "sandboxKeepDays": (0, 3_650),
-    "retrievalMinSimilarity": (0, 1),
-    "retrievalPerDocCap": (1, 10),
-    "retrievalCandidates": (5, 50),
-    "fetchCacheSeconds": (0, 86_400),
-    "imessageLongRunMinutes": (1, 1440),
-}
+# The numeric settings with a control in the UI; every key in limits.RANGES is still validated on PUT.
+USER_EDITABLE = ("uiZoom", "maxRunTokens", "maxRunSeconds")
+NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {k: limits.RANGES[k] for k in USER_EDITABLE}
 
 
 def _check_numeric_setting(key: str, value: Any) -> int | float:
@@ -822,8 +791,8 @@ def _check_numeric_setting(key: str, value: Any) -> int | float:
     default = llm.DEFAULT_SETTINGS[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise HTTPException(422, f"{key} must be a number")
-    lo, hi = NUMERIC_SETTING_RANGES.get(key, (0, math.inf))
-    if not lo <= value <= hi:
+    lo, hi = limits.RANGES.get(key, (0, math.inf))
+    if not (value == 0 and key in limits.AUTOMATIC) and not lo <= value <= hi:
         raise HTTPException(422, f"{key} must be between {lo:g} and {hi:g}")
     return int(value) if isinstance(default, int) else float(value)
 
@@ -1515,8 +1484,8 @@ LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row
              "Answer with what you already have, and say in one line what you could not finish.")
 CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
             "send a smaller call or split the content")
-REPEAT_LIMIT = 5
-TOOL_ERROR_LIMIT = 3
+REPEAT_LIMIT = limits.REPEAT_LIMIT
+TOOL_ERROR_LIMIT = limits.TOOL_ERROR_LIMIT
 
 
 # Run kinds that may not complete an outward-facing side effect. A scheduled job proposes; the user executes.
@@ -1525,10 +1494,10 @@ PROPOSAL_ONLY_KINDS = ("job",)
 # interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
 # A model call that is still open after this long while writing the closing answer is abandoned.
 EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was sent without one."
-FINAL_ROUND_SECONDS = 90.0
+FINAL_ROUND_SECONDS = limits.FINAL_ROUND_SECONDS
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
-JOB_HARD_SECONDS = 1800.0
-JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240}
+JOB_HARD_SECONDS = limits.JOB_HARD_SECONDS
+JOB_BUDGET = {"maxToolRounds": limits.JOB_MAX_ROUNDS, "maxRunTokens": limits.JOB_RUN_TOKENS, "maxRunSeconds": limits.JOB_RUN_SECONDS}
 # What one job may tighten for itself. Never maxToolRounds: the round cap stays fixed for every unattended run.
 # No cost key: cost is reported, never a limit.
 JOB_BUDGET_KEYS = ("maxRunTokens", "maxRunSeconds")
@@ -1566,7 +1535,7 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
         if want > 0 and (have <= 0 or want < have):
             out[key] = want
     out["deskMaxTurns"] = int(out["deskMaxTurns"] or 0)
-    out["deskMaxLive"] = int(out["deskMaxLive"] or 0)
+    out["deskMaxLive"] = limits.slots(cfg, "deskMaxLive")
     return out
 
 
@@ -1607,7 +1576,7 @@ class Budget:
     def __init__(self, cfg: dict[str, Any]):
         # A junk value already stored (from before PUT /settings validated) falls back to the default
         # instead of raising on every reply.
-        self.max_rounds = int(_num(cfg, "maxToolRounds"))
+        self.max_rounds = limits.max_rounds(cfg)
         self.max_tokens = int(_num(cfg, "maxRunTokens"))
         self.max_seconds = _num(cfg, "maxRunSeconds")
         self.t0, self.paused = time.monotonic(), 0.0
@@ -2388,7 +2357,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         repeats = 0
         tool_errors: dict[str, int] = {}
         warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
-        detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
+        detector = StuckDetector()  # loop shapes REPEAT_LIMIT cannot see; always on (the stuckDetection key is legacy)
         perm_rules = permrules.load_rules(permissions.get(cfg, "permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
         stuck_hits = 0
@@ -2436,7 +2405,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             asking or refusing it, not a writer, a spawn or session-holding tool, and no plan in play. The first call
             that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
             tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
-            width = max(1, int(cfg.get("parallelReads") or 1))
+            width = limits.slots(cfg, "parallelReads")
             if width < 2 or planning or active_plan is not None or plan_seen or proposal_only(run):
                 return 1
             sim = dict(tool_ctx)
@@ -3058,7 +3027,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
                         explicit_ask=(explicit == "ask" and not locked_spec) or (mode == "ask" and perm.kind in ("rule", "external_directory")),
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
-                        hard_forced=hard_forced, soft_forced=lockable and not hard_forced, fenced=bool(fs_ask),
+                        hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
+                        # a write outside the workspace folders or a runaway repeat stays a card even in allow-all
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
                     if rt == "run":
                         if mode == "ask":
@@ -3840,8 +3811,8 @@ async def _desk_supervisor(desk_id: str, run: Run) -> None:
 
 
 def _over_live_cap() -> bool:
-    cap = int(settings().get("deskMaxLive") or 0)
-    return cap > 0 and desks.live_count() >= cap
+    cap = limits.slots(settings(), "deskMaxLive")
+    return desks.live_count() >= cap
 
 
 def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...]) -> Run | dict[str, Any] | None:
@@ -3988,7 +3959,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     if not row:
         raise HTTPException(404, "Conversation not found")
     # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
-    if body.content is not None and (too_long := _message_too_long(body.content, settings())):
+    if body.content is not None and (too_long := _message_too_long(body.content, settings(), str(row.get("model") or ""))):
         raise HTTPException(413, too_long)
     _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
     # A chat with a live run is never hidden: writing in an archived one brings it back.
@@ -4036,7 +4007,7 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     attachments = _resolve_attachments(conv, body.attachments)
     if not text and not attachments:
         raise HTTPException(400, "Empty message")
-    if too_long := _message_too_long(text, settings()):
+    if too_long := _message_too_long(text, settings(), str(conv.get("model") or "")):
         raise HTTPException(413, too_long)
     # Only a run that is still answering can fold the message into a round; past its `done` the loop
     # is over, so accepting one here would store a message nothing ever replies to.
@@ -9450,7 +9421,7 @@ async def delete_desk(id: str, purge: bool = False) -> dict[str, bool]:
 def _queued_view(desk_id: str) -> dict[str, Any]:
     """What a route answers for a desk that joined the queue instead of starting."""
     return {"queued": True, "position": desks.queue_position(desk_id),
-            "live": desks.live_count(), "max": int(settings().get("deskMaxLive") or 0)}
+            "live": desks.live_count(), "max": limits.slots(settings(), "deskMaxLive")}
 
 
 @app.post("/cowork/desks/{id}/start")

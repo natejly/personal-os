@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, compaction, llm, permissions, permrules, redact
+from . import approval_log, autoreview, compaction, limits, llm, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
@@ -672,7 +672,7 @@ class Subagents:
         if role is None:
             names = ", ".join(sorted(BUILTIN_ROLES) + [d["name"] for d in (self.defs.list(True) if self.defs else []) if not d["hidden"]])
             return tool_error(redact.scrub_command_output(f"Unknown agent role {a.get('role')!r}."), field="role", expected=names)
-        if len(self.running()) >= max(1, self._int("subagentMaxConcurrent")):
+        if len(self.running()) >= limits.slots(self.settings(), "subagentMaxConcurrent"):
             return {"started": False, "state": "not_started",
                     "note": "not started: concurrency cap, call agent_wait first (or finish this one yourself)."}
         narrow = a.get("tools")
@@ -1003,7 +1003,9 @@ class Subagents:
                     explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
                         mode == "ask" and perm.kind in ("rule", "external_directory")),
                     covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
-                    hard_forced=hard_forced, soft_forced=lockable and not hard_forced, fenced=bool(fs_ask),
+                    hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
+                    # a write outside the workspace folders or a runaway repeat stays a card even in allow-all
+                    fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
                     question=name in permrules.STILL_ASK)
                 if rt == "run":
                     if mode == "ask":

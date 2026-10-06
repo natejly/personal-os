@@ -44,7 +44,7 @@ export default function ApprovalHistory(): JSX.Element {
         {rows === null ? <p className="muted small">Loading…</p> : rows.length === 0 ? <p className="muted small">Nothing recorded yet.</p> : (
           <ul>
             {rows.map((r) => {
-              const review = reviewLine({ verdict: r.reviewer_verdict, reason: r.reviewer_reason, confidence: r.reviewer_confidence })
+              const review = reviewLine({ verdict: r.reviewer_verdict, reason: r.reviewer_reason })
               return (
                 <li key={r.id}>
                   <span>

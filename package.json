@@ -15,7 +15,8 @@
     "test:expr": "node scripts/test-expr.mjs",
     "bundle:backend": "scripts/bundle-backend.sh",
     "package": "scripts/bundle-backend.sh && electron-vite build && electron-builder --mac --config electron-builder.config.cjs",
-    "package:x64": "scripts/bundle-backend.sh x64 && electron-vite build && electron-builder --mac --x64 --config electron-builder.config.cjs"
+    "package:x64": "scripts/bundle-backend.sh x64 && electron-vite build && electron-builder --mac --x64 --config electron-builder.config.cjs",
+    "install-app": "scripts/install-app.sh"
   },
   "dependencies": {
     "blobatar": "^2.7.0",

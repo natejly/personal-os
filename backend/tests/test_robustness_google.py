@@ -1,5 +1,5 @@
 """Failure cases in the Google sync paths: a changed sync target, a todo Google refuses,
-a deleted mirror calendar, a flaky token refresh. No network; Google is a small fake.
+a flaky token refresh. No network; Google is a small fake.
 """
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from personal_os import google as google_mod  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.google_store import ReadStore  # noqa: E402
 from personal_os.gtasks import TasksSync  # noqa: E402
-from personal_os.todocal import TodoCalendarMirror  # noqa: E402
 from personal_os.todos import Todos, clean_due  # noqa: E402
 
 
@@ -167,62 +166,6 @@ def test_a_todo_deleted_during_the_insert_is_not_resurrected() -> None:
     assert g.lists["@default"] == {}
     g.tasks_insert = insert  # type: ignore[method-assign]
     assert sync.sync_once()["created_local"] == 0
-
-
-# ---- calendar mirror ----
-class _Calendar:
-    def __init__(self) -> None:
-        self.events: dict[str, dict[str, Any]] = {}
-        self.calendars = {"cal-1"}
-        self.n = 0
-
-    def calendar_ensure(self, summary: str) -> dict[str, Any]:
-        self.n += 1
-        cid = f"cal-{self.n + 1}"
-        self.calendars.add(cid)
-        return {"id": cid, "summary": summary, "created": True}
-
-    def calendar_create(self, event: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
-        if calendar_id not in self.calendars:
-            raise RuntimeError("404 Not Found")
-        if event["summary"] == "Refused":
-            raise RuntimeError("400 Bad Request")
-        self.n += 1
-        eid = f"e{self.n}"
-        self.events[eid] = {"id": eid, "calendar_id": calendar_id, **event}
-        return {**self.events[eid], "link": f"https://cal/{eid}"}
-
-    def calendar_delete(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
-        self.events.pop(event_id, None)
-        return {"deleted": event_id}
-
-
-def test_one_refused_event_does_not_block_the_mirror() -> None:
-    todos, g = _todos(), _Calendar()
-    settings = _Settings(googleTodoCalendar={"enabled": True, "calendarId": "cal-1"})
-    mirror = TodoCalendarMirror(todos, g, settings.get, settings.set)  # type: ignore[arg-type]
-    todos.create("Refused", due="2026-10-05")
-    todos.create("Fine", due="2026-10-06")
-
-    counts = mirror.sync_once()
-
-    assert counts["created"] == 1
-    assert [e["summary"] for e in g.events.values()] == ["Fine"]
-    assert mirror.last_error and "Refused" in mirror.last_error
-
-
-def test_a_deleted_mirror_calendar_is_recreated() -> None:
-    todos, g = _todos(), _Calendar()
-    settings = _Settings(googleTodoCalendar={"enabled": True, "calendarId": "cal-gone"})
-    mirror = TodoCalendarMirror(todos, g, settings.get, settings.set)  # type: ignore[arg-type]
-    todos.create("Dentist", due="2026-10-05")
-
-    counts = mirror.sync_once()
-
-    new_id = settings.data["googleTodoCalendar"]["calendarId"]
-    assert new_id and new_id != "cal-gone"
-    assert counts["created"] == 1
-    assert [e["calendar_id"] for e in g.events.values()] == [new_id]
 
 
 # ---- google.py helpers ----

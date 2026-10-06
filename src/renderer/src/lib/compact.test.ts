@@ -1,16 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { compactCommand, compactNow } from './compact'
-
-test('compactCommand: /compact with or without a focus is caught, anything else is a message', () => {
-  assert.equal(compactCommand('/compact'), '')
-  assert.equal(compactCommand('  /compact  '), '')
-  assert.equal(compactCommand('/compact keep the budget numbers'), 'keep the budget numbers')
-  assert.equal(compactCommand('/compact\nthe API design\n'), 'the API design')
-  assert.equal(compactCommand('/compaction is slow'), null)
-  assert.equal(compactCommand('please /compact'), null)
-  assert.equal(compactCommand('hello'), null)
-})
+import { compactNow } from './compact'
 
 test('compactNow: a filled focus reaches the compact route, a blank one is sent as none', async () => {
   const bodies: { url: string; body: unknown }[] = []

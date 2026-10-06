@@ -8,10 +8,8 @@ Sync bookkeeping lives here so every writer behaves the same:
 - `on_change` (set by the app) is fired after any user-visible mutation; the sync services
   use it to schedule a near-immediate sync. Sync's own writes pass notify=False.
 
-The Google Calendar mirror (todocal.py) reuses the same shape one level over:
-`calendar_event_id`/`calendar_id` point at the mirrored event and `calendar_sig` records the
-todo fields as last mirrored, so a pass can tell what actually changed. Deleting a todo that
-had an event leaves an event tombstone so the mirror can delete the event too.
+`calendar_event_id`/`calendar_link`/`calendar_id` hold an event the user put the todo on by hand. The
+`calendar_sig` column and the `todo_event_tombstones` table are leftovers of a removed mirror; nothing reads them.
 """
 from __future__ import annotations
 
@@ -97,7 +95,6 @@ def clean_due(due: Any) -> str | None:
 
 # Board columns are statuses now. A todo's `status` is a free column name, NULL meaning "derive it":
 # Done for a finished todo, To do otherwise. Moving to a done-like status completes the todo.
-DEFAULT_STATUSES = ["Backlog", "To do", "In progress", "Done"]
 _DONE_WORDS = ("done", "complete", "completed", "finished", "shipped")
 
 
@@ -366,11 +363,6 @@ class Todos:
             fields["estimate_min"] = int(fields["estimate_min"]) if fields["estimate_min"] else None
         before = self.get(id)
         completing = bool(before and fields.get("done") and not before["done"] and before.get("repeat"))
-        relink = before is not None and "calendar_event_id" in fields
-        if relink:
-            # A caller placed the event itself: the mirror adopts it rather than rewriting it against
-            # the old event's signature, and a replaced event is tombstoned so the mirror deletes it.
-            fields["calendar_sig"] = None
         if "done" in fields:
             fields["done"] = int(bool(fields["done"]))
             fields["completed_at"] = now() if fields["done"] else None
@@ -379,8 +371,6 @@ class Todos:
         with self.db.tx() as c:
             c.execute(f"UPDATE todos SET {sets} WHERE id=?", (*fields.values(), id))
             self._register_list(c, fields.get("list_name"))
-            if relink and before and before.get("calendar_event_id") not in (None, fields["calendar_event_id"]):
-                self._tombstone(c, {"calendar_event_id": before["calendar_event_id"], "calendar_id": before.get("calendar_id")})
             if completing:
                 c.execute("UPDATE todos SET repeat=NULL WHERE id=?", (id,))
         if completing and before:
@@ -452,9 +442,6 @@ class Todos:
     def _tombstone(c: Any, t: dict[str, Any]) -> None:
         if t.get("external_id"):
             c.execute("INSERT OR REPLACE INTO todo_tombstones(external_id, deleted_at) VALUES(?,?)", (t["external_id"], now()))
-        if t.get("calendar_event_id"):
-            c.execute("INSERT OR REPLACE INTO todo_event_tombstones(event_id, calendar_id, deleted_at) VALUES(?,?,?)",
-                      (t["calendar_event_id"], t.get("calendar_id"), now()))
 
     def delete(self, id: str, notify: bool = True, tombstone: bool = True) -> None:
         """Erase a todo for good. The user-facing delete is `trash`; this is the purge and the sync's own."""
@@ -469,8 +456,8 @@ class Todos:
             self._changed()
 
     def trash(self, id: str, deleted_with: str | None = None, notify: bool = True) -> bool:
-        """Soft delete. The remote Google task and mirrored calendar event are still deleted the way a hard
-        delete would (tombstones), and the todo forgets its links, so a restore comes back as a new task
+        """Soft delete. The remote Google task is still deleted the way a hard
+        delete would (tombstone), and the todo forgets its links, so a restore comes back as a new task
         instead of pointing at one that no longer exists."""
         with self.db.tx() as c:
             t = row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
@@ -478,7 +465,7 @@ class Todos:
                 return False
             self._tombstone(c, t)
             c.execute("UPDATE todos SET deleted_at=?, deleted_with=?, external_id=NULL, remote_updated=NULL, synced_at=NULL,"
-                      " calendar_event_id=NULL, calendar_link=NULL, calendar_id=NULL, calendar_sig=NULL WHERE id=?",
+                      " calendar_event_id=NULL, calendar_link=NULL, calendar_id=NULL WHERE id=?",
                       (now(), deleted_with, id))
         if notify:
             self._changed()
@@ -525,21 +512,6 @@ class Todos:
     def clear_tombstone(self, external_id: str) -> None:
         with self.db.tx() as c:
             c.execute("DELETE FROM todo_tombstones WHERE external_id=?", (external_id,))
-
-    # ---- calendar mirror support ----
-    def set_calendar_state(self, id: str, event_id: str | None, link: str | None, calendar_id: str | None, sig: str | None) -> None:
-        """Record where a todo stands against its mirrored calendar event; never bumps updated_at."""
-        with self.db.tx() as c:
-            c.execute("UPDATE todos SET calendar_event_id=?, calendar_link=?, calendar_id=?, calendar_sig=? WHERE id=?",
-                      (event_id, link, calendar_id, sig, id))
-
-    def event_tombstones(self) -> list[dict[str, Any]]:
-        with self.db.tx() as c:
-            return [row_to_dict(r) for r in c.execute("SELECT * FROM todo_event_tombstones").fetchall()]  # type: ignore[misc]
-
-    def clear_event_tombstone(self, event_id: str) -> None:
-        with self.db.tx() as c:
-            c.execute("DELETE FROM todo_event_tombstones WHERE event_id=?", (event_id,))
 
     def stats(self) -> dict[str, int]:
         # `due` is the user's local date; SQLite date('now') is UTC and is a day ahead every evening.

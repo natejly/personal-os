@@ -65,10 +65,3 @@ export function buildPreviewDoc(code: string, kind: 'html' | 'svg' = 'html'): st
 export function hasScript(code: string): boolean {
   return /<script[\s>]/i.test(code || '')
 }
-
-/** The attribute set the preview iframe must use; exported so a test pins it. */
-export function isSafeSandbox(attr: string): boolean {
-  const tokens = attr.split(/\s+/).filter(Boolean)
-  return tokens.length > 0 && tokens.every((t) => t === 'allow-scripts')
-}
-

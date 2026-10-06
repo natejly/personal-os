@@ -21,7 +21,7 @@ export interface ModuleView {
 
 export interface ModuleNav {
   /** 'apps' is the icon strip at the right of every title bar (AppSwitcher), not a sidebar section. */
-  section: 'main' | 'knowledge' | 'apps'
+  section: 'apps'
   /** Position among the section's entries; the shell's own entries use multiples of 10. */
   order: number
   /** The count shown beside the entry, or null for none. Runs inside a store selector: keep it pure and cheap. */

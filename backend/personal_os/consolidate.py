@@ -73,10 +73,6 @@ def _norm_tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def jaccard(a: str, b: str) -> float:
-    return _jaccard_sets(_norm_tokens(a), _norm_tokens(b))
-
-
 def _jaccard_sets(ta: set[str], tb: set[str]) -> float:
     return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
 

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapTaskLine, taskLines, toggleTaskAt } from './tasks'
+import { taskLineMap, taskLines, toggleTaskAt } from './tasks'
 import { normalizeMathBlocks } from '../../lib/mathBlocks'
 
 test('toggling flips the box on exactly that line', () => {
@@ -36,8 +36,9 @@ test('math normalisation shifts lines but the task mapping still lands on the so
   const norm = taskLines(md)
   const orig = taskLines(src)
   assert.notDeepEqual(norm, orig)
-  norm.forEach((n, i) => assert.equal(mapTaskLine(src, md, n), orig[i]))
-  assert.equal(mapTaskLine(src, md, 1), null)
-  const flipped = toggleTaskAt(src, mapTaskLine(src, md, norm[2])!)
+  const map = taskLineMap(src, md)
+  norm.forEach((n, i) => assert.equal(map.get(n), orig[i]))
+  assert.equal(map.get(1), undefined)
+  const flipped = toggleTaskAt(src, map.get(norm[2])!)
   assert.ok(flipped?.endsWith('- [x] third'))
 })

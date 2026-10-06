@@ -5,7 +5,7 @@ import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './bloc
 import { registerToolCard, type ToolCardProps } from './registry'
 
 /** run_python: the script (collapsed), what it printed, and the files it wrote into the desk. Figures show as images under the card. */
-export default function PythonCard(props: ToolCardProps): JSX.Element {
+function PythonCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const d = p.data

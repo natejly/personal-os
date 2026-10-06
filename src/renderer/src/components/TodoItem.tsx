@@ -14,33 +14,27 @@ export { dueLabel }
 
 /** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime.
  *
- * A todo that already has an event (the mirror's, or an earlier placement) has that event moved;
- * a second event would leave the first one orphaned on the calendar. Otherwise the event is made
- * first and the due date and link are written together, so the todo -> calendar mirror
- * (todocal.py) is never poked with a dated, unlinked todo and never makes an event of its own.
- * Writing the link resets the mirror's signature, so its next pass adopts the event at the time
- * picked here.
+ * A todo that already has an event (an earlier placement) has that event moved; a second event
+ * would leave the first one orphaned on the calendar. Otherwise the event is made first and the due
+ * date and link are written together.
  */
 export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   const app = useStore.getState()
   const cur = app.todos.find((t) => t.id === todo.id) ?? todo
   const when = start || todo.due || localDay()
-  const mirror = app.todoCalendar
-  const calendarId = (mirror?.config.enabled && mirror.config.calendarId) || undefined
   let ev: CalendarEvent | null = null
   if (cur.calendar_event_id) {
     // Gone or not writable: fall through and make a new one; the server tombstones the old link.
-    // The mirror's all-day marker is free time; a block placed at an hour should look booked, like a new event.
+    // An all-day marker is free time; a block placed at an hour should look booked, like a new event.
     const busy = when.length > 10 ? { transparency: 'opaque' } : {}
     try { ev = await api.google.updateEvent(cur.calendar_event_id, { start: when, calendar_id: cur.calendar_id ?? 'primary', ...busy }) } catch { ev = null }
   }
   ev ??= await api.google.createEvent({
     summary: todo.title,
     start: when,
-    description: todo.notes || undefined,
-    ...(calendarId ? { calendar_id: calendarId } : {})
+    description: todo.notes || undefined
   })
-  const link = { calendar_event_id: ev.id, calendar_link: ev.link, calendar_id: ev.calendar_id ?? calendarId ?? null }
+  const link = { calendar_event_id: ev.id, calendar_link: ev.link, calendar_id: ev.calendar_id ?? null }
   const due = when.slice(0, 10)
   await app.updateTodo(todo.id, { ...link, ...(cur.due !== due ? { due } : {}) })
   return { ...cur, due, ...link }

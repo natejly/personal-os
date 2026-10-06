@@ -78,7 +78,7 @@ export function ShipChecklistView({ checklist: c }: { checklist: ShipChecklist }
 }
 
 /** ship_checklist / ship_status in the transcript: the call's arguments, then the live checklist it started. */
-export default function ShipChecklistCard(props: ToolCardProps): JSX.Element {
+function ShipChecklistCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const id = str(p.data?.ship_checklist_id) || (event.name === 'ship_status' ? str(event.arguments.id) : '')

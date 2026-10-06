@@ -88,5 +88,3 @@ export const def: WidgetDef = {
   chrome: 'full',
   Component: ActivityWidget
 }
-
-export default ActivityWidget

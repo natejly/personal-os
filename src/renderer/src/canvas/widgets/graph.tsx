@@ -4,7 +4,7 @@ import { useStore, type Scope } from '../../store'
 import GraphView from '../../components/GraphView'
 import type { WidgetDef, WidgetProps } from '../registry'
 
-export default function GraphWidget({ window: win, focused, live, onConfig }: WidgetProps): JSX.Element {
+function GraphWidget({ window: win, focused, live, onConfig }: WidgetProps): JSX.Element {
   const projects = useStore((s) => s.projects)
   const refreshGraph = useStore((s) => s.refreshGraph)
   const loaded = useRef(false)

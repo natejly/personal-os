@@ -32,5 +32,3 @@ export const useRingStatus = (conversationId: string | null | undefined): RingSt
   const expired = status === 'done' && finishedAt !== null && Date.now() - finishedAt >= HOLD_MS
   return { status: expired ? 'idle' : status, approvals }
 }
-
-export default useRingStatus

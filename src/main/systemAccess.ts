@@ -1,5 +1,9 @@
 import { desktopCapturer, Notification, shell, systemPreferences } from 'electron'
 import { execFile } from 'child_process'
+import { mkdtemp, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { attachScript, isAttachId } from '../shared/codingAttach'
 import {
   automationScript, isAllowedPaneUrl, mediaState, parseOsascript, PANE_URLS,
   type AccessState, type MainStatus
@@ -62,7 +66,17 @@ async function grant(id: string): Promise<Grant> {
   return { state }
 }
 
+/** Opens Terminal on `claude attach <id>`. Only ever called from a click; the id is checked before it reaches the file. */
+async function codingAttach(id: unknown): Promise<boolean> {
+  if (!isMac || !isAttachId(id)) return false
+  const dir = await mkdtemp(join(tmpdir(), 'grain-attach-'))
+  const file = join(dir, 'attach.command')
+  await writeFile(file, attachScript(id), { mode: 0o700 })
+  return new Promise((resolve) => execFile('/usr/bin/open', ['-a', 'Terminal', file], (err) => resolve(!err)))
+}
+
 export function registerSystemAccess(): void {
+  handle('coding:attach', (_e, id: unknown) => codingAttach(id))
   handle('sysaccess:status', () => status())
   handle('sysaccess:grant', (_e, id: unknown) => grant(String(id)))
   handle('sysaccess:open-pane', async (_e, url: unknown) => {

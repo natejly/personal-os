@@ -17,7 +17,7 @@ from .secrets import SecretStore
 log = logging.getLogger("personal_os.db")
 
 # Settings whose values live in the secret store, not in SQLite (the settings row is left blank).
-SECRET_SETTINGS = ("apiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
+SECRET_SETTINGS = ("apiKey", "firecrawlApiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
 # These settings are dicts; only the listed fields are secret, the rest (email, expiry, scopes) stays in SQLite.
 TOKEN_SECRET_FIELDS = {
     "googleToken": ("token", "refresh_token", "client_secret"),

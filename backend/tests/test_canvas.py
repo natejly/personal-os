@@ -1,4 +1,4 @@
-"""Canvas + notes routes against the real app. Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_canvas.py"""
+"""Canvas routes against the real app. Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_canvas.py"""
 from __future__ import annotations
 
 import os
@@ -70,7 +70,7 @@ def test_canvas_crud() -> None:
 def test_windows_and_z() -> None:
     cid = j("GET", "/canvases")[0]["id"]
     a = j("POST", f"/canvases/{cid}/windows", {"kind": "todos", "x": 10, "y": 20})
-    b = j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": "n1", "w": 300, "h": 300})
+    b = j("POST", f"/canvases/{cid}/windows", {"kind": "doc", "ref_id": "n1", "w": 300, "h": 300})
     c = j("POST", f"/canvases/{cid}/windows", {"kind": "recap", "title": "Today"})
     check([a["z"], b["z"], c["z"]] == [0, 1, 2], "z is MAX+1 per canvas")
     check(a["w"] == 520 and a["h"] == 640 and a["state"] == "normal", "window defaults")
@@ -192,41 +192,6 @@ def test_opacity() -> None:
     j("DELETE", f"/windows/{w['id']}")
 
 
-def test_notes() -> None:
-    n = j("POST", "/notes", {"body": "milk, eggs"})
-    check(n["color"] == "yellow" and n["project_id"] is None, "note defaults")
-    check(j("GET", f"/notes/{n['id']}")["body"] == "milk, eggs", "GET /notes/{id}")
-    j("GET", "/notes/nope", expect=404)
-    upd = j("PUT", f"/notes/{n['id']}", {"body": "milk, eggs, bread", "color": "blue"})
-    check(upd["body"] == "milk, eggs, bread" and upd["color"] == "blue", "note update")
-    check(upd["updated_at"] >= n["updated_at"], "note update touches updated_at")
-    j("PUT", "/notes/nope", {"body": "x"}, expect=404)
-
-    pid = j("POST", "/projects", {"name": "Canvas test"})["id"]
-    scoped = j("POST", "/notes", {"body": "project-only", "project_id": pid})
-    check(scoped["project_id"] == pid, "note takes a project")
-    check(len(j("GET", "/notes")) == 2, "default list is every scope")
-    check([x["id"] for x in j("GET", f"/notes?project_id={pid}")] == [scoped["id"]], "project scope filters")
-    check([x["id"] for x in j("GET", "/notes?project_id=personal")] == [n["id"]], "personal scope is project_id IS NULL")
-    check(len(j("GET", "/notes?project_id=all")) == 2, "all scope")
-    check([x["id"] for x in j("GET", "/notes?q=bread")] == [n["id"]], "q is a LIKE on body")
-    check(j("PUT", f"/notes/{scoped['id']}", {"clear_project": True})["project_id"] is None, "clear_project unbinds")
-
-    j("PUT", f"/notes/{scoped['id']}", {"project_id": pid})
-    j("DELETE", f"/projects/{pid}")
-    survivor = j("GET", f"/notes/{scoped['id']}")
-    check(survivor["project_id"] is None, "deleting a project SET NULLs its notes rather than deleting them")
-
-    cid = j("GET", "/canvases")[0]["id"]
-    w = j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": n["id"]})
-    keep = j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": scoped["id"]})
-    j("DELETE", f"/notes/{n['id']}")
-    j("GET", f"/notes/{n['id']}", expect=404)
-    j("GET", f"/windows/{w['id']}", expect=404)
-    check(j("GET", f"/windows/{keep['id']}")["ref_id"] == scoped["id"], "deleting a note only sweeps its own windows")
-    j("DELETE", f"/notes/{scoped['id']}")
-
-
 def test_lock() -> None:
     made = j("POST", "/canvases", {"name": "Frozen"})
     check(made["locked"] == 0, "a new space starts unlocked")
@@ -243,7 +208,7 @@ def test_lock() -> None:
 
 
 TESTS = [test_default_seed, test_canvas_crud, test_lock, test_windows_and_z, test_layout_bulk, test_window_config_merges,
-         test_raise, test_move_between_canvases, test_copy_from, test_opacity, test_notes]
+         test_raise, test_move_between_canvases, test_copy_from, test_opacity]
 
 if __name__ == "__main__":
     failures = 0

@@ -49,8 +49,8 @@ def test_add_arrange_and_guards() -> None:
     assert "space_add_widget" in _offered({})
     assert "space_add_widget" not in _offered({"space_add_widget": "off"})
     assert call("space_add_widget", canvas_id=sid, kind="bogus")["error"]
-    assert call("space_add_widget", canvas_id=sid, kind="note", ref_id="missing")["error"]
-    assert call("space_add_widget", canvas_id=sid, kind="note")["error"]
+    assert call("space_add_widget", canvas_id=sid, kind="doc", ref_id="missing")["error"]
+    assert call("space_add_widget", canvas_id=sid, kind="doc")["error"]
     assert call("space_add_widget", canvas_id="nope", kind="todos")["error"]
     for _ in range(5):
         assert call("space_add_widget", canvas_id=sid, kind="todos")["added"]

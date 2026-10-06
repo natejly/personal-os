@@ -133,7 +133,7 @@ test('relaunch restores spaces, active layout and lock', async ({ grain }) => {
   const { api } = grain
   const s = (await spaces(grain))[0]
   await api('/canvases', { method: 'POST', body: { name: 'Second' } })
-  const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'note', ref_id: (await api('/notes', { method: 'POST', body: { body: 'hi' } })).id, x: 123, y: 77, w: 301, h: 222 } })
+  const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'doc', ref_id: (await api('/docs', { method: 'POST', body: { title: 'hi', content: 'hi' } })).id, x: 123, y: 77, w: 301, h: 222 } })
   await api(`/canvases/${s.id}`, { method: 'PUT', body: { zoom: 1.25, pan_x: -40, pan_y: 22, locked: true } })
   await grain.relaunch()
   await enterCanvas(grain)
@@ -153,7 +153,7 @@ test('relaunch restores spaces, active layout and lock', async ({ grain }) => {
 test('lock blocks add / close / move; unlock restores them', async ({ grain }) => {
   const { api, page, app } = grain
   const s = (await spaces(grain))[0]
-  const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'note', x: 100, y: 100, w: 300, h: 220 } })
+  const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'face', x: 100, y: 100, w: 300, h: 220 } })
   await page.reload()
   await page.waitForSelector('.sidebar')
   await enterCanvas(grain)

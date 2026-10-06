@@ -60,10 +60,10 @@ def register(box: Any) -> None:
         return {"window_id": win["id"], "canvas_id": canvas_id, "kind": kind, "added": True} if win else {"error": "space vanished"}
     box.specs["space_add_widget"] = ToolSpec(
         "space_add_widget",
-        "Put a window on a space: a todos/calendar/memory/etc. view, or an existing chat, note or project "
+        "Put a window on a space: a todos/calendar/memory/etc. view, or an existing chat, doc or project "
         "(pass its id as ref_id). Never closes or moves other windows.",
         _obj({"canvas_id": {"type": "string"}, "kind": {"type": "string", "enum": list(WIDGET_KINDS)},
-              "ref_id": {"type": "string", "description": "Required for chat, note, project"},
+              "ref_id": {"type": "string", "description": "Required for chat, doc, project"},
               "title": {"type": "string"}}, ["canvas_id", "kind"]),
         space_add_widget, "spaces", "writes")
 

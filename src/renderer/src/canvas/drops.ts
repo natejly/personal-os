@@ -41,7 +41,6 @@ export async function openPayload(p: DragPayload | null, t: OpenTarget = {}): Pr
     case 'document': return open('documents')
     case 'memory': return open('memory')
     case 'project': return ensure('project', p.id)
-    case 'note': return ensure('note', p.id)
     case 'doc': return ensure('doc', p.id)
     case 'file': return upload()
     // A desk or a workflow lands as its crew: the agents under it, nested, each saying what it is on.

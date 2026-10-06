@@ -530,7 +530,8 @@ export default function SettingsModal(): JSX.Element {
               )}
               <PlannerMailSettings />
               <h4>Web search keys</h4>
-              <p className="muted small">All optional. Without a key, web search uses Exa, then DuckDuckGo.</p>
+              <p className="muted small">All optional. A Firecrawl key makes it the first engine for web search and page reads. Without one, web search uses Exa, then DuckDuckGo.</p>
+              <label><span className="toggle-text"><b>Firecrawl API key</b><small>Searches and reads pages first when set; the engines below are the fallback. Firecrawl sees the page address. {settings.firecrawlEnvKey && !settings.firecrawlApiKeySet ? 'Using FIRECRAWL_API_KEY from the environment.' : 'Empty uses FIRECRAWL_API_KEY from the environment, if set.'}</small></span><input type="password" value={draft.firecrawlApiKey ?? ''} onChange={(e) => patch({ firecrawlApiKey: e.target.value })} placeholder={settings.firecrawlApiKeySet ? 'Saved. Type to replace' : 'fc-…'} spellCheck={false} /></label>
               <label><span className="toggle-text"><b>Brave Search API key</b></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
               <label><span className="toggle-text"><b>Tavily API key</b><small>An alternative to Brave.</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
               <label><span className="toggle-text"><b>Exa API key</b><small>Exa works without one; a key lifts its rate limit.</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
@@ -540,7 +541,7 @@ export default function SettingsModal(): JSX.Element {
               <details className="modal-free">
                 <summary>Advanced</summary>
                 <label className="toggle-row plain">
-                  <span className="toggle-text"><b>Retry blocked pages through Jina Reader</b><small>For pages that are blocked or need JavaScript. Jina sees the page address.</small></span>
+                  <span className="toggle-text"><b>Retry blocked pages through Jina Reader</b><small>For pages that are blocked or need JavaScript; with a Firecrawl key, Firecrawl reads pages first. Jina sees the page address.</small></span>
                   <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} /><span className="switch" />
                 </label>
               </details>

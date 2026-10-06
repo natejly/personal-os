@@ -1283,6 +1283,9 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
+  firecrawlApiKeySet?: boolean
+  /** FIRECRAWL_API_KEY is set in the backend's environment; used when the field is empty. Never the value. */
+  firecrawlEnvKey?: boolean
   braveApiKeySet?: boolean
   tavilyApiKeySet?: boolean
   exaApiKeySet?: boolean
@@ -1440,6 +1443,8 @@ export interface Settings {
   workEnvPackages?: string[]
   /** fs_edit and an overwriting write refuse a file this chat has not read. Missing means on. */
   requireReadBeforeWrite?: boolean
+  /** When set, Firecrawl answers web search and page reads first; the other engines are the fallback. Empty = the FIRECRAWL_API_KEY environment variable, if any. */
+  firecrawlApiKey?: string
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
@@ -2002,7 +2007,7 @@ export interface PromotionResult {
 
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
-  | 'chat' | 'todos' | 'calendar' | 'note'
+  | 'chat' | 'todos' | 'calendar'
   | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'doc' | 'face' | 'crew'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
@@ -2045,8 +2050,6 @@ export interface Canvas {
 /** One row of the bulk `PUT /canvases/{id}/layout` body; every field but `id` is optional. */
 export interface WindowLayout { id: string; x?: number; y?: number; w?: number; h?: number; z?: number; state?: WindowState }
 
-export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
-
 /** One row in the trash (GET /trash). Deleting is soft: it sits here for `retention_days`, then is purged. */
 export type TrashKind = 'project' | 'conversation' | 'doc' | 'document' | 'memory' | 'todo'
 export interface TrashItem {
@@ -2069,7 +2072,7 @@ export interface TrashListing {
 
 /**
  * A doc: long-form markdown the user writes in the Docs editor. Distinct from `Document` (a file they
- * uploaded, for retrieval) and from `Note` (canvas mode's sticky note).
+ * uploaded, for retrieval).
  */
 export interface Doc {
   id: string
@@ -2198,7 +2201,7 @@ export interface CanvasPreset {
 export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
-  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'note' | 'file' | 'nav'
+  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'file' | 'nav'
   /** A Files doc: opens as a doc window editing it in place. */
   | 'doc'
   /** A desk, a saved workflow or one run of it: each opens as a crew window showing its agents. */
@@ -2813,9 +2816,9 @@ export interface ActivityContextFile {
 }
 
 /** ---- meetings -----------------------------------------------------------
- *  A recorded conversation plus the notes taken during it. The fourth text-bearing type, and
- *  distinct from the other three: `Doc` is markdown the user writes, `Document` is a file they
- *  uploaded and had chunked for retrieval, `Note` is canvas mode's sticky. A meeting is the only
+ *  A recorded conversation plus the notes taken during it. The third text-bearing type, and
+ *  distinct from the other two: `Doc` is markdown the user writes, `Document` is a file they
+ *  uploaded and had chunked for retrieval. A meeting is the only
  *  one whose body is partly machine-made, so it keeps the two apart — `notes` is what the user
  *  typed and has exactly one writer, `enhanced` is only ever set by accepting a MeetingRevision.
  *  Nothing here expires: unlike ActivityEvent there is no `expires_at`, so /activity/purge cannot

@@ -136,7 +136,7 @@ check(len(j("GET", f"/docs/{did}/revisions")) == n, "restoring the current versi
 
 # ---- tools ----
 names = {n for n, s in toolbox.specs.items() if s.group == "docs"}  # by group: doc_guide shares the prefix, not the feature
-check(names == {"doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete"}, f"doc tools registered: {names}")
+check(names == {"doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply"}, f"doc tools registered: {names}")
 check(toolbox.specs["doc_edit"].danger == "writes", "doc_edit is a write")
 check(toolbox.specs["doc_read"].danger == "safe", "doc_read is read-only")
 
@@ -244,7 +244,7 @@ j("GET", f"/docs/{did}", expect=404)
 check(True, "a deleted doc is gone")
 
 # ---- the neighbouring surfaces still answer ----
-for path in ("/health", "/notes", "/todos"):
+for path in ("/health", "/todos"):
     j("GET", path)
 check(True, "the routes that were already there still work")
 

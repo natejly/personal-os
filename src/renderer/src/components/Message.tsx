@@ -274,7 +274,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const isUser = message.role === 'user'
   const ctx = message.context_used
   // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
-  const ctxCount = ctx?.nodes.length ?? 0
+  const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
   const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeInfo(c)])), [chunks])
@@ -289,7 +289,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
-    <div className={`msg ${message.role}`}>
+    <div className={`msg ${message.role}`} data-message-id={message.id}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
       {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
@@ -345,7 +345,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && ctx && ctxCount > 0 && (
               <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-                <span><Share2 size={11} />{ctx.nodes.length}</span>
+                <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
               </button>
             )}
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}

@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { actionLabel, formatCount, groupByChat, groupByKind, kindLabel, rowAction, type ChatFile } from './chatFiles'
+import { actionLabel, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, type ChatFile } from './chatFiles'
 
 const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: Partial<ChatFile> = {}): ChatFile => ({
-  id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, created_at: at, missing: false, rel: null, ...over
+  id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, chat_count: 1, pinned: false, created_at: at, missing: false, rel: null, ...over
 })
 
 test('groupByKind: fixed order, empty kinds left out', () => {
@@ -20,6 +20,25 @@ test('groupByChat: newest chat first, files keep their order, untitled fallback'
   assert.deepEqual(g[1].files.map((x) => x.id), ['a', 'c'])
 })
 
+test('groupByChat: files no chat touched share one titled group, ordered with the rest', () => {
+  const g = groupByChat([f('a', 'note', 'c1', 5), f('b', 'upload', 'c', 20, { conversation_id: null, conversation_title: null }), f('c', 'upload', 'c', 9, { conversation_id: null, conversation_title: null })])
+  assert.deepEqual(g.map((x) => [x.conversationId, x.title]), [['', 'Not from a chat'], ['c1', 'Chat c1']])
+  assert.deepEqual(g[0].files.map((x) => x.id), ['b', 'c'])
+})
+
+test('filesQuery: personal and project scopes, cursor and limit', () => {
+  assert.equal(filesQuery('personal'), '/chat-files?scope=personal&limit=50')
+  assert.equal(filesQuery({ projectId: 'p 1' }, 'a/b', 4), '/chat-files?scope=project&project_id=p%201&limit=4&cursor=a%2Fb')
+})
+
+test('projectFilter: name or chat title, case-insensitive, blank keeps all', () => {
+  const l = [f('Report.csv', 'output', 'c1', 3), f('b', 'upload', 'c2', 2, { conversation_id: null, conversation_title: null })]
+  assert.deepEqual(projectFilter(l, ' report ').map((x) => x.id), ['Report.csv'])
+  assert.deepEqual(projectFilter(l, 'chat c1').map((x) => x.id), ['Report.csv'])
+  assert.equal(projectFilter(l, '').length, 2)
+  assert.equal(projectFilter(l, 'zzz').length, 0)
+})
+
 test('formatCount: nothing for 0, capped at 99+', () => {
   assert.equal(formatCount(0), '')
   assert.equal(formatCount(-1), '')
@@ -31,6 +50,7 @@ test('formatCount: nothing for 0, capped at 99+', () => {
 test('labels', () => {
   assert.equal(actionLabel('attached'), 'Attached')
   assert.equal(actionLabel('saved'), 'Saved')
+  assert.equal(actionLabel('uploaded'), 'Uploaded')
   assert.equal(kindLabel('coding'), 'Coding')
 })
 

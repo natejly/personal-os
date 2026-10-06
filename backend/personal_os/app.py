@@ -38,6 +38,9 @@ from .consolidate import Consolidator
 from . import learn, memory_limits
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
+from .graph_backfill import BackfillRunning, GraphBackfill
+from .graph_learn import canonical_type, normalize_predicate
+from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .meeting_index import MeetingIndex
 from .retrieval import Retriever
@@ -514,7 +517,11 @@ retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
 meeting_index = MeetingIndex(db, meeting_store, embedder)
 meeting_store.on_final = lambda mid: meeting_index.schedule(settings(), [mid])
+graph_recall = GraphRecall(db, graph, embedder)
+memory_index.recall = graph_recall
+graph_backfill = GraphBackfill(db, graph, recall=graph_recall)  # runs only when asked (POST /graph/backfill)
 learner.index = memory_index
+learner.graph_recall = graph_recall  # entity resolution in the extractor
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 
@@ -1897,9 +1904,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     rq = retrieval_query(prior, user_text)
     doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
+    qvec = await _query_vec(rq, cfg, conv["settings"])
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
-        memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
+        memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
+        graph_hits=await _graph_hits(conv["project_id"], rq, cfg, conv["settings"], qvec),
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
@@ -3469,7 +3478,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
-        yield "learned", tool_ctx["learned"]
+        yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
     # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
     gone = convos.get(conv_id, with_messages=False) is None
@@ -5832,17 +5841,43 @@ async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], con
         return None
 
 
-async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+_UNSET: Any = object()  # "compute the query vector yourself"
+
+
+async def _query_vec(query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> Any:
+    """The turn's query embedding, computed once for memory and graph retrieval. None when neither is on or embeddings are off."""
+    if not (conv_settings.get("useMemory", True) or conv_settings.get("useGraph", True)):
+        return None
+    return await memory_index.query_vec(cfg, query)
+
+
+async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any], qvec: Any = _UNSET) -> list[dict[str, Any]] | None:
     """Relevance-gated memory hits for build_context (lexical, cosine above the floor, graph seeds; lexical + graph
     alone when embeddings are off). None = retrieval failed or memory is off: build_context falls back to lexical matches."""
     if not conv_settings.get("useMemory", True):
         return None
     try:
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
-        qvec = await memory_index.query_vec(cfg, query)
+        if qvec is _UNSET:
+            qvec = await _query_vec(query, cfg, conv_settings)
         return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
+        return None
+
+
+async def _graph_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any], qvec: Any = _UNSET) -> dict[str, Any] | None:
+    """Seeds, ranked live edges and nodes for build_context. None = graph off (or failed): build_context seeds on mentions alone."""
+    if not conv_settings.get("useGraph", True):
+        return None
+    try:
+        graph_recall.schedule(cfg)  # lazily embed nodes that have no vector yet
+        if qvec is _UNSET:
+            qvec = await _query_vec(query, cfg, conv_settings)
+        vec = graph_recall.similar(project_id, qvec, memory_index.embedder.model(cfg)) if qvec is not None else {}
+        return graph_subgraph(graph, project_id, query, vec)  # the module function; `graph_recall` here is the GraphRecall instance
+    except Exception:  # noqa: BLE001
+        log.exception("graph retrieval failed; falling back to mentions")
         return None
 
 
@@ -5852,10 +5887,12 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     project = projects.get(body.project_id) if sid(body.project_id) else None
     conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
                      "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings}
+    qvec = await _query_vec(body.query, cfg, conv_settings)
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
         doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
-        memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
+        memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
+        graph_hits=await _graph_hits(sid(body.project_id), body.query, cfg, conv_settings, qvec),
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         draft=bool(conv_settings.get("draftMode")),
@@ -5959,6 +5996,23 @@ def restore_memory(id: str) -> dict[str, Any]:
 @app.get("/memories/{id}/history")
 def memory_history(id: str) -> list[dict[str, Any]]:
     return memories.history(id)
+
+
+@app.get("/memories/{id}/source")
+def memory_source(id: str) -> dict[str, Any]:
+    m = memories.get(id)
+    if not m or not m.get("source_message_id"):
+        raise HTTPException(404)
+    with db.tx() as c:
+        r = c.execute("SELECT m.id, m.conversation_id, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id "
+                      "WHERE m.id=? AND c.deleted_at IS NULL", (m["source_message_id"],)).fetchone()
+    if not r:
+        raise HTTPException(404)
+    quote = " ".join(str(r["content"]).split())
+    cap = memory_limits.SOURCE_QUOTE_CHARS
+    if len(quote) > cap:
+        quote = quote[:cap].rstrip() + "…"
+    return {"conversation_id": r["conversation_id"], "message_id": r["id"], "title": r["title"], "quote": quote}
 
 
 @app.post("/memories")
@@ -6099,7 +6153,7 @@ def delete_style_sample(id: str) -> dict[str, bool]:
 class NodeIn(BaseModel):
     project_id: str | None = None
     label: str
-    type: str = "entity"
+    type: str = "topic"
     properties: dict[str, Any] = {}
 
 
@@ -6127,16 +6181,50 @@ def get_graph(project_id: str | None = None, include_global: bool = True, includ
     return graph.get(sid(project_id), include_global, include_invalid)
 
 
+class BackfillIn(BaseModel):
+    project_id: str | None = None  # omitted: personal chats; "all": every chat
+    limit: int | None = Field(None, ge=1)
+
+
+@app.post("/graph/backfill")
+async def start_graph_backfill(body: BackfillIn = BackfillIn()) -> dict[str, Any]:
+    """Extract the graph from past user messages, oldest first, in the background. Idempotent: done messages are skipped."""
+    cfg = settings()
+    if not cfg.get("autoLearn", True):
+        raise HTTPException(400, "Auto-learn is off")
+    model = str(cfg.get("extractionModel") or cfg.get("defaultModel") or "")
+    if not model:
+        raise HTTPException(400, "No model configured")
+    try:
+        return graph_backfill.start(cfg, model, project_id=sid(body.project_id), limit=body.limit)
+    except BackfillRunning:
+        raise HTTPException(409, "A graph backfill is already running")
+
+
+@app.get("/graph/backfill")
+async def graph_backfill_status() -> dict[str, Any]:
+    return graph_backfill.status()
+
+
+@app.delete("/graph/backfill")
+async def cancel_graph_backfill() -> dict[str, Any]:
+    graph_backfill.cancel()
+    return graph_backfill.status()
+
+
 @app.post("/graph/nodes")
 def create_node(body: NodeIn) -> dict[str, Any]:
     if not body.label.strip():
         raise HTTPException(400, "Empty label")
-    return graph.upsert_node(wsid(body.project_id), body.label, body.type, body.properties)
+    return graph.upsert_node(wsid(body.project_id), body.label, canonical_type(body.type), body.properties)
 
 
 @app.put("/graph/nodes/{id}")
 def update_node(id: str, body: NodePatch) -> dict[str, Any]:
-    n = graph.update_node(id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    if "type" in patch:
+        patch["type"] = canonical_type(patch["type"])
+    n = graph.update_node(id, patch)
     if not n:
         raise HTTPException(404)
     return n
@@ -6154,12 +6242,22 @@ def create_edge(body: EdgeIn) -> dict[str, Any]:
         raise HTTPException(400, "Self-loops not allowed")
     if not (graph.get_node(body.source_id) and graph.get_node(body.target_id)):
         raise HTTPException(404, "Node not found")
-    return graph.upsert_edge(wsid(body.project_id), body.source_id, body.target_id, body.relation, body.properties)
+    pred, phrase = normalize_predicate(body.relation)  # the closed predicate set; an unknown phrase is related_to with the phrase as its note
+    if not pred:
+        raise HTTPException(400, "Empty relation")
+    return graph.upsert_edge(wsid(body.project_id), body.source_id, body.target_id, pred, body.properties, fact=phrase)
 
 
 @app.put("/graph/edges/{id}")
 def update_edge(id: str, body: EdgePatch) -> dict[str, Any]:
-    e = graph.update_edge(id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    if "relation" in patch:
+        patch["relation"], phrase = normalize_predicate(patch["relation"])
+        if not patch["relation"]:
+            raise HTTPException(400, "Empty relation")
+        if phrase:
+            patch["fact"] = phrase
+    e = graph.update_edge(id, patch)
     if not e:
         raise HTTPException(404)
     return e

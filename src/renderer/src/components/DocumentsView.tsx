@@ -60,15 +60,20 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
           </div>
         ))}
       </div>
-      {open && (
-        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null) }}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null) } }}>
-          <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close file" onClick={() => setOpen(null)}><X size={16} /></button></header>
-            <pre className="doc-text">{open.text}</pre>
-          </div>
-        </div>
-      )}
+      {open && <DocTextModal doc={open} onClose={() => setOpen(null)} />}
+    </div>
+  )
+}
+
+/** An upload's extracted text in a modal; Escape or a click outside closes it. */
+export function DocTextModal({ doc, onClose }: { doc: Document; onClose: () => void }): JSX.Element {
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() } }}>
+      <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
+        <header><h2>{doc.name}</h2><button autoFocus className="icon-btn" aria-label="Close file" onClick={onClose}><X size={16} /></button></header>
+        <pre className="doc-text">{doc.text}</pre>
+      </div>
     </div>
   )
 }

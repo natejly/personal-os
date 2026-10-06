@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { MODES, modeOf, needsConfirm, pillLabel } from './permissionMode'
+import { MODES, modeOf, needsConfirm, pillLabel, pillTitle } from './permissionMode'
 
 test('modeOf defaults to auto for missing or invalid values', () => {
   assert.equal(modeOf({}), 'auto')
@@ -22,4 +22,10 @@ test('three modes with pills', () => {
   assert.deepEqual(MODES.map((m) => m.id), ['auto', 'manual', 'allow_all'])
   assert.equal(pillLabel('allow_all'), 'Allow everything')
   assert.equal(pillLabel('auto'), 'Auto')
+})
+
+test('the pill title names Dangerously allow all when it is on', () => {
+  assert.match(pillTitle('allow_all'), /^Dangerously allow all is on/)
+  assert.equal(pillTitle('auto'), 'Permission mode: Auto. Click to change it in Settings.')
+  assert.doesNotMatch(pillTitle('manual'), /Dangerously/)
 })

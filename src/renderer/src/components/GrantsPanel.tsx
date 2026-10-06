@@ -1,17 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import type { McpGrant, PendingApproval, PermissionGrants, PermissionRules, Settings, ToolOverride } from '@shared/types'
+import type { McpGrant, PermissionGrants, PermissionRules, Settings, ToolOverride } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import { MODE_LABEL, normalize } from './ToolPermissions'
+import ApprovalHistory from './ApprovalHistory'
 
 /** The grants listing also carries agent tool maps and chats that skip their cards (newer than the shared type). */
 type Grants = PermissionGrants & {
   agent_overrides?: { agent_id: string; title: string; tool: string; mode: ToolOverride }[]
   chat_skip?: { conversation_id: string; title: string }[]
 }
-
-const when = (t: number | null): string => (t ? new Date(t * 1000).toLocaleString() : '')
 
 const without = <T,>(m: Record<string, T> | undefined, k: string): Record<string, T> =>
   Object.fromEntries(Object.entries(m ?? {}).filter(([t]) => t !== k))
@@ -32,12 +31,9 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
   const allProjects = useStore((s) => s.projects)
   const conversations = useStore((s) => s.conversations)
   const [g, setG] = useState<Grants | null>(null)
-  const [history, setHistory] = useState<PendingApproval[]>([])
 
   const load = useCallback(async (): Promise<void> => {
-    const [grants, decided] = await Promise.all([api.permissionGrants(), api.decidedApprovals(50)])
-    setG(grants)
-    setHistory(decided)
+    setG(await api.permissionGrants())
   }, [])
   useEffect(() => { load().catch((e) => toast((e as Error).message, 'error')) }, [load, toast])
 
@@ -66,7 +62,7 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
   const revokeBtn = (label: string, onClick: () => void): JSX.Element =>
     <button className="icon-btn" aria-label={`Revoke ${label}`} onClick={onClick}><X size={12} /></button>
 
-  if (!g) return <div className="perm-rules"><h4>Grants</h4><p className="muted small">Loading…</p></div>
+  if (!g) return <div className="perm-rules"><h4>Standing grants</h4><p className="muted small">Loading…</p></div>
   const globalMcp: McpGrant[] = g.mcp.filter((m) => m.scope === 'global')
   const chats = g.chat_overrides.filter((o) => o.mode === 'on')
   const projects = g.project_overrides.filter((o) => o.mode === 'on')
@@ -77,8 +73,9 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
     && !agents.length && !skips.length
 
   return (
+    <>
     <div className="perm-rules grants-panel">
-      <h4>Grants</h4>
+      <h4>Standing grants</h4>
       <p className="muted small">What you said "always" to, from settings, a chat, an agent, a project, a connector or an approval card. Revoking takes effect now.</p>
       {none && <p className="muted small">None yet.</p>}
       {modes.length + allow.length + globalMcp.length > 0 && (
@@ -173,22 +170,8 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
           </ul>
         </div>
       )}
-      <div className="perm-rule-group">
-        <b>Recent decisions</b>
-        {history.length === 0 ? <p className="muted small">No approvals answered yet.</p> : (
-          <ul>
-            {history.map((a) => (
-              <li key={a.call_id}>
-                <span><code>{a.tool}</code> <b>{a.status === 'denied' ? 'denied' : 'allowed'}</b>
-                  {a.decided_by && a.decided_by !== 'user' ? ` by ${a.decided_by}` : ''}
-                  {a.conversation_title ? <small className="muted"> in {a.conversation_title}</small> : null}
-                  {a.note ? <small className="muted"> “{a.note}”</small> : null}</span>
-                <small className="muted">{when(a.decided_at)}</small>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </div>
+    <ApprovalHistory />
+    </>
   )
 }

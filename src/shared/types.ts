@@ -325,6 +325,31 @@ export interface McpGrant {
 }
 
 /** GET /permissions/grants: every standing grant, so one view shows what runs without asking. */
+/** One row of GET /approvals/history (approval_log.py): an answer to a card, a call a standing grant or plan let
+ *  through, or a reviewer's verdict. */
+export interface ApprovalLogEntry {
+  id: number
+  ts: number
+  conversation_id: string | null
+  conversation_title?: string
+  run_id: string | null
+  desk_id: string | null
+  agent: string | null
+  tool: string
+  args_summary: string
+  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) */
+  decision: string
+  /** once | conversation | global | rule | plan */
+  scope: string | null
+  rule: unknown
+  note: string | null
+  reviewer_verdict: string | null
+  reviewer_reason: string | null
+  reviewer_model: string | null
+  reviewer_ms: number | null
+  call_id: string | null
+}
+
 export interface PermissionGrants {
   /** 'Allow for this chat session' keys, in memory until restart. */
   session: { conversation_id: string; title: string; keys: string[] }[]

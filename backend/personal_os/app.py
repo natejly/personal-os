@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -2881,6 +2881,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
                 forced = forced or taint_only
                 perm = permrules.Resolution(mode, forced)
+                pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
@@ -2994,6 +2995,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # The user already said yes to exactly this call on a card an earlier turn let go
                     # of (see parked_report). Spent here, once; any other arguments still ask.
                     asks = False
+                # History: a call that runs without a card because something already stood behind it — an approved plan
+                # step, an allow rule or session grant, or the review gate's look (approval_log.py). Card answers log in decide().
+                if not asks and pre is None and not proposing and mode != "off":
+                    granted_by = (("conversation" if permrules.SESSION.covers(conv_id, perm.keys) else "rule")
+                                  if pre_mode == "ask" and perm.mode == "on" else None)
+                    if claimed is not None or review or granted_by:
+                        approval_log.record(db, tool=c["name"], args=args, conversation_id=conv_id, call_id=uid,
+                                            run_id=run.run_id if run else None, desk_id=desk_id or None, agent=run.kind if run else None,
+                                            decision="plan" if claimed else ("always" if granted_by else "auto"),
+                                            scope="plan" if claimed else granted_by,
+                                            rule=perm.rule if granted_by == "rule" else None, review=review)
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
@@ -3020,7 +3032,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
                         opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                     forced=forced, desk_id=run.desk_id, danger=danger)
+                                                     forced=forced, desk_id=run.desk_id, danger=danger, review=review)
                         mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
                                     and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
                         if not mine:
@@ -4540,6 +4552,17 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
             for a in rows]
 
 
+@app.get("/approvals/history")
+def approval_history(limit: int = 50, offset: int = 0, tool: str | None = None, decision: str | None = None,
+                     q: str | None = None) -> dict[str, Any]:
+    """The approval log (approval_log.py), newest first: {items, more}. Each item names its chat when it had one."""
+    page = approval_log.history(db, limit=limit, offset=offset, tool=tool, decision=decision, q=q)
+    titles = _conversation_titles({r["conversation_id"] for r in page["items"] if r.get("conversation_id")})
+    for r in page["items"]:
+        r["conversation_title"] = titles.get(r.get("conversation_id") or "")
+    return page
+
+
 def _conversation_titles(ids: set[str]) -> dict[str, str]:
     if not ids:
         return {}
@@ -4633,7 +4656,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
-    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited)
+    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited, rules=body.rules)
     live = bool(fut and not fut.done())
     # Read off the row as it was BEFORE this decision: decide() overwrites `decided_by` with 'user'.
     was_parked = bool(pending and pending.get("parked_at"))

@@ -87,7 +87,16 @@ def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
 
 
 def _approval_history(c: sqlite3.Connection) -> None:
-    """Slot reserved for the approval decision log (owner: approval-history)."""
+    """The approval decision log (approval_log.py): one row per answer, standing-grant pass and reviewer verdict.
+    `approvals.review` keeps the review gate's verdict on the card it opened, so the answer's log row can carry it."""
+    c.execute("CREATE TABLE IF NOT EXISTS approval_log ("
+              "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, conversation_id TEXT, run_id TEXT, desk_id TEXT, "
+              "agent TEXT, tool TEXT NOT NULL, args_summary TEXT NOT NULL DEFAULT '', decision TEXT NOT NULL, scope TEXT, "
+              "rule_json TEXT, note TEXT, reviewer_verdict TEXT, reviewer_reason TEXT, reviewer_model TEXT, reviewer_ms INTEGER, "
+              "call_id TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_approval_log_ts ON approval_log(ts)")
+    if "review" not in {r[1] for r in c.execute("PRAGMA table_info(approvals)")}:
+        c.execute("ALTER TABLE approvals ADD COLUMN review TEXT")
 
 
 def _teach_recordings(c: sqlite3.Connection) -> None:

@@ -3,6 +3,7 @@
  * to the backend, plus gather/scatter: centre every pop-out on the display under the cursor and undo it.
  */
 import { app, BrowserWindow, screen } from 'electron'
+import { background, reveal, stealFocus } from './background'
 import { handle } from './ipc'
 import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
@@ -190,7 +191,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
   // Before ready-to-show, so a translucent pop-out never flashes opaque on open.
   if (entry.opacity < 1) win.setOpacity(entry.opacity)
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => reveal(win))
   guardNavigation(win.webContents)
   const onBounds = (): void => scheduleSave(windowId, entry)
   win.on('move', onBounds)
@@ -230,8 +231,8 @@ export const focusPopout = (windowId: string): boolean => {
   if (!e || e.win.isDestroyed()) return false
   quiet(windowId, e)
   if (e.win.isMinimized()) e.win.restore()
-  e.win.show()
-  e.win.focus()
+  reveal(e.win)
+  if (!background) e.win.focus()
   return true
 }
 
@@ -304,10 +305,10 @@ const raiseMain = (): void => {
   const m = getMain()
   if (m && !m.isDestroyed()) {
     if (m.isMinimized()) m.restore()
-    m.show()
-    m.focus()
+    reveal(m)
+    stealFocus()
   }
-  app.focus({ steal: true })
+  stealFocus()
 }
 
 /**
@@ -354,10 +355,10 @@ export const gather = (): GatherState => {
     const m = getMain()
     if (m && !m.isDestroyed()) {
       if (m.isMinimized()) m.restore()
-      m.show()
-      m.focus()
+      reveal(m)
+      stealFocus()
     }
-    app.focus({ steal: true })
+    stealFocus()
     return state()
   }
 
@@ -402,7 +403,7 @@ export const gather = (): GatherState => {
   }
 
   setFronted(true)
-  app.focus({ steal: true })
+  stealFocus()
   return state()
 }
 

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { join } from 'path'
+import { background, goBackground, reveal } from './background'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
@@ -59,7 +60,7 @@ function createWindow(): void {
     }
   })
 
-  win.once('ready-to-show', () => win?.show())
+  win.once('ready-to-show', () => { if (win) reveal(win) })
 
   // When the renderer dies there is no React error and no macOS crash report -- the window simply goes
   // blank, and because it is transparent that looks like the app vanishing. These say why.
@@ -84,8 +85,8 @@ function createWindow(): void {
 function showMain(): void {
   if (!win || win.isDestroyed()) return createWindow()
   if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
+  reveal(win)
+  if (!background) win.focus()
 }
 
 /** The Mac woke or unlocked: have the job scheduler run its pass now, so a slot missed asleep fires at once. */
@@ -324,6 +325,7 @@ if (!gotLock) app.quit()
 else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
+  goBackground()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('backend:url', () => backendUrl())
@@ -386,7 +388,7 @@ if (gotLock) app.whenReady().then(async () => {
   startUpdater()
   powerMonitor.on('resume', nudgeScheduler)
   powerMonitor.on('unlock-screen', nudgeScheduler)
-  app.on('activate', showMain)
+  app.on('activate', () => { if (!background) showMain() })
 })
 
 app.on('window-all-closed', () => {

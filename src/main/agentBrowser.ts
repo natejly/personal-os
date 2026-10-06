@@ -10,6 +10,7 @@
  * navigation; downloads are refused unless the triggering act said so AND a download folder was given.
  */
 import { BrowserWindow, nativeImage, type WebContents } from 'electron'
+import { reveal } from './background'
 import { randomBytes } from 'crypto'
 import { existsSync, mkdirSync } from 'fs'
 import { basename, extname, isAbsolute, join } from 'path'
@@ -293,7 +294,7 @@ function safeHost(u: string): string {
 function applyVisibility(s: Sess): void {
   for (const t of s.tabs) {
     if (t.win.isDestroyed()) continue
-    if (s.visible && t === s.active) t.win.show()
+    if (s.visible && t === s.active) reveal(t.win)
     else if (t.win.isVisible()) t.win.hide()
   }
 }

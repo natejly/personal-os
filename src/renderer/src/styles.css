@@ -2807,6 +2807,13 @@ select:focus-visible {
 .skill-intent button { display: inline-flex; align-items: center; gap: 4px; }
 .skill-preview { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; font-family: var(--mono, ui-monospace, monospace); }
 .skill-body input:focus, .skill-body textarea:focus { border-color: var(--accent); }
+/* Teach a task (TeachTaskPanel) */
+.teach-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.teach-frame { flex: none; width: 120px; height: 75px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+.teach-steps { display: flex; flex-direction: column; gap: 6px; }
+.teach-step { display: grid; grid-template-columns: auto auto 2fr 1fr 2fr auto auto auto; gap: 6px; align-items: center; }
+.teach-step .teach-frame { width: 64px; height: 40px; }
+.teach-step:not(:has(.teach-frame)) { grid-template-columns: auto 2fr 1fr 2fr auto auto auto; }
 /* Buttons in these rows are the shared .primary-btn.sm / .ghost-btn.sm; there is no local size. */
 .row-actions { display: flex; align-items: center; gap: 8px; }
 

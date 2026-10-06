@@ -34,12 +34,14 @@ def test_check_probes_a_remote_draft_with_its_url_and_headers(monkeypatch: Any) 
     assert seen[0]["headers"] == {"Authorization": "Bearer t0k"}
 
 
-def test_sse_is_refused_everywhere() -> None:
-    r = client.post("/mcp/servers", json={"name": "Old", "transport": "sse", "url": "https://example.test/sse"})
-    assert r.status_code == 400 and "streamable HTTP" in r.json()["detail"]
-    assert client.post("/mcp/check", json={"transport": "sse", "url": "https://example.test/sse"}).status_code == 400
+def test_sse_is_accepted_and_unknown_transports_refused() -> None:
+    r = client.post("/mcp/servers", json={"name": "Legacy", "transport": "sse", "url": "https://example.test/sse", "enabled": False})
+    assert r.status_code == 200 and r.json()["transport"] == "sse"
+    assert client.post("/mcp/servers", json={"name": "Odd", "transport": "carrier-pigeon"}).status_code == 400
+    assert client.post("/mcp/check", json={"transport": "carrier-pigeon", "url": "https://example.test/sse"}).status_code == 400
     sid = client.post("/mcp/servers", json={"name": "Local", "command": "true", "enabled": False}).json()["id"]
-    assert client.patch(f"/mcp/servers/{sid}", json={"transport": "sse"}).status_code == 400
+    assert client.patch(f"/mcp/servers/{sid}", json={"transport": "sse"}).status_code == 200
+    assert client.patch(f"/mcp/servers/{sid}", json={"transport": "carrier-pigeon"}).status_code == 400
 
 
 def test_header_values_are_stored_as_secrets() -> None:

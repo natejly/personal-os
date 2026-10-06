@@ -1142,6 +1142,9 @@ class Toolbox:
         def _day(ts: float) -> str:
             return time.strftime("%Y-%m-%d", time.localtime(ts))
 
+        def _noted(m: dict[str, Any]) -> float:
+            return m.get("valid_from") or m.get("created_at") or 0
+
         async def _memories(ctx: dict[str, Any], query: str, offset: int, kind: str, since_ts: float | None) -> Any:
             q = query.strip()
             if q and self.memory_index is not None:
@@ -1151,15 +1154,16 @@ class Toolbox:
             elif q:
                 found = self.memories.list(ctx["project_id"], query)
             else:  # a filter-only listing, newest first
-                found = sorted(self.memories.list(ctx["project_id"]), key=lambda m: m.get("valid_from") or m["created_at"], reverse=True)
+                found = sorted(self.memories.list(ctx["project_id"]), key=_noted, reverse=True)
             t = time.time()
             found = [m for m in found if not (m.get("expires_at") and m["expires_at"] <= t)  # expired rows are not memory any more
                      and (not kind or m["kind"] == kind)
-                     and (since_ts is None or (m.get("valid_from") or m["created_at"]) >= since_ts)]
+                     and (since_ts is None or _noted(m) >= since_ts)]
             rows = []
             for m in found:
-                row = {"id": m["id"], "content": m["content"], "kind": m["kind"], "scope": "project" if m["project_id"] else "personal",
-                       "valid_from": _day(m.get("valid_from") or m["created_at"])}
+                row = {"id": m["id"], "content": m["content"], "kind": m["kind"], "scope": "project" if m["project_id"] else "personal"}
+                if _noted(m):
+                    row["valid_from"] = _day(_noted(m))
                 if m.get("expires_at"):
                     row["expires_at"] = _day(m["expires_at"] - 1)  # the stored instant is the end of the last day it holds
                 conv = self.conversations.get(m["source_conversation_id"], with_messages=False) \

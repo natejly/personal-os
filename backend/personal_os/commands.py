@@ -83,11 +83,6 @@ def fill(body: str, arguments: str = "") -> str:
 
 _SLASH = re.compile(r"^/([a-z0-9][a-z0-9_-]{0,39})(?:\s+([\s\S]*))?$")
 
-# Built-in slash commands the backend fills. They shadow a saved command of the same name; the composer
-# lists them beside the saved ones (lib/slashCommands.ts). /compact, /skills, /commands and /plan act in
-# the UI and never reach a run.
-BUILTIN = ("skill", "schedule", "loop", "research")
-
 _SCHEDULE_NOTE = ("\n\n[The user ran /schedule: they want this done later, unattended. Call schedule_task once — work out the time "
                   "from what they typed (call current_time first if you are unsure of today's date) and write `prompt` as a "
                   "self-contained instruction, since the later run cannot see this chat. Then tell them when it will run.]")

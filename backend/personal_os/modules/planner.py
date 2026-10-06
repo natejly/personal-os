@@ -3,7 +3,7 @@
 Suggesting is read-only: it reads calendar events and todos and returns proposals. The only write is
 POST /planner/apply, which the UI calls when the user presses "Add selected to calendar", and it goes
 through the same verified `calendar_create` as every other event. The agent tool never writes events: it returns
-the same blocks as calendar_propose changes the user approves on one card (with no mirror calendar yet, finding the
+the same blocks as calendar_propose changes the user approves on one card (with no planner calendar yet, finding the
 target may create the empty one, as apply does).
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from .. import planner as pl
 from .. import redact
 from ..google import GoogleNotConnected
 from ..todos import Todos
-from ..tools import ToolSpec, _obj, tool_error
+from ..tools import ToolSpec, _obj
 from . import Module, ModuleContext
 
 if TYPE_CHECKING:
@@ -69,7 +69,10 @@ class PlannerModule(Module):
         return {**pl.DEFAULT_CONFIG, **{k: v for k, v in stored.items() if k in pl.DEFAULT_CONFIG}}
 
     def _mirror_ids(self) -> list[str]:
-        cid = (self.ctx.settings().get("googleTodoCalendar") or {}).get("calendarId")
+        """The planner's own calendar once apply has found or created it (Focus blocks live there). Older installs kept
+        the same calendar's id under the removed todo mirror's settings."""
+        s = self.ctx.settings()
+        cid = (s.get("planner") or {}).get("calendarId") or (s.get("googleTodoCalendar") or {}).get("calendarId")
         return [cid] if cid else []
 
     def suggest_sync(self, days: int | None = None, project_id: str | None = None) -> dict[str, Any]:
@@ -89,7 +92,11 @@ class PlannerModule(Module):
         return {**result, "generated_at": now.isoformat(timespec="minutes"), "holds_untrusted": holds_untrusted}
 
     def _target(self) -> str:
-        return (self._mirror_ids() or [None])[0] or self.ctx.google.calendar_ensure(self.config()["calendarName"])["id"]
+        if ids := self._mirror_ids():
+            return ids[0]
+        cid = self.ctx.google.calendar_ensure(self.config()["calendarName"])["id"]
+        self.ctx.set_settings({"planner": {**(self.ctx.settings().get("planner") or {}), "calendarId": cid}})
+        return cid
 
     def apply_sync(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         g = self.ctx.google
@@ -126,7 +133,7 @@ class PlannerModule(Module):
             cfg = {**self.config(), **body.model_dump(exclude_none=True)}
             if (msg := pl.validate_config(cfg)):
                 raise HTTPException(422, msg)
-            self.ctx.set_settings({"planner": cfg})
+            self.ctx.set_settings({"planner": {**(self.ctx.settings().get("planner") or {}), **cfg}})  # keeps calendarId
             return self.config()
 
         @r.post("/planner/suggest")

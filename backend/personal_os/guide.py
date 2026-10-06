@@ -65,7 +65,7 @@ Type / in the composer:
 - Calendar (Cmd+3): your week from Google plus due todos. Double-click to add an event; click one to edit guests, recurrence, Meet link, reminders and colour.
 - Mail (Cmd+5): read, reply and draft. Sends have a 90 second undo.
 - Connect Google in Settings -> Integrations. Until then Calendar, Mail and the first-prompt suggestions wait. If access expires or is revoked, Integrations shows Reconnect.
-- Once connected, todos sync both ways with Google Tasks, and todos with a due date appear on a "Grain Todos" calendar. Both can be switched off under Integrations.
+- Once connected, todos sync both ways with Google Tasks (switch it off under Integrations). Todos are not copied onto your calendar; the planner's Focus blocks go on a calendar named "Grain Todos".
 
 ## Projects and memory
 - Sidebar Projects, + to add one: its own instructions, knowledge files and memories, layered on top of your personal ones. A project can be isolated so its chats see no personal memory.

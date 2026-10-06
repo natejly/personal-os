@@ -225,7 +225,7 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'google' && (
           <>
             <p className="muted">Optional. Connecting Google or Microsoft lets the assistant read your Calendar and mail. Google also adds Tasks and Drive. You can skip this and do it later in Settings.</p>
-            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, and creates a &ldquo;Grain Todos&rdquo; calendar that shows todos with a due date. Both can be switched off in Settings → Integrations.</p>
+            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, which can be switched off in Settings → Integrations.</p>
             {google?.connected ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (

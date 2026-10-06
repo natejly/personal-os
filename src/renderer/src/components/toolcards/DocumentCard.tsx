@@ -10,7 +10,7 @@ interface Page { page?: unknown; path?: unknown }
 const kb = (n: unknown): string | null => (typeof n === 'number' ? (n < 1024 ? `${n} bytes` : `${Math.round(n / 1024).toLocaleString()} KB`) : null)
 
 /** convert_document (source → output, converter used) and render_preview (source → page image paths). Paths only; no thumbnails. */
-export default function DocumentCard(props: ToolCardProps): JSX.Element {
+function DocumentCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const d = p.data

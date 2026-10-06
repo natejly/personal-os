@@ -314,11 +314,12 @@ export interface PlanStepRef {
   title: string
 }
 
-/** What the user authorises on a plan card: the steps to keep, by their proposed index, with any edited arguments. */
-export interface PlanEdit {
-  idx: number
-  arguments?: Record<string, unknown>
-}
+/**
+ * What the user authorises on a plan card, one entry per KEPT step (POST /approvals `steps`, plans.parse_plan_edits):
+ * the step by its 0-based proposed index, with `arguments` only when the user edited them. A step left out is
+ * dropped; `steps: null` approves the plan as proposed.
+ */
+export interface PlanEdit { idx: number; arguments?: Record<string, unknown> }
 
 export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule' | 'allow_host'
 
@@ -1142,23 +1143,6 @@ export interface TasksSyncStatus {
   syncing: boolean
 }
 
-/** One-way todos -> Google Calendar mirror (`/integrations/google/todo-calendar`). */
-export interface TodoCalendarStatus {
-  config: {
-    enabled: boolean
-    /** Empty until the first pass resolves or creates the calendar. */
-    calendarId: string
-    calendarName: string
-    intervalMinutes: number
-    keepCompleted: boolean
-  }
-  /** Unix seconds of the last successful pass. */
-  last_sync: number | null
-  last_error: string | null
-  last_result: Record<string, number> | null
-  syncing: boolean
-}
-
 export interface DriveFile {
   id: string
   name: string
@@ -1856,9 +1840,6 @@ export const DESK_LIVE: DeskStatus[] = ['planning', 'working', 'needs_approval']
 
 export type DeskAutonomy = 'plan' | 'ask' | 'propose'
 export type PlanDecision = 'approve' | 'edit' | 'reject'
-
-/** One entry of POST /cowork/plans/{id}'s `steps`. `idx` is 1-based, exactly as the card numbers it. */
-export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; drop?: boolean }
 
 
 

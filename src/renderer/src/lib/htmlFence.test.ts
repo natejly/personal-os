@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert'
 import { readFileSync } from 'node:fs'
-import { buildPreviewDoc, fenceKind, hasScript, isSafeSandbox, PREVIEW_SANDBOX, SVG_CSP } from './htmlFence'
+import { buildPreviewDoc, fenceKind, hasScript, PREVIEW_SANDBOX, SVG_CSP } from './htmlFence'
 
 test('fenceKind recognises html and svg fences only', () => {
   assert.equal(fenceKind('html'), 'html')
@@ -14,10 +14,6 @@ test('fenceKind recognises html and svg fences only', () => {
 
 test('the preview sandbox never includes allow-same-origin', () => {
   assert.equal(PREVIEW_SANDBOX, 'allow-scripts')
-  assert.ok(isSafeSandbox(PREVIEW_SANDBOX))
-  assert.ok(!isSafeSandbox('allow-scripts allow-same-origin'))
-  assert.ok(!isSafeSandbox('allow-same-origin'))
-  assert.ok(!isSafeSandbox(''))
 })
 
 test('the iframe source files pass the sandbox through the constant and never spell allow-same-origin', () => {

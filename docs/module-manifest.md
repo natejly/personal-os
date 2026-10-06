@@ -31,8 +31,8 @@ The slices below are the pilot's original work split, kept as the worked example
 
 ## Behaviour that must not change
 
-- Every HTTP path, method, request body and response shape: `/todos*`, `/integrations/google/tasks-sync*`,
-  `/integrations/google/todo-calendar*`. `/integrations/google/tasklists` stays in app.py (Google listing).
+- Every HTTP path, method, request body and response shape: `/todos*`, `/integrations/google/tasks-sync*`.
+  `/integrations/google/tasklists` stays in app.py (Google listing).
 - `GET /dashboard` still returns `todos` (open, first 12) and `todo_stats`.
 - Tool names, schemas, descriptions, examples, groups, danger levels, **and their position in
   `toolbox.specs`** (todo tools register at the same point, between `todo_write`'s working group and the modules after it).
@@ -45,8 +45,8 @@ The slices below are the pilot's original work split, kept as the worked example
 ### backend — `TodosModule`
 | Path | Note |
 |---|---|
-| `backend/personal_os/modules/todos.py` | new. `TodosModule(Module)`, `key="todos"`. Owns `self.store = Todos(ctx.db)`, `self.tasks_sync`, `self.calendar_mirror`, the `on_change` wiring, the router (`TodoIn`/`TodoPatch` + the 4 todo routes + tasks-sync and todo-calendar routes and their models), the 4 todo tools (moved verbatim from `tools._register_todos`), start/stop of both loops, `today()`. |
-| `backend/personal_os/app.py` | delete the moved code; `modules = build_modules(ModuleContext(...))` right after `google`; keep a module-level alias `todos = modules_get(modules, "todos").store` (and `tasks_sync`, `todo_calendar` aliases) for the remaining readers; include each router; one startup/one shutdown hook looping the modules; `/dashboard` merges `m.today()`; pass `modules=modules` to Toolbox. |
+| `backend/personal_os/modules/todos.py` | new. `TodosModule(Module)`, `key="todos"`. Owns `self.store = Todos(ctx.db)`, `self.tasks_sync`, the `on_change` wiring, the router (`TodoIn`/`TodoPatch` + the 4 todo routes + tasks-sync routes and their models), the 4 todo tools (moved verbatim from `tools._register_todos`), start/stop of the sync loop, `today()`. |
+| `backend/personal_os/app.py` | delete the moved code; `modules = build_modules(ModuleContext(...))` right after `google`; keep a module-level alias `todos = modules_get(modules, "todos").store` (and a `tasks_sync` alias) for the remaining readers; include each router; one startup/one shutdown hook looping the modules; `/dashboard` merges `m.today()`; pass `modules=modules` to Toolbox. |
 | `backend/personal_os/tools.py` | drop the `todos=` param, `self.todos` and `_register_todos`; add `modules: list[Any] \| None = None`, stored as `self.modules`, and call `m.register_tools(self)` at the spot `_register_todos` ran; `available()` consults `m.tool_available(name)` for any module that returns non-None. |
 | `backend/tests/test_modules.py` | new. Tests: tool order/names unchanged; routes reachable via `TestClient`; `/dashboard` keeps `todos`/`todo_stats`; `on_change` pokes; start/stop leave no running tasks. |
 

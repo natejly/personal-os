@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, Pencil, ShieldAlert, Wrench } from 'lucide-react'
-import type { PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
-import { argRows, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
+import type { PlanDecision, PlanEdit, PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
+import { argRows, broken, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
 import { useStore } from '../store'
 // This card mounts inline in a chat bubble as well as in the Plan tab, so it carries its own sheet
 // rather than relying on another component having loaded it first.
 import '../styles/cowork.css'
 
 /**
- * The approval artifact, with two mount points: inline in the assistant bubble (routed here by
- * ToolEvents from a pending `propose_plan`) and the desk's Plan tab. Approving step 3 approves
- * `sha256(canon(arguments))` for that one call, once — so the card's job is to show exactly what will
- * be run and to let the user rewrite it before it is bound.
+ * The approval artifact, with two mount points. The desk's Plan tab (DeskPlan) passes a stored plan and decides
+ * it through the store's `decidePlan`. A chat's pending `propose_plan` call (ToolEvents) passes the call read as
+ * a plan (`planOfCall`) and its own `onDecide`, which answers through `approveTool`. Either way the answer is one
+ * payload: the kept steps by `idx`, with new arguments only where the user edited them (`editPayload`).
+ * Approving a step approves `sha256(canon(arguments))` for that one call, once — so the card's job is to show
+ * exactly what will be run and to let the user rewrite it before it is bound.
  *
  * Nothing here subscribes to store STATE. The inline mount lives inside a streaming message, where
  * Message.tsx:10-11 documents that any broader subscription re-renders every message in every open
@@ -89,7 +91,7 @@ function StepRow({ step, dropped, draft, open, decided, onDrop, onDraft, onToggl
   const rows = argRows(step.arguments)
   return (
     <li className={`aplan-step ${dropped ? 'dropped' : ''} ${step.status}`}>
-      <span className="aplan-idx">{step.idx}</span>
+      <span className="aplan-idx">{step.idx + 1}</span>
       <div className="aplan-step-main">
         <div className="aplan-step-head">
           <b>{step.title || step.tool || 'Think it through'}</b>
@@ -131,7 +133,10 @@ function StepRow({ step, dropped, draft, open, decided, onDrop, onDraft, onToggl
             />
             {err
               ? <p className="aplan-invalid">{err}</p>
-              : <p className="muted small">{changed ? 'The agent will be held to these arguments, not its own.' : 'Unchanged — reformatting is not an edit.'}</p>}
+              : <p className="muted small">
+                  {changed ? 'The agent will be held to these arguments, not its own.' : 'Unchanged — reformatting is not an edit.'}
+                  {changed && <> <button className="aplan-edit-toggle" onClick={() => onDraft(pretty(step.arguments))}>revert</button></>}
+                </p>}
           </div>
         )}
         {step.result_error && <p className="aplan-invalid">{step.result_error}</p>}
@@ -140,7 +145,13 @@ function StepRow({ step, dropped, draft, open, decided, onDrop, onDraft, onToggl
   )
 }
 
-export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Element {
+export default function ActionPlanCard({ plan, onDecide, shortcuts = true }: {
+  plan: PlanRecord
+  /** Answers the card; defaults to the store's `decidePlan` (a stored plan). `edits` is set only for 'edit'. */
+  onDecide?: (decision: PlanDecision, edits: PlanEdit[] | undefined, note: string) => Promise<void>
+  /** ⌘⇧A / ⌘⇧D answer the card. Off for the inline mount: several pending cards can be on screen at once. */
+  shortcuts?: boolean
+}): JSX.Element {
   // Single selector: a stable function reference, so this never re-renders on a streamed token.
   const decidePlan = useStore((s) => s.decidePlan)
   const [drafts, setDrafts] = useState<Record<number, string>>({})
@@ -152,15 +163,17 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
   const pending = plan.status === 'pending'
   const steps = plan.steps
   const payload = editPayload(steps, drafts, dropped)
-  const broken = steps.some((s) => drafts[s.idx] !== undefined && open[s.idx] && invalid(drafts[s.idx]) !== null)
-  const changed = payload.length > 0
+  const blocked = broken(steps, drafts, dropped)
+  const changed = payload !== null
+  const kept = steps.length - dropped.length
   const strip = effects(steps.filter((s) => !dropped.includes(s.idx)))
 
   const decide = async (decision: 'approve' | 'edit' | 'reject'): Promise<void> => {
     if (sending) return
     setSending(true)
     try {
-      await decidePlan(plan.call_id, decision, decision === 'edit' ? payload : undefined, note.trim())
+      const edits = decision === 'edit' ? payload ?? undefined : undefined
+      await (onDecide ?? ((d, e, n) => decidePlan(plan.call_id, d, e, n)))(decision, edits, note.trim())
     } finally {
       setSending(false)
     }
@@ -170,11 +183,11 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
   // change rather than on every keystroke in the note box.
   const act = useRef({ approve: () => {}, reject: () => {} })
   act.current = {
-    approve: () => { if (!broken) void decide(changed ? 'edit' : 'approve') },
+    approve: () => { if (!blocked && kept > 0) void decide(changed ? 'edit' : 'approve') },
     reject: () => void decide('reject')
   }
   useEffect(() => {
-    if (!pending) return
+    if (!pending || !shortcuts) return
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return
       const k = e.key.toLowerCase()
@@ -183,7 +196,7 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pending])
+  }, [pending, shortcuts])
 
   return (
     <div className={`aplan ${plan.status}`}>
@@ -241,21 +254,18 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
           <div className="aplan-actions">
             <button
               className="primary-btn sm"
-              disabled={sending || broken || changed}
-              title={changed ? 'You changed the plan — use “Approve with changes”' : 'Approve and run (⌘⇧A)'}
-              onClick={() => void decide('approve')}
+              disabled={sending || blocked || kept === 0}
+              title={shortcuts ? 'Approve exactly what is shown here (⌘⇧A)' : 'Approve exactly what is shown here'}
+              onClick={() => void decide(changed ? 'edit' : 'approve')}
             >
-              Approve &amp; run
+              {!changed ? 'Approve & run' : kept === steps.length ? 'Approve with changes' : `Approve ${kept} of ${steps.length}`}
             </button>
-            {changed && (
-              <button className="primary-btn sm" disabled={sending || broken} title="Approve the plan as you edited it (⌘⇧A)" onClick={() => void decide('edit')}>
-                Approve with changes
-              </button>
-            )}
-            <button className="ghost-btn sm" disabled={sending} title="Reject and ask for a different plan (⌘⇧D)" onClick={() => void decide('reject')}>
+            <button className="ghost-btn sm" disabled={sending} title={shortcuts ? 'Reject and ask for a different plan (⌘⇧D)' : 'Reject and ask for a different plan'} onClick={() => void decide('reject')}>
               Reject
             </button>
           </div>
+          {blocked && <p className="aplan-invalid">Fix the JSON in the step you edited, or drop it.</p>}
+          {!blocked && kept === 0 && <p className="aplan-invalid">Nothing left to approve — reject the plan instead.</p>}
         </div>
       ) : (
         <p className="muted small aplan-decided">

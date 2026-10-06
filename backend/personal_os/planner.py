@@ -90,8 +90,8 @@ def _local_naive(value: str) -> datetime:
 
 def busy_from_events(events: list[dict[str, Any]], mirror_calendar_ids: tuple[str, ...] | list[str] = ()) -> list[Busy]:
     """Blocking intervals from Google.calendar_events rows. Skips all-day, free ('transparent'), cancelled and
-    declined events, and anything on the mirror calendar (those are todo markers or our own Focus blocks;
-    the latter come back through locked_from_events)."""
+    declined events, and anything on the planner calendar (our own Focus blocks;
+    they come back through locked_from_events)."""
     out: list[Busy] = []
     for e in events:
         if e.get("all_day") or e.get("transparency") == "transparent" or e.get("status") == "cancelled":
@@ -107,7 +107,7 @@ def busy_from_events(events: list[dict[str, Any]], mirror_calendar_ids: tuple[st
 
 
 def locked_from_events(events: list[dict[str, Any]], mirror_calendar_ids: tuple[str, ...] | list[str]) -> list[Block]:
-    """Focus blocks earlier accepted onto the mirror calendar, as locked blocks (busy, and their todo is not re-planned)."""
+    """Focus blocks earlier accepted onto the planner calendar, as locked blocks (busy, and their todo is not re-planned)."""
     out: list[Block] = []
     for e in events:
         if e.get("calendar_id") not in mirror_calendar_ids or e.get("all_day") or not str(e.get("summary") or "").startswith(FOCUS_PREFIX):

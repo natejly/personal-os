@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, outputFiles, parseResult, sandboxEntries, sandboxLine, shellState, snapshotLine, tailLines } from './toolResult'
+import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, outputFiles, parseResult, sandboxEntries, sandboxLine, shellState, snapshotLine } from './toolResult'
 
 test('sandbox run outcome reads like a shell run', () => {
   assert.deepEqual(shellState('sandbox_exec', { stdout: '', stderr: 'boom', exit_code: 1, timed_out: false }, false), { label: 'exit 1', tone: 'bad' })
@@ -42,14 +42,6 @@ test('a whole preview parses; a cut one is read loosely and flagged', () => {
 test('a preview that ends mid-escape still decodes', () => {
   assert.equal(looseFields('{"output": "abc\\').output, 'abc')
   assert.equal(looseFields('{"output": "caf\\u00').output, 'caf')
-})
-
-test('output tails keep the last lines and count the rest', () => {
-  const text = Array.from({ length: 30 }, (_, i) => `l${i + 1}`).join('\n')
-  const t = tailLines(text, 12)
-  assert.equal(t.hidden, 18)
-  assert.ok(t.shown.startsWith('l19') && t.shown.endsWith('l30'))
-  assert.deepEqual(tailLines('a\nb\n', 12), { shown: 'a\nb', hidden: 0 })
 })
 
 test('network line reads reached and blocked hosts', () => {

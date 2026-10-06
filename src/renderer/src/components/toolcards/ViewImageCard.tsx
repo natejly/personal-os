@@ -5,7 +5,7 @@ import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './bloc
 import { registerToolCard, type ToolCardProps } from './registry'
 
 /** view_image: which picture, what was asked of it, and what came back (a description, or OCR text when no vision model is set). */
-export default function ViewImageCard(props: ToolCardProps): JSX.Element {
+function ViewImageCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const d = p.data

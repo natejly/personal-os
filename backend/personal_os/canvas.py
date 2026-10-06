@@ -259,8 +259,3 @@ class Canvases:
         """ref_id carries no foreign key, so deleting the referent has to sweep its windows."""
         with self.db.tx() as c:
             return c.execute("DELETE FROM canvas_windows WHERE kind=? AND ref_id=?", (kind, ref_id)).rowcount
-
-    def reset_popped(self) -> int:
-        """Called at startup: no BrowserWindow survives a relaunch, so 'popped' rows are stale."""
-        with self.db.tx() as c:
-            return c.execute("UPDATE canvas_windows SET state='normal', updated_at=? WHERE state='popped'", (now(),)).rowcount

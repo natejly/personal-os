@@ -8,7 +8,7 @@ import { registerToolCard, type ToolCardProps } from './registry'
  * agent is about to do in the page. The arguments are already shaped for reading (typed text arrives hidden for
  * password and payment fields), so Details is safe to open.
  */
-export default function BrowserApprovalCard(props: ToolCardProps): JSX.Element {
+function BrowserApprovalCard(props: ToolCardProps): JSX.Element {
   const handoff = props.event.arguments.action === 'handoff'
   const risky = ['submit', 'password', 'payment', 'download'].includes(String(props.event.arguments.risk ?? ''))
   return (

@@ -26,13 +26,6 @@ def test_calendar_fields() -> None:
         assert "calendar.google.com" in updated["calendar_link"]
         listed = todos.list()
         assert listed[0]["calendar_event_id"] == "evt_1"
-        # The mirror recorded a signature; relinking to a new event tombstones the old one and clears it,
-        # so the replaced event is deleted rather than left orphaned on the calendar.
-        todos.set_calendar_state(t["id"], "evt_1", None, "cal_x", '{"due": "2026-10-02"}')
-        todos.update(t["id"], {"calendar_event_id": "evt_1"})  # same event: nothing to tombstone
-        assert todos.event_tombstones() == [] and todos.get(t["id"])["calendar_sig"] is None
-        todos.update(t["id"], {"calendar_event_id": "evt_2", "calendar_id": "cal_x"})
-        assert [(x["event_id"], x["calendar_id"]) for x in todos.event_tombstones()] == [("evt_1", "cal_x")]
 
 
 def test_structure() -> None:

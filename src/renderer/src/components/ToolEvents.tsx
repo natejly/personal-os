@@ -6,7 +6,7 @@ import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
-import PlanApproval from './PlanApproval'
+import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
 import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
@@ -16,6 +16,7 @@ import { OutputFiles } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
 import { latestBrowserCall } from '../lib/browserApproval'
+import { planOfCall } from '../lib/planDigest'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -277,6 +278,17 @@ function ToolFallback({ event, conversationId }: { event: ToolEvent; conversatio
 }
 
 /** Runs a row's render inside its boundary, so a throw while describing the call lands in that row's fallback. */
+/** A pending `propose_plan` call as the approval card, answered through the call's own approval. */
+function ProposedPlanCard({ event, conversationId }: { event: ToolEvent; conversationId: string }): JSX.Element {
+  const approveTool = useStore((s) => s.approveTool)
+  const plan = useMemo(() => planOfCall(event.id, event.arguments, !!event.forced), [event.id, event.arguments, event.forced])
+  return (
+    <ActionPlanCard plan={plan} shortcuts={false}
+      onDecide={(decision, edits, note) => approveTool(event.id, decision === 'reject' ? 'deny' : 'allow', conversationId,
+        { steps: decision === 'edit' ? edits : null, note: note || undefined })} />
+  )
+}
+
 function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
@@ -341,7 +353,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
           <button key={c.id} className="link small" title="Open this chat" onClick={() => void useStore.getState().selectChat(c.id)}>{c.title}</button>
         ))}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
-        {t.pending && t.needs_approval && t.name === 'propose_plan' && !deskPlanShown && <PlanApproval event={t} conversationId={conversationId} />}
+        {t.pending && t.needs_approval && t.name === 'propose_plan' && !deskPlanShown && <ProposedPlanCard event={t} conversationId={conversationId} />}
         {/* A question is answered, not permitted: its options and a text box instead of Allow/Deny. */}
         {t.pending && t.needs_approval && QUESTION_TOOLS.has(t.name) && <AskQuestion event={t} conversationId={conversationId} />}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && !QUESTION_TOOLS.has(t.name) && (

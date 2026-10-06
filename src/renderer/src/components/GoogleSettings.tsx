@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { GoogleCalendar, GoogleTaskList } from '@shared/types'
+import type { GoogleTaskList } from '@shared/types'
 
 /** Console pages, in the order the setup walks through them. */
 const CONSOLE = {
@@ -25,24 +25,17 @@ const openExternal = (url: string): void => void window.open(url, '_blank')
 export default function GoogleSettings({ clientId, clientSecret, secretSaved = false, onChange, onSaveCreds }: { clientId: string; clientSecret: string; secretSaved?: boolean; onChange: (p: { googleClientId?: string; googleClientSecret?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
   const google = useStore((s) => s.google)
   const tasksSync = useStore((s) => s.tasksSync)
-  const todoCalendar = useStore((s) => s.todoCalendar)
-  const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, setTodoCalendar, runTodoCalendar, toast } = useStore()
+  const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, toast } = useStore()
   const [setupOpen, setSetupOpen] = useState(false)
   const [taskLists, setTaskLists] = useState<GoogleTaskList[]>([])
-  const [calendars, setCalendars] = useState<GoogleCalendar[]>([])
   const idRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   useEffect(() => { void refreshGoogle() }, [refreshGoogle])
   // The list picker only matters once sync is on; fetch lazily so a plain settings open costs nothing.
   const syncEnabled = !!tasksSync?.config.enabled
-  const mirrorEnabled = !!todoCalendar?.config.enabled
   useEffect(() => {
     if (google?.connected && syncEnabled) void api.google.tasklists().then(setTaskLists).catch(() => undefined)
   }, [google?.connected, syncEnabled])
-  // Same for the calendar picker: only the mirror needs the writable calendar list.
-  useEffect(() => {
-    if (google?.connected && mirrorEnabled) void api.google.calendars().then(setCalendars).catch(() => undefined)
-  }, [google?.connected, mirrorEnabled])
 
   // Google only runs a sign-in flow on behalf of a registered app, so there has to be an
   // OAuth client before the button can do anything: from .env, or pasted here.
@@ -99,7 +92,7 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             {google?.connected
               ? <><Check size={11} /> Signed in as {google.email}</>
               : hasClient
-                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets. Signing in turns on two-way Todos ↔ Google Tasks sync and creates a “Grain Todos” calendar for due todos; both can be switched off here in Settings → Integrations.'
+                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets. Signing in turns on two-way Todos ↔ Google Tasks sync, which can be switched off here in Settings → Integrations.'
                 : 'Needs a one-time OAuth client (about two minutes) before the first sign-in.'}
           </small>
         </div>
@@ -142,46 +135,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
                     : 'Not synced yet — press Sync now'}
               </small>
             </div>
-          )}
-
-          <label className="toggle-row plain">
-            <span className="toggle-text"><b>Show Todos on Google Calendar</b><small>Puts each open todo with a due date on a calendar you choose.</small></span>
-            <input type="checkbox" checked={mirrorEnabled} disabled={!todoCalendar} onChange={(e) => void setTodoCalendar({ enabled: e.target.checked })} /><span className="switch" />
-          </label>
-          {mirrorEnabled && todoCalendar && (
-            <div className="tasks-sync-row">
-              <select aria-label="Calendar to put todos on" value={todoCalendar.config.calendarId}
-                onChange={(e) => void setTodoCalendar({ calendarId: e.target.value })}
-                title="Which calendar the due-date events go on">
-                <option value="">New calendar: {todoCalendar.config.calendarName}</option>
-                {calendars.filter((c) => c.access_role === 'owner' || c.access_role === 'writer')
-                  .map((c) => <option key={c.id} value={c.id}>{c.summary}{c.primary ? ' (primary)' : ''}</option>)}
-              </select>
-              <button className="ghost-btn" onClick={() => void runTodoCalendar()} disabled={todoCalendar.syncing}>
-                <RefreshCw size={13} className={todoCalendar.syncing ? 'spin' : ''} /> {todoCalendar.syncing ? 'Syncing…' : 'Sync now'}
-              </button>
-              <small className="muted">
-                {todoCalendar.last_error
-                  ? `Last sync failed: ${todoCalendar.last_error}`
-                  : todoCalendar.last_sync
-                    ? `Synced ${new Date(todoCalendar.last_sync * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                    : 'Not synced yet — press Sync now'}
-              </small>
-            </div>
-          )}
-          {mirrorEnabled && todoCalendar && (
-            <label className="toggle-row plain">
-              <span className="toggle-text"><b>Keep done todos on the calendar</b><small>Leave the event behind after a todo is ticked off.</small></span>
-              <input type="checkbox" checked={todoCalendar.config.keepCompleted}
-                onChange={(e) => void setTodoCalendar({ keepCompleted: e.target.checked })} /><span className="switch" />
-            </label>
-          )}
-          {mirrorEnabled && (
-            <small className="muted small">
-              Every open todo with a due date becomes an all-day event (marked free, so it will not
-              make your day look booked). Giving a todo a time — drag it onto an hour in the week
-              view — keeps that time. Todos with no due date stay off the calendar.
-            </small>
           )}
         </div>
       )}

@@ -5,7 +5,7 @@ import { Badge, ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './bloc
 import { registerToolCard, type ToolCardProps } from './registry'
 
 /** shell_run / shell_poll: the command, where it ran, how it ended, the end of its output, and which hosts it reached. */
-export default function ShellCard(props: ToolCardProps): JSX.Element {
+function ShellCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const p = useParsed(event)
   const d = p.data

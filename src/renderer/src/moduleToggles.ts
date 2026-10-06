@@ -5,10 +5,7 @@
  */
 import type { Settings } from '@shared/types'
 
-/** Matches backend llm.DEFAULT_SETTINGS. Used when settings have not loaded yet. */
-export const DEFAULT_HIDDEN_VIEWS: readonly string[] = []
-
 /** A missing homeWidgets key means the card is shown. */
 export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false
 export const viewHidden = (s: Settings, view: string): boolean =>
-  (s.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)
+  (s.hiddenViews ?? []).includes(view)

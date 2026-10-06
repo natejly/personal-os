@@ -44,7 +44,6 @@ export interface Outcome {
   b?: string
 }
 
-export const CALENDAR_WRITE_TOOLS = ['calendar_propose', 'calendar_create', 'calendar_update', 'calendar_delete'] as const
 const SINGLE_OP: Record<string, Op> = { calendar_create: 'create', calendar_update: 'update', calendar_delete: 'delete' }
 
 const CHANGE_KEYS: (keyof Change)[] = ['op', 'event_id', 'calendar_id', 'summary', 'start', 'end', 'attendees', 'location', 'description', 'recurrence', 'conference', 'send_updates']
@@ -403,19 +402,6 @@ export function layoutLanes(blocks: Block[]): Placed[] {
   return out
 }
 
-/** The whole-hour band worth drawing: every timed block, padded by an hour, never under `minHours`. */
-export function hourBand(blocks: Block[], minHours = 5): { start: number; end: number } {
-  const timed = blocks.filter((b) => !b.allDay)
-  if (!timed.length) return { start: 8, end: 18 }
-  let start = Math.max(0, Math.floor(Math.min(...timed.map((b) => b.startMin)) / 60) - 1)
-  let end = Math.min(24, Math.ceil(Math.max(...timed.map((b) => b.endMin)) / 60) + 1)
-  while (end - start < minHours && (start > 0 || end < 24)) {
-    if (start > 0) start -= 1
-    if (end - start < minHours && end < 24) end += 1
-  }
-  return { start, end }
-}
-
 export const MAX_DAYS = 5
 
 /**
@@ -441,7 +427,6 @@ export function rangeDays(changes: Change[], old: Record<string, CalendarEvent> 
 }
 
 // ------------------------------------------------------------------ agenda (find_time / events)
-export interface AgendaItem { day: string; label: string; start: string; end: string; allDay: boolean; title?: string; link?: string | null; location?: string | null; slot?: boolean }
 
 export function groupByDay<T extends { day: string }>(items: T[]): { day: string; items: T[] }[] {
   const m = new Map<string, T[]>()

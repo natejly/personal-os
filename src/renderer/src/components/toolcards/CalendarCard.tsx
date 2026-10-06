@@ -577,7 +577,7 @@ function ReadCard({ event, pending, decide, conversationId, rules }: ToolCardPro
   )
 }
 
-export default function CalendarCard(props: ToolCardProps): JSX.Element {
+function CalendarCard(props: ToolCardProps): JSX.Element {
   return ['calendar_find_time', 'calendar_events'].includes(props.event.name) ? <ReadCard {...props} /> : <ProposalCard {...props} />
 }
 

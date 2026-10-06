@@ -182,5 +182,3 @@ export const def: WidgetDef = {
   accepts: ACCEPTS,
   Component: TodosWidget
 }
-
-export default TodosWidget

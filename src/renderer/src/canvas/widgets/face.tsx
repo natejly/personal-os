@@ -41,5 +41,3 @@ export const def: WidgetDef = {
   chrome: 'minimal',
   Component: FaceWidget
 }
-
-export default FaceWidget

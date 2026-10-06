@@ -67,11 +67,6 @@ def net_blocked_note(hosts: list[str]) -> str:
             "domains), or ask them with desk_ask.")
 
 
-# Credential shapes only. The entropy and card rules would also eat file paths, commit hashes and build ids, which are
-# most of what a shell prints, and the "word that announces a secret" sweep would eat ordinary source code.
-SHELL_REDACT = redact.COMMAND_OUTPUT_RULES
-
-
 def _scrub(text: str) -> str:
     return redact.scrub_command_output(text)
 

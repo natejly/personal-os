@@ -131,5 +131,3 @@ export const def: WidgetDef = {
   needsRef: true,
   Component: DocWidget
 }
-
-export default DocWidget

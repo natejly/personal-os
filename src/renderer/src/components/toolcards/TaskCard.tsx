@@ -7,7 +7,7 @@ import { registerToolCard, type ToolCardProps } from './registry'
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 /** Add Google Task: title, due date and notes are editable until you approve. */
-export default function TaskCard(props: ToolCardProps): JSX.Element {
+function TaskCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const a = event.arguments
   const [title, setTitle] = useState(str(a.title))

@@ -104,20 +104,6 @@ export function builtinCommands(now: () => Date = () => new Date()): SlashComman
   }))
 }
 
-/** The chat composer's saved-command menu shows at most this many rows. */
-export const COMPOSER_SLASH_MAX = 8
-
-/**
- * Saved commands for the chat composer: only a `/` that starts the whole draft, before any space, opens
- * the menu. Ranked by `filterCommands` on the name, with the description's words as keywords.
- */
-export function composerSlash<T extends { name: string; description: string }>(text: string, commands: T[]): T[] | null {
-  const hit = detectSlash(text, text.length)
-  if (!hit || hit.start !== 0) return null
-  const items = commands.map((c) => ({ c, label: c.name, keywords: c.description.split(/\s+/).filter(Boolean) }))
-  return filterCommands(items, hit.query).slice(0, COMPOSER_SLASH_MAX).map((x) => x.c)
-}
-
 /** What a key does while a slash menu with `count` rows is open; null leaves the key to the textarea. */
 export function slashMenuKey(key: string, active: number, count: number):
   { kind: 'move'; active: number } | { kind: 'pick' } | { kind: 'close' } | null {

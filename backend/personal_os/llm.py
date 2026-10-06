@@ -270,9 +270,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
     "googleTasksSync": {},
-    # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
-    # /integrations/google/todo-calendar.
-    "googleTodoCalendar": {},
     # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
     # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
     "retrievalMode": "hybrid",
@@ -301,9 +298,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
-# Longest the provider may go without sending a byte before the stream is given up on. Generous
-# because a reasoning model can think silently for minutes; a dead socket must still end the run.
-STREAM_IDLE_S = 300.0
 
 
 class LLMError(Exception):

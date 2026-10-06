@@ -1,6 +1,7 @@
 /**
  * The canonical argument string an approved plan step binds to, plus the pure helpers the approval
- * card needs. No store, no fetch, no React.
+ * card needs (for a stored plan and for a chat's pending `propose_plan` call alike). No store, no
+ * fetch, no React.
  *
  * Approving step 3 approves `sha256(canon(arguments))` for that one call, once. `canon()` here is a
  * byte-for-byte mirror of `runlog.canon()` in backend/personal_os/runlog.py: sorted keys at every
@@ -13,7 +14,7 @@
  * arrays and plain objects. Anything else is stringified rather than silently serialised wrong,
  * which is what the Python side's `_plain()` fallback does too.
  */
-import type { PlanRecordStep, PlanEdit } from '@shared/types'
+import type { PlanRecord, PlanRecordStep, PlanEdit } from '@shared/types'
 
 /**
  * Key order by Unicode code point, which is what Python's `sorted()` gives. JS compares strings by
@@ -70,11 +71,6 @@ export function canon(args: Record<string, unknown> | null | undefined): string 
   return write(args ?? {})
 }
 
-/** Two argument objects that canonicalise the same are the same call, however they were typed. */
-export function sameArgs(a: Record<string, unknown> | null | undefined, b: Record<string, unknown> | null | undefined): boolean {
-  return canon(a) === canon(b)
-}
-
 /**
  * A draft as the card holds it: the raw text of the JSON textarea, an already-parsed object, or
  * nothing. Returns null when there is no usable object, so an unfinished edit is simply not an
@@ -105,24 +101,52 @@ export function edited(step: PlanRecordStep, draft: unknown): boolean {
 }
 
 /**
- * The `steps` payload of `POST /cowork/plans/{id}`: `{idx, arguments}` for a genuinely edited step
- * and `{idx, drop: true}` for a dropped one, in the order the card renders them, with the 1-based
- * `idx` the backend numbers steps by. A step nobody touched is left out — the backend keeps it
- * approved as proposed, so sending a subset never silently drops the rest.
+ * The `steps` payload of `POST /approvals` for a `propose_plan` call: the KEPT steps by their `idx` (0-based, as the
+ * backend numbers them), `{idx}` for a step authorised as proposed and `{idx, arguments}` for a genuinely edited one
+ * so the backend re-derives that step's digest from the new values. A step left out is dropped, and null means
+ * nothing was touched, so the proposed digests stand and no edit is sent at all. A draft that does not parse is
+ * never sent as a guess: the step falls back to its proposed arguments (and `broken()` blocks the approval).
  */
-export function editPayload(steps: PlanRecordStep[], drafts: Record<number, unknown>, dropped: Iterable<number>): PlanEdit[] {
+export function editPayload(steps: Pick<PlanRecordStep, 'idx' | 'arguments'>[], drafts: Record<number, unknown>, dropped: Iterable<number>): PlanEdit[] | null {
   const gone = new Set(dropped)
-  const out: PlanEdit[] = []
-  for (const step of steps) {
-    if (gone.has(step.idx)) {
-      // A drop outranks an edit: there is no point binding arguments to a call that will not happen.
-      out.push({ idx: step.idx, drop: true })
-      continue
+  const out: PlanEdit[] = steps
+    .filter((s) => !gone.has(s.idx))
+    .map((s) => {
+      const next = asArgs(drafts[s.idx])
+      return next !== null && canon(next) !== canon(s.arguments) ? { idx: s.idx, arguments: next } : { idx: s.idx }
+    })
+  return gone.size === 0 && out.every((e) => !e.arguments) ? null : out
+}
+
+/** True when a kept step has a draft that is not a usable arguments object: approving must be blocked, not guessed at. */
+export function broken(steps: Pick<PlanRecordStep, 'idx'>[], drafts: Record<number, string>, dropped: Iterable<number>): boolean {
+  const gone = new Set(dropped)
+  return steps.some((s) => !gone.has(s.idx) && drafts[s.idx] !== undefined && invalid(drafts[s.idx]) !== null)
+}
+
+/**
+ * A pending `propose_plan` tool call, read as the plan record the card renders. Unknown shapes degrade to an
+ * empty plan, not a crash. `danger` is 'plan' (always asks) because the call itself carries no tier, and
+ * `idx` is the step's position in `arguments.steps`, which is the index the backend stored it under.
+ */
+export function planOfCall(callId: string, args: unknown, tainted: boolean): PlanRecord {
+  const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const steps = (Array.isArray(a.steps) ? a.steps : []).map((raw, idx): PlanRecordStep => {
+    const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+    const tool = text(o.tool) || 'unknown'
+    const arguments_ = o.arguments && typeof o.arguments === 'object' && !Array.isArray(o.arguments) ? (o.arguments as Record<string, unknown>) : {}
+    return {
+      step_id: `${callId}:${idx}`, plan_id: callId, idx, title: text(o.title) || tool, tool, arguments: arguments_,
+      args_digest: '', why: text(o.why), danger: 'plan', status: 'proposed', edited: false, call_id: null,
+      consumed_at: null, result_error: null
     }
-    const next = asArgs(drafts[step.idx])
-    if (next !== null && canon(next) !== canon(step.arguments)) out.push({ idx: step.idx, arguments: next })
+  })
+  return {
+    plan_id: callId, call_id: callId, run_id: null, conversation_id: null, message_id: null, desk_id: null,
+    title: text(a.title), intent: text(a.intent), status: 'pending', tainted, expected_taint: [], note: null,
+    decided_by: null, created_at: 0, decided_at: null, steps
   }
-  return out
 }
 
 /** One argument of a step, rendered for the card. `multiline` is the hint to give it its own row. */

@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from .. import redact, todo_rules
 from ..google import GoogleNotConnected
 from ..gtasks import TasksSync
-from ..todocal import TodoCalendarMirror
 from ..todos import UNTRUSTED_SOURCES, Todos
 from ..tools import ToolSpec, _obj, page, tool_error
 from . import Module, ModuleContext
@@ -84,14 +83,6 @@ class TasksSyncIn(BaseModel):
     intervalMinutes: int | None = None
 
 
-class TodoCalendarIn(BaseModel):
-    enabled: bool | None = None
-    calendarId: str | None = None
-    calendarName: str | None = None
-    intervalMinutes: int | None = None
-    keepCompleted: bool | None = None
-
-
 class TodosModule(Module):
     key = "todos"
     label = "Todos"
@@ -100,14 +91,12 @@ class TodosModule(Module):
         super().__init__(ctx)
         self.store = Todos(ctx.db)
         self.tasks_sync = TasksSync(self.store, ctx.google, ctx.settings, ctx.set_settings)
-        self.calendar_mirror = TodoCalendarMirror(self.store, ctx.google, ctx.settings, ctx.set_settings)
         self.store.on_change = self._changed
         self._tasks: list[asyncio.Task[Any]] = []
 
     def _changed(self) -> None:
-        """Any todo write (routes or assistant tools) nudges both Google sync loops."""
+        """Any todo write (routes or assistant tools) nudges the Google Tasks sync loop."""
         self.tasks_sync.poke()
-        self.calendar_mirror.poke()
 
     # ---- routes ----
     def router(self) -> APIRouter:
@@ -230,26 +219,6 @@ class TodosModule(Module):
                 raise HTTPException(502, f"Google Tasks sync failed: {e}") from e
             return self.tasks_sync.status()
 
-        # ---- todos -> Google Calendar mirror ----
-        @r.get("/integrations/google/todo-calendar")
-        def google_todo_calendar_status() -> dict[str, Any]:
-            return self.calendar_mirror.status()
-
-        @r.put("/integrations/google/todo-calendar")
-        def google_todo_calendar_config(body: TodoCalendarIn) -> dict[str, Any]:
-            self.calendar_mirror.set_config(body.model_dump(exclude_none=True))
-            return self.calendar_mirror.status()
-
-        @r.post("/integrations/google/todo-calendar/run")
-        async def google_todo_calendar_run() -> dict[str, Any]:
-            try:
-                await asyncio.to_thread(self.calendar_mirror.sync_once)
-            except GoogleNotConnected as e:
-                raise HTTPException(409, str(e)) from e
-            except Exception as e:  # noqa: BLE001
-                raise HTTPException(502, f"Todo calendar sync failed: {e}") from e
-            return self.calendar_mirror.status()
-
         return r
 
     # ---- agent tools ----
@@ -360,7 +329,7 @@ class TodosModule(Module):
 
     # ---- loops ----
     async def start(self) -> None:
-        self._tasks = [asyncio.create_task(self.tasks_sync.loop()), asyncio.create_task(self.calendar_mirror.loop())]
+        self._tasks = [asyncio.create_task(self.tasks_sync.loop())]
 
     async def stop(self) -> None:
         tasks, self._tasks = self._tasks, []

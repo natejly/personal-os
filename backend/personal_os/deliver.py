@@ -34,7 +34,6 @@ TIMEOUT_S = 120
 WHICH_TTL_S = 60.0
 GUIDES_DIR = Path(__file__).parent / "guides"
 GUIDE_FORMATS = ("docx", "xlsx", "pptx", "pdf", "charts", "csv")
-GUIDE_MAX_CHARS = 4500
 
 DEFAULT_PAGES = 3
 MAX_PAGES = 8

@@ -32,7 +32,3 @@ export function taskLineMap(source: string, normalized: string): Map<number, num
   if (a.length === b.length) a.forEach((n, i) => map.set(n, b[i]))
   return map
 }
-
-export function mapTaskLine(source: string, normalized: string, normalizedLine: number): number | null {
-  return taskLineMap(source, normalized).get(normalizedLine) ?? null
-}

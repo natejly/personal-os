@@ -1482,8 +1482,21 @@ The `show` tool opens the same kinds of content (plus markdown and files on this
 
 # Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
 PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
-TOOLS_HINT = ("You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. "
+TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
+              "the user's own data; answer directly only when nothing you could look up would change it. "
               "After using tools, write the final answer for the user. " + FENCE_RULE)
+# The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
+# alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
+PROACTIVE_HINT = (
+    "## How to work\n"
+    "You are an agent, not a lookup. Own the request end to end: do the obvious work with your tools instead of "
+    "describing it or asking for what you could find out yourself. When a request touches time, people or commitments, "
+    "check the calendar, inbox or todos first and say what you found that bears on it (a clash, a reply waiting, a "
+    "deadline). Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
+    "Prefer a draft or proposal over a silent change to anything the user owns. If they describe a recurring want, offer "
+    "schedule_task once. End with at most one specific next step you can do right now, or none; never a generic offer. "
+    "A wrong suggestion costs more than silence."
+)
 # Only added when todo_write is actually available in this chat (see _chat_stream).
 PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
              "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
@@ -2351,7 +2364,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What each connected server said about its own tools at initialize, for servers with a tool offered this
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
-        hints = (RENDER_HINT, tools_hint, _agents_hint(modes), JOB_HINT if proposal_only(run) else "",
+        hints = (RENDER_HINT, tools_hint, PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
+                 _agents_hint(modes), JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",

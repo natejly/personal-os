@@ -689,6 +689,11 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    /** An office file as HTML (word-processor formats) or the extracted markdown (sheets, slides, the rest). */
+    preview: (id: string) => req<{ kind: 'html'; html: string } | { kind: 'markdown'; text: string }>(`/documents/${id}/preview`),
+    /** Hand the stored original to the default app / show it in Finder. A 400 carries why not (e.g. the file can run code). */
+    open: (id: string) => req<{ ok: boolean }>(`/documents/${id}/open`, { method: 'POST' }),
+    reveal: (id: string) => req<{ ok: boolean }>(`/documents/${id}/reveal`, { method: 'POST' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
     /** Re-chunk every uploaded file with the current chunker. */
     reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),

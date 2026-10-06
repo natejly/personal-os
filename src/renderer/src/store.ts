@@ -266,6 +266,8 @@ export interface State {
   /** The Advanced group to open when Settings opens on the Advanced tab. */
   settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
+  /** The upload the standalone viewer shows (an upload opened with no chat to put it beside). */
+  uploadPreview: string | null
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
@@ -400,6 +402,7 @@ export interface State {
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
   openSettings: (tab: SettingsTab | LegacySettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
+  openUploadPreview: (id: string | null) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
@@ -1963,6 +1966,7 @@ export const useStore = create<State>((set, get) => {
     settingsTab: 'model',
     settingsGroup: null,
     projectModal: null,
+    uploadPreview: null,
     toasts: [],
     paletteOpen: false,
     helpOpen: false,
@@ -2177,6 +2181,7 @@ export const useStore = create<State>((set, get) => {
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (id) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
+    openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))

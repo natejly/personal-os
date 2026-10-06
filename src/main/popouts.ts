@@ -8,7 +8,7 @@ import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
 import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
-import { reveal, stealFocus } from './background'
+import { background, reveal, stealFocus } from './background'
 
 const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
@@ -230,8 +230,8 @@ export const focusPopout = (windowId: string): boolean => {
   if (!e || e.win.isDestroyed()) return false
   quiet(windowId, e)
   if (e.win.isMinimized()) e.win.restore()
-  e.win.show()
-  e.win.focus()
+  reveal(e.win)
+  if (!background) e.win.focus()
   return true
 }
 
@@ -304,8 +304,8 @@ const raiseMain = (): void => {
   const m = getMain()
   if (m && !m.isDestroyed()) {
     if (m.isMinimized()) m.restore()
-    m.show()
-    m.focus()
+    reveal(m)
+    if (!background) m.focus()
   }
   stealFocus()
 }
@@ -354,8 +354,8 @@ export const gather = (): GatherState => {
     const m = getMain()
     if (m && !m.isDestroyed()) {
       if (m.isMinimized()) m.restore()
-      m.show()
-      m.focus()
+      reveal(m)
+      if (!background) m.focus()
     }
     stealFocus()
     return state()

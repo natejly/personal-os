@@ -19,24 +19,20 @@ from personal_os import activity, codingagents, imessage, opencode, shell, syste
 
 
 class _Base(unittest.TestCase):
-    stored: list[str] = []
-
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         system_access._version.cache_clear()
-        self.cfg = {"workspaceRoots": [self.tmp.name]}
+        self.cfg: dict = {}
         app = FastAPI()
-        app.include_router(system_access.router(lambda: self.cfg, lambda: self.stored, lambda: object()))
+        app.include_router(system_access.router(lambda: self.cfg, lambda: object()))
         self.c = TestClient(app)
         for target, val in [(activity, {"IS_MAC": True, "automation_status": lambda b: "granted",
                                         "input_monitoring_status": lambda: "unasked", "full_disk_access": lambda: False,
                                         "installed_browsers": lambda: ["Safari"]}),
                             (codingagents, {"claude_binary": lambda: "/bin/claude"}),
                             (opencode, {"binary": lambda: None}),
-                            (imessage, {"_open_ro": lambda p: mock.Mock()}),
-                            # tmp dirs sit outside home, which mac.allowed_root rightly refuses
-                            (shell, {"granted_roots": lambda cfg, desk: [Path(os.path.realpath(r)) for r in cfg["workspaceRoots"]]})]:
+                            (imessage, {"_open_ro": lambda p: mock.Mock()})]:
             for k, v in val.items():
                 p = mock.patch.object(target, k, v)
                 p.start()
@@ -50,13 +46,19 @@ class _Base(unittest.TestCase):
 class AccessTests(_Base):
     def test_shape(self) -> None:
         d = self.c.get("/system/access").json()
-        self.assertEqual(set(d), {"fullDisk", "inputMonitoring", "automation", "browsers", "roots", "clis"})
+        self.assertEqual(set(d), {"fullDisk", "inputMonitoring", "automation", "browsers", "scope", "clis"})
         self.assertEqual(set(d["automation"]), {"messages", "finder", "systemEvents", "contacts", "calendar", "reminders"})
         self.assertEqual(d["fullDisk"], "granted")  # chat.db probe succeeded
         self.assertEqual(d["inputMonitoring"], "unasked")
         self.assertEqual(d["browsers"], [{"name": "Safari", "state": "granted"}] if "Safari" in activity.BROWSER_BUNDLES
                          else d["browsers"])
-        self.assertEqual(d["roots"], {"roots": [self.tmp.name], "defaulted": True})
+        # the file scope: what is off limits and what asks first, as display strings
+        self.assertEqual(set(d["scope"]), {"protected", "sensitive"})
+        self.assertTrue(d["scope"]["protected"][0].startswith("Grain's data folder ("))
+        self.assertIn("/Applications/Grain.app", d["scope"]["protected"])
+        self.assertIn("~/.ssh", d["scope"]["sensitive"])
+        self.assertIn("Browser cookies and saved passwords", d["scope"]["sensitive"])
+        self.assertIn(".env files", d["scope"]["sensitive"])
 
     def test_probe_raises_is_unknown(self) -> None:
         with mock.patch.object(activity, "input_monitoring_status", side_effect=RuntimeError("x")):
@@ -89,10 +91,9 @@ class AccessTests(_Base):
         self.c.get("/system/access")
         self.assertEqual(self.run_mock.call_count, 1)
 
-    def test_defaulted_false_when_stored(self) -> None:
-        type(self).stored = ["/x"]
-        self.addCleanup(lambda: setattr(type(self), "stored", []))
-        self.assertFalse(self.c.get("/system/access").json()["roots"]["defaulted"])
+    def test_workspace_roots_are_not_reported(self) -> None:
+        self.cfg = {"workspaceRoots": ["/x"]}
+        self.assertNotIn("roots", self.c.get("/system/access").json())
 
 
 class ShellCheckTests(_Base):
@@ -104,7 +105,7 @@ class ShellCheckTests(_Base):
         with mock.patch.object(shell, "run_fixed", fake):
             d = self.c.post("/system/shell-check").json()
         self.assertEqual(d["ok"], True)
-        self.assertEqual(d["cwd"], os.path.realpath(self.tmp.name))
+        self.assertEqual(d["cwd"], os.path.realpath(os.path.expanduser("~")))  # the check runs in the home folder
         self.assertIsNone(d["error"])
 
     def test_nonzero_exit(self) -> None:
@@ -121,13 +122,6 @@ class ShellCheckTests(_Base):
         with mock.patch.object(shell, "run_fixed", fake):
             d = self.c.post("/system/shell-check").json()
         self.assertEqual((d["ok"], d["error"]), (False, "sandbox unavailable"))
-
-    def test_no_roots(self) -> None:
-        self.cfg = {"workspaceRoots": []}
-        d = self.c.post("/system/shell-check").json()
-        self.assertFalse(d["ok"])
-        self.assertIsNone(d["cwd"])
-        self.assertTrue(d["error"])
 
 
 if __name__ == "__main__":

@@ -1129,7 +1129,8 @@ def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
 
 
 def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
-    script({"text": "I think that is everything."}, {"text": "Still nothing."})
+    # A turn that used a tool and then just ended is unfinished work: one nudge, then it settles for the user to look at.
+    script({"calls": [call("current_time")]}, {"text": "I think that is everything."}, {"text": "Still nothing."})
     did = make_desk("Do it", autonomy="ask")["desk"]["id"]
     quiet(did)
     time.sleep(0.3)
@@ -1141,10 +1142,94 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
     check(desk(did)["status"] in ("review", "blocked"), "a nudged turn that also just ends settles")
 
 
+def test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge() -> None:
+    script({"text": "Paris."})
+    did = make_desk("What is the capital of France?", autonomy="ask")["desk"]["id"]
+    quiet(did)
+    time.sleep(0.3)
+    quiet(did)
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", f"no tool, no plan: done (answered), got {d['status']}/{d['status_reason']}")
+    check(len(run_store.list(desk_id=did, statuses=None)) == 1, "one turn: no nudge")
+    check(not any("ended your reply without calling" in str(m[-1].get("content") or "") for m in SCRIPT["messages"] if m), "and none was sent")
+    # a later message in the same chat relaunches the desk like any other turn
+    script({"text": "Berlin."})
+    j("POST", f"/cowork/desks/{did}/message", {"content": "And Germany?"})
+    quiet(did)
+    check(desk(did)["status"] == "done" and len(run_store.list(desk_id=did, statuses=None)) == 2, "the next question is answered the same way")
+    check([m["content"] for m in j("GET", f"/conversations/{desk(did)['conversation_id']}")["messages"] if m["role"] == "assistant"][-1].strip() == "Berlin.",
+          "and lands in the same transcript")
+
+
+def test_an_answer_that_used_a_tool_or_a_plan_is_not_a_plain_answer() -> None:
+    from personal_os.app import _answered, _chain_kind
+    import types
+
+    def fake(**kw: Any) -> Any:
+        base = dict(error=None, partial=None, tool_calls=0, steps_consumed=0, tool_ok=0, input={"content": "hi"}, stop=asyncio.Event())
+        return types.SimpleNamespace(**{**base, **kw})
+    row = {"autonomy": "ask", "plan_id": None, "status": "working", "turn": 1, "budget": {}}
+    check(_answered(row, fake()) and _chain_kind(row, fake()) is None, "a turn with no tool call at all is a plain answer, and nothing follows it")
+    check(not _answered(row, fake(tool_calls=1)) and _chain_kind(row, fake(tool_calls=1)) == "nudge",
+          "a call that was refused still counts as a tool call: the nudge path is unchanged")
+    check(not _answered(row, fake(tool_ok=1, tool_calls=1)) and _chain_kind(row, fake(tool_ok=1, tool_calls=1)) == "nudge", "so does one that ran")
+    check(not _answered(row, fake(steps_consumed=1)), "a consumed plan step is not a plain answer")
+    check(not _answered({**row, "plan_id": "p1"}, fake()), "a desk with a plan is not")
+    check(_chain_kind({**row, "plan_id": "p1"}, fake()) == "nudge", "and still gets its nudge")
+    check(not _answered({**row, "autonomy": "plan"}, fake()) and not _answered({**row, "autonomy": "propose"}, fake()), "only `ask` desks answer plainly")
+    check(not _answered(row, fake(partial="rounds")) and not _answered(row, fake(error="x")), "a budget stop or an error is not an answer")
+    from personal_os.cowork import DESK_NUDGE
+    check(not _answered(row, fake(input={"content": DESK_NUDGE})) and not _answered(
+        {**row, "status": "done"}, fake()), "nor is a continuation turn, or a desk that already settled")
+
+
+def test_a_chats_first_message_can_start_a_desk_through_the_message_route() -> None:
+    """What the composer does on a new chat's first send with Autonomous on: bind a desk to the empty chat without starting
+    it, then send the text through the desk's message route."""
+    cid = j("POST", "/conversations", {"title": "New chat"})["id"]
+    made = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "ask", "brief": "How tall is Everest?", "start": False})
+    did = made["desk"]["id"]
+    check(made["desk"]["status"] == "draft" and made["conversation_id"] == cid and "run_id" not in made, "created as a draft, nothing running")
+    check(made["desk"]["brief"] == "How tall is Everest?" and j("GET", f"/conversations/{cid}")["settings"]["deskId"] == did, "bound to the chat")
+    script({"text": "About 8,849 metres."})
+    out = j("POST", f"/cowork/desks/{did}/message", {"content": "How tall is Everest?"})
+    check(out["ok"] and out.get("run_id") and not out.get("queued"), f"the first message launches the draft: {out}")
+    quiet(did)
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", "and the answer settles it")
+    roles = [(m["role"], m["content"].strip()) for m in j("GET", f"/conversations/{cid}")["messages"]]
+    check(roles == [("user", "How tall is Everest?"), ("assistant", "About 8,849 metres.")], f"one user message, one answer: {roles}")
+
+
+def test_a_message_over_the_live_cap_queues_instead_of_starting() -> None:
+    """Reported, not redesigned: a chat's first message goes through the same gate as every desk turn, so over deskMaxLive it waits in
+    line (the message is held with the desk, and the client gets {queued, position}) and is sent when a slot frees."""
+    settings_patch(deskMaxLive=1)
+    try:
+        script({"text": " ".join(["slow"] * 60)}, delay=0.1)
+        busy = make_desk("Work on something long", autonomy="ask")["desk"]["id"]
+        wait_until(lambda: desk(busy)["status"] in LIVE, "the first desk to be live")
+        cid = j("POST", "/conversations", {"title": "second"})["id"]
+        did = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "ask", "brief": "Quick one", "start": False})["desk"]["id"]
+        out = j("POST", f"/cowork/desks/{did}/message", {"content": "Quick one"})
+        check(out.get("queued") is True and out["position"] == 1 and desk(did)["status"] == "queued", f"over deskMaxLive it waits in line: {out}")
+        check(not j("GET", f"/conversations/{cid}")["messages"], "and nothing is in its transcript yet")
+        script({"text": "Done quickly."})
+        j("POST", f"/cowork/desks/{busy}/stop")  # a slot frees: the queue drains
+        wait_until(lambda: desk(did)["status"] == "done", "the queued desk to run and answer")
+        check([m["role"] for m in j("GET", f"/conversations/{cid}")["messages"]] == ["user", "assistant"], "then the question and its answer are there")
+    finally:
+        settings_patch(deskMaxLive=4)
+
+
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_chat_is_offered_desk_start_whatever_views_are_hidden,
          test_a_chat_works_autonomously_in_its_own_conversation,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
+         test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge,
+         test_an_answer_that_used_a_tool_or_a_plan_is_not_a_plain_answer,
+         test_a_chats_first_message_can_start_a_desk_through_the_message_route,
+         test_a_message_over_the_live_cap_queues_instead_of_starting,
          test_a_desk_is_told_it_is_a_desk,
          test_a_desk_is_told_its_inputs,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,

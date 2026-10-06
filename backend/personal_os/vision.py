@@ -202,7 +202,7 @@ def register(tb: Any) -> None:
         return allowed_image_path(raw)
 
     async def view_image(ctx: dict[str, Any], path: str = "", question: str = "") -> Any:
-        fix = dict(field="path", expected="a PNG, JPEG, GIF, WebP, BMP or TIFF file: a desk path like outputs/chart.png, or a path under your home folder",
+        fix = dict(field="path", expected="a PNG, JPEG, GIF, WebP, BMP or TIFF file: a desk path like outputs/chart.png, or a path anywhere on this Mac",
                    example={"path": "outputs/chart.png", "question": "what does the y axis show?"})
 
         def fail(msg: str, alternative: str | None = None) -> dict[str, Any]:
@@ -265,7 +265,7 @@ def register(tb: Any) -> None:
         "and an answer to your question about it. Use it on charts you made, screenshots, rendered slides or pages, photos and scans. "
         "PNG, JPEG, GIF, WebP, BMP, TIFF up to 20 MB. In a desk the path is relative to the workspace. When no vision model is available "
         "you get OCR text only.",
-        _obj({"path": {"type": "string", "description": "Desk path (outputs/chart.png) or a path under the home folder"},
+        _obj({"path": {"type": "string", "description": "Desk path (outputs/chart.png) or a path anywhere on this Mac"},
               "question": {"type": "string", "description": "What to find out about the picture (optional). Ask about the specific thing you need."}},
              ["path"]),
         view_image, "vision", "safe",

@@ -677,8 +677,10 @@ def test_writers_confined_and_serialized() -> None:
     root_a, root_b = tempfile.mkdtemp(), tempfile.mkdtemp()
     reset(workspaceRoots=[root_a, root_b])
     ctx = mkctx(new_conv())
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "w", "role": "worker", "root": os.environ["PERSONAL_OS_DATA_DIR"]}, ctx))
+    check("error" in out and "off limits" in out["error"], "a worker root inside Grain's own data folder is refused")
     out = run(appmod.toolbox.call("agent_spawn", {"task": "w", "role": "worker", "root": "/etc"}, ctx))
-    check("error" in out and "outside" in out["error"], "a worker root outside the granted folders is refused")
+    check("error" not in out, "a worker root anywhere else on the Mac is fine now")
 
     # a file tool aimed outside the root is denied before it runs
     SCRIPTS["escape"] = [{"text": "", "calls": [call("e", "write_local_file", {"path": "/tmp/elsewhere.txt", "content": "x"})]}, {"text": "done"}]
@@ -687,7 +689,7 @@ def test_writers_confined_and_serialized() -> None:
     ch = next(c for c in mgr.children.values() if c.task == "escape")
     tool_out = next(m["content"] for m in ch.messages if m["role"] == "tool")
     check("outside" in tool_out and not os.path.exists("/tmp/elsewhere.txt"), "a worker's write outside its root is denied")
-    check(ch.roots == (Path(root_a).resolve(),), "the child's writable root is the narrowed one")
+    check(ch.roots == (Path(root_a).resolve(),) and ch.confine, "the child's writable root is the narrowed one, and it is confined to it")
 
     # same root serializes, disjoint roots overlap
     for name in ("one", "two"):
@@ -711,23 +713,26 @@ def test_writers_confined_and_serialized() -> None:
     run(pair(root_a, nested))
     check(LIVE["peak"] == 1, "a root and one nested in it overlap, so they serialize")
 
-    # with no root set, the default workspace folder (~/Grain) is the worker's root, so it still has writers
+    # with no root named the worker is not confined: it keeps its writers and may write anywhere the tools reach
     reset(workspaceRoots=[])
     SCRIPTS["bare"] = [{"text": "nothing to write in"}]
     run(appmod.toolbox.call("agent_spawn", {"task": "bare", "role": "worker"}, mkctx(new_conv())))
     offered = next(s for s in SEEN if s["child"])["tools"]
-    check("write_local_file" in offered, "a worker falls back to the default workspace folder for its writers")
+    check("write_local_file" in offered, "a worker with no root keeps its writers")
+    bare = next(c for c in mgr.children.values() if c.task == "bare")
+    check(bare.roots == () and not bare.confine and mgr._confine(bare, "write_local_file", {"path": "/tmp/anywhere.txt"}) is None,
+          "an unconfined worker may write anywhere")
 
 
 # ---- definitions -----------------------------------------------------------------------------------
 
 def test_worker_can_spawn_a_worker_on_its_own_root() -> None:
     root = tempfile.mkdtemp()
-    reset(workspaceRoots=[root], subagentStaleSeconds=1)
-    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker"})]}, {"text": "outer done"}]
+    reset(subagentStaleSeconds=1)
+    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker", "root": root})]}, {"text": "outer done"}]
     SCRIPTS["inner"] = [{"text": "inner done"}]
     modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "on"}
-    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker"}, mkctx(new_conv(), modes=modes)))
+    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker", "root": root}, mkctx(new_conv(), modes=modes)))
     inner = next(c for c in mgr.children.values() if c.task == "inner")
     check(inner.roots and inner.state == "completed", "a nested worker inherits its ancestor's root lock instead of deadlocking")
 
@@ -997,7 +1002,7 @@ def test_pinned_notes_cannot_open_a_section() -> None:
             id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
             depth=1, conversation_id=None, message_id=None, desk_id=None,
             ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(),
-            roots=(Path("/tmp/work\n\n## System"),),
+            roots=(Path("/tmp/work\n\n## System"),), confine=True,
         )
         msgs = mgr._seed(ch, {}, None)
     finally:
@@ -1091,13 +1096,13 @@ def test_a_token_in_a_subagent_root_is_stripped() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     root = tempfile.mkdtemp()
     ctx = mkctx(new_conv(), settings={**appmod.settings(), "workspaceRoots": [root]})
-    out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/tmp/{pat}"}, ctx))
-    check(pat not in str(out) and "[github-pat]" in out["error"] and "outside" in out["error"],
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/Applications/Grain.app/{pat}"}, ctx))
+    check(pat not in str(out) and "[github-pat]" in out["error"] and "off limits" in out["error"],
           "a token in a worker root is stripped")
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(), roots=(Path(root).resolve(),),
+        ctx={}, modes={}, steps=3, meter=sa.Meter(), roots=(Path(root).resolve(),), confine=True,
     )
     msg = mgr._confine(ch, "write_local_file", {"path": f"/tmp/{pat}.txt"})
     check(msg is not None and pat not in msg and "[github-pat]" in msg, "a token in a confined path is stripped")

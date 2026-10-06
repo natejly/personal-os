@@ -175,12 +175,15 @@ class Bridge:
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.
         # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
         mode = self.tb.gate(name, raw, self.ctx, args)
+        fs_ask = self.tb.fs_needs_ask(name, args, self.ctx)  # a credential store, or a write after untrusted content
+        if fs_ask and mode == "on":
+            mode = "ask"
         # Then the user's argument-pattern rules and this chat's session grants: a deny refuses, an ask rule cards.
         cfg = self.ctx.get("settings") or self.tb.settings()
-        roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+        roots: list[str] = []
         if self.ctx.get("desk_id") and (ws := getattr(self.tb, "workspace", None)) is not None:
             roots.append(str(ws.desk_root(self.ctx["desk_id"])))
-        perm = permrules.resolve(name, args, mode, mode != raw, rules=cfg.get("permissionRules"), roots=roots,
+        perm = permrules.resolve(name, args, mode, mode != raw or fs_ask, rules=cfg.get("permissionRules"), roots=roots,
                                  conv=self.ctx.get("conversation_id"))
         if perm.refusal:
             return self._refuse(name, f"{name} was refused: {perm.refusal}")
@@ -203,7 +206,11 @@ class Bridge:
                 return self._refuse(name, f"the user declined {name}.")
         # The run's own caller when the lane has one (undo snapshot, idempotency journal), else the toolbox directly.
         call = self.ctx.get("bridge_call")
-        result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
+        self.ctx["fs_outside_ok"] = fs_ask  # the user said yes to it above
+        try:
+            result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
+        finally:
+            self.ctx["fs_outside_ok"] = False
         if self.tb.taints(name) and not (isinstance(result, dict) and result.get("error")):
             self.ctx.setdefault("taint_sources", []).append(name)  # appended every time: the fence reads growth
         self.log.append({"tool": name, "ok": not (isinstance(result, dict) and result.get("error"))})

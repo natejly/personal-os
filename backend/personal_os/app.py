@@ -61,7 +61,7 @@ from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthSto
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -302,9 +302,6 @@ def settings() -> dict[str, Any]:
     to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
     stored = db.get_settings()
     perms = permissions.load(stored)
-    if not perms["workspaceRoots"]:  # the one place every shell/file/subagent consumer reads roots from
-        with contextlib.suppress(OSError):
-            perms["workspaceRoots"] = [mac.default_workspace()]
     return {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
             **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
 
@@ -329,7 +326,7 @@ for _m in modules:
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
-app.include_router(system_access.router(settings, lambda: permissions.load(db.get_settings())["workspaceRoots"], lambda: toolbox.shell))
+app.include_router(system_access.router(settings, lambda: toolbox.shell))
 usage = Usage(db)
 pricing = Pricing()
 llm.caps_lookup = pricing.caps
@@ -557,7 +554,7 @@ subagent_mgr.snaps = snaps
 # Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
 workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
 workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_store, settings, projects,
-                              conv_cfg=lambda cfg, cid: _conv_cfg(cfg, cid))
+)
 command_store = Commands(db)
 toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
 # The insights pass proposes automations, so it is told which tools this install actually has - an
@@ -649,46 +646,22 @@ _approval_notes: dict[str, str] = {}
 QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 
-def _working_folder(conv_settings: dict[str, Any]) -> str | None:
-    """The folder the user bound a chat to, when it still exists and may be granted (mac.allowed_root: inside home,
-    not home itself, not around the app's data). A folder that stopped qualifying is simply not granted."""
-    raw = str(conv_settings.get("workingFolder") or "").strip()
+PERSONA_FOLDER_HINT = ("## Working folder\nThis agent keeps its work in `{path}`. Start there: pass it as cwd to shell_run and "
+                       "opencode_run and as root to the fs_* tools. For a whole coding task (a feature, a fix, a refactor) prefer "
+                       "opencode_run with a self-contained brief, then check its diff. Say which files you changed.")
+
+
+def _persona_folder(persona: Any) -> str | None:
+    """The folder an agent definition names for its work, when it is an existing folder the file tools may reach. Only a
+    hint for the prompt: nothing is scoped by it, since the whole Mac is in reach."""
+    raw = str(getattr(persona, "workspace", "") or "").strip()
     if not raw:
         return None
     try:
-        p = mac.allowed_root(raw)
+        p = mac.allowed_path(raw)
     except mac.LocalPathError:
         return None
     return str(p) if p.is_dir() else None
-
-
-def _with_folder(cfg: dict[str, Any], folder: str | None) -> dict[str, Any]:
-    """`cfg` with `folder` granted first among the workspace roots (a no-op without one). The Settings list is always
-    unioned back in, so a partial cfg can never leave a run with only the folder."""
-    if not folder:
-        return cfg
-    rest = [*(permissions.get(cfg, "workspaceRoots") or []), *(permissions.get(settings(), "workspaceRoots") or [])]
-    return {**cfg, "workspaceRoots": [folder, *dict.fromkeys(r for r in rest if r != folder)]}
-
-
-def _conv_cfg(cfg: dict[str, Any], conv_id: str | None) -> dict[str, Any]:
-    """Settings for a run that belongs to a conversation: its working folder is granted like a workspace root."""
-    conv = convos.get(conv_id) if conv_id else None
-    return _with_folder(cfg, _working_folder(conv["settings"])) if conv else cfg
-
-
-FOLDER_HINT = ("## Working folder\nThe user bound this chat to `{path}`. shell_run, opencode_run, the fs_* tools and the local file "
-               "tools may read and write there; an empty cwd or a relative path means that folder. For a whole coding task "
-               "(a feature, a fix, a refactor) prefer opencode_run with a self-contained brief, then check its diff. Say which "
-               "files you changed.")
-
-
-def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
-    """Folders a shell or file call counts as inside: the granted roots plus the active desk's workspace."""
-    roots = [r for r in (permissions.get(cfg, "workspaceRoots") or []) if isinstance(r, str) and r]
-    if desk_id:
-        roots.append(str(workspace.desk_root(desk_id)))
-    return roots
 
 
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -1321,17 +1294,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     if isinstance(settings_patch.get("tools"), dict):
         settings_patch["tools"] = toolbox.cap_modes(settings_patch["tools"])  # external and schedules tools top out at ask
     settings_patch.pop("deskId", None)  # bound and unbound by the cowork routes only, never by a settings PATCH
-    if "workingFolder" in settings_patch:  # the chat's working folder: a grantable folder, stored resolved; "" unbinds
-        raw = str(settings_patch.get("workingFolder") or "").strip()
-        if raw:
-            try:
-                p = mac.allowed_root(raw)
-            except mac.LocalPathError as e:
-                raise HTTPException(422, str(e)) from None
-            if not p.is_dir():
-                raise HTTPException(422, f"{p} is not a folder")
-            raw = str(p)
-        settings_patch["workingFolder"] = raw
+    settings_patch.pop("workingFolder", None)  # retired: the file tools reach the whole Mac, so a chat needs no folder bound to it
     # Clearing the banner has to drop library text that was copied into the sandbox, or the next
     # command can print it back as if the chat were trusted again.
     if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
@@ -1841,17 +1804,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "error", {"message": "Conversation not found"}
         return
     cfg = settings()
-    # A chat bound to a working folder (the Folder control under the composer) grants that folder to this run the
-    # way a Settings workspace root would, and first, so an empty cwd or a relative path means that folder.
     # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
     # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.
     persona = subagent_mgr.role_for(str(conv["settings"].get("agent") or "")) if conv["settings"].get("agent") else None
     if conv["settings"].get("agent") and persona is None:
         yield "error", {"message": f"The agent {conv['settings']['agent']!r} is not approved. Approve it in Library > Agents, or clear it from this chat."}
         return
-    # The agent's own folder stands in when the chat has none bound.
-    folder = _working_folder(conv["settings"]) or (_working_folder({"workingFolder": persona.workspace}) if persona else None)
-    cfg = _with_folder(cfg, folder)
+    folder = _persona_folder(persona) if persona else None  # an agent's own folder, as a hint to start there
     model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
@@ -2354,7 +2313,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         hints = (RENDER_HINT, tools_hint, _agents_hint(modes), JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
-                 FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
+                 PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
@@ -2467,7 +2426,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
                     break
-                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, conv=conv_id,
                                          doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
                 if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
                     break
@@ -2739,6 +2698,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
             ensure_unique_call_ids(calls, seen_call_ids)
+            if run is not None:
+                run.tool_calls += len(calls)
             if end.get("finish_reason") == "timeout":
                 # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
                 # A reply that already ran tools has something to close out with (see below), so it does not raise.
@@ -2925,7 +2886,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # What auto mode may never review away: a card forced by taint, a voided plan, the doom loop or a desk that
                 # asks as it goes (hard_forced), against an alwaysAsk / force_ask card it may lift on a confident allow (soft).
                 hard_forced = mode != raw_mode
-                # A file write outside the granted folders (or in one, once the reply read untrusted content) asks.
+                # A credential store read or write, or a write once the reply read untrusted content, asks.
                 fs_ask = mode != "off" and toolbox.fs_needs_ask(c["name"], args, tool_ctx)
                 if fs_ask and mode == "on":
                     mode = "ask"
@@ -2935,7 +2896,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 desk_cleared = False
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
-                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args, tool_ctx))
+                forced = mode != raw_mode or (mode == "ask" and (fs_ask or toolbox.forces_ask(c["name"], args, tool_ctx)))
                 # A sandboxed shell_run inside this desk's own workspace needs no card when the tool is still on its default
                 # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.
                 if (c["name"] == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and desk_id
@@ -2989,7 +2950,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
-                        rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                        rules=perm_rules, conv=conv_id,
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode
                     if perm.kind == "doom_loop":
@@ -3070,7 +3031,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 review = None
                 is_background = run is not None and run.kind in UNATTENDED_KINDS
                 # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
-                # known safe to the reviewer; allow_all lifts every card except an outside-folder write. Refusals, proposals and
+                # known safe to the reviewer; allow_all lifts every card except a credential-store access, a tainted write and a runaway repeat. Refusals, proposals and
                 # approved plan steps are already settled, so they never get here.
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
@@ -3085,7 +3046,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
-                        # a write outside the workspace folders or a runaway repeat stays a card even in allow-all
+                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
                         fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
                     if rt == "run":
@@ -3415,7 +3376,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["taint_sources"].extend(warm_ctx[wkey]["taint_sources"])
                     ran = True
                 else:
-                    tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
+                    tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this credential-store access or write
                     inflight = {"id": uid, "name": c["name"], "arguments": args}
                     try:
                         result, interrupted = await _await_tool(
@@ -3762,7 +3723,8 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
         # The pause route already decided how this turn ends; its cooperative stop must not be
         # read back as a user Stop and overwrite `paused` with `stopped`.
         stopped = False
-    settled = desks.settle(desk_id, partial=partial, stopped=stopped, error=err, chain=chain)
+    settled = desks.settle(desk_id, partial=partial, stopped=stopped, error=err, chain=chain,
+                           answered=_answered(desks.get(desk_id) or {}, run, err))
     try:
         run.publish("desk_status", settled)
     except Exception:  # noqa: BLE001 - a rail label must never kill a run
@@ -3780,6 +3742,16 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
 BUDGET_STOPS = ("rounds", "tokens", "time")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
 
 
+def _answered(desk: dict[str, Any], run: Run, error: str | None = None) -> bool:
+    """A turn of an `ask`-autonomy desk that only answered: it ended on its own (no stop, no budget window, no error), made
+    no tool call at all (not just none that worked), consumed no plan step, and the desk has no plan. That is a quick
+    question, not unfinished work: the desk settles done with no nudge and no self-review, and the chat's next message
+    relaunches it like any other. A continuation turn (a nudge, a wake, a resume) is not a plain answer: it picks up work."""
+    return (desk.get("autonomy") == "ask" and not str(run.input.get("content") or "").startswith(tuple(CONTINUE_MESSAGES.values())) and not desk.get("plan_id") and not error and not run.error and not run.stop.is_set()
+            and run.partial is None and run.tool_calls == 0 and run.steps_consumed == 0
+            and desk.get("status") in ("working", "planning"))
+
+
 def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str | None:
     """Which turn follows this one: "continue", "nudge", or None (settle). Both decision points -
     the run's final `done` and the supervisor after the run ends - call this on the same row, so they
@@ -3789,6 +3761,8 @@ def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str
     a plan step or ran a tool without error. The progress guard is what stops a desk burning turns
     re-reading the same file. nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more
     turn tells the model to finish or ask, never two in a row. Caps hold for both."""
+    if _answered(desk, run, error):
+        return None
     caps = _desk_caps(settings(), desk.get("budget"))
     turns = caps["deskMaxTurns"]
     # claim_run puts a desk with no plan into `planning` whatever its autonomy, and only a plan-autonomy desk
@@ -4413,7 +4387,7 @@ class AgentDefIn(BaseModel):
 
 def _check_scope(scope: dict[str, Any] | None) -> dict[str, Any] | None:
     """A scope as it may be stored: a tool-mode map that is only on/ask/off, with ask-locked tools capped at ask, and a folder
-    the file tools could be granted (the same guard as a chat's working folder)."""
+    the file tools may reach (anything but Grain's own data folder and app)."""
     if not scope:
         return scope
     out = dict(scope)
@@ -4424,7 +4398,7 @@ def _check_scope(scope: dict[str, Any] | None) -> dict[str, Any] | None:
         out["tool_modes"] = toolbox.cap_modes(tm)
     if str(out.get("workspace") or "").strip():
         try:
-            out["workspace"] = str(mac.allowed_root(str(out["workspace"]).strip()))
+            out["workspace"] = str(mac.allowed_path(str(out["workspace"]).strip()))
         except mac.LocalPathError as e:
             raise HTTPException(422, f"{out['workspace']} cannot be an agent folder: {e}") from e
     return out
@@ -4844,7 +4818,7 @@ def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]
     cfg = settings()
     if texts is None:
         texts = permrules.evaluate(row["tool"], row["args"], permrules.load_rules(permissions.get(cfg, "permissionRules")),
-                                   roots=_perm_roots(cfg, row.get("desk_id"))).suggestions
+                                   ).suggestions
     try:
         rules = permrules.validate_saved_rules(row["tool"], row["args"], texts)
     except ValueError as e:
@@ -4878,7 +4852,7 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
             return {"ok": False, "error": str(e)}
     cfg = settings()
     args = {"command": body.command, **body.args} if body.command is not None else body.args
-    v = permrules.evaluate(body.tool, args, permrules.load_rules(permissions.get(cfg, "permissionRules")), roots=_perm_roots(cfg, body.desk_id))
+    v = permrules.evaluate(body.tool, args, permrules.load_rules(permissions.get(cfg, "permissionRules")))
     return {"action": v.action or "none", "hardline": v.hardline, "reason": v.refusal, "rule": v.rule, "kind": v.kind,
             "subjects": v.subjects, "suggestions": v.suggestions, "external": v.external}
 
@@ -5121,7 +5095,7 @@ class JobIn(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=5)
     # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
     allowed_tools: list[str] | None = None
-    # kind='watch': a folder under the home folder; each pass that finds new or touched files in it fires one run.
+    # kind='watch': a folder on this Mac; each pass that finds new or touched files in it fires one run.
     watch_dir: str | None = Field(default=None, max_length=1000)
     # When a run is worth an OS notification (job_history.notify_events).
     notify: Literal["problems", "always", "never"] = "problems"
@@ -5219,7 +5193,7 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         try:
             check_watch_dir(watch_dir)
         except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
-            raise HTTPException(400, f"A directory job needs a folder under your home folder: {e}") from e
+            raise HTTPException(400, f"A directory job needs a folder Grain may read: {e}") from e
         return
     if kind == "mail":
         if expr:
@@ -5476,7 +5450,7 @@ def _conv_job(cid: str | None) -> str | None:
     return (conv or {}).get("settings", {}).get("job_id") if conv else None
 
 
-ship_runner = ship_mod.Ship(db, _ship_run, events.publish, roots=lambda: shell_tool.granted_roots(settings(), None), job_of=_conv_job)
+ship_runner = ship_mod.Ship(db, _ship_run, events.publish, job_of=_conv_job)
 ship_mod.register(toolbox, ship_runner)
 
 
@@ -5554,8 +5528,7 @@ async def _coding_run(argv: list[str], cwd: str, timeout: float, env: dict[str, 
                                       extra_env=env)
 
 
-coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings,
-                                     roots=lambda: shell_tool.granted_roots(settings(), None), tb=toolbox)
+coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings, tb=toolbox)
 codingagents.register(toolbox, coding)
 
 
@@ -5622,8 +5595,7 @@ def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -
     except approval_edits.EditError as e:
         raise HTTPException(400, str(e)) from e
     cfg = settings()
-    perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(permissions.get(cfg, "permissionRules")),
-                             roots=_perm_roots(cfg, desk_id))
+    perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(permissions.get(cfg, "permissionRules")))
     if perm.refusal:
         raise HTTPException(403, f"{tool}: {perm.refusal}")
     return edited
@@ -5657,7 +5629,7 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
         raise HTTPException(409, "That proposal was just decided somewhere else")
     conv = convos.get(claimed["conversation_id"], with_messages=False) if claimed["conversation_id"] else None
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
-                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": _conv_cfg(settings(), claimed["conversation_id"]),
+                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
                            "proposal_only": False, "message_id": claimed["message_id"]}
 
     async def _execute() -> Any:
@@ -7445,9 +7417,9 @@ _RAW_AS_TEXT = {"text/html", "image/svg+xml", "application/xhtml+xml", "applicat
 @app.get("/local/raw")
 def local_raw(path: str) -> FileResponse:
     """Bytes of a file on this Mac for the chat's side panel (the `show` tool). Same guard as read_local_file:
-    the home folder only, no hidden folders, no ~/Library, never the app's own data."""
+    anywhere on this Mac but Grain's own data folder and app, and never a credential store."""
     try:
-        p = mac.allowed_path(path)
+        p = mac.readable_path(path)
     except mac.LocalPathError as e:
         raise HTTPException(400, str(e)) from e
     if not p.is_file():
@@ -9040,7 +9012,7 @@ async def induce_conversation_skill(id: str, body: InduceIn | None = None) -> di
 class DeskInputRef(BaseModel):
     kind: str                              # doc | document | path
     id: str | None = None                  # doc or uploaded document id
-    path: str | None = None                # a local file under the home folder
+    path: str | None = None                # a local file on this Mac
 
 
 class DeskIn(BaseModel):
@@ -9274,8 +9246,7 @@ DESK_INPUT_MAX = 20
 
 def _load_desk_inputs(refs: list[DeskInputRef], used_bytes: int = 0) -> list[tuple[str, bytes, str]]:
     """What the user picked, read into (name, bytes, source). The route is a trust boundary even though the user picks:
-    a local path must resolve, symlinks followed, under the home folder and outside dot-folders, ~/Library, the app's
-    data and credential files. Local files are size-checked together against the room left (`used_bytes` is what the
+    a local path must resolve, symlinks followed, outside the app's own data folder and app and outside credential files. Local files are size-checked together against the room left (`used_bytes` is what the
     workspace already holds) before any is read."""
     if len(refs) > DESK_INPUT_MAX:
         raise HTTPException(400, f"At most {DESK_INPUT_MAX} inputs at a time")

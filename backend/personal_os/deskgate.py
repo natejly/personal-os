@@ -18,7 +18,7 @@ import asyncio
 import re
 from typing import Any
 
-from . import permissions, redact
+from . import approval_log, permissions, redact
 
 from .tools import tool_error
 from .workspace import WorkspaceError
@@ -206,6 +206,7 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
         if text is not None:
             st["reviewed"] = True  # the reviewer speaks once: it can block one finish, never a second
             verdict, gaps = parse_verdict(text)
+            record_review(tb, ctx, desk_id, verdict, gaps)
             if verdict == "fail":
                 st["notes"] = gaps or "(the reviewer gave no detail)"
                 return (tool_error(redact.scrub_command_output(
@@ -215,3 +216,17 @@ async def gate(tb: Any, ctx: dict[str, Any], desk_id: str, summary: str) -> tupl
     if st["notes"]:
         extra.append("Reviewer notes (gaps found at the first review, not confirmed fixed):\n" + st["notes"])
     return None, "\n\n".join(extra)
+
+
+def record_review(tb: Any, ctx: dict[str, Any], desk_id: str, verdict: str, gaps: str) -> None:
+    """The reviewer's verdict goes in the approval history and on the desk's timeline. Never raises: a record that
+    fails to write must not change what the gate decides."""
+    reason = _one_line(gaps, 500) if verdict == "fail" else ""
+    body = f"Reviewed: {verdict}" + (f" — {reason}" if reason else "")
+    try:
+        approval_log.record(tb.desks.db, tool="desk_done", decision="review", conversation_id=ctx.get("conversation_id"),
+                            run_id=ctx.get("run_id"), desk_id=desk_id, agent="desk reviewer",
+                            review={"verdict": verdict, "reason": reason or None})
+        tb.desks.event(desk_id, "note", body, run_id=ctx.get("run_id"), review=verdict)
+    except Exception:  # noqa: BLE001
+        pass

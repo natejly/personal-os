@@ -86,6 +86,50 @@ def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
             c.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps({"enabled": True}), key))
 
 
+def _approval_history(c: sqlite3.Connection) -> None:
+    """The approval decision log (approval_log.py): one row per answer, standing-grant pass and reviewer verdict.
+    `approvals.review` keeps the review gate's verdict on the card it opened, so the answer's log row can carry it."""
+    c.execute("CREATE TABLE IF NOT EXISTS approval_log ("
+              "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, conversation_id TEXT, run_id TEXT, desk_id TEXT, "
+              "agent TEXT, tool TEXT NOT NULL, args_summary TEXT NOT NULL DEFAULT '', decision TEXT NOT NULL, scope TEXT, "
+              "rule_json TEXT, note TEXT, reviewer_verdict TEXT, reviewer_reason TEXT, reviewer_model TEXT, reviewer_ms INTEGER, "
+              "call_id TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_approval_log_ts ON approval_log(ts)")
+    if "review" not in {r[1] for r in c.execute("PRAGMA table_info(approvals)")}:
+        c.execute("ALTER TABLE approvals ADD COLUMN review TEXT")
+
+
+def _teach_recordings(c: sqlite3.Connection) -> None:
+    """Teach-a-task recordings (teach.py): a folder of screen frames plus the step draft extracted from them,
+    and the skill / routine that came out of it. Frames live under <data_dir>/teach/<id>/, deleted with the row."""
+    c.execute("CREATE TABLE IF NOT EXISTS teach_recordings ("
+              "id TEXT PRIMARY KEY, created_at REAL NOT NULL, "
+              "status TEXT NOT NULL DEFAULT 'recording', "  # recording | ready | extracted | saved
+              "source TEXT NOT NULL DEFAULT 'screen', "     # screen | import
+              "dir TEXT NOT NULL, frame_count INTEGER NOT NULL DEFAULT 0, "
+              "steps_json TEXT, skill_id TEXT, job_id TEXT)")
+
+
+def _ship_checklists(c: sqlite3.Connection) -> None:
+    """A job's ship checklist (ship.py): tests -> push -> pr -> merge for one branch, each step's status, log tail
+    and link in steps_json (a fixed ordered list). status: running | awaiting_confirm | done | failed | cancelled."""
+    c.execute("""CREATE TABLE IF NOT EXISTS ship_checklists (
+      id TEXT PRIMARY KEY,
+      job_id TEXT,
+      run_id TEXT,
+      repo_path TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      base TEXT NOT NULL,
+      test_command TEXT,
+      status TEXT NOT NULL,
+      steps_json TEXT NOT NULL,
+      pr_url TEXT,
+      merged_sha TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ship_checklists_job ON ship_checklists(job_id, created_at)")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -94,6 +138,9 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (4, "activity_record_everything_keys", _activity_record_everything_keys),
     (5, "permissions_store", _permissions_store),
     (6, "meetings_activity_defaults", _meetings_activity_defaults),
+    (7, "approval_history", _approval_history),
+    (8, "teach_recordings", _teach_recordings),
+    (9, "ship_checklists", _ship_checklists),
 ]
 
 

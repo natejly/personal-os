@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home } from 'lucide-react'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Bell, CalendarClock } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
-import { useStore, type View } from '../store'
+import { chatAttentionOf, useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
 import { MeetingIndicator } from './MeetingsView'
 import SidebarSpaces from './SidebarSpaces'
@@ -15,7 +15,9 @@ import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
 import { partitionChats } from '../lib/chatRows'
 import ChatRow from './ChatRow'
-import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
+import { AttentionDot } from './ChatPulse'
+import type { Attention, ChatSearchHit, Conversation, Doc, Job, WidgetKind } from '@shared/types'
+import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { inboxBadge } from '../lib/inboxBadge'
 import { rowButton } from '../lib/rowButton'
@@ -37,6 +39,18 @@ const writeCollapsed = (ids: Set<string>): void => {
     // Per-viewer convenience only; without it the groups are open again next launch.
   }
 }
+
+/** The "Needs you" filter over the chat list, remembered per viewer like the folded groups. */
+const NEEDS_KEY = 'grain.sidebar.needsYou'
+const readNeeds = (): boolean => {
+  try { return localStorage.getItem(NEEDS_KEY) === '1' } catch { return false }
+}
+const writeNeeds = (on: boolean): void => {
+  try { localStorage.setItem(NEEDS_KEY, on ? '1' : '0') } catch { /* per-viewer convenience only */ }
+}
+const NO_STATES: Attention[] = []
+/** A job worth a sidebar row: one that runs, or one the scheduler switched off by itself (it is blocked). */
+const listedJob = (j: Job): boolean => j.enabled || !!j.paused_reason
 
 /** The first matching excerpt under a search result, with the matched words marked. */
 function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
@@ -123,6 +137,27 @@ export default function Sidebar(): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
+  const [jobsOpen, setJobsOpen] = useState(true)
+  const [needsOnly, setNeedsOnly] = useState(readNeeds)
+  const jobs = useStore((s) => s.jobs)
+  const agentInbox = useStore((s) => s.agentInbox)
+  // Job states come from GET /jobs. The inbox is re-read whenever a job run, proposal or pause moves, so the list follows it.
+  useEffect(() => { if (agentInbox) void useStore.getState().refreshJobs() }, [agentInbox])
+  const shownJobs = useMemo(() => jobs.filter(listedJob), [jobs])
+  // Element-wise compared, so a streamed token that moves no chat's state re-renders nothing; empty while the filter is off.
+  const chatStates = useStore(useShallow((s) => (needsOnly ? s.conversations.map((c) => chatAttentionOf(s, c)) : NO_STATES)))
+  /** Everything that wants the user, needs-you first then blocked; order within each kept (chats newest first, then jobs). */
+  const wanting = useMemo(() => {
+    if (!needsOnly) return []
+    type Item = { a: Attention } & ({ conv: Conversation } | { job: Job })
+    const items: Item[] = [
+      ...conversations.map((conv, i) => ({ a: chatStates[i] ?? 'idle', conv })),
+      ...shownJobs.map((job) => ({ a: jobAttention(job), job }))
+    ]
+    return items.filter((x) => wantsYou(x.a)).sort((x, y) => ATTENTION_RANK[x.a] - ATTENTION_RANK[y.a])
+  }, [needsOnly, conversations, chatStates, shownJobs])
+  // A search reaches every chat: typing a query lifts the filter until the box is cleared.
+  const filtering = needsOnly && !query.trim()
   const [collapsed, setCollapsed] = useState(readCollapsed)
   useEffect(() => {
     if (searching) searchRef.current?.focus()
@@ -310,6 +345,11 @@ export default function Sidebar(): JSX.Element {
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
+        <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
+          title={needsOnly ? 'Showing only what needs you or is blocked' : 'Show only what needs you'}
+          onClick={() => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }}>
+          <Bell size={13} />
+        </button>
         <button
           className={`icon-btn sm${searching ? ' on' : ''}`}
           aria-label="Search chats"
@@ -353,20 +393,29 @@ export default function Sidebar(): JSX.Element {
         </label>
       )}
       <div className="convo-list">
-        {pinned.length > 0 && (
+        {filtering && (
+          <section>
+            <h4>Needs you</h4>
+            {wanting.length === 0 && <p className="empty-hint">Nothing needs you.</p>}
+            {wanting.map((x) => ('conv' in x
+              ? <ChatRow key={x.conv.id} conv={x.conv} active={x.conv.id === focusedId && view === 'chat'} lead={projectDot(x.conv)} />
+              : <JobRow key={`j${x.job.id}`} job={x.job} onOpen={() => setView('home')} />))}
+          </section>
+        )}
+        {!filtering && pinned.length > 0 && (
           <section>
             <h4>Pinned</h4>
             {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         )}
-        {groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
-        {groups.map((g) => (
+        {!filtering && groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
+        {!filtering && groups.map((g) => (
           <section key={g.label}>
             <h4>{g.label}</h4>
             {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         ))}
-        {inMessages.length > 0 && (
+        {!filtering && inMessages.length > 0 && (
           <section>
             <h4>In messages</h4>
             {inMessages.map((h) => (
@@ -394,6 +443,15 @@ export default function Sidebar(): JSX.Element {
         </section>
       </div>
       </>)}
+
+      {shownJobs.length > 0 && (<>
+        <div className="section-row">
+          <button className="section-toggle" aria-expanded={jobsOpen} onClick={() => setJobsOpen((o) => !o)}>
+            <ChevronRight size={12} className={jobsOpen ? 'rot90' : ''} /><CalendarClock size={13} /> Jobs
+          </button>
+        </div>
+        {jobsOpen && <div className="convo-list">{shownJobs.map((j) => <JobRow key={j.id} job={j} onOpen={() => setView('home')} />)}</div>}
+      </>)}
       </div>
 
       <div className="sidebar-bottom">
@@ -405,5 +463,15 @@ export default function Sidebar(): JSX.Element {
           <kbd>⌘,</kbd></button>
       </div>
     </aside>
+  )
+}
+
+/** A scheduled job in the sidebar: its attention state and name. Jobs are managed on Today, so a click goes there. */
+function JobRow({ job, onOpen }: { job: Job; onOpen: () => void }): JSX.Element {
+  return (
+    <div className="convo-item" {...rowButton(onOpen)}>
+      <AttentionDot state={jobAttention(job)} detail={job.paused_reason ? 'switched off by the scheduler' : job.last_error ?? undefined} />
+      <span className="convo-title">{job.name}</span>
+    </div>
   )
 }

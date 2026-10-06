@@ -10,7 +10,7 @@
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
 import { useEffect, useState } from 'react'
-import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
@@ -22,6 +22,8 @@ import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
+import { ShipChecklistView } from './toolcards/ShipChecklistCard'
+import type { ShipChecklist } from '@shared/types'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -364,6 +366,15 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
   const [history, setHistory] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [shipOpen, setShipOpen] = useState(false)
+  const upsertShip = useStore((s) => s.upsertShip)
+  // The job's latest ship checklist, kept live by the ship_checklist event.
+  const ship = useStore((s) => Object.values(s.shipChecklists).filter((c) => c.job_id === job.id)
+    .reduce<ShipChecklist | null>((a, c) => (!a || c.created_at > a.created_at ? c : a), null))
+  useEffect(() => {
+    api.ship.latest(job.id).then((c) => { if (c) upsertShip(c) }).catch(() => undefined)
+  }, [job.id, upsertShip])
+  const shipLive = ship?.status === 'running' || ship?.status === 'awaiting_confirm'
 
   const preview = async (): Promise<void> => {
     try {
@@ -476,6 +487,10 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
             </button>
           </>
         )}
+        <button className={`icon-btn sm ${shipOpen ? 'on' : ''}`} title="Ship checklist: tests, push, pull request, merge"
+          aria-label={`Ship checklist for ${job.name}`} aria-expanded={shipOpen} onClick={() => setShipOpen((v) => !v)}>
+          <Rocket size={12} />
+        </button>
         <button className="icon-btn sm danger" title="Delete" aria-label={`Delete ${job.name}`}
           onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
           <Trash2 size={12} />
@@ -511,8 +526,51 @@ export function JobRow({ job }: { job: Job }): JSX.Element {
       </li>
     )}
     {editing && <li className="job-history"><NewTask job={job} onDone={() => setEditing(false)} /></li>}
+    {(shipOpen || shipLive) && (
+      <li className="job-history">
+        {ship && <ShipChecklistView checklist={ship} />}
+        {shipOpen && !shipLive && <ShipStart jobId={job.id} prev={ship} />}
+      </li>
+    )}
     {history && <JobHistory job={job} />}
     </>
+  )
+}
+
+/** Start a ship checklist for a job by hand. The fields default to its last checklist's. */
+function ShipStart({ jobId, prev }: { jobId: string; prev: ShipChecklist | null }): JSX.Element {
+  const upsertShip = useStore((s) => s.upsertShip)
+  const toast = useStore((s) => s.toast)
+  const [f, setF] = useState({ repo_path: prev?.repo_path ?? '', branch: prev?.branch ?? '', base: prev?.base ?? 'main', test_command: prev?.test_command ?? '' })
+  const [busy, setBusy] = useState(false)
+  const field = (k: keyof typeof f, label: string, placeholder: string): JSX.Element => (
+    <label className="small">
+      <span className="muted">{label}</span>{' '}
+      <input value={f[k]} placeholder={placeholder} aria-label={label} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+    </label>
+  )
+  const start = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      upsertShip(await api.ship.start(jobId, { repo_path: f.repo_path.trim(), branch: f.branch.trim(), base: f.base.trim() || 'main', ...(f.test_command.trim() ? { test_command: f.test_command.trim() } : {}) }))
+    } catch (e) {
+      toast(`Ship: ${(e as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="job-run-settings">
+      {field('repo_path', 'Repository', '/Users/me/code/app')}
+      {field('branch', 'Branch', 'feature-branch')}
+      {field('base', 'Into', 'main')}
+      {field('test_command', 'Test command', 'npm test or pytest (detected)')}
+      <button type="button" className="primary-btn sm" disabled={busy || !f.repo_path.trim() || !f.branch.trim()} onClick={() => void start()}>
+        {prev ? 'Run again' : 'Start'}
+      </button>
+      <p className="muted small">Runs the tests, then pushes the branch, then opens a pull request. The merge waits for you;
+        nothing is ever force-pushed or pushed to main.</p>
+    </div>
   )
 }
 

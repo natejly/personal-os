@@ -21,6 +21,8 @@ import time
 from collections import deque
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterable
 
+from . import approval_log
+from .attention import for_run
 from .db import Database, new_id
 
 log = logging.getLogger("personal_os")
@@ -275,15 +277,16 @@ class RunStore:
     # ---- approvals ----
     def open_approval(self, call_id: str, run_id: str | None, tool: str, args: dict[str, Any], *, conversation_id: str | None = None,
                       message_id: str | None = None, forced: bool = False, desk_id: str | None = None,
-                      danger: str = "external") -> dict[str, Any]:
-        self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, status, created_at) "
-                   "VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
+                      danger: str = "external", review: dict[str, Any] | None = None) -> dict[str, Any]:
+        """`review` is the review gate's verdict when that is why this card opened; the answer's history row carries it."""
+        self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, review, status, created_at) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
                    (call_id, run_id, conversation_id, message_id, tool, _dumps(args), args_digest(args), int(forced),
-                    danger, desk_id, time.time()))
+                    danger, desk_id, _dumps(review) if review else None, time.time()))
         return self.approval(call_id) or {}
 
     def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None,
-               edited_args: dict[str, Any] | None = None) -> dict[str, Any] | None:
+               edited_args: dict[str, Any] | None = None, rules: list[str] | None = None) -> dict[str, Any] | None:
         """First decision wins. None if there is no such approval or it was already decided.
 
         `note` is what the user said with the answer (a denial's reason, a desk_ask's answer).
@@ -299,7 +302,17 @@ class RunStore:
         else:
             n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
                            (status, decision, by, time.time(), note, call_id))
-        return self.approval(call_id) if n else None
+        row = self.approval(call_id) if n else None
+        if row is not None:  # the history: every answer to a card passes here, whoever gave it
+            logged, scope = approval_log.DECISIONS.get(decision, (decision, None))
+            if row.get("edited_args") is not None:
+                logged = "edited"
+            run = self.get(row["run_id"]) if row.get("run_id") else None
+            approval_log.record(self.db, tool=row["tool"], decision=logged, scope=scope, args=row["edited_args"] or row["args"],
+                                conversation_id=row.get("conversation_id"), run_id=row.get("run_id"), desk_id=row.get("desk_id"),
+                                agent=(run or {}).get("kind"), rule=rules if decision == "always_rule" else None,
+                                note=note if by == "user" else f"({by}) {note or ''}", review=row.get("review"), call_id=call_id)
+        return row
 
     def approval(self, call_id: str) -> dict[str, Any] | None:
         r = self._one("SELECT * FROM approvals WHERE call_id=?", (call_id,))
@@ -307,6 +320,7 @@ class RunStore:
             r["args"] = json.loads(r["args"])
             r["forced"] = bool(r["forced"])
             r["edited_args"] = json.loads(r["edited_args"]) if r.get("edited_args") else None
+            r["review"] = json.loads(r["review"]) if r.get("review") else None
         return r
 
     def park(self, call_id: str) -> None:
@@ -582,7 +596,8 @@ class Run:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
                 "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
                 "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
-                "turn": self.turn, "ended_at": self.ended_at, "error": self.error}
+                "turn": self.turn, "ended_at": self.ended_at, "error": self.error,
+                "attention": for_run({"status": self.status})}
 
     def set_status(self, status: str) -> None:
         if status == self.status:

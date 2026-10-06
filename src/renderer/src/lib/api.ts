@@ -1,6 +1,6 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
-  ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
+  ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
@@ -16,8 +16,10 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail,
+  TeachDraft, TeachRecording
 } from '@shared/types'
+import type { ShipChecklist } from '@shared/types'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
@@ -211,6 +213,10 @@ export const api = {
     req<{ ok: boolean }>(`/permissions/agent/${encodeURIComponent(agentId)}?tool=${encodeURIComponent(tool)}`, { method: 'DELETE' }),
   /** Answered approvals, the latest decision first. */
   decidedApprovals: (limit = 50) => req<PendingApproval[]>(`/approvals?status=decided&order=desc&limit=${limit}`),
+  /** The approval history, newest first; filters are optional and `more` says another page exists. */
+  approvalHistory: (f: { limit?: number; offset?: number; tool?: string; decision?: string; q?: string } = {}) =>
+    req<{ items: ApprovalLogEntry[]; more: boolean }>(`/approvals/history?${new URLSearchParams(
+      Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]))}`),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */
@@ -243,6 +249,17 @@ export const api = {
     },
     /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
     runNow: (id: string, test = false) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run${test ? '?test=1' : ''}`, { method: 'POST' })
+  },
+  /** Ship checklist (tests -> push -> PR -> merge). Start fields left out reuse the job's latest checklist. */
+  ship: {
+    start: (jobId: string, b: { repo_path?: string; branch?: string; base?: string; test_command?: string }) =>
+      req<ShipChecklist>(`/jobs/${jobId}/ship`, { method: 'POST', body: json(b) }),
+    latest: (jobId: string) => req<ShipChecklist | null>(`/jobs/${jobId}/ship`),
+    get: (id: string) => req<ShipChecklist>(`/ship/${id}`),
+    /** The user's go for the merge: the only way a merge runs. */
+    confirm: (id: string) => req<ShipChecklist>(`/ship/${id}/confirm`, { method: 'POST' }),
+    cancel: (id: string) => req<ShipChecklist>(`/ship/${id}/cancel`, { method: 'POST' }),
+    retry: (id: string) => req<ShipChecklist>(`/ship/${id}/retry`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
@@ -529,6 +546,28 @@ export const api = {
     importMd: (src: { text?: string; url?: string }) =>
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json(src) }, NO_TIMEOUT),
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
+  },
+  /** Teach a task: a screen recording (or an imported video) becomes a candidate skill. */
+  teach: {
+    list: () => req<TeachRecording[]>('/teach'),
+    get: (id: string) => req<TeachRecording>(`/teach/${id}`),
+    /** `needs_permission` when macOS has not granted Screen Recording; nothing is recorded then. */
+    start: () => req<TeachRecording | { needs_permission: true; state: string }>('/teach/start', { method: 'POST' }),
+    stop: () => req<TeachRecording>('/teach/stop', { method: 'POST' }, CONTROL_TIMEOUT_MS),
+    importVideo: (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return req<TeachRecording>('/teach/import', { method: 'POST', body: fd }, NO_TIMEOUT)
+    },
+    extract: (id: string) => req<TeachRecording>(`/teach/${id}/extract`, { method: 'POST' }, NO_TIMEOUT),
+    setSteps: (id: string, d: TeachDraft) => req<TeachRecording>(`/teach/${id}/steps`, { method: 'PUT', body: json(d) }),
+    save: (id: string) => req<{ skill: Skill; findings: SkillFinding[]; recording: TeachRecording }>(`/teach/${id}/save`, { method: 'POST' }),
+    schedule: (id: string, s: { kind: 'cron' | 'once'; cron?: string; run_at?: number | null; test?: boolean }) =>
+      req<{ job: Job; recording: TeachRecording; test?: { ok: boolean; run_id: string | null; conversation_id: string | null } }>(
+        `/teach/${id}/schedule`, { method: 'POST', body: json(s) }, NO_TIMEOUT),
+    delete: (id: string) => req<{ ok: boolean }>(`/teach/${id}`, { method: 'DELETE' }),
+    /** One frame as an object URL (an <img> cannot send the token header). Revoke it when done. */
+    frame: async (id: string, n: number): Promise<string> => URL.createObjectURL(await (await fetchRaw(`/teach/${id}/frames/${n}`)).blob())
   },
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
   chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string; attachments?: string[] }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),

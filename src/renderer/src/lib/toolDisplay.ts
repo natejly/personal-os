@@ -46,6 +46,7 @@ const VERBS: Record<string, string> = {
   sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy uploaded file to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
   sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
   shell_run: 'Run command', opencode_run: 'Run coding agent', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
+  ship_checklist: 'Ship branch', ship_status: 'Check ship checklist',
   fs_glob: 'Find files by name', fs_grep: 'Search file contents', fs_edit: 'Edit file', fs_copy: 'Copy file', fs_mkdir: 'Create folder',
   agent_spawn: 'Start subagent', agent_wait: 'Wait for subagents', agent_stop: 'Stop subagent',
   desk_fetch_file: 'Download file to desk',

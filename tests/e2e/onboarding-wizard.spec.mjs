@@ -69,6 +69,10 @@ test('first run: wizard walks every step, seeds a pinned memory, finishes, and n
     await expect(w.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '6')
     await cont(page).click()
 
+    // permissions: optional, skipped
+    await expect(w.getByRole('heading', { name: 'Give Grain access' })).toBeVisible()
+    await cont(page, 'Skip for now').click()
+
     // done: saved
     await expect(w.getByRole('heading', { name: 'You are all set' })).toBeVisible()
     await expect(w.getByText(/Grain is connected to Custom/)).toBeVisible()

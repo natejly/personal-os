@@ -20,6 +20,7 @@ import type {
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
+import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
@@ -677,6 +678,10 @@ export const api = {
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
+  system: {
+    access: () => req<BackendAccess>('/system/access'),
+    shellCheck: () => req<ShellCheck>('/system/shell-check', { method: 'POST' })
+  },
   activity: {
     status: () => req<ActivityStatus>('/activity/status'),
     config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),

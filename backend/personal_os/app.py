@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import imessage
+from . import imessage, system_access
 from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
@@ -328,6 +328,7 @@ for _m in modules:
 # Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
 trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
+app.include_router(system_access.router(settings, lambda: permissions.load(db.get_settings())["workspaceRoots"], lambda: toolbox.shell))
 usage = Usage(db)
 pricing = Pricing()
 llm.caps_lookup = pricing.caps
@@ -652,10 +653,12 @@ def _working_folder(conv_settings: dict[str, Any]) -> str | None:
 
 
 def _with_folder(cfg: dict[str, Any], folder: str | None) -> dict[str, Any]:
-    """`cfg` with `folder` granted first among the workspace roots (a no-op without one)."""
+    """`cfg` with `folder` granted first among the workspace roots (a no-op without one). The Settings list is always
+    unioned back in, so a partial cfg can never leave a run with only the folder."""
     if not folder:
         return cfg
-    return {**cfg, "workspaceRoots": [folder, *[r for r in (permissions.get(cfg, "workspaceRoots") or []) if r != folder]]}
+    rest = [*(permissions.get(cfg, "workspaceRoots") or []), *(permissions.get(settings(), "workspaceRoots") or [])]
+    return {**cfg, "workspaceRoots": [folder, *dict.fromkeys(r for r in rest if r != folder)]}
 
 
 def _conv_cfg(cfg: dict[str, Any], conv_id: str | None) -> dict[str, Any]:
@@ -5555,7 +5558,7 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
         raise HTTPException(409, "That proposal was just decided somewhere else")
     conv = convos.get(claimed["conversation_id"], with_messages=False) if claimed["conversation_id"] else None
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
-                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
+                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": _conv_cfg(settings(), claimed["conversation_id"]),
                            "proposal_only": False, "message_id": claimed["message_id"]}
 
     async def _execute() -> Any:

@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import imessage, system_access
-from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -58,7 +58,7 @@ from . import guide, meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
-from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
+from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
@@ -705,6 +705,21 @@ async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k != "is_error"}
 
 
+def _mcp_review_text(name: str) -> str:
+    """The auto reviewer's description of an MCP tool (connector tools have no ToolSpec): its text plus its self-reported hints."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    return mcp_review_text(tool) if tool else ""
+
+
+def _mcp_event(name: str) -> dict[str, Any] | None:
+    """The `mcp` field of a tool_call event, so a card can say which connector asks and what it claims to do."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    if tool is None:
+        return None
+    server = mcp_store.server(tool["server_id"])
+    return {"server": server["name"] if server else "MCP", "read_only": tool["read_only"], "destructive": tool["destructive"]}
+
+
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
     live = (mcp.status(row["id"]) or [{}])[0]
@@ -712,11 +727,12 @@ def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     return {**row,
             "live": {"status": live.get("status", row["status"]), "detail": live.get("detail", row["status_detail"]),
                      "running": bool(live.get("running")), "ready": bool(live.get("ready")),
-                     "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
+                     "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {},
+                     "resources": live.get("resources") or [], "prompts": live.get("prompts") or []},
             "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"]), "drift": mcp_drift.view(mcp_store, t, every)}
                       for t in mcp_store.tools(row["id"], include_missing=True)],
             "eval": mcp_store.latest_eval(row["id"]),
-            "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") == "http" else None}
+            "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") in ("http", "sse") else None}
 
 
 def fscope(raw: str | None) -> str:
@@ -994,17 +1010,18 @@ class McpProbeIn(BaseModel):
 
 
 def _mcp_transport_ok(transport: str | None) -> None:
-    """Only stdio and streamable HTTP connect; an sse server would be saved only to fail every time."""
-    if transport == "sse":
-        raise HTTPException(400, "sse is not supported: use the server's streamable HTTP endpoint")
-    if transport is not None and transport not in ("stdio", "http"):
-        raise HTTPException(400, "transport must be stdio or http")
+    if transport is not None and transport not in ("stdio", "http", "sse"):
+        raise HTTPException(400, "transport must be stdio, http or sse")
 
 
 class McpGrantIn(BaseModel):
     mode: str
     scope: str = "global"
     scope_id: str | None = None
+    confirm: bool = False  # the user has seen that the server calls this tool destructive
+
+
+app.include_router(mcp_routes.router(mcp_store, mcp, _mcp_server_view))
 
 
 @app.get("/mcp/servers")
@@ -1140,8 +1157,11 @@ def mcp_set_grant(slug: str, body: McpGrantIn) -> dict[str, Any]:
         raise HTTPException(400, f"mode must be one of {', '.join(MCP_MODES)}")
     if body.scope not in MCP_SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(MCP_SCOPES)}")
-    if mcp_store.tool(slug) is None:
+    tool = mcp_store.tool(slug)
+    if tool is None:
         raise HTTPException(404, "No such MCP tool")
+    if body.mode == "on" and tool["destructive"] and not body.confirm:
+        raise HTTPException(409, "destructive: confirm required")  # standing permission for a self-declared destructive tool is explicit
     mcp_store.set_grant(slug, body.mode, body.scope, body.scope_id)
     return mcp_store.effective_mode(slug, body.scope_id if body.scope == "project" else None,
                                     body.scope_id if body.scope == "chat" else None)
@@ -2099,7 +2119,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             sp = toolbox.specs.get(name)
             recent, first = autoreview.digest(messages)
             return await autoreview.review(
-                cfg, model, name=name, description=sp.description if sp else "", args=args, danger=danger, user_text=user_text,
+                cfg, model, name=name, description=sp.description if sp else _mcp_review_text(name), args=args, danger=danger, user_text=user_text,
                 task=first, recent=recent, mode=raw_mode, tainted=toolbox.tainted_for(name, args, tool_ctx), cancel=stop, conv_id=conv_id,
                 cache=review_cache)
 
@@ -3050,14 +3070,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
+                    hints = _mcp_event(c["name"]) or {}
+                    # A connector call forced by untrusted content stays a card in every mode, allow-all included.
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
                     rt = autoreview.route(
                         pmode, mode=mode, danger=danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
                         explicit_ask=(explicit == "ask" and not locked_spec) or (mode == "ask" and perm.kind in ("rule", "external_directory")),
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
-                        hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
+                        # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
+                        hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
                         # a write outside the workspace folders or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
                     if rt == "run":
                         if mode == "ask":
@@ -3117,7 +3141,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
-                                    "review": review,
+                                    "review": review, "mcp": _mcp_event(c["name"]),
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
@@ -6373,7 +6397,7 @@ def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
 
 def _too_big(n: int) -> str | None:
     if n > MAX_UPLOAD_BYTES:
-        return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"
+        return f"Files must be {limits.MAX_UPLOAD_MB} MB or smaller"
     return None
 
 
@@ -6394,7 +6418,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
     # The project is resolved first so an upload for a deleted project leaves no file behind, and the file is
-    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 20 MB
+    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 50 MB
     # PDF on the event loop would stall every SSE stream.
     pid = wsid(project_id)
     safe = safe_upload_name(name)

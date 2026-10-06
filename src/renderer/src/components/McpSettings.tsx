@@ -3,56 +3,29 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, LogOut, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { ApiError } from '../lib/apiError'
 import { useStore } from '../store'
-import type { McpGrant, McpReport, McpServer, McpServerDraft, McpSignIn, McpTool, ToolMode } from '@shared/types'
+import type { McpGrant, McpRegistryResult, McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@shared/types'
+import CatalogBrowser from './connectors/CatalogBrowser'
+import ImportDialog from './connectors/ImportDialog'
+import ToolBadges from './connectors/ToolBadges'
+import { POLL_MS, envToText, joinArgv, needsSignIn, parseEnvText, registryDraft, tokenize } from './connectors/catalog'
+import { signInMcp } from './connectors/signIn'
 
-/** A connector that is coming up gets polled; one that has settled does not. */
-const POLL_MS = 2500
+export { joinArgv, parseEnvText, signInMcp, tokenize }
+
+type View = 'installed' | 'browse' | 'import'
+const VIEWS: { key: View; label: string }[] = [
+  { key: 'installed', label: 'Installed' },
+  { key: 'browse', label: 'Browse' },
+  { key: 'import', label: 'Import' }
+]
 
 type HeaderRow = { k: string; v: string }
 const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string; headerRows: HeaderRow[] } = {
   name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, url: '', headers: {}, description: '',
   argv: '', envText: '', secretsText: '', headerRows: []
 }
-
-/** Start a remote server's browser sign-in and resolve once it settles: done, error, or given up after 5 minutes. */
-export async function signInMcp(id: string): Promise<McpSignIn> {
-  const st = await api.mcp.signIn(id)
-  if (st.status === 'error') throw new Error(st.error)
-  if (st.auth_url) window.open(st.auth_url, '_blank')
-  for (let i = 0; i < 150; i++) {
-    await new Promise((r) => setTimeout(r, 2000))
-    const x = await api.mcp.signInStatus(id)
-    if (x.status !== 'waiting' && x.status !== 'starting') return x
-  }
-  return { ...st, status: 'error', error: 'sign-in timed out' }
-}
-
-/** Split a pasted command line into argv, honouring simple quoting. */
-export const tokenize = (line: string): string[] =>
-  (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((t) => t.replace(/^(['"])([\s\S]*)\1$/, '$2'))
-
-/** The inverse, for showing a stored command back in one field. */
-export const joinArgv = (command: string, args: string[]): string =>
-  [command, ...args].filter(Boolean).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
-
-export const parseEnvText = (text: string): Record<string, string> =>
-  Object.fromEntries(
-    text
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith('#'))
-      .map((l) => {
-        const i = l.indexOf('=')
-        return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 1).trim()]
-      })
-      .filter(([k]) => k)
-  )
-
-const envToText = (env: Record<string, string>): string =>
-  Object.entries(env)
-    .map(([k, v]) => `${k}=${v}`)
-    .join('\n')
 
 /**
  * Accept a `claude_desktop_config.json`-style block, which is how MCP servers are published:
@@ -93,8 +66,6 @@ const DOT: Record<string, string> = { ready: 'ok', connecting: 'warn', error: 'b
 const STATUS_WORD: Record<string, string> = {
   ready: 'connected', connecting: 'connecting…', error: 'failed', disabled: 'off', idle: 'not running'
 }
-/** The supervisor stops with this detail when only a browser sign-in can help; it is not a failure. */
-const needsSignIn = (s: McpServer): boolean => s.transport === 'http' && s.live.status === 'error' && s.live.detail === 'sign-in required'
 const VERDICT: Record<string, string> = {
   pass: 'nothing suspicious found', warn: 'worth a look', fail: 'problems found', error: 'could not check'
 }
@@ -189,8 +160,9 @@ function ScopedGrants({ tool, grants }: { tool: McpTool; grants: McpGrant[] }): 
   )
 }
 
-function ToolRow({ tool, grants, onMode, onAccept }: {
-  tool: McpTool; grants: McpGrant[]; onMode: (mode: ToolMode) => void; onAccept: () => void
+function ToolRow({ tool, grants, confirming, onMode, onConfirm, onCancelConfirm, onAccept }: {
+  tool: McpTool; grants: McpGrant[]; confirming: boolean; onMode: (mode: ToolMode) => void
+  onConfirm: () => void; onCancelConfirm: () => void; onAccept: () => void
 }): JSX.Element {
   const eff = tool.effective
   const gone = !!tool.missing_since
@@ -199,6 +171,7 @@ function ToolRow({ tool, grants, onMode, onAccept }: {
       <span className="toggle-text">
         <b>
           {tool.name}
+          <ToolBadges readOnly={tool.read_only} destructive={tool.destructive} />
           {eff.stale && <span className="tag ask" title={`Approved shape ${eff.approved_hash.slice(0, 8)}, now offering ${eff.schema_hash.slice(0, 8)}`}>changed since approved</span>}
           {gone && <span className="tag">no longer offered</span>}
         </b>
@@ -206,6 +179,13 @@ function ToolRow({ tool, grants, onMode, onAccept }: {
         <small className="muted mono">{tool.slug}</small>
         <DriftBanner tool={tool} onAccept={onAccept} />
         <ScopedGrants tool={tool} grants={grants} />
+        {confirming && (
+          <span className="mcp-confirm" role="alert">
+            <span>This server says the tool can change or delete things. Let it run without asking?</span>
+            <button type="button" className="ghost-btn danger small" onClick={onConfirm}>Yes, turn on</button>
+            <button type="button" className="ghost-btn small" onClick={onCancelConfirm}>Keep asking</button>
+          </span>
+        )}
       </span>
       <div className="seg" role="group" aria-label={`Permission for ${tool.name}`}>
         {(['on', 'ask', 'off'] as ToolMode[]).map((m) => (
@@ -213,6 +193,20 @@ function ToolRow({ tool, grants, onMode, onAccept }: {
         ))}
       </div>
     </div>
+  )
+}
+
+/** What the server offers besides tools. Collapsed: most people never need it. */
+function Extras({ live }: { live: McpServer['live'] }): JSX.Element | null {
+  const resources = live.resources ?? []
+  const prompts = live.prompts ?? []
+  if (!resources.length && !prompts.length) return null
+  return (
+    <details className="mcp-extras">
+      <summary>Resources &amp; prompts <span className="muted">({resources.length} resource{resources.length === 1 ? '' : 's'}, {prompts.length} prompt{prompts.length === 1 ? '' : 's'})</span></summary>
+      {resources.length > 0 && <p className="small"><b>Resources:</b> {resources.map((r) => r.name || r.uri).join(', ')}</p>}
+      {prompts.length > 0 && <p className="small"><b>Prompts:</b> {prompts.map((p) => p.name).join(', ')}</p>}
+    </details>
   )
 }
 
@@ -228,6 +222,8 @@ export default function McpSettings(): JSX.Element {
   const [busy, setBusy] = useState<string>('')
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [grants, setGrants] = useState<McpGrant[]>([])
+  const [view, setView] = useState<View>('installed')
+  const [confirmTool, setConfirmTool] = useState<string | null>(null)
   const nameRef = useRef<HTMLInputElement>(null)
   const signPoll = useRef<ReturnType<typeof setInterval> | null>(null)
   useEffect(() => () => { if (signPoll.current) clearInterval(signPoll.current) }, [])
@@ -277,10 +273,10 @@ export default function McpSettings(): JSX.Element {
   }
 
   const draftConfig = (): Partial<McpServerDraft> => {
-    if (draft.transport === 'http') {
+    if (draft.transport !== 'stdio') {
       const url = draft.url.trim()
       const headers = Object.fromEntries(draft.headerRows.filter((h) => h.k.trim()).map((h) => [h.k.trim(), h.v]))
-      return { name: draft.name.trim() || url.replace(/^https?:\/\//, '').split('/')[0], transport: 'http', url, headers, description: draft.description }
+      return { name: draft.name.trim() || url.replace(/^https?:\/\//, '').split('/')[0], transport: draft.transport, url, headers, description: draft.description }
     }
     const [command = '', ...args] = tokenize(draft.argv)
     return {
@@ -290,8 +286,8 @@ export default function McpSettings(): JSX.Element {
   }
 
   const draftReady = (cfg: Partial<McpServerDraft>): void => {
-    if (cfg.transport === 'http' ? !/^https?:\/\/\S+$/.test(cfg.url ?? '') : !cfg.command)
-      throw new Error(cfg.transport === 'http' ? "Enter the server's https:// URL" : 'Enter the command that starts the server')
+    if (cfg.transport !== 'stdio' ? !/^https?:\/\/\S+$/.test(cfg.url ?? '') : !cfg.command)
+      throw new Error(cfg.transport !== 'stdio' ? "Enter the server's https:// URL" : 'Enter the command that starts the server')
   }
 
   const checkDraft = (): Promise<void> =>
@@ -334,11 +330,27 @@ export default function McpSettings(): JSX.Element {
       toast(`Added ${created.name} — its tools ask before running`)
     })
 
-  const setMode = (slug: string, mode: ToolMode): Promise<void> =>
+  /** Turning a destructive tool `on` needs a confirm; the API says so with a 409 if the row did not ask first. */
+  const setMode = (slug: string, mode: ToolMode, confirm = false): Promise<void> =>
     run(`grant-${slug}`, async () => {
-      await api.mcp.setGrant(slug, mode, 'global')
-      await refresh()
+      try {
+        await api.mcp.setGrant(slug, mode, 'global', undefined, confirm)
+        setConfirmTool(null)
+        await refresh()
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) { setConfirmTool(slug); return }
+        throw e
+      }
     })
+
+  /** "Use this" on a registry hit: fill the custom form and show it. It still goes through check and add. */
+  const useRegistry = (r: McpRegistryResult): void => {
+    setDraft({ ...EMPTY, ...registryDraft(r) })
+    setDraftReport(null)
+    setAdding(true)
+    setView('installed')
+    requestAnimationFrame(() => nameRef.current?.focus())
+  }
 
   const acceptChange = (slug: string): Promise<void> =>
     run(`accept-${slug}`, async () => {
@@ -355,6 +367,16 @@ export default function McpSettings(): JSX.Element {
         connector <b>asks before it runs</b> until you say otherwise.
       </p>
 
+      <div className="seg" role="tablist" aria-label="Connectors">
+        {VIEWS.map((v) => (
+          <button key={v.key} type="button" role="tab" aria-selected={view === v.key} className={view === v.key ? 'on' : ''} onClick={() => setView(v.key)}>{v.label}</button>
+        ))}
+      </div>
+
+      {view === 'browse' && <CatalogBrowser onUseRegistry={useRegistry} onInstalled={() => void refresh()} />}
+      {view === 'import' && <ImportDialog onImported={() => void refresh()} />}
+
+      {view === 'installed' && <>
       {servers.length === 0 && !adding && <p className="empty-row"><Plug size={15} /> No connectors yet. Add one to give the assistant more tools.</p>}
 
       {servers.map((s) => {
@@ -401,10 +423,10 @@ export default function McpSettings(): JSX.Element {
             {expanded && (
               <div className="mcp-body">
                 <div className="mcp-meta">
-                  <code className="mono">{s.transport === 'http' ? s.url : joinArgv(s.command, s.args)}</code>
+                  <code className="mono">{s.transport !== 'stdio' ? s.url : joinArgv(s.command, s.args)}</code>
                   {s.cwd && <small className="muted">in {s.cwd}</small>}
                   {s.secret_keys.length > 0 && (
-                    <small className="muted">{s.transport === 'http' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>
+                    <small className="muted">{s.transport !== 'stdio' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>
                   )}
                   {s.signed_in && <small className="muted">signed in</small>}
                 </div>
@@ -454,11 +476,16 @@ export default function McpSettings(): JSX.Element {
                   <pre className="mcp-log">{logs[s.id].length ? logs[s.id].join('\n') : 'Nothing on stderr.'}</pre>
                 )}
 
+                <Extras live={s.live} />
+
                 {s.tools.length > 0 ? (
                   <div className="tool-perms">
                     <h5>Tools</h5>
                     {s.tools.map((t) => <ToolRow key={t.slug} tool={t} grants={grants.filter((g) => g.tool_slug.toLowerCase() === t.slug.toLowerCase())}
-                      onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} />)}
+                      confirming={confirmTool === t.slug}
+                      onMode={(m) => { if (m === 'on' && t.destructive && t.effective.mode !== 'on') setConfirmTool(t.slug); else { setConfirmTool(null); void setMode(t.slug, m) } }}
+                      onConfirm={() => void setMode(t.slug, 'on', true)} onCancelConfirm={() => setConfirmTool(null)}
+                      onAccept={() => void acceptChange(t.slug)} />)}
                   </div>
                 ) : (
                   <p className="muted empty">{s.live.ready ? 'This server offers no tools.' : 'Tools appear once the server connects.'}</p>
@@ -479,14 +506,17 @@ export default function McpSettings(): JSX.Element {
               <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
             </label>
             <div className="seg" role="group" aria-label="Where the server runs">
-              {(['stdio', 'http'] as const).map((t) => (
-                <button key={t} className={draft.transport === t ? 'on' : ''} aria-pressed={draft.transport === t}
-                  onClick={() => { setDraft({ ...draft, transport: t }); setDraftReport(null) }}>
-                  {t === 'stdio' ? 'Local' : 'Remote'}
-                </button>
-              ))}
+              {(['stdio', 'http'] as const).map((t) => {
+                const on = (draft.transport === 'stdio') === (t === 'stdio')
+                return (
+                  <button key={t} className={on ? 'on' : ''} aria-pressed={on}
+                    onClick={() => { if (!on) setDraft({ ...draft, transport: t }); setDraftReport(null) }}>
+                    {t === 'stdio' ? 'Local' : 'Remote'}
+                  </button>
+                )
+              })}
             </div>
-            {draft.transport === 'http' ? (
+            {draft.transport !== 'stdio' ? (
               <>
                 <label><span>URL <small className="muted">(the streamable HTTP endpoint, or paste the server&apos;s config JSON here)</small></span>
                   <input value={draft.url} spellCheck={false} placeholder="https://example.com/mcp"
@@ -549,7 +579,7 @@ export default function McpSettings(): JSX.Element {
         </div>
       ) : (
         <button className="ghost-btn" onClick={() => { setAdding(true); requestAnimationFrame(() => nameRef.current?.focus()) }}>
-          <Plus size={13} /> Add a connector
+          <Plus size={13} /> Add custom
         </button>
       )}
 
@@ -559,6 +589,7 @@ export default function McpSettings(): JSX.Element {
           A server that changes a tool after you approved it goes back to asking.
         </p>
       )}
+      </>}
     </div>
   )
 }

@@ -87,6 +87,28 @@ def test_upload_route_reports_whether_the_file_can_be_read() -> None:
     assert appmod._store_upload(None, "words.txt", "text/plain", b"plain words\n")["duplicate"] is True
 
 
+def test_upload_cap_is_50_mb_and_one_constant() -> None:
+    """One cap in limits.py: extract_text re-exports it, the route refuses just past it, and the zip guard leaves
+    a docx of that size room to be read."""
+    from fastapi.testclient import TestClient
+
+    from personal_os import app as appmod
+    from personal_os import extract_text as ex
+    from personal_os import limits
+    from personal_os.app import AUTH_TOKEN, app
+
+    assert limits.MAX_UPLOAD_MB == 50 and limits.MAX_UPLOAD_BYTES == 50 * 1024 * 1024
+    assert ex.MAX_UPLOAD_BYTES is limits.MAX_UPLOAD_BYTES and appmod.MAX_UPLOAD_BYTES == limits.MAX_UPLOAD_BYTES
+    assert ex.MAX_UNZIPPED_BYTES == limits.MAX_UNZIPPED_BYTES > limits.MAX_UPLOAD_BYTES
+    assert appmod._too_big(limits.MAX_UPLOAD_BYTES) is None
+    assert appmod._too_big(limits.MAX_UPLOAD_BYTES + 1) == "Files must be 50 MB or smaller"
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    ok = client.post("/documents", files={"file": ("big.bin", b"\0" * (30 * 1024 * 1024), "application/octet-stream")})
+    assert ok.status_code == 200, ok.text
+    big = client.post("/documents", files={"file": ("huge.bin", b"\0" * (limits.MAX_UPLOAD_BYTES + 1), "application/octet-stream")})
+    assert big.status_code == 413 and "50 MB" in big.json()["detail"]
+
+
 if __name__ == "__main__":
     test_text_code_and_unknown_extensions()
     test_binary_is_stored_as_a_note_instead_of_rejected()
@@ -94,4 +116,5 @@ if __name__ == "__main__":
     test_index_and_pdf_text_are_capped()
     test_has_readable_text_tells_a_marker_from_a_document()
     test_upload_route_reports_whether_the_file_can_be_read()
+    test_upload_cap_is_50_mb_and_one_constant()
     print("ok")

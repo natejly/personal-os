@@ -974,7 +974,7 @@ class Subagents:
             result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
         else:
             pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
-            tainted = bool(ch.ctx.get("tainted"))
+            tainted = self.toolbox.tainted_for(name, args, ch.ctx)
             mode = self.toolbox.gate(name, raw_mode, ch.ctx, args)
             hard_forced = mode != raw_mode
             # The parent's gates, in the parent's order: a write outside the granted folders asks, then the
@@ -989,7 +989,7 @@ class Subagents:
             taint_only = mode == "ask" and spec.danger in ASK_LOCKED_DANGER and tainted
             forced = forced or taint_only
             lockable = bool(self.toolbox.ask_locked(spec) or self.toolbox.forces_ask(name, args, ch.ctx))
-            hard_forced = hard_forced or taint_only or (lockable and tainted)
+            hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
             pre_mode = mode
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)

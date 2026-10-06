@@ -855,7 +855,7 @@ class Toolbox:
         return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
 
     def fs_needs_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> bool:
-        """True when a file-writing call targets somewhere the user did not grant (fsx.py), so the reply loop shows a card."""
+        """True when a file call needs the user's yes (fsx.py): it reads or writes a credential store, or writes anything after the reply read untrusted content. The reply loop shows a card."""
         return fsx.needs_ask(self, name, args, ctx)
 
     def forces_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
@@ -1541,9 +1541,9 @@ class Toolbox:
             where = {"pane": pane} if pane else {}
             if kind == "file":
                 try:
-                    p = mac.allowed_path(path)
+                    p = mac.readable_path(path)
                 except mac.LocalPathError as e:
-                    return tool_error(redact.scrub_command_output(f"show: {e}"), field="path", expected="a file inside the home folder",
+                    return tool_error(redact.scrub_command_output(f"show: {e}"), field="path", expected="a file on this Mac that is not a credential store",
                                       example={"kind": "file", "path": "~/Documents/Lease 2026.pdf"})
                 if not p.is_file():
                     return tool_error(redact.scrub_command_output(f"show: {p} is not a file"), field="path")
@@ -1652,7 +1652,7 @@ class Toolbox:
                     folder = check_watch_dir(watch_dir)
                 except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
                     return tool_error(f"I can't watch that folder: {e}", field="watch_dir",
-                                      expected="a folder under the home folder, not a hidden one, e.g. ~/Downloads")
+                                      expected="a folder on this Mac, e.g. ~/Downloads")
                 job = self.jobs.create(name.strip(), cron or "", prompt, kind="watch", timezone=tz, enabled=True,
                                        project_id=pid, watch_dir=folder, agent_id=aid)
             elif cron:
@@ -2433,7 +2433,7 @@ def _register_sandbox(self: Toolbox) -> None:
         if not ctx.get("desk_id"):
             out = {"outputs": [entry], **out,
                    "note": "Saved in this chat's files; the user can download it from the card. write_local_file puts text "
-                           "files elsewhere in their home folder."}
+                           "files elsewhere on their Mac."}
         if sb.networked(ctx["conversation_id"]):
             out["network"] = True
         return _mark(ctx, _shown_file(out), "sandbox_export_file")
@@ -2756,7 +2756,7 @@ def _register_mac(self: Toolbox) -> None:
         try:
             return _scrub_strings(await mac.mdfind(query, folders=folders, name_only=bool(name_only), limit=limit))
         except mac.LocalPathError as e:
-            return tool_error(redact.scrub_command_output(f"find_files: {e}"), field="folders", expected="folders inside the home folder, e.g. ~/Downloads",
+            return tool_error(redact.scrub_command_output(f"find_files: {e}"), field="folders", expected="folders on this Mac, e.g. ~/Downloads",
                               example={"query": "lease agreement", "folders": ["~/Documents"]}, alternative=ALTERNATIVE["find_files"])
         except ValueError as e:
             return tool_error(redact.scrub_command_output(f"find_files: {e}"), field="query", example={"query": "invoice 2026", "name_only": True})
@@ -2781,13 +2781,13 @@ def _register_mac(self: Toolbox) -> None:
         except ValueError as e:  # extract_text: a binary format it cannot read
             return tool_error(redact.scrub_command_output(f"read_local_file: {e}"), field="path", expected="a text, markdown, PDF or .docx file",
                               alternative=ALTERNATIVE["read_local_file"])
-    R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Home folder only; hidden folders and ~/Library are off limits. Page through long files with offset.",
+    R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Works anywhere on this Mac: Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) need the user's approval, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages...) need Full Disk Access in System Settings. Page through long files with offset.",
         _obj({"path": {"type": "string", "description": "Absolute or ~/ path, usually from find_files"},
               "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "files",
         examples=[{"path": "~/Documents/Lease 2026.pdf"}, {"path": "~/Desktop/notes.md", "offset": 8000}], taints=True))
 
     def _path_error(name: str, e: Exception, **extra: Any) -> Any:
-        out = tool_error(f"{name}: {e}", field="path", expected="a path inside the home folder, outside ~/Library and hidden folders",
+        out = tool_error(f"{name}: {e}", field="path", expected="a path on this Mac outside Grain's own data folder and app",
                          alternative=ALTERNATIVE[name], **extra)
         if isinstance(out.get("error"), str):
             out["error"] = redact.scrub_command_output(out["error"])
@@ -2822,6 +2822,7 @@ def _register_mac(self: Toolbox) -> None:
     async def write_local_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
         snap: dict[str, Any] | None = None
         try:
+            fsx.guard_local(self, ctx, "write_local_file", {"path": path})
             unread = fsx.pre_write(self, ctx, path, mode)
             if unread:
                 return tool_error(redact.scrub_command_output(f"write_local_file: {unread}"), field="mode", alternative="fs_edit for a small change, or read_local_file first")
@@ -2843,7 +2844,7 @@ def _register_mac(self: Toolbox) -> None:
         except OSError as e:
             await _with_undo(snap, {"error": "failed"})
             return tool_error(redact.scrub_command_output(f"write_local_file: {_first_line(e)}"), field="path", alternative=ALTERNATIVE["write_local_file"])
-    R("write_local_file", ToolSpec("write_local_file", "Write a text file on this Mac (notes, markdown, CSV, code). Home folder only; hidden folders and ~/Library are off limits. Default mode 'create' refuses to replace an existing file: pass 'overwrite' to replace it or 'append' to add to the end. Missing parent folders are created.",
+    R("write_local_file", ToolSpec("write_local_file", "Write a text file on this Mac (notes, markdown, CSV, code). Works anywhere on this Mac: Grain's own data folder and app are off limits, credential stores need the user's approval, and macOS-protected folders need Full Disk Access in System Settings. Default mode 'create' refuses to replace an existing file: pass 'overwrite' to replace it or 'append' to add to the end. Missing parent folders are created.",
         _obj({"path": {"type": "string", "description": "Absolute or ~/ path, e.g. ~/Desktop/notes.md"},
               "content": {"type": "string", "description": "The full text to write"},
               "mode": {"type": "string", "enum": list(mac.WRITE_MODES), "default": "create"}}, ["path", "content"]), write_local_file, "files", "external",
@@ -2853,6 +2854,7 @@ def _register_mac(self: Toolbox) -> None:
     async def move_local_file(ctx: dict[str, Any], path: str, to: str) -> Any:
         snap: dict[str, Any] | None = None
         try:
+            fsx.guard_local(self, ctx, "move_local_file", {"path": path, "to": to})
             snap = await _snapshot("move", path, ctx, to)
             return _local_shown(await _with_undo(snap, await asyncio.to_thread(mac.move_local, path, to)))
         except mac.LocalPathError as e:
@@ -2869,6 +2871,7 @@ def _register_mac(self: Toolbox) -> None:
 
     async def trash_local_file(ctx: dict[str, Any], path: str) -> Any:
         try:
+            fsx.guard_local(self, ctx, "trash_local_file", {"path": path})
             return _local_shown(await asyncio.to_thread(mac.trash_local, path))
         except mac.LocalPathError as e:
             return _path_error("trash_local_file", e, example={"path": "~/Downloads/duplicate.pdf"})

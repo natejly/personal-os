@@ -834,9 +834,6 @@ export interface ConversationSettings {
   deskId?: string
   /** The doc this chat is bound to: opening the doc brings the chat back in the page agent panel. */
   docId?: string
-  /** A folder the user bound this chat to (the Folder control under the composer): granted to the shell, file and
-   *  coding-agent tools for this chat's runs, first in the root list. "" or absent means none. */
-  workingFolder?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
 }
@@ -1522,8 +1519,10 @@ export interface Settings {
   snapshotsEnabled?: boolean
   /** Reported by GET /settings, never stored: folder snapshots need a version-control binary on this Mac. */
   snapshotsAvailable?: boolean
-  /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
+  /** Grain works anywhere on the Mac, so this no longer limits anything. The backend still accepts and stores it. */
   workspaceRoots?: string[]
+  /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
+  autonomousByDefault?: boolean
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
   /** Linux sandbox containers: the image a fresh one starts from, the CLI. */
@@ -2848,7 +2847,7 @@ export interface AgentDef {
   boundaries: string
   /** "What this agent should remember": fenced into its system prompt after the boundaries. */
   notes: string
-  /** Its own working folder when a chat has none bound; empty = none. */
+  /** Its own working folder; empty = none. */
   workspace: string
   /** Tool modes for this agent only: above the project's, below the chat's. Empty = inherit. */
   tool_modes: Record<string, ToolMode>

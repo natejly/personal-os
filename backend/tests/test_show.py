@@ -68,12 +68,16 @@ def test_a_file_is_named_and_sized_but_its_bytes_never_reach_the_model(home: Pat
     assert PDF.decode() not in str(out)
 
 
-def test_a_file_outside_the_home_guard_is_refused(home: Path, tmp_path: Path) -> None:
+def test_anywhere_on_the_mac_but_a_credential_store_or_grains_own_folder(home: Path, tmp_path: Path) -> None:
     outside = tmp_path / "elsewhere.pdf"
     outside.write_bytes(PDF)
-    assert "outside your home folder" in _show(kind="file", path=str(outside))["error"]
-    (home / "Library" / "secret.pdf").write_bytes(PDF)
-    assert "off limits" in _show(kind="file", path="~/Library/secret.pdf")["error"]
+    assert "error" not in _show(kind="file", path=str(outside)), "outside the home folder is fine now"
+    (home / "Library" / "notes.pdf").write_bytes(PDF)
+    assert "error" not in _show(kind="file", path="~/Library/notes.pdf")
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_ed25519").write_text("key")
+    assert "secrets" in _show(kind="file", path="~/.ssh/id_ed25519")["error"]
+    assert "off limits" in _show(kind="file", path="/Applications/Grain.app/Contents/Info.plist")["error"]
     assert "is not a file" in _show(kind="file", path="~/Documents")["error"]
     assert "is not a file" in _show(kind="file", path="~/Documents/missing.pdf")["error"]
 
@@ -90,10 +94,13 @@ def test_local_raw_serves_a_home_file_with_its_type_and_html_as_text(home: Path,
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
     (home / "Documents" / "logo.svg").write_text("<svg/>")
     assert client.get("/local/raw", params={"path": "~/Documents/logo.svg"}).headers["content-type"].startswith("text/plain")
-    # Outside the guard: refused, and a folder or missing file is not served either.
+    # Anywhere on the Mac is served; a credential store is refused, and a folder or missing file is not served either.
     outside = tmp_path / "x.pdf"
     outside.write_bytes(PDF)
-    assert client.get("/local/raw", params={"path": str(outside)}).status_code == 400
+    assert client.get("/local/raw", params={"path": str(outside)}).status_code == 200
+    (home / ".aws").mkdir()
+    (home / ".aws" / "credentials").write_text("k")
+    assert client.get("/local/raw", params={"path": "~/.aws/credentials"}).status_code == 400
     assert client.get("/local/raw", params={"path": "~/Documents"}).status_code == 404
     assert client.get("/local/raw", params={"path": "~/Documents/none.pdf"}).status_code == 404
 

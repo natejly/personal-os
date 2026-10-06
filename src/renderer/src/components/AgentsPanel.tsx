@@ -127,7 +127,7 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       <label>When to hand work to it<input value={f.description} placeholder="One line another agent can match a task against" onChange={(e) => set({ description: e.target.value })} /></label>
       <label>Instructions<textarea rows={6} value={f.body} placeholder="Who it is, what it does, what it must not do, how it reports back." onChange={(e) => set({ body: e.target.value })} /></label>
       <label>Boundaries<textarea rows={3} maxLength={2000} value={f.boundaries ?? ''} placeholder="What it must ask you before doing, and what it never does." onChange={(e) => set({ boundaries: e.target.value })} /></label>
-      <label>Working folder<input value={f.workspace ?? ''} placeholder="Optional, e.g. ~/Documents/Taxes (used when a chat has none bound)" onChange={(e) => set({ workspace: e.target.value })} /></label>
+      <label>Working folder<input value={f.workspace ?? ''} placeholder="Optional, e.g. ~/Documents/Taxes" onChange={(e) => set({ workspace: e.target.value })} /></label>
       <details className="agent-pick">
         <summary>Tools <span className="tag">{f.tools.length}</span></summary>
         <input className="agent-filter" placeholder="Filter tools" value={filter} onChange={(e) => setFilter(e.target.value)} />

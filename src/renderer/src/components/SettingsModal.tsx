@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, FolderOpen, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, type LucideIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
@@ -19,7 +19,6 @@ import type { Settings, ShortcutState } from '@shared/types'
 import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
-import { WorkspaceRoots } from './WorkspaceRoots'
 import { PermissionsPanel } from './PermissionsPanel'
 import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
@@ -44,7 +43,6 @@ type Tab = SettingsTab
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'model', label: 'Model', icon: Cpu },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
-  { id: 'workspace', label: 'Workspace folders', icon: FolderOpen },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'texting', label: 'Texting', icon: MessageSquare },
   { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -53,7 +51,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 ]
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'workspace'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -396,7 +394,7 @@ export default function SettingsModal(): JSX.Element {
               <h3>Permissions</h3>
               <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
               <PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} />
-              <p className="muted small">Whatever the mode, Grain only writes inside your <button type="button" className="link-btn" onClick={() => setTab('workspace')}>workspace folders</button>; anywhere else needs the folder added first. Per-tool rules and the always-ask list are under Advanced.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
@@ -406,8 +404,6 @@ export default function SettingsModal(): JSX.Element {
                 </details>
               )}
             </section>}
-
-            {tab === 'workspace' && <section className="workspace-tab"><WorkspaceRoots /></section>}
 
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
@@ -484,7 +480,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'system' && <section className="system-tab">
               <h3>System access</h3>
-              <PermissionsPanel onEditFolders={() => setTab('workspace')} />
+              <PermissionsPanel />
             </section>}
 
             {tab === 'advanced' && <section>

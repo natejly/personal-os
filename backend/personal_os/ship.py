@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from . import mac
 from .db import new_id
 
 STEPS = ("tests", "push", "pr", "merge")
@@ -89,9 +90,8 @@ def _reset(step: dict[str, Any]) -> None:
 
 class Ship:
     def __init__(self, db: Any, run: Runner, publish: Callable[[str, Any], None],
-                 roots: Callable[[], list[Path]] | None = None, job_of: Callable[[str | None], str | None] | None = None):
+                 job_of: Callable[[str | None], str | None] | None = None):
         self.db, self.run, self.publish = db, run, publish
-        self.roots = roots              # the granted workspace roots; a repo must sit inside one
         self.job_of = job_of or (lambda _cid: None)   # conversation id -> the job it belongs to
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self._recover()
@@ -143,9 +143,8 @@ class Ship:
         if not repo.is_absolute():
             raise ShipError("repo_path must be an absolute path to the repository folder.")
         repo = repo.resolve()
-        roots = self.roots() if self.roots else []
-        if not any(repo == r or r in repo.parents for r in roots):
-            raise ShipError(f"{repo} is outside the workspace folders. Ask the user to add it under Settings (Workspace folders).")
+        if why := mac.protected_reason(repo):
+            raise ShipError(f"{repo}: {why}.")
         if not (repo / ".git").exists():
             raise ShipError(f"{repo} is not a git repository (no .git).")
         t = time.time()
@@ -325,7 +324,7 @@ def register(tb: Any, ship: Ship) -> None:
     spec = ToolSpec("ship_checklist", "Ship a branch: run the repo's tests, then push the branch to origin, then open (or reuse) "
                     "a pull request into base. Each step runs only after the previous one passed. The merge is never "
                     "automatic: it waits for the user to confirm it. Never pushes main/master and never force-pushes. "
-                    "repo_path must be inside a workspace folder. test_command defaults to npm test or pytest.",
+                    "repo_path must be a git repository folder on this Mac. test_command defaults to npm test or pytest.",
                     _obj({"repo_path": {"type": "string"}, "branch": {"type": "string"},
                           "base": {"type": "string", "default": "main"}, "test_command": {"type": "string"}},
                          ["repo_path", "branch"]),

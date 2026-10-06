@@ -80,7 +80,8 @@ export interface BackendAccess {
   fullDisk: AccessState
   automation: { finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
   browsers: { name: string; state: AccessState }[]
-  roots: { roots: string[]; defaulted: boolean }
+  /** Short display strings from the backend: what Grain never touches, and what always asks first. */
+  scope?: { protected: string[]; sensitive: string[] }
   clis: { claude: Cli; opencode: Cli }
 }
 export interface ShellCheck { ok: boolean; output: string; cwd: string | null; error: string | null }
@@ -95,7 +96,7 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
     row('screen', 'Screen Recording', 'Teaching a task by showing it, and looking at your screen.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
-    row('fullDisk', 'Full Disk Access', 'Lets Grain\'s agent, and the coding agents it starts, read protected folders like Mail, Messages and app data, plus workspace folders on your Desktop, in Documents or Downloads.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
+    row('fullDisk', 'Full Disk Access', 'Lets Grain\'s agent, and the coding agents it starts, read protected folders like Mail, Messages and app data, plus Desktop, Documents and Downloads. The rest of the Mac needs no grant.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),
     row('automation:systemEvents', 'Automation: System Events', 'Mac actions you ask for.', a?.systemEvents, 'native', PANE_URLS.automation),
     ...(backend?.browsers ?? []).map((b) =>

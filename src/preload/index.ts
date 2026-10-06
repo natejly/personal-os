@@ -62,7 +62,7 @@ const api: GrainApi = {
     /** The hidden print window asks for its note, then says it has finished drawing it. */
     payload: () => ipcRenderer.invoke('print:payload'),
     ready: () => ipcRenderer.send('print:ready'),
-    /** Print a note to PDF: 'save' asks where (and reveals the file), 'bytes' hands the PDF back. null when cancelled. */
+    /** Print a note to PDF: 'save' writes it into Downloads under a free name and returns the path, 'bytes' hands the PDF back. */
     exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => ipcRenderer.invoke('print:export-pdf', title, content, filename, mode)
   },
   closeSelf: () => ipcRenderer.send('window:close-self'),

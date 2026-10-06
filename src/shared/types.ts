@@ -1763,6 +1763,7 @@ export interface GrainApi {
   print: {
     payload: () => Promise<{ title: string; content: string } | null>
     ready: () => void
+    /** 'save': the path of the PDF written into Downloads. 'bytes': the PDF itself. */
     exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => Promise<string | Uint8Array | null>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */

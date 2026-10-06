@@ -11,7 +11,7 @@ import { isAppUrl } from './appUrl'
 import { guardNavigation } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
-import { registerPrintIpc, renderNotePdf } from './printDoc'
+import { registerPrintIpc, renderNotePdf, uniquePath } from './printDoc'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { registerQuickAsk, toggleAsk } from './quickAsk'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -382,19 +382,12 @@ if (gotLock) app.whenReady().then(async () => {
     return r.canceled || !r.filePath ? null : r.filePath
   })
   registerPrintIpc()
-  handle('print:export-pdf', async (e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
-    let dest: string | null = null
-    if (mode === 'save') {
-      const win = BrowserWindow.fromWebContents(e.sender)
-      const opts = { title: 'Export as PDF', defaultPath: join(app.getPath('documents'), basename(String(filename))), filters: [{ name: 'PDF', extensions: ['pdf'] }] }
-      const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
-      if (r.canceled || !r.filePath) return null
-      dest = r.filePath
-    }
+  handle('print:export-pdf', async (_e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
     const pdf = await renderNotePdf(String(title), String(content))
-    if (!dest) return new Uint8Array(pdf)
-    writeFileSync(dest, pdf)
-    shell.showItemInFolder(dest)
+    if (mode !== 'save') return new Uint8Array(pdf)
+    // Straight into Downloads, no dialog. A name already taken gets " (2)", " (3)", … rather than being overwritten.
+    const dest = uniquePath(app.getPath('downloads'), basename(String(filename)))
+    writeFileSync(dest, pdf, { flag: 'wx' })
     return dest
   })
   handle('data:choose-input-files', async () => {

@@ -8,7 +8,7 @@ import {
 const main: MainStatus = { microphone: 'granted', camera: 'unasked', screen: 'denied', accessibility: 'granted', notifications: 'unknown' }
 const backend: BackendAccess = {
   fullDisk: 'denied', inputMonitoring: 'unknown',
-  automation: { messages: 'granted', finder: 'unasked', systemEvents: 'unknown', contacts: 'unknown', calendar: 'unknown', reminders: 'unknown' },
+  automation: { finder: 'unasked', systemEvents: 'unknown', contacts: 'unknown', calendar: 'unknown', reminders: 'unknown' },
   browsers: [{ name: 'Safari', state: 'denied' }],
   scope: { protected: [], sensitive: [] },
   clis: { claude: { path: null, version: null, hint: '' }, opencode: { path: null, version: null, hint: '' } }
@@ -32,7 +32,7 @@ test('media and osascript results map to states', () => {
 })
 
 test('automation scripts come only from the allowlists', () => {
-  assert.equal(automationScript('automation:messages'), 'tell application "Messages" to get name')
+  assert.equal(automationScript('automation:finder'), 'tell application "Finder" to get name of startup disk')
   assert.equal(automationScript('browser:Arc'), 'tell application "Arc" to get name')
   assert.equal(automationScript('browser:Evil" to quit'), null)
   assert.equal(automationScript('automation:toString'), null)
@@ -41,7 +41,7 @@ test('automation scripts come only from the allowlists', () => {
 
 test('rows keep order, probes override backend state, and the plan puts native first', () => {
   const rows = buildRows(main, backend, { 'automation:finder': 'granted' })
-  assert.deepEqual(rows.map((r) => r.id).slice(0, 8), ['microphone', 'camera', 'screen', 'accessibility', 'fullDisk', 'inputMonitoring', 'automation:messages', 'automation:finder'])
+  assert.deepEqual(rows.map((r) => r.id).slice(0, 7), ['microphone', 'camera', 'screen', 'accessibility', 'fullDisk', 'inputMonitoring', 'automation:finder'])
   assert.equal(rows.at(-1)?.id, 'notifications')
   assert.ok(rows.some((r) => r.id === 'browser:Safari' && r.state === 'denied'))
   assert.equal(rows.find((r) => r.id === 'automation:finder')?.state, 'granted')

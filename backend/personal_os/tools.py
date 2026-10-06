@@ -39,7 +39,8 @@ from . import firecrawl, reach
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
 from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
-from . import redact
+from . import graph_recall, redact
+from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as ENTITY_TYPES, canonical_type, normalize_predicate
 from . import webread
 from . import websearch
 from . import outbox as outbox_mod
@@ -1274,12 +1275,17 @@ class Toolbox:
                       {"replaces": "mem_8c1d2e", "forget": True}]))
 
         async def graph_search(ctx: dict[str, Any], query: str) -> Any:
-            sub = self.graph.neighborhood(ctx["project_id"], query, max_nodes=40)
+            sub = graph_recall.subgraph(self.graph, ctx["project_id"], query)
             by_id = {n["id"]: n for n in sub["nodes"]}
+            if sub["seeds"]:
+                rels = [graph_recall.edge_line(e, by_id)[2:] for e in sub["edges"]]
+            else:  # no label or alias named: the looser word match keeps the tool forgiving
+                sub = self.graph.neighborhood(ctx["project_id"], query, max_nodes=40)
+                by_id = {n["id"]: n for n in sub["nodes"]}
+                rels = [redact.scrub_command_output(
+                    f"{by_id[e['source_id']]['label']} -[{e['relation']}]-> {by_id[e['target_id']]['label']}") for e in sub["edges"]]
             ents = [{"id": n["id"], "label": redact.scrub_command_output(str(n["label"] or "")),
                      "type": n["type"], "properties": _scrub_strings(n["properties"])} for n in sub["nodes"]]
-            rels = [redact.scrub_command_output(
-                f"{by_id[e['source_id']]['label']} -[{e['relation']}]-> {by_id[e['target_id']]['label']}") for e in sub["edges"]]
             return {"entities": ents, "relations": rels, "total_entities": len(ents), "total_relations": len(rels),
                     "truncated": len(ents) >= 40}
         R("graph_search", ToolSpec("graph_search", "Find entities in the user's knowledge graph matching a query, with their direct relations (1 hop).",
@@ -1289,7 +1295,10 @@ class Toolbox:
         async def graph_traverse(ctx: dict[str, Any], entity: str, depth: int = 2) -> Any:
             g = self.graph.get(ctx["project_id"])
             by_id = {n["id"]: n for n in g["nodes"]}
-            start = next((n for n in g["nodes"] if n["label"].lower() == entity.strip().lower()), None) or next((n for n in g["nodes"] if entity.strip().lower() in n["label"].lower()), None)
+            want = entity.strip().lower()
+            start = (next((n for n in g["nodes"] if n["label"].lower() == want), None)
+                     or next((n for n in g["nodes"] if want in (a.lower() for a in graph_recall.aliases(n))), None)
+                     or next((n for n in g["nodes"] if want in n["label"].lower()), None))
             if not start:
                 labels = [n["label"] for n in g["nodes"]]
                 sample = redact.scrub_command_output(str(labels[0])) if labels else "Acme"
@@ -1317,25 +1326,49 @@ class Toolbox:
             _obj({"entity": {"type": "string"}, "depth": {"type": "integer", "default": 2}}, ["entity"]), graph_traverse, "graph",
             examples=[{"entity": "Acme"}, {"entity": "Mira", "depth": 1}, {"entity": "migration project", "depth": 3}]))
 
-        async def graph_add(ctx: dict[str, Any], source: str, relation: str, target: str, source_type: str = "entity", target_type: str = "entity") -> Any:
-            if source.strip().lower() in SELF_LABELS or target.strip().lower() in SELF_LABELS:
-                return tool_error("The user is not a graph entity.", field="source",
-                                  expected="two named things (people, projects, tools…), never the user",
-                                  example={"source": "Mira", "relation": "works at", "target": "Acme"},
-                                  alternative="save_memory for facts about the user")
-            s = self.graph.upsert_node(ctx["project_id"], source, source_type)
-            t = self.graph.upsert_node(ctx["project_id"], target, target_type)
-            e = self.graph.upsert_edge(ctx["project_id"], s["id"], t["id"], relation)
+        async def graph_add(ctx: dict[str, Any], source: str, relation: str, target: str, source_type: str = "topic", target_type: str = "topic") -> Any:
+            """The user is `self_node`; a relation phrase outside the closed set becomes related_to with the phrase as its note."""
+            pred, phrase = normalize_predicate(relation)
+            if not pred:
+                return tool_error("The relation is empty.", field="relation", expected="one of: " + ", ".join(PREDICATES),
+                                  example={"source": "Mira", "relation": "works_at", "target": "Acme"})
+            pid = ctx["project_id"]
+            if source.strip().lower() in SELF_LABELS:
+                s = self.graph.self_node(pid)
+            else:
+                s = self.graph.upsert_node(pid, source, canonical_type(source_type))
+            if pred in LITERAL_PREDICATES:  # a status or deadline: the object is a value, not an entity
+                t = self.graph.value_node(pid, target)
+                if t is None:
+                    return tool_error("An entity already has that name, so it cannot be used as a value.", field="target",
+                                      expected="a short value such as blocked, or a YYYY-MM-DD date",
+                                      example={"source": "Helios migration", "relation": pred, "target": "blocked"})
+            elif target.strip().lower() in SELF_LABELS:
+                t = self.graph.self_node(pid)
+            else:
+                t = self.graph.upsert_node(pid, target, canonical_type(target_type))
+            if graph_recall.is_literal(s) or (pred not in LITERAL_PREDICATES and graph_recall.is_literal(t)):
+                return tool_error("That name is already used for a value (a status or date), not an entity.", field="source",
+                                  expected="an entity name, e.g. a person, project or tool", example={"source": "Mira", "relation": "works_at", "target": "Acme"})
+            e = self.graph.upsert_edge(pid, s["id"], t["id"], pred, fact=phrase)
+            if pred in SINGLE_VALUED:  # a new employer, status or home replaces the old one (unless the old one is newer)
+                self.graph.supersede_siblings(pid, e)
             learned = ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
             learned["nodes"] += [s, t]
             learned["edges"].append(e)
             return {"added": redact.scrub_command_output(
                 f"{s['label']} -[{e['relation']}]-> {t['label']}")}
-        R("graph_add", ToolSpec("graph_add", "Add a relation (and the entities if new) to the knowledge graph.",
-            _obj({"source": {"type": "string"}, "relation": {"type": "string"}, "target": {"type": "string"}, "source_type": {"type": "string", "default": "entity"}, "target_type": {"type": "string", "default": "entity"}}, ["source", "relation", "target"]), graph_add, "graph", "writes",
-            examples=[{"source": "Mira", "relation": "works at", "target": "Acme", "source_type": "person", "target_type": "company"},
-                      {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
-                      {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
+        R("graph_add", ToolSpec("graph_add", "Add a relation (and the entities if new) to the knowledge graph. relation is one of: "
+            + ", ".join(PREDICATES) + ". Use source \"User\" for facts about the user. status and deadline take a value as the target "
+            "(deadline as YYYY-MM-DD); a new status, deadline, employer, manager or home replaces the old one. "
+            "Types: " + ", ".join(ENTITY_TYPES) + ".",
+            _obj({"source": {"type": "string"}, "relation": {"type": "string"}, "target": {"type": "string"},
+                  "source_type": {"type": "string", "default": "topic"},
+                  "target_type": {"type": "string", "default": "topic"}}, ["source", "relation", "target"]), graph_add, "graph", "writes",
+            examples=[{"source": "Mira", "relation": "works_at", "target": "Acme", "source_type": "person", "target_type": "org"},
+                      {"source": "User", "relation": "uses", "target": "SQLite", "target_type": "tool"},
+                      {"source": "Helios migration", "relation": "status", "target": "blocked", "source_type": "project"},
+                      {"source": "Acme", "relation": "related_to", "target": "Globex", "source_type": "org", "target_type": "org"}]))
 
         async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "",
                              allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> Any:
@@ -1529,7 +1562,7 @@ class Toolbox:
             return out
         R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. Outside a desk, files the script saves under outputs/ (os.makedirs('outputs', exist_ok=True) first; up to 10 files of 25 MB) are kept in this chat's files, listed as outputs, for the user to download. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
-                  "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 50 calls and 300s; only what the script prints comes back."}},
+                  "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 300s per script; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
             examples=[{"code": "print(sum(1 / n**2 for n in range(1, 10000)))"},
                       {"code": "import grain_tools\nr = grain_tools.call('search_documents', query='TODO')\nprint(r)", "tools": ["search_documents"], "timeout": 120},

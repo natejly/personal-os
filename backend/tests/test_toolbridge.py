@@ -139,7 +139,7 @@ def test_an_off_tool_is_refused(tmp_path: Path) -> None:
 
 
 @needs_seatbelt
-def test_the_call_cap_is_fifty(rig: Rig) -> None:
+def test_no_call_cap(rig: Rig) -> None:
     code = """
 import grain_tools
 ok = 0
@@ -153,8 +153,8 @@ for i in range(55):
 print("ok", ok)
 """ % str(rig.root)
     out = asyncio.run(rig.run(code, ["fs_glob"], timeout=60))
-    assert "ok 50" in out["stdout"] and "call cap" in out["stdout"] and out["bridged_calls"] == 50
-    assert len(rig.seen) == 50
+    assert "ok 55" in out["stdout"] and out["bridged_calls"] == 55
+    assert len(rig.seen) == 55
 
 
 @needs_seatbelt

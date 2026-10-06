@@ -13,9 +13,9 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from . import activity, codingagents, imessage, mac, opencode, shell
+from . import activity, codingagents, mac, opencode, shell
 
-AUTOMATION = {"messages": "com.apple.MobileSMS", "finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
+AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
 CLAUDE_INSTALL_HINT = "Install the claude CLI: npm i -g @anthropic-ai/claude-code"
 
@@ -30,15 +30,7 @@ def _safe(fn: Callable[[], str]) -> str:
 def _full_disk() -> str:
     if not activity.IS_MAC:
         return activity.UNKNOWN
-    if activity.full_disk_access():
-        return activity.GRANTED
-    try:
-        imessage._open_ro(imessage.DEFAULT_CHAT_DB).close()
-        return activity.GRANTED
-    except imessage.NeedsFullDiskAccess:
-        return activity.DENIED
-    except Exception:  # noqa: BLE001 - e.g. no Messages database on this Mac
-        return activity.DENIED
+    return activity.GRANTED if activity.full_disk_access() else activity.DENIED
 
 
 @lru_cache(maxsize=8)

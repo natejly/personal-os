@@ -63,7 +63,7 @@ def test_b64_reply_is_saved_to_uploads(box: Box) -> None:
     out = box.call(prompt="A red fox, in the snow!")
     s = out["saved"][0]
     assert (s["width"], s["height"]) == (48, 24) and Path(s["path"]).read_bytes()[:4] == b"\x89PNG"
-    assert Path(s["path"]).name.endswith("-a-red-fox-in-the-snow.png")
+    assert Path(s["path"]).name == "a-red-fox-in-the-snow.png" and Path(s["path"]).parent.parent.name == "uploads"
     assert box.tb.documents.get(s["doc_id"])["mime"] == "image/png"
     assert out["images"][0]["data"].startswith("data:image/png;base64,")
     body = json.loads(box.requests[0].content)

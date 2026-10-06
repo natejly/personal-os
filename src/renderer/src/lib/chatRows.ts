@@ -49,15 +49,3 @@ export function adjacentChatId(conversations: { id: string }[], focusedId: strin
   const j = i + dir
   return j < 0 || j >= conversations.length ? null : conversations[j].id
 }
-
-type Item = { id: string; project_id: string | null; title: string; updated_at: number }
-export type ProjectRow = { kind: 'chat' | 'doc'; id: string; title: string; at: number }
-
-/** Each project's chats and notes interleaved, newest first: the sidebar group and the project page list the same rows. */
-export function projectRows(conversations: Item[], docs: Item[]): Record<string, ProjectRow[]> {
-  const m: Record<string, ProjectRow[]> = {}
-  for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push({ kind: 'chat', id: c.id, title: c.title, at: c.updated_at })
-  for (const d of docs) if (d.project_id) (m[d.project_id] ??= []).push({ kind: 'doc', id: d.id, title: d.title, at: d.updated_at })
-  for (const rows of Object.values(m)) rows.sort((a, b) => b.at - a.at)
-  return m
-}

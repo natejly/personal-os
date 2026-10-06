@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
+  budget          TEXT NOT NULL DEFAULT '{}',      -- legacy; no longer read
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -167,7 +167,7 @@ You are working on your own, in the background, in a private workspace directory
 under `work/`; anything the user should keep goes under `outputs/` and is nominated with
 `desk_deliver`. If you need a decision only the user can make, call `desk_ask` and end your turn —
 do not guess and do not trail off. When the brief is finished, call `desk_done` with a short summary.
-Your work runs as several bounded turns, and a new turn sees only your earlier replies, not their tool
+Your work may continue over several turns, and a new turn sees only your earlier replies, not their tool
 results. Keep `work/PROGRESS.md` current — done, next, decisions, where files are — and update it before
 a turn ends; you will be shown it at the start of the next one."""
 
@@ -639,7 +639,7 @@ class Desks:
         """What a finished desk turn means, decided from the three facts the run ends with.
 
         `chain=True` says the supervisor has already decided another turn follows, so the desk stays
-        `working`; that flag is why a budget-window stop can be settled honestly without the row
+        `working`; that flag is why an early stop can be settled honestly without the row
         having to guess. `answered=True` says the turn was a plain answer from an `ask` desk (no tool, no plan): it is
         `done` with reason "answered" instead of the review/blocked an unfinished reply gets. A desk that is no longer LIVE settled itself during the turn (`desk_ask`,
         `desk_done`, a park, a pause) and is left exactly as it is — only a stop or a crash outranks
@@ -661,8 +661,8 @@ class Desks:
         elif partial == "blocked":
             target, reason = "blocked", "approval"
         elif partial:
-            # rounds | tokens | time from Budget.exceeded(), or "loop" from the repeat breaker.
-            target, reason = "review", "budget" if partial != "loop" else "loop"
+            # "loop" from the stuck breakers, or length | incomplete from the provider ending the reply early.
+            target, reason = "review", "loop" if partial == "loop" else "cut_short"
         else:
             # The reply ended without `desk_done`. A terminal state is a decision, not an inference,
             # so this is never `done`: it is review when there is something to review and otherwise a

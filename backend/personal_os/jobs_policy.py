@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 LIVE = ("running", "awaiting_approval")
 FAILED = ("error", "interrupted")
-# The longest a watcher will follow one run before giving up on it (the job budget is minutes, not hours).
+# The longest a watcher will follow one run before giving up on it (a job run is minutes, not hours; an idle one is stopped after JOB_IDLE_SECONDS).
 WATCH_MAX_S = 2 * 3600.0
 BACKOFF_CAP_S = 1800.0
 

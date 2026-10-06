@@ -86,7 +86,8 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None) -
                     models = sorted(m["id"] for m in r.json().get("data", []) if isinstance(m, dict) and "id" in m)
                 except Exception:  # noqa: BLE001 - listing is optional
                     models = None
-            # Newer OpenAI models refuse max_tokens; the others ignore or require it, so try it first.
+            # A key/connection probe, not a reply, and the one capped call: a reasoning model would otherwise think at
+            # length and the timeout would read as a bad key. Newer OpenAI models refuse max_tokens; the others ignore or require it, so try it first.
             chat = {"model": model, "messages": [{"role": "user", "content": "Reply with: ok"}], "stream": False}
             url = providers.endpoint(base, "/chat/completions")
             r = await client.post(url, headers=headers, json={**chat, "max_tokens": 1})

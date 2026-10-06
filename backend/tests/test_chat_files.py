@@ -262,6 +262,95 @@ def test_routes_paging_scope_and_counts() -> None:
           "a trashed chat hides its files")
 
 
+def _walk(**params: Any) -> list[dict[str, Any]]:
+    out, cur = [], None
+    for _ in range(100):
+        r = CL.get("/chat-files", params={**params, **({"cursor": cur} if cur else {})}).json()
+        out += r["files"]
+        cur = r["next_cursor"]
+        if not cur:
+            return out
+    raise AssertionError("cursor never ended")
+
+
+def test_project_scope() -> None:
+    P, Q = PROJECTS.create("PS-P")["id"], PROJECTS.create("PS-Q")["id"]
+    p1, p2, q1, pers = chat(P), chat(P), chat(Q), chat()
+    ctx = {"message_id": "m", "settings": {"docEditMode": "apply"}}
+    shared = call("doc_create", {"title": "Shared", "content": "a\n"}, {**ctx, "conversation_id": p1, "project_id": P})["doc_id"]
+    call("doc_edit", {"doc": shared, "edits": [{"find": "a", "replace": "b"}]}, {**ctx, "conversation_id": p2, "project_id": P})
+    direct = DOCS.create("Direct", "x", P)["id"]
+    trashed = DOCS.create("Trashed", "x", P)["id"]
+    up_both = DOCUMENTS.create(P, "both.txt", "text/plain", 1, "", "t")["id"]
+    up_direct = DOCUMENTS.create(P, "direct.txt", "text/plain", 1, "", "t")["id"]
+    up_trash = DOCUMENTS.create(P, "trash.txt", "text/plain", 1, "", "t")["id"]
+    CONVOS.add_message(p1, "user", "x", attachments=[{"id": up_both, "name": "both.txt"}])
+    CONVOS.add_message(p2, "user", "x", attachments=[{"id": up_both, "name": "both.txt"}])
+    CHATS.save_bytes(p1, "outputs/p.csv", b"a")
+    CHATS.save_bytes(q1, "outputs/q.csv", b"a")
+    snap("create", HOME / "Desktop" / "q-only.md", q1)
+    CHATS.save_bytes(pers, "outputs/personal.csv", b"a")
+    with DB.tx() as c:  # known times: p1 note 100, p2 edit 200, direct note created 300 then edited 400
+        c.execute("UPDATE chat_files SET created_at=100 WHERE conversation_id=? AND ref=?", (p1, shared))
+        c.execute("UPDATE chat_files SET created_at=200 WHERE conversation_id=? AND ref=?", (p2, shared))
+        c.execute("UPDATE docs SET created_at=100, updated_at=100 WHERE id=?", (shared,))
+        c.execute("UPDATE docs SET created_at=300, updated_at=300 WHERE id=?", (direct,))
+        c.execute("UPDATE docs SET deleted_at=1 WHERE id=?", (trashed,))
+        c.execute("UPDATE documents SET created_at=500 WHERE id=?", (up_direct,))
+        c.execute("UPDATE documents SET created_at=50, deleted_at=1 WHERE id=?", (up_trash,))
+        c.execute("UPDATE documents SET created_at=60 WHERE id=?", (up_both,))
+        c.execute("UPDATE chat_files SET created_at=700 WHERE conversation_id=? AND ref=?", (p1, up_both))
+        c.execute("UPDATE chat_files SET created_at=650 WHERE conversation_id=? AND ref=?", (p2, up_both))
+        c.execute("UPDATE chat_files SET created_at=10 WHERE kind='output' AND conversation_id=?", (p1,))
+    files = _walk(scope="project", project_id=P, limit=200)
+    by = {f["ref"]: f for f in files}
+    check(len(files) == len(by) == 5 and {f["kind"] for f in files} == {"note", "upload", "output"} and {shared, direct, up_both, up_direct} < set(by),
+          f"project P is the deduped union, no trashed items, nothing from Q or personal: {[f['name'] for f in files]}")
+    s = by[shared]
+    check(s["chat_count"] == 2 and s["conversation_id"] == p2 and s["action"] == "edited" and s["created_at"] == 200 and s["kind"] == "note"
+          and s["project_id"] == P and s["id"] == f"note:{shared}", "a note touched by two chats is one item with the newest chat")
+    d = by[direct]
+    check(d["conversation_id"] is None and d["chat_count"] == 0 and d["action"] == "created" and d["created_at"] == 300, "direct note: no chat, created")
+    with DB.tx() as c:
+        c.execute("UPDATE docs SET updated_at=400 WHERE id=?", (direct,))
+        c.execute("UPDATE docs SET updated_at=450 WHERE id=?", (shared,))
+    again = {f["ref"]: f for f in CL.get("/chat-files", params={"scope": "project", "project_id": P, "limit": 200}).json()["files"]}
+    check(again[direct]["action"] == "edited" and again[shared]["created_at"] == 450 and again[shared]["conversation_id"] == p2 and again[shared]["chat_count"] == 2,
+          "a direct edit is the newest activity but the newest chat id is kept")
+    u = by[up_direct]
+    check(u["conversation_id"] is None and u["chat_count"] == 0 and u["action"] == "uploaded" and u["kind"] == "upload" and u["pinned"] is False, "direct upload")
+    b = by[up_both]
+    check(b["chat_count"] == 2 and b["conversation_id"] == p1 and b["action"] == "attached" and b["created_at"] == 700, "attached in a P chat and owned by P: one item")
+    DOCUMENTS.set_pinned(up_both, True)
+    check(next(f for f in _walk(scope="project", project_id=P) if f["ref"] == up_both)["pinned"] is True, "pinned follows documents.pinned")
+    out = next(f for f in files if f["kind"] == "output")
+    check(out["rel"] == "outputs/p.csv" and out["conversation_id"] == p1 and not out["missing"], "output rel uses its chat")
+    q = _walk(scope="project", project_id=Q)
+    check(sorted(f["kind"] for f in q) == ["local", "output"] and all(f["conversation_id"] == q1 for f in q), "Q has only its own chat's files")
+    order = [(f["created_at"], f["id"]) for f in _walk(scope="project", project_id=P, limit=200)]
+    check(order == sorted(order, reverse=True), "newest first, id breaks ties")
+    for lim in (1, 2, 3):
+        pg = _walk(scope="project", project_id=P, limit=lim)
+        check([f["id"] for f in pg] == [f["id"] for f in _walk(scope="project", project_id=P, limit=200)] and len({f["id"] for f in pg}) == 5,
+              f"limit={lim} walks the merged set with no dupes or gaps")
+    n = CL.get("/chat-files/counts").json()
+    check(n["projects"][P] == 5 and n["projects"][Q] == 2 and pers not in n["projects"], f"project counts match the lists: {n['projects']}")
+    check(isinstance(n["counts"], dict) and n["counts"][p1] >= 1 and n["counts"][pers] == 1, "per-chat counts unchanged")
+    check(p1 not in CL.get("/chat-files/counts?scope=personal").json()["counts"], "per-chat counts still honour scope")
+    pf_rows = _walk(scope="personal", limit=200)
+    mine = [f for f in pf_rows if f["conversation_id"] == pers]
+    check(len(mine) == 1 and mine[0]["kind"] == "output" and mine[0]["pinned"] is False and mine[0]["chat_count"] == 1 and not any(f["conversation_id"] in (p1, p2, q1) for f in pf_rows),
+          "personal scope is unchanged")
+    check(CL.get("/chat-files?scope=project").status_code == 400 and CL.get("/chat-files?scope=nope").status_code == 400, "project scope needs project_id")
+    check(CL.get("/chat-files", params={"scope": "project", "project_id": "none"}).json() == {"files": [], "next_cursor": None}, "unknown project is empty")
+    check(CL.get("/chat-files?scope=project&project_id=x&cursor=zzz").status_code == 400, "bad cursor -> 400")
+    with DB.tx() as c:
+        c.execute("UPDATE conversations SET deleted_at=1 WHERE id IN (?,?)", (p1, p2))
+    after = {f["ref"]: f for f in _walk(scope="project", project_id=P, limit=200)}
+    check(set(after) == {shared, direct, up_both, up_direct} and after[shared]["chat_count"] == 0 and after[up_both]["conversation_id"] is None and after[up_both]["chat_count"] == 0,
+          "trashed chats drop out; directly owned items stay")
+
+
 if __name__ == "__main__":
     failed = 0
     for t in [v for k, v in sorted(globals().items(), key=lambda kv: getattr(kv[1], "__code__", None) and kv[1].__code__.co_firstlineno or 0)

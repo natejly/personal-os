@@ -150,7 +150,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
                  model: str | None = None, background: bool = False, timeout: int | None = None,
                  conversation_id: str | None = None, run_id: str | None = None, notify: bool = True,
                  on_timeout: str | None = None, pool: str = "shell",
-                 max_background: int | None = None) -> tuple[shell.Job, dict[str, Any]]:
+                 max_background: int | None = None, no_timeout: bool = False) -> tuple[shell.Job, dict[str, Any]]:
     """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
     Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
     `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
@@ -168,7 +168,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     use_model = str(model or "").strip() or default_model
     dr = _desk_root(tb, ctx)
     where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
-    timeout = timeout or default_timeout(s, None, background)
+    timeout = None if no_timeout else timeout or default_timeout(s, None, background)
     data_dir = getattr(getattr(getattr(tb, "results", None), "db", None), "data_dir", None)
     state = state_dir(Path(data_dir) if data_dir else Path(tempfile.gettempdir()) / "grain-opencode", state_key)
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))

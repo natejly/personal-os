@@ -1,7 +1,7 @@
 """A job's run history, derived from rows: pure functions over agent_runs / run_events / proposals.
 
 Nothing here reads a model's words to decide anything. `summary` is shown as text and never parsed; status,
-duration, cost, attempt and counts all come from the run row, its budget snapshot and the event/proposal tallies.
+duration, cost, attempt and counts all come from the run row, its usage snapshot and the event/proposal tallies.
 The notification events carry names and counts only: a reply can quote mail, and a notification banner is
 readable from a locked screen.
 """
@@ -34,12 +34,13 @@ def result_digest(text: str) -> str:
 
 
 def _timed_out(budget: Any, error: str | None) -> bool:
-    """The run hit its wall-clock cap: the budget snapshot says it used all of `max_seconds`."""
+    """The run was stopped for going idle (JOB_IDLE_SECONDS). Rows written before the limits were removed may
+    instead say their wall-clock cap was used up."""
     if isinstance(budget, dict):
         lim, used = budget.get("max_seconds"), budget.get("seconds")
         if isinstance(lim, (int, float)) and lim > 0 and isinstance(used, (int, float)) and used >= lim * 0.999:
             return True
-    return bool(error) and "Out of budget (time" in (error or "")
+    return bool(error) and ("no model or tool activity" in (error or "") or "Out of budget (time" in (error or ""))
 
 
 def summarize_run(run: dict[str, Any], event_counts: dict[str, int] | None = None,

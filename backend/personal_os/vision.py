@@ -24,7 +24,6 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_EDGE = 1568                 # long edge sent to the model
 MAX_ENCODED = 1_000_000         # bytes of JPEG sent to the model
 MAX_DESCRIPTION = 6_000
-MAX_CALLS_PER_REPLY = 12
 OCR_TIMEOUT_S = 30
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 _FORMATS = {"PNG", "JPEG", "GIF", "WEBP", "BMP", "TIFF", "MPO"}
@@ -235,10 +234,6 @@ def register(tb: Any) -> None:
         cache: dict[Any, Any] = ctx.setdefault("_view_image_cache", {})
         if key in cache:
             return {**cache[key], "cached": True}
-        if int(ctx.get("_view_image_calls") or 0) >= MAX_CALLS_PER_REPLY:
-            return tool_error(f"view_image: at most {MAX_CALLS_PER_REPLY} images per reply",
-                              alternative="continue in the next reply, or look at fewer images by combining them into one contact sheet")
-        ctx["_view_image_calls"] = int(ctx.get("_view_image_calls") or 0) + 1
         try:
             data = await asyncio.to_thread(p.read_bytes)
             out = await describe(cfg(ctx), data, q, chat_model(ctx))

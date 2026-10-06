@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, Trash2, FileText, Pin, X } from 'lucide-react'
+import { Upload, Trash2, FileText, Pin } from 'lucide-react'
 import { useStore, type Scope } from '../store'
-import { api } from '../lib/api'
-import type { Document } from '@shared/types'
 import ProjectChip from './ProjectChip'
 
 
@@ -13,16 +11,14 @@ import ProjectChip from './ProjectChip'
 export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { uploadDocuments, deleteDocument, pinDocument, loadScope } = useStore()
+  const { uploadDocuments, deleteDocument, pinDocument, loadScope, openUploadPreview } = useStore()
   // Without a project it follows the library scope, which Files → Uploads picks in its header.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
-  const [open, setOpen] = useState<Document | null>(null)
 
   useEffect(() => { void loadScope(scope) }, [scope, loadScope])
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
-  const view = async (d: Document): Promise<void> => setOpen(await api.documents.get(d.id))
 
   return (
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
@@ -46,7 +42,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
       )}
       <div className="doc-grid">
         {documents.map((d) => (
-          <div key={d.id} className="doc-card" onClick={() => void view(d)}>
+          <div key={d.id} className="doc-card" onClick={() => openUploadPreview(d.id)}>
             <div className="doc-head">
               <FileText size={16} />
               <span className="doc-name" title={d.name}>{d.name}</span>
@@ -60,15 +56,6 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
           </div>
         ))}
       </div>
-      {open && (
-        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null) }}
-          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null) } }}>
-          <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close file" onClick={() => setOpen(null)}><X size={16} /></button></header>
-            <pre className="doc-text">{open.text}</pre>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

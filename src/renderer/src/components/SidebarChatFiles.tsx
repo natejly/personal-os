@@ -11,7 +11,7 @@ const readByChat = (): boolean => {
 }
 
 /**
- * The sidebar's Files list: everything the personal (no-project) chats touched, newest first, flat or
+ * The sidebar's Documents list: everything the personal (no-project) chats touched, newest first, flat or
  * grouped by chat. Reloads from the top when the chat list changes (a run finished, a chat came or went).
  */
 export default function SidebarChatFiles({ jump }: { jump: (conversationId: string) => void }): JSX.Element {
@@ -48,7 +48,7 @@ export default function SidebarChatFiles({ jump }: { jump: (conversationId: stri
     <div className="cf-side">
       {problem && <p className="empty-hint" role="alert">{problem}</p>}
       {!problem && files === null && <p className="empty-hint">Loading…</p>}
-      {files?.length === 0 && <p className="empty-hint">No files in personal chats yet.</p>}
+      {files?.length === 0 && <p className="empty-hint">No documents in personal chats yet.</p>}
       {!!files?.length && (
         <label className="cf-bychat">
           <input type="checkbox" checked={byChat} onChange={(e) => {

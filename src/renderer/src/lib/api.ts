@@ -1,10 +1,10 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
+  Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
@@ -16,7 +16,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, IMessageSelfChat, IMessageStatus, SandboxStatus, ShellJobInfo, ShellJobTail,
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
@@ -194,10 +194,13 @@ export const api = {
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
   sandboxes: () => req<SandboxStatus>('/sandboxes'),
-  imessageStatus: () => req<IMessageStatus>('/imessage/status'),
-  imessageTest: (handle?: string) => req<{ ok: boolean; error?: string; to?: 'self_chat' | 'handle' }>('/imessage/test', { method: 'POST', body: json(handle ? { handle } : {}) }),
-  imessageSelfChats: () => req<{ chats: IMessageSelfChat[] }>('/imessage/self-chats'),
-  imessageOpenFda: () => req<{ ok: boolean }>('/imessage/open-fda', { method: 'POST' }),
+  telegramStatus: () => req<TelegramStatus>('/telegram/status'),
+  telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
+  telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
+  telegramNewCode: () => req<TelegramStatus>('/telegram/pairing', { method: 'POST' }),
+  telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
+  telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
+  telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),
   resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
@@ -232,16 +235,16 @@ export const api = {
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
      *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
      *  a mail job passes kind:'mail' and `mail_query`; a calendar job passes kind:'calendar', `calendar_query` and `minutes_before`. target:'desk' makes each fire open a desk instead of a run. */
-    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget']; agent_id?: string | null }) =>
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; agent_id?: string | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'target' | 'desk_autonomy'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
     preview: (cron: string, timezone?: string, n = 5) =>
       req<{ ok: boolean; error?: string; timezone?: string; next: number[] }>(
         `/jobs/preview?${new URLSearchParams({ cron, n: String(n), ...(timezone ? { timezone } : {}) })}`),
-    /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    /** Fire it now by hand. Still proposal-only; the cron schedule is untouched. */
     /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
     dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
     runs: (id: string, limit = 50) => req<(JobRunRecord | JobSkipRecord)[]>(`/jobs/${id}/runs?limit=${limit}`),
@@ -642,6 +645,7 @@ export const api = {
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
     history: (id: string) => req<Memory[]>(`/memories/${id}/history`),
+    source: (id: string) => req<MemorySource>(`/memories/${id}/source`),
     exportFile: (s: Scope) => req<MemoryExport>(`/memories/export?${scope(s)}`),
     importFile: (file: unknown, projectId: string | null) => req<{ added: number; skipped: number }>('/memories/import', { method: 'POST', body: json({ file, project_id: projectId }) }),
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
@@ -668,7 +672,11 @@ export const api = {
     deleteNode: (id: string) => req(`/graph/nodes/${id}`, { method: 'DELETE' }),
     createEdge: (e: { project_id: string | null; source_id: string; target_id: string; relation: string }) => req<GraphEdge>('/graph/edges', { method: 'POST', body: json(e) }),
     updateEdge: (id: string, patch: Partial<Pick<GraphEdge, 'relation' | 'properties'>>) => req<GraphEdge>(`/graph/edges/${id}`, { method: 'PUT', body: json(patch) }),
-    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' })
+    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' }),
+    /** `project_id`: null is personal chats, 'all' every chat, else one project. */
+    backfill: (project_id?: string | null) => req<GraphBackfillStatus>('/graph/backfill', { method: 'POST', body: json({ project_id: project_id ?? null }) }),
+    backfillStatus: () => req<GraphBackfillStatus>('/graph/backfill'),
+    cancelBackfill: () => req<GraphBackfillStatus>('/graph/backfill', { method: 'DELETE' })
   },
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),
@@ -681,6 +689,11 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    /** An office file as HTML (word-processor formats) or the extracted markdown (sheets, slides, the rest). */
+    preview: (id: string) => req<{ kind: 'html'; html: string } | { kind: 'markdown'; text: string }>(`/documents/${id}/preview`),
+    /** Hand the stored original to the default app / show it in Finder. A 400 carries why not (e.g. the file can run code). */
+    open: (id: string) => req<{ ok: boolean }>(`/documents/${id}/open`, { method: 'POST' }),
+    reveal: (id: string) => req<{ ok: boolean }>(`/documents/${id}/reveal`, { method: 'POST' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
     /** Re-chunk every uploaded file with the current chunker. */
     reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),
@@ -732,12 +745,12 @@ export const api = {
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
       /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
-      create: (d: { brief?: string; conversation_id?: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
+      create: (d: { brief?: string; conversation_id?: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; start?: boolean; inputs?: DeskInputRef[] }) =>
         req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
       /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
       addInputs: (id: string, inputs: DeskInputRef[]) =>
         req<{ added: { path: string; bytes: number; source: string }[] }>(`/cowork/desks/${id}/inputs`, { method: 'POST', body: json({ inputs }) }),
-      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
+      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; clear_project?: boolean }) =>
         req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
       delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),

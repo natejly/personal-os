@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import learn  # noqa: E402
+from personal_os import graph_learn, learn  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Graph, Memories  # noqa: E402
 
@@ -98,14 +98,23 @@ def test_provenance_on_learned_memories(stores, monkeypatch) -> None:
     assert m["source_conversation_id"] == "c1" and m["source_message_id"] == "m1" and m["valid_from"]
 
 
+def _graph(graph: Graph, reply: dict[str, Any], monkeypatch: Any, user_text: str = "My notes on Nate, Acme and Beta", **kw: Any) -> dict[str, Any]:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
+        return json.dumps(reply)
+
+    monkeypatch.setattr(graph_learn.llm, "complete", fake_complete)
+    return asyncio.run(graph_learn.learn_graph(settings={}, graph=graph, project_id=None, user_text=user_text,
+                                               assistant_text="ok", model="m", **kw))
+
+
 def test_edge_ended_and_replaced_then_revived(stores, monkeypatch) -> None:
     _, memories, graph = stores
-    nate, acme = graph.upsert_node(None, "Nate", "person"), graph.upsert_node(None, "Acme", "organization")
-    graph.upsert_edge(None, nate["id"], acme["id"], "works at")
-    out = _learn(memories, graph, {
-        "entities": [{"label": "Beta", "type": "organization"}, {"label": "Nate", "type": "person"}],
-        "relations": [{"source": "Nate", "target": "Beta", "relation": "works at"}],
-        "ended": [{"source": "Nate", "target": "Acme", "relation": "works at"}],
+    nate, acme = graph.upsert_node(None, "Nate", "person"), graph.upsert_node(None, "Acme", "org")
+    graph.upsert_edge(None, nate["id"], acme["id"], "works_at")
+    out = _graph(graph, {
+        "entities": [{"name": "Beta", "type": "org"}],
+        "triples": [{"subject": "Nate", "predicate": "works_at", "object": "Beta", "confidence": 0.9}],
+        "ended": [{"subject": "Nate", "predicate": "works_at", "object": "Acme"}],
     }, monkeypatch, message_id="m2")
     assert [e["target_id"] for e in out["ended"]] == [acme["id"]]
     sub = graph.neighborhood(None, "Nate")
@@ -114,18 +123,19 @@ def test_edge_ended_and_replaced_then_revived(stores, monkeypatch) -> None:
     assert sub["edges"][0]["source_message_id"] == "m2"
     assert len(graph.get(None)["edges"]) == 1 and len(graph.get(None, include_invalid=True)["edges"]) == 2
     # re-asserting revives the old row instead of adding a duplicate
-    e = graph.upsert_edge(None, nate["id"], acme["id"], "works at")
+    e = graph.upsert_edge(None, nate["id"], acme["id"], "works_at")
     assert e["invalid_at"] is None
     assert len(graph.get(None, include_invalid=True)["edges"]) == 2 and len(graph.get(None)["edges"]) == 2
 
 
-def test_replaces_invalidates_old_edge(stores, monkeypatch) -> None:
+def test_single_valued_predicate_invalidates_old_edge(stores, monkeypatch) -> None:
     _, memories, graph = stores
-    nate, acme = graph.upsert_node(None, "Nate"), graph.upsert_node(None, "Acme")
-    old = graph.upsert_edge(None, nate["id"], acme["id"], "lives near")
-    _learn(memories, graph, {"relations": [{"source": "Nate", "target": "Beta", "relation": "lives near", "replaces": "Nate|lives near|Acme"}]}, monkeypatch)
+    nate, lisbon = graph.upsert_node(None, "Nate", "person"), graph.upsert_node(None, "Lisbon", "place")
+    old = graph.upsert_edge(None, nate["id"], lisbon["id"], "located_in")
+    out = _graph(graph, {"triples": [{"subject": "Nate", "predicate": "lives in", "object": "Porto", "confidence": 0.9}]},
+                 monkeypatch, "My friend Nate moved to Porto")
     row = next(e for e in graph.get(None, include_invalid=True)["edges"] if e["id"] == old["id"])
-    assert row["invalid_at"] is not None and row["superseded_by"]
+    assert row["invalid_at"] is not None and row["superseded_by"] == out["edges"][0]["id"]
 
 
 def test_migration_adds_columns_idempotently() -> None:

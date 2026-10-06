@@ -356,7 +356,7 @@ Grain has native integrations that overlap with connectors. This is what could m
 | GitHub (`github_search`, `github_read`) | Candidate: replace with the official GitHub MCP server, which is a far larger surface (issues, pull requests, actions). Needs deferred search, which is already in place, and a read-only token recommendation. |
 | Google (Mail, Calendar, Drive, Docs, Sheets, Tasks) | Keep native for now. OAuth scopes, the read cache, write verification and undo live in `google.py`, and a connector would bypass them. |
 | Microsoft (Outlook Mail, Calendar) | Keep native for now, for the same reasons (`microsoft*.py`). |
-| iMessage | Stays native. It reads the local `chat.db` and sends through AppleScript; there is no remote service to connect to. |
+| Telegram texting (`telegram.py`) | Stays native. It long-polls its own bot and routes messages into chat runs and approvals; it is a channel into Grain, not a tool Grain calls. |
 | Health (COROS, Garmin) | Already connectors: `health_sync.py` creates and drives these servers through the same `McpServers` store. |
 | Coding agents (`coding_session_*`, `opencode_run`) | Stay native. They own process lifetime, worktrees and approvals that a tool call cannot express. |
 

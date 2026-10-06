@@ -216,15 +216,13 @@ def test_tool_rules(monkeypatch: Any, tmp_path: Path) -> None:
     assert "error" in b.call(path="/etc/hosts")  # an absolute path goes through the home-folder policy
 
 
-def test_per_reply_budget(monkeypatch: Any, tmp_path: Path) -> None:
+def test_no_per_reply_cap(monkeypatch: Any, tmp_path: Path) -> None:
     monkeypatch.setattr(llm, "_VISION_FLAGS", {})
     _stub_complete(monkeypatch)
     b = Box(tmp_path, visionModel="v/model")
     (b.root / "a.png").write_bytes(_png())
-    for i in range(vision.MAX_CALLS_PER_REPLY):
+    for i in range(30):
         assert "error" not in b.call(path="a.png", question=f"q{i}")
-    over = b.call(path="a.png", question="one more")
-    assert "error" in over and str(vision.MAX_CALLS_PER_REPLY) in over["error"]
     assert b.call(path="a.png", question="q0").get("cached") is True  # the cache still answers
 
 

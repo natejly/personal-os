@@ -9,7 +9,7 @@ import AgentHome from './AgentHome'
 import Face from './Face'
 import { ConfirmDelete } from './SkillsPanel'
 
-const BLANK: AgentFields = { name: '', description: '', model: null, steps: null, tools: [], skills: [], hue: null, hidden: false, body: '', label: '', boundaries: '', workspace: '', tool_modes: {} }
+const BLANK: AgentFields = { name: '', description: '', model: null, tools: [], skills: [], hue: null, hidden: false, body: '', label: '', boundaries: '', workspace: '', tool_modes: {} }
 
 /** What rides beside the text when a definition is saved. Notes are not here: the agent's Memory tab owns them. */
 const scopeOf = (f: AgentFields): AgentScope => ({ label: f.label ?? '', boundaries: f.boundaries ?? '', workspace: f.workspace ?? '', tool_modes: f.tool_modes ?? {} })
@@ -165,7 +165,6 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       </details>
       <div className="agent-face-row">
         <label>Model<input value={f.model ?? ''} placeholder="default" onChange={(e) => set({ model: e.target.value || null })} /></label>
-        <label>Tool rounds<input type="number" min={1} max={60} value={f.steps ?? ''} placeholder="default" onChange={(e) => set({ steps: e.target.value ? Number(e.target.value) : null })} /></label>
         <label className="chip-check-row"><input type="checkbox" checked={f.hidden} onChange={(e) => set({ hidden: e.target.checked })} /> Hidden from the roster replies see</label>
       </div>
       {err && <p className="muted small" role="alert">{err}</p>}

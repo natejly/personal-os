@@ -12,6 +12,7 @@ already had content.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from bisect import bisect_left, bisect_right
 from typing import Callable
@@ -318,6 +319,45 @@ def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
             c.execute("UPDATE memories SET source_conversation_id=?, source_message_id=? WHERE id=?", (conv, um[0], mem[0]))
 
 
+def _graph_canonical_types(c: sqlite3.Connection) -> None:
+    """Graph vocabulary becomes closed: node types map onto graph_learn.TYPES and edge relations onto its predicates.
+    The old phrase is kept as the edge's fact (when it has none) unless it only spells the predicate ("works at"): an
+    unknown phrase becomes `related_to`, and a synonym ("works for") keeps what the word said. A row whose
+    new name would collide with another edge of the same pair (idx_edge_uniq) keeps its old relation."""
+    from .graph_learn import canonical_type, normalize_predicate  # lazy: graph_learn imports memory_limits
+
+    for nid, typ in c.execute("SELECT id, type FROM kg_nodes").fetchall():
+        if canonical_type(typ) != typ:
+            c.execute("UPDATE kg_nodes SET type=? WHERE id=?", (canonical_type(typ), nid))
+    for eid, src, dst, rel, fact in c.execute("SELECT id, source_id, target_id, relation, fact FROM kg_edges").fetchall():
+        pred, label = normalize_predicate(rel)
+        if not pred or pred == rel:
+            continue
+        if c.execute("SELECT 1 FROM kg_edges WHERE source_id=? AND target_id=? AND lower(relation)=lower(?) AND id<>?",
+                     (src, dst, pred, eid)).fetchone():
+            continue
+        spelled = re.sub(r"[\s\-]+", "_", rel.strip().lower()) == pred
+        c.execute("UPDATE kg_edges SET relation=?, fact=? WHERE id=?", (pred, fact or label or ("" if spelled else rel.strip()), eid))
+
+
+_LEGACY_TEXTING_KEYS = ("imessageEnabled", "imessageHandles", "imessageSelfChatGuid", "imessageReplyMarker",
+                        "imessageConversationId", "imessageNotifyLongRuns", "imessageLongRunMinutes", "imessageState")
+
+
+def _drop_legacy_texting_keys(c: sqlite3.Connection) -> None:
+    """Texting moved to Telegram: the retired bridge's stored settings are dead weight."""
+    c.execute(f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_LEGACY_TEXTING_KEYS))})", _LEGACY_TEXTING_KEYS)
+
+
+BUDGET_SETTING_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subagentMaxRounds", "deskMaxTurns",
+                       "codingSessionTimeoutMinutes", "contextBudget", "skillsInlineBudget", "usageAlerts")
+
+
+def _drop_budget_settings(c: sqlite3.Connection) -> None:
+    """Round, token, time, turn and spend limits no longer exist; their stored values are dead rows."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in BUDGET_SETTING_KEYS])
+
+
 def _autonomous_by_default(c: sqlite3.Connection) -> None:
     """Every existing install gets `autonomousByDefault` true: a new chat starts as a task (a desk) that works through its
     steps, and a plain question is simply answered. A value already stored (impossible before this step) is kept."""
@@ -343,7 +383,10 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (15, "memories_expires_at", _memories_expires_at),
     (16, "memories_fts_live", _memories_fts_live),
     (17, "memory_provenance_backfill", _memory_provenance_backfill),
-    (18, "autonomous_by_default", _autonomous_by_default),
+    (18, "graph_canonical_types", _graph_canonical_types),
+    (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
+    (20, "drop_budget_settings", _drop_budget_settings),
+    (21, "autonomous_by_default", _autonomous_by_default),
 ]
 
 

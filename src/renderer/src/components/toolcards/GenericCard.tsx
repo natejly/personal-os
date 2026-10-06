@@ -2,7 +2,7 @@ import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import ApprovalRules from '../ApprovalRules'
 import { ArgList, RawDetails, ResultBlock } from './parts'
-import { useStore } from '../../store'
+import { useStore, useChatTainted } from '../../store'
 import ToolBadges from '../connectors/ToolBadges'
 import { connectorName } from '../connectors/catalog'
 import './toolcards.css'
@@ -40,7 +40,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
   const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
   const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
   // `forced` also marks a card an autonomous chat asks for on every change, so the taint line needs the taint itself.
-  const tainted = useStore((s) => !!s.sessions[conversationId]?.conversation.settings.tainted)
+  const tainted = useChatTainted(conversationId)
   return (
     <div
       className="approval tc-approval"

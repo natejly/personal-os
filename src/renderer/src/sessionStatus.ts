@@ -98,7 +98,11 @@ export const mergeConversation = (local: Conversation, remote: Conversation, kee
     unseen.delete(r.id)
     return mergeMessage(l, r, r.id === liveMessageId)
   })
-  return { ...remote, messages: keepUnsent ? [...messages, ...unseen.values()] : messages }
+  // The row is only stored as untrusted when the run ends, so a fetch mid-reply must not clear what the stream has seen.
+  const settings = keepUnsent && local.settings.tainted && !remote.settings.tainted
+    ? { ...remote.settings, tainted: true, taint_sources: local.settings.taint_sources }
+    : remote.settings
+  return { ...remote, settings, messages: keepUnsent ? [...messages, ...unseen.values()] : messages }
 }
 
 /**

@@ -602,6 +602,22 @@ test('error: once the reply is done nothing is touched; with no reply row it bec
   assert.equal(next.runError, null, 'the next message clears it')
 })
 
+// Regression: ISSUE-012 — taint state is live in the store, so forced cards say why they ask
+// Found by /qa on 2026-10-06
+// Report: .gstack/qa-reports/run-20261006T212932Z/
+test('a taint event marks the chat untrusted at once, and a done frame carries it for a chat tainted earlier', () => {
+  const s0 = session()
+  assert.ok(!s0.conversation.settings.tainted)
+  const s1 = applyEvent(s0, ev({ event: 'taint', data: { message_id: 'm1', source: 'web_fetch' } }), true)
+  assert.equal(s1.conversation.settings.tainted, true)
+  assert.deepEqual(s1.conversation.settings.taint_sources, ['web_fetch'])
+  const again = applyEvent(s1, ev({ event: 'taint', data: { message_id: 'm1', source: 'web_fetch' } }), true)
+  assert.equal(again, s1, 'a source already listed changes nothing')
+  const s2 = applyEvent(session(), ev({ event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, tainted: true, taint_sources: ['gmail_read'] } }), true)
+  assert.deepEqual([s2.conversation.settings.tainted, s2.conversation.settings.taint_sources], [true, ['gmail_read']])
+  assert.ok(!applyEvent(session(), FINAL_DONE, true).conversation.settings.tainted, 'a done that is not tainted leaves the mark alone')
+})
+
 test('editCut counts the rows from the message onward and notices tool runs', () => {
   const t = { id: 't1', name: 'a', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: false }
   const rows = [msg({ id: 'u1', role: 'user' }), msg({ id: 'a1', role: 'assistant', tool_events: [t] as never }), msg({ id: 'u2', role: 'user' }), msg({ id: 'a2', role: 'assistant' })]

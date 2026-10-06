@@ -780,6 +780,17 @@ export const settleInterrupted = (s: ChatSession, message: string): ChatSession 
   }
 }
 
+/**
+ * The chat is untrusted from the moment a reply reads something outside, but the row is only stored when the run ends.
+ * Mirrored here as the events say so, so a card raised later in the same turn can tell its reader why it asks.
+ */
+const withTaint = (s: ChatSession, sources: string[]): ChatSession => {
+  const cur = s.conversation.settings
+  const merged = [...(cur.taint_sources ?? []), ...sources.filter((x) => !cur.taint_sources?.includes(x))]
+  if (cur.tainted && merged.length === (cur.taint_sources?.length ?? 0)) return s
+  return { ...s, conversation: { ...s.conversation, settings: { ...cur, tainted: true, taint_sources: merged } } }
+}
+
 /** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
 export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?: number | null): ChatSession => {
   // The tape is exactly-once on the wire, but an attach replay and a refetch can overlap: an event at or
@@ -854,6 +865,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
         const i = trace.findIndex((sp) => sp.id === ev.data.span.id)
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
+    case 'taint':
+      return withTaint(s, [ev.data.source])
     case 'done': {
       const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
@@ -862,7 +875,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       // A steer segment's done is not the end, so it neither counts nor clears a Stop that is still pending.
       const final = !ev.data.segment
       return {
-        ...done,
+        ...(ev.data.tainted ? withTaint(done, ev.data.taint_sources ?? []) : done),
         streaming: done.streaming && { ...done.streaming, answering: false, stopping: final ? false : done.streaming.stopping },
         finishedAt: Date.now(),
         unread: final && !focused ? done.unread + 1 : done.unread
@@ -1034,7 +1047,7 @@ export const useStore = create<State>((set, get) => {
       // A fetch that lands among the deltas must not clobber what the stream already applied: the
       // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
       const next = cur
-        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.messageId), touchedAt: Date.now() }
+        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.answering ? cur.streaming.messageId : null), touchedAt: Date.now() }
         : newSession(conversation)
       const sessions = { ...st.sessions, [conversation.id]: next }
       return { sessions: evict(sessions, st.focusedConversationId) }
@@ -3690,6 +3703,8 @@ const pick = (s: State, convId?: string): ChatSession | undefined => s.sessions[
 
 /** Every selector below returns state as-is. */
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
+/** Whether this chat has read untrusted content, as far as the window knows (live events fold it in, see `withTaint`). */
+export const useChatTainted = (convId?: string | null): boolean => useStore((s) => !!convId && !!s.sessions[convId]?.conversation.settings.tainted)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
 /** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */
 export const useChatPulse = (convId?: string): SessionStatus =>

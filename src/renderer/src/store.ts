@@ -26,7 +26,7 @@ import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, RunInfo } from '@shared/types'
+import type { Attention, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -185,6 +185,9 @@ export interface State {
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
   agentInbox: AgentInbox | null
   jobs: Job[]
+  /** Ship checklists by id, kept live by the `ship_checklist` event (job rows and ship_checklist tool cards read it). */
+  shipChecklists: Record<string, ShipChecklist>
+  upsertShip: (c: ShipChecklist) => void
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
@@ -1327,6 +1330,8 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'todos_changed') {
             if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
+          } else if (ev.event === 'ship_checklist') {
+            get().upsertShip(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
@@ -1863,6 +1868,8 @@ export const useStore = create<State>((set, get) => {
     recapLoading: false,
     agentInbox: null,
     jobs: [],
+    shipChecklists: {},
+    upsertShip: (c) => set((st) => ({ shipChecklists: { ...st.shipChecklists, [c.id]: c } })),
     routineDraft: null,
     scheduleAsRoutine: (conversationId, messageId) => {
       const msgs = get().sessions[conversationId]?.conversation.messages ?? []

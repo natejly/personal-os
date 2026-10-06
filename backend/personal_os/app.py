@@ -81,6 +81,7 @@ from . import resume
 from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
+from . import ship as ship_mod
 from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .commands import expand as expand_command
@@ -5326,6 +5327,88 @@ async def dry_run_job(id: str) -> dict[str, Any]:
     run_id = await _launch_job(job, fire)
     row = run_store.get(run_id) if run_id else None
     return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+
+
+# ---------------- ship checklist (ship.py): tests -> push -> PR -> merge, the merge only on the user's confirm ----------------
+async def _ship_run(argv: list[str], cwd: str, sandboxed: bool, timeout: float) -> tuple[bool, str]:
+    return await shell_tool.run_fixed(toolbox.shell, argv, cwd, settings(), sandboxed=sandboxed, timeout=timeout)
+
+
+def _conv_job(cid: str | None) -> str | None:
+    conv = convos.get(cid, with_messages=False) if cid else None
+    return (conv or {}).get("settings", {}).get("job_id") if conv else None
+
+
+ship_runner = ship_mod.Ship(db, _ship_run, events.publish, roots=lambda: shell_tool.granted_roots(settings(), None), job_of=_conv_job)
+ship_mod.register(toolbox, ship_runner)
+
+
+class ShipIn(BaseModel):
+    repo_path: str | None = None
+    branch: str | None = None
+    base: str | None = None
+    test_command: str | None = None
+
+
+def _ship_row(id: str) -> dict[str, Any]:
+    row = ship_runner.get(id)
+    if not row:
+        raise HTTPException(404, "No such ship checklist")
+    return row
+
+
+async def _ship_do(fn: Any, id: str) -> dict[str, Any]:
+    _ship_row(id)
+    try:
+        out = fn(id)
+        return await out if asyncio.iscoroutine(out) else out
+    except ship_mod.ShipError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/jobs/{id}/ship")
+async def start_job_ship(id: str, body: ShipIn) -> dict[str, Any]:
+    """Start a ship checklist for this job by hand. Fields left out come from the job's latest checklist."""
+    _known_job(id)
+    prev = ship_runner.latest(id) or {}
+    want = {k: getattr(body, k) or prev.get(k) for k in ("repo_path", "branch", "base", "test_command")}
+    if not want["repo_path"] or not want["branch"]:
+        raise HTTPException(400, "repo_path and branch are required for this job's first checklist")
+    try:
+        row = ship_runner.create(repo_path=want["repo_path"], branch=want["branch"], base=want["base"] or "main",
+                                 test_command=want["test_command"], job_id=id)
+    except ship_mod.ShipError as e:
+        raise HTTPException(400, str(e)) from e
+    ship_runner.start(row["id"])
+    return row
+
+
+@app.get("/jobs/{id}/ship")
+def latest_job_ship(id: str) -> dict[str, Any] | None:
+    _known_job(id)
+    return ship_runner.latest(id)
+
+
+@app.get("/ship/{id}")
+def get_ship(id: str) -> dict[str, Any]:
+    return _ship_row(id)
+
+
+@app.post("/ship/{id}/confirm")
+async def confirm_ship(id: str) -> dict[str, Any]:
+    """The user's go for the merge step. The only way a merge ever runs."""
+    return await _ship_do(ship_runner.confirm, id)
+
+
+@app.post("/ship/{id}/cancel")
+async def cancel_ship(id: str) -> dict[str, Any]:
+    return await _ship_do(ship_runner.cancel, id)
+
+
+@app.post("/ship/{id}/retry")
+async def retry_ship(id: str) -> dict[str, Any]:
+    """Re-run from the first step that is not green; a merge asks for confirmation again."""
+    return await _ship_do(ship_runner.retry, id)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:

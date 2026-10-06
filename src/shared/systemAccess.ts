@@ -36,7 +36,6 @@ export function parseOsascript(code: number | null, stderr: string): AccessState
 }
 
 export const AUTOMATION_TARGETS = {
-  messages: { app: 'Messages', script: 'tell application "Messages" to get name' },
   finder: { app: 'Finder', script: 'tell application "Finder" to get name of startup disk' },
   systemEvents: { app: 'System Events', script: 'tell application "System Events" to get name of first process' },
   contacts: { app: 'Contacts', script: 'tell application "Contacts" to count people' },
@@ -79,7 +78,7 @@ export interface MainStatus {
 export interface Cli { path: string | null; version: string | null; hint: string }
 export interface BackendAccess {
   fullDisk: AccessState
-  automation: { messages: AccessState; finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
+  automation: { finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
   browsers: { name: string; state: AccessState }[]
   roots: { roots: string[]; defaulted: boolean }
   clis: { claude: Cli; opencode: Cli }
@@ -96,8 +95,7 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
     row('screen', 'Screen Recording', 'Teaching a task by showing it, and looking at your screen.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
-    row('fullDisk', 'Full Disk Access', 'Lets Grain and the coding agents it starts read and write workspace folders on your Desktop, in Documents or Downloads, plus Mail and Messages data.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
-    row('automation:messages', 'Automation: Messages', 'Sending iMessage replies.', a?.messages, 'native', PANE_URLS.automation),
+    row('fullDisk', 'Full Disk Access', 'Lets Grain\'s agent, and the coding agents it starts, read protected folders like Mail, Messages and app data, plus workspace folders on your Desktop, in Documents or Downloads.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),
     row('automation:systemEvents', 'Automation: System Events', 'Mac actions you ask for.', a?.systemEvents, 'native', PANE_URLS.automation),
     ...(backend?.browsers ?? []).map((b) =>

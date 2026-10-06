@@ -37,7 +37,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import permrules
+from . import limits, permrules
 from .db import new_id, now
 from .tools import ASK_LOCKED_DANGER
 
@@ -802,6 +802,7 @@ class Engine:
                 state[s["id"]] = r["status"]
                 if r["status"] == "done" and self._taints(s):
                     ctx["tainted"] = True
+                    ctx.setdefault("taint_sources", []).append(f"workflow:{s['id']}")
         # Waves: every step whose dependencies are settled runs now, side by side. Validation ruled out cycles
         # and unknown needs, so the frontier only empties once every step has a state.
         while True:
@@ -1011,7 +1012,7 @@ class Engine:
         cap = int(self.settings().get("workflowMaxFanOut") or 50)
         if len(over) > cap:
             raise _StepFailed(f"fan_out over {len(over)} items; the limit is {cap} (setting workflowMaxFanOut)")
-        conc = max(1, min(int(f.get("max_parallel") or 4), int(self.settings().get("subagentMaxConcurrent") or 4)))
+        conc = max(1, min(int(f.get("max_parallel") or 4), limits.slots(self.settings(), "subagentMaxConcurrent")))
         prior = (next((s for s in run["steps"] if s["step_id"] == step["id"]), {}).get("items")) or {}
         items: dict[str, Any] = {k: v for k, v in prior.items() if int(k) < len(over)}
         sem = asyncio.Semaphore(conc)

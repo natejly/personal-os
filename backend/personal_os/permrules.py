@@ -1066,11 +1066,8 @@ def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
 
 
 def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
-    """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
-    conv = conv_settings or {}
-    if "skipPermissions" in conv:
-        return bool(conv["skipPermissions"])
-    return bool(permissions.get(cfg or {}, "skipPermissions"))
+    """Whether approval cards are skipped: only the global Allow all mode does (a chat's own skipPermissions is legacy)."""
+    return permissions.get(cfg or {}, "permissionMode") == "allow_all"
 
 
 def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",
@@ -1079,11 +1076,12 @@ def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = Fals
 
     Stays a card: a plan or desk question (the user deciding, not granting a tool), a forced ask (taint,
     doom loop, desk ask-as-you-go), an ask rule or an outside-folder write (`fenced`), an external or
-    schedules tool, and a shell command no read-only list or allow rule already cleared (a shell_run that
-    is still `ask` here was not cleared).
+    schedules tool (except coding_session_start/send, which skip lifts), and a shell command no read-only list
+    or allow rule already cleared (a shell_run that is still `ask` here was not cleared).
     """
     if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
-            and danger not in ("external", "schedules") and name not in ("shell_run", "opencode_run")):
+            and (danger not in ("external", "schedules") or name in ("coding_session_start", "coding_session_send"))
+            and name not in ("shell_run", "opencode_run")):
         return "on"
     return mode
 

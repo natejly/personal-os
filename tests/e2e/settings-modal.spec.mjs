@@ -29,7 +29,8 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
 
 test('Voice input settings act at once and persist through /voice/config', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Behavior')
+  await openSettings(page, 'Advanced')
+  await dialog(page).locator('summary', { hasText: 'Voice and shortcuts' }).click()
   await dialog(page).getByLabel('Transcription').first().selectOption('local')
   await field(page, 'Tidy dictation with the model').setChecked(true, { force: true })
   await expect.poll(async () => api('/voice/config')).toMatchObject({ sttBackend: 'local', dictationCleanup: true })

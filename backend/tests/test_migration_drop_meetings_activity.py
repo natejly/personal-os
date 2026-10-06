@@ -1,4 +1,4 @@
-"""Migration 13: the meetings and activity-monitor tables are dropped; their settings rows are left readable.
+"""Migration 15: the meetings and activity-monitor tables are dropped; their settings rows are left readable.
 
 (a) a bare in-memory database stamped 12 with the old tables loses exactly those tables;
 (b) a real data directory written by the old build (tables, rows, legacy `meetings`/`activity`/`digest` settings)
@@ -89,7 +89,7 @@ def _seed_old_rows(c: sqlite3.Connection) -> None:
     c.execute("INSERT INTO activity_profile(id, content) VALUES (1, 'works in bursts')")
 
 
-def test_migration_13_drops_exactly_those_tables() -> None:
+def test_migration_15_drops_exactly_those_tables() -> None:
     c = sqlite3.connect(":memory:", isolation_level=None)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys = ON")
@@ -100,7 +100,7 @@ def test_migration_13_drops_exactly_those_tables() -> None:
     c.executescript(OLD_SCHEMA)
     _seed_old_rows(c)
     assert set(DROPPED) <= _tables(c)
-    assert migrations.run(c) == [13]
+    assert migrations.run(c) == [15]
     left = _tables(c)
     assert not set(DROPPED) & left, set(DROPPED) & left
     assert not {n for n in left if n.startswith(("meetings_fts", "meeting_", "activity_"))}, left  # shadow tables too
@@ -113,7 +113,7 @@ def test_a_fresh_database_has_none_of_the_tables() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Database(td)
         with db.connect() as c:
-            assert migrations.current(c) == migrations.latest() >= 13
+            assert migrations.current(c) == migrations.latest() >= 15
             assert not set(DROPPED) & _tables(c)
 
 

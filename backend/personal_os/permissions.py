@@ -1,6 +1,6 @@
 """The one store for global permission settings: a single `permissions` row in the settings table.
 
-Shape: {"version": 1, <key>: <value>, ...} holding only what the user set; DEFAULTS fills the rest on read. Every
+Shape: {"version": 2, <key>: <value>, ...} holding only what the user set; DEFAULTS fills the rest on read. Every
 gate reads these values through `get(cfg, key)` (or `load()` for the whole set), and every writer goes through
 `save()` / `update()`, which validate nothing themselves: PUT /settings calls `validate()` first.
 
@@ -26,7 +26,7 @@ import sqlite3
 from typing import Any, Callable
 
 
-VERSION = 1
+VERSION = 2  # 2: permissionMode added; migrate_mode stamps it
 DEFAULT_IMAGE = "python:3.12-slim"  # microvm.DEFAULT_IMAGE
 KEY = "permissions"
 
@@ -41,14 +41,17 @@ DEFAULTS: dict[str, Any] = {
     # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
-    # Chats with no own skipPermissions follow this. Off: tools that ask still show a card. On: those
-    # cards are skipped. Deny rules, plan cards, desk questions and scheduled jobs are unchanged.
+    # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
+    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything but denied
+    # calls and writes outside the workspace folders.
+    "permissionMode": "auto",
+    # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
+    # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
     "skipPermissions": False,
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
-    # Review gate (autoreview.py): off | risky | all-writes. A second model looks at a call that would run unasked and may turn it into a card.
     "autoReview": "off",
-    "autoReviewModel": "",  # "" = the extraction model, else the chat model
+    "autoReviewModel": "",  # "" = the fast model, else the extraction model, else the chat model
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # How doc_edit lands. "review" proposes a diff; "apply" writes it.
@@ -86,6 +89,7 @@ IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
 SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
 CHOICES: dict[str, tuple[str, ...]] = {
+    "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
     "autoReview": ("off", "risky", "all-writes"),
     "sandboxRuntime": SANDBOX_RUNTIMES,
@@ -94,6 +98,7 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "planMode": ("off", "auto", "always"),
 }
 CHOICE_ERRORS = {
+    "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
     "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
     "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
@@ -154,6 +159,16 @@ def _write(c: sqlite3.Connection, patch: dict[str, Any]) -> dict[str, Any]:
 def migrate(c: sqlite3.Connection) -> None:
     """Migration 5: the legacy top-level permission rows become the one `permissions` row."""
     _write(c, {})
+
+
+def migrate_mode(c: sqlite3.Connection) -> None:
+    """One-time, idempotent: a store older than version 2, or without a permissionMode, becomes "auto" whatever
+    skipPermissions / autoReview said. _write keeps every other key (workspaceRoots included) and stamps VERSION."""
+    row = c.execute("SELECT value FROM settings WHERE key = ?", (KEY,)).fetchone()
+    cur = _json(row[0]) if row else None
+    if isinstance(cur, dict) and (cur.get("version") or 0) >= 2 and cur.get("permissionMode") in CHOICES["permissionMode"]:
+        return
+    _write(c, {"permissionMode": "auto"})
 
 
 def update(db: Any, fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:

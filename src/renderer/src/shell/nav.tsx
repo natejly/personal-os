@@ -24,7 +24,7 @@ export interface NavEntry {
  * title-bar apps 110 and 120; a module slots by its `nav.order`, plus 100 when it asks for the title bar.
  */
 const SHELL: NavEntry[] = [
-  { view: 'library', description: 'Skills, connectors and everything Grain made for you', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
+  { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },
   { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, place: 'apps', order: 120 }
 ]

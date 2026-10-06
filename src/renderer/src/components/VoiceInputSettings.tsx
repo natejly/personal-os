@@ -3,7 +3,7 @@ import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { VoiceConfig } from '@shared/types'
 
-/** How the chat mic's clips become text. Acts at once (its own endpoint), like Zoom: no Save needed. */
+/** How the chat mic's clips become text. Acts at once (its own endpoint): no Save needed. */
 export default function VoiceInputSettings(): JSX.Element | null {
   const [cfg, setCfg] = useState<VoiceConfig | null>(null)
   useEffect(() => { void api.voice.getConfig().then(setCfg).catch(() => undefined) }, [])

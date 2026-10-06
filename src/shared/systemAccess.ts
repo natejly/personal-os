@@ -96,7 +96,7 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
     row('screen', 'Screen Recording', 'Teaching a task by showing it, and looking at your screen.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
-    row('fullDisk', 'Full Disk Access', 'Reading Messages for iMessage texting and protected folders.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
+    row('fullDisk', 'Full Disk Access', 'Lets Grain and the coding agents it starts read and write workspace folders on your Desktop, in Documents or Downloads, plus Mail and Messages data.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
     row('automation:messages', 'Automation: Messages', 'Sending iMessage replies.', a?.messages, 'native', PANE_URLS.automation),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),
     row('automation:systemEvents', 'Automation: System Events', 'Mac actions you ask for.', a?.systemEvents, 'native', PANE_URLS.automation),

@@ -3,12 +3,12 @@ import { X } from 'lucide-react'
 import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode } from '../lib/coworkSettings'
+import { hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode } from '../lib/coworkSettings'
 
 /**
- * The Autonomy tab of Settings: how long a desk may run, which model reads pictures, and the Python environment its
+ * Settings > Advanced > Desks and background: which model reads pictures, and the Python environment its
  * code runs in. What a desk's shell and browser may reach, and its finishing checks, are permissions: ShellNetwork,
- * BrowserAccess and DeskGates below are mounted in Settings > Permissions. Everything edits the modal's `draft` through
+ * BrowserAccess and DeskGates below are mounted in Settings > Advanced. Everything edits the modal's `draft` through
  * `patch`, so nothing is saved until Save — except the environment build and browser sign-ins, which are actions on
  * the machine, not settings.
  */
@@ -54,27 +54,6 @@ function SignIns(): JSX.Element | null {
       {rows && rows.length > 0 && <div className="workspace-roots-add"><button type="button" onClick={() => clear()}>Clear all</button></div>}
       {error && <p className="cowork-error" role="alert">{error}</p>}
     </div>
-  )
-}
-
-/** A number the user can clear while typing; it is clamped into the backend's range once they leave the field. */
-function NumField({ title, help, settingKey, value, fallback, step = 1, onCommit }: {
-  title: string; help: string; settingKey: string; value: number | undefined; fallback: number; step?: number; onCommit: (n: number) => void
-}): JSX.Element {
-  const [text, setText] = useState(String(value ?? fallback))
-  useEffect(() => setText(String(value ?? fallback)), [value, fallback])
-  const commit = (): void => {
-    const n = clampSetting(settingKey, text, value ?? fallback)
-    setText(String(n))
-    onCommit(n)
-  }
-  return (
-    <label className="cowork-num">
-      <span>{title}</span>
-      <input type="number" min={0} step={step} value={text} onChange={(e) => setText(e.target.value)} onBlur={commit}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit() } }} />
-      <small className="muted">{help}</small>
-    </label>
   )
 }
 
@@ -260,8 +239,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
-      <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
-        help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
       <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
@@ -282,17 +259,10 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   )
 }
 
-/** Desk limits, shown under Settings → Autonomy → Advanced. The finishing checks moved to Permissions (DeskGates). */
+/** The desk sandbox folder switch, under Settings > Advanced > Desks and background. */
 export function CoworkAdvanced({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
-      <h4>Desk limits</h4>
-      <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
-        help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
-      <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}
-        help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
-      <NumField title="Tabs per desk" settingKey="browserMaxTabs" value={draft.browserMaxTabs} fallback={4}
-        help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
       <label className="toggle-row plain">
         <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
         <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />

@@ -295,7 +295,7 @@ async def learn_from_exchange(
         try:
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await index.near_duplicate(settings, project_id, content) if index is not None else None
-            if dup:
+            if dup and dup["content"].strip().lower() != content.lower():  # the same words: create() dedupes, no new version
                 mem = memories.supersede(dup["id"], content, kind=kind, source="auto", provenance=prov, expires_at=expires)
                 if mem:
                     updated_memories.append(mem)

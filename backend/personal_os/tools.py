@@ -935,8 +935,9 @@ class Toolbox:
                 and not a.get("replaces") and not a.get("forget") and self._user_backed(ctx, content))
 
     def _user_backed(self, ctx: dict[str, Any], content: str) -> bool:
-        """At least TAINT_SAVE_MIN_OVERLAP of `content`'s words (the third-person rewrite's "User" aside) appear in
-        what the user typed in this chat."""
+        """At least TAINT_SAVE_MIN_OVERLAP of `content`'s words (the third-person rewrite's "User" aside) appear in one
+        message the user typed in this chat. One message, not the whole chat: words picked from several cannot be
+        stitched into something the user never said."""
         from .context import _terms
 
         def words(text: str) -> set[str]:  # "prefers" and "prefer" are the same word
@@ -949,7 +950,7 @@ class Toolbox:
         if cid and self.conversations is not None:
             conv = self.conversations.get(cid) or {}
             typed += [str(m.get("content") or "") for m in conv.get("messages") or [] if m.get("role") == "user"]
-        return len(mine & words(" ".join(typed))) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
+        return max(len(mine & words(t)) for t in typed) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
 
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
         """Effective mode for one call. Untrusted content forces alwaysAsk tools, and anything that writes lasting text, to ask.
@@ -1243,7 +1244,7 @@ class Toolbox:
             scope = None if personal else ctx["project_id"]
             # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
             dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
-            if dup:
+            if dup and dup["content"].strip().lower() != text.strip().lower():  # the same words: create() dedupes, no new version
                 m = self.memories.supersede(dup["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
                 if m:
                     learned().setdefault("updated", []).append(m)

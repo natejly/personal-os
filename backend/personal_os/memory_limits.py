@@ -21,6 +21,7 @@ W_RECENT = 0.5
 # (limits.RETRIEVAL_MIN_SIMILARITY, 0.25): a passage is one of several cited excerpts, but a memory line is injected
 # with no reranker every turn it matches, and a short unrelated sentence routinely scores near that floor.
 MEMORY_MIN_SIMILARITY = 0.4
+LEXICAL_HITS = 15        # keyword hits per lexical pass (FTS, then CJK substring); a few strong matches beat many weak ones
 CONTEXT_HITS = 40        # most log rows a turn asks retrieval for; the "memories" token budget trims further
 SEARCH_HITS = 100        # most rows search_memory ranks before paging
 SEARCH_PAGE = 20         # rows per search_memory page
@@ -39,7 +40,7 @@ PROFILE_WINDOW_SHARE = 0.02
 
 # ---- Tainted-chat save_memory ----
 # In a chat that read untrusted text, save_memory skips its card only when at least this share of the memory's
-# content words appear in what the user typed in this chat. The rest is the third-person rewrite ("User", a date).
+# content words appear in one message the user typed in this chat. The rest is the third-person rewrite ("User", a date).
 TAINT_SAVE_MIN_OVERLAP = 0.6
 
 # ---- Extraction (learn.py) ----

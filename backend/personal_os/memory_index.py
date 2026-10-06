@@ -122,7 +122,7 @@ class MemoryIndex:
             model = self.embedder.model(settings) if qv is not None else ""
             if qv is None or not model:
                 return None
-            where, args = _scope_clause(project_id)
+            where, args = _scope_clause(project_id, include_global=False)  # a project save never rewrites a personal row
             with self.db.tx() as c:
                 rows = c.execute(
                     f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id

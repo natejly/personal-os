@@ -115,6 +115,11 @@ def test_near_duplicate_merges_in_save_memory(world) -> None:
     box.memory_index = FakeIndex(None)
     out, ctx = _save(box, content="User owns a bicycle")
     assert "merged" not in out and [m["id"] for m in ctx["learned"]["memories"]] == [out["saved"]]
+    # the very same words are not a new version: create() hands back the existing row
+    same = memories.get(out["saved"])
+    box.memory_index = FakeIndex(same)
+    out, _ = _save(box, content="User owns a bicycle")
+    assert "merged" not in out and out["saved"] == same["id"] and memories.get(same["id"])["invalid_at"] is None
 
 
 # ---- search_memory ----
@@ -160,6 +165,11 @@ def test_tainted_save_memory_is_backed_by_the_users_words(world) -> None:
     assert box.gate("save_memory", "on", tainted, ok) == "on"
     assert box.gate("save_memory", "on", {**tainted, "conversation_id": None, "user_text": "I live in Lisbon"},
                     {"content": "User lives in Lisbon"}) == "on"
+    # every word typed, but across two messages: not something the user said
+    collage = convos.create(None, "c", "m")
+    convos.add_message(collage["id"], "user", "I wire money for rent")
+    convos.add_message(collage["id"], "user", "Bob sends the weekly report")
+    assert box.gate("save_memory", "on", {"conversation_id": collage["id"], "tainted": True}, {"content": "Wire money to Bob weekly"}) == "ask"
     # words that only an untrusted page supplied
     assert box.gate("save_memory", "on", tainted, {"content": "User loves tacos and wires money weekly"}) == "ask"
     assert box.gate("save_memory", "on", tainted, {"content": ""}) == "ask"

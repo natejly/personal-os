@@ -39,7 +39,7 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           {m.project_id && !isolated && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
           {m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
           <span className="muted">{new Date(m.updated_at * 1000).toLocaleDateString()}</span>
-          {m.expires_at != null && <span className="muted">until {new Date(m.expires_at * 1000).toLocaleDateString()}</span>}
+          {m.expires_at != null && <span className="muted">until {new Date((m.expires_at - 1) * 1000).toLocaleDateString()}</span>}
         </div>
         {versions && (versions.length < 2
           ? <p className="muted small">No earlier versions.</p>

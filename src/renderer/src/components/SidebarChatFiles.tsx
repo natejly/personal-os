@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { groupByChat, type ChatFile } from '../lib/chatFiles'
 import { chatFilesApi } from '../lib/useChatFiles'
@@ -22,9 +22,11 @@ export default function SidebarChatFiles({ jump }: { jump: (conversationId: stri
   const [problem, setProblem] = useState<string | null>(null)
   const [byChat, setByChat] = useState(readByChat)
 
+  const gen = useRef(0)  // bumped on every reload, so a Load more page from before it is dropped
   useEffect(() => {
     let live = true
     const t = setTimeout(() => {
+      gen.current += 1
       chatFilesApi.list('personal').then((r) => { if (live) { setFiles(r.files); setCursor(r.next_cursor); setProblem(null) } })
         .catch((e: Error) => { if (live) setProblem(e.message) })
     }, 300)
@@ -34,8 +36,9 @@ export default function SidebarChatFiles({ jump }: { jump: (conversationId: stri
   const more = (): void => {
     if (!cursor || busy) return
     setBusy(true)
+    const g = gen.current
     chatFilesApi.list('personal', cursor)
-      .then((r) => { setFiles((cur) => [...(cur ?? []), ...r.files]); setCursor(r.next_cursor) })
+      .then((r) => { if (g !== gen.current) return; setFiles((cur) => [...(cur ?? []), ...r.files]); setCursor(r.next_cursor) })
       .catch((e: Error) => setProblem(e.message))
       .finally(() => setBusy(false))
   }

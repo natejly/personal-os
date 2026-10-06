@@ -52,8 +52,11 @@ export default function ChatFilesButton({ conversationId }: { conversationId?: s
   const [problem, setProblem] = useState<string | null>(null)
   useEffect(() => {
     if (!at || !conversationId) return
+    let live = true  // ChatView is not keyed by chat, so a late answer for the last chat must not land here
+    setFiles(null)
     setProblem(null)
-    chatFilesApi.forChat(conversationId).then((r) => setFiles(r.files)).catch((e: Error) => setProblem(e.message))
+    chatFilesApi.forChat(conversationId).then((r) => { if (live) setFiles(r.files) }).catch((e: Error) => { if (live) setProblem(e.message) })
+    return () => { live = false }
   }, [at, conversationId])
   const close = (): void => setAt(null)
   return (

@@ -129,7 +129,8 @@ def test_credential_stores_are_sensitive_whatever_the_case(home: Path) -> None:
                 "~/Library/Application Support/Arc/User Data/Default/Cookies",
                 "~/Library/Application Support/Firefox/Profiles/x.default/key4.db",
                 "~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
-                "~/.config/gh/hosts.yml", "~/Documents/.env", "~/Documents/id_rsa"):
+                "~/.config/gh/hosts.yml", "~/Documents/.env", "~/Documents/id_rsa",
+                "~/.cargo/credentials.toml", "~/.vault-token", "~/Documents/credentials.toml"):
         assert mac.sensitive_reason(os.path.normpath(os.path.expanduser(raw))), raw
     for raw in ("~/Library-backup/x", "~/Desktop/notes.txt", "~/Library/Application Support/Google/Chrome/Default/History",
                 "~/.config/gh/config.yml", "~/Documents/id_rsa.pub"):

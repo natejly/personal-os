@@ -14,6 +14,7 @@ import './DocumentCard'
 import './DeskCards'
 import './SandboxCard'
 import './ShipChecklistCard'
+import './CodingSessionCard'
 
 export { TOOL_CARDS, registerToolCard } from './registry'
 export type { ToolCardProps } from './registry'

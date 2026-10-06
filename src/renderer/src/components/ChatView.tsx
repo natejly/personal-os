@@ -37,6 +37,8 @@ function greeting(): string {
 /** `conversationId` is omitted in classic mode, where the focused session is the only one on screen. */
 export default function ChatView({ conversationId }: { conversationId?: string }): JSX.Element {
   const convo = useConversation(conversationId)
+  // The backend refuses an edit of, and a branch from, a desk or job transcript.
+  const isDeskOrJob = !!convo?.settings.deskId || !!convo?.settings.job_id
   const face = useChatFace(convo)
   const isStreamingHere = useIsStreaming(conversationId)
   const streamingMessageId = useStreamingMessageId(conversationId)
@@ -163,8 +165,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} showContextChips
-                      branchable={m.created_at > 0 && !convo?.settings.deskId && !convo?.settings.job_id}
+                    <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                      branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />
                   </Fragment>
                 ))}

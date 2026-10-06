@@ -21,7 +21,7 @@ test('every Add-widget entry opens a window that renders without console errors'
   // the menu lists one entry per registry kind
   const menu = await addMenu(page)
   const labels = (await menu.locator('[role=menuitem]').allInnerTexts()).map((t) => t.trim())
-  for (const l of ['Chat', 'Lists', 'Calendar', 'Sticky note', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Doc', 'Face']) {
+  for (const l of ['Chat', 'Lists', 'Calendar', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Doc', 'Face']) {
     expect(labels).toContain(l)
   }
   await page.keyboard.press('Escape')
@@ -35,13 +35,13 @@ test('every Add-widget entry opens a window that renders without console errors'
     expect(ws.map((w) => w.kind)).toContain(kind)
   }
 
-  // chat + note go through a submenu
+  // chat + doc go through a submenu
   let m = await addMenu(page)
   await m.getByRole('menuitem', { name: 'Chat', exact: true }).click()
   await page.getByRole('menuitem', { name: 'New chat' }).click()
   m = await addMenu(page)
-  await m.getByRole('menuitem', { name: 'Sticky note', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'New sticky note' }).click()
+  await m.getByRole('menuitem', { name: 'Doc', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New doc' }).click()
   await expect.poll(async () => (await windowsOf(grain, s.id)).length).toBe(SIMPLE.length + 2)
 
   // a project via the API renders too
@@ -62,7 +62,7 @@ test('every Add-widget entry opens a window that renders without console errors'
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('submenu entries add a chat / note / project once, and re-adding focuses instead of duplicating', async ({ grain }) => {
+test('submenu entries add a chat / doc / project once, and re-adding focuses instead of duplicating', async ({ grain }) => {
   const { page, api } = grain
   const s = (await spaces(grain))[0]
   const proj = await api('/projects', { method: 'POST', body: { name: 'Proj A' } })

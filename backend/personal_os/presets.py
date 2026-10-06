@@ -7,7 +7,7 @@ from typing import Any
 
 from .canvas import _INSERT_WINDOW, _RENAMED_DEFAULTS, FALLBACK_NAME, WIDGET_KINDS, Canvases, clamp_opacity
 from .db import Database, new_id, now, row_to_dict
-from .notes import Notes
+from .docs import Docs, title_from_body
 
 # Owned here, like canvas.py's tables: CREATE TABLE IF NOT EXISTS in the constructor covers existing databases.
 SCHEMA = """
@@ -29,8 +29,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_presets_created ON canvas_presets(created_
 """
 PRESET_JSON = ("windows",)
 # needsRef kinds -> the table their ref_id must still exist in. Mirrors `needsRef` in
-# src/renderer/src/canvas/registry.ts (chat, note, project).
-REF_TABLES = {"chat": "conversations", "note": "notes", "project": "projects"}
+# src/renderer/src/canvas/registry.ts (chat, doc, project; crew refs are not rows).
+REF_TABLES = {"chat": "conversations", "doc": "docs", "project": "projects"}
 
 
 def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
@@ -50,16 +50,16 @@ def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
 
 def _exists(c: sqlite3.Connection, table: str, rid: str | None) -> bool:
     """`table` only ever comes from REF_TABLES or the literal "projects", never from input."""
-    # A trashed project or chat is as good as gone here: restoring a preset must not pin a window to it.
-    soft = " AND deleted_at IS NULL" if table in ("projects", "conversations") else ""
+    # A trashed project, chat or doc is as good as gone here: restoring a preset must not pin a window to it.
+    soft = " AND deleted_at IS NULL" if table in ("projects", "conversations", "docs") else ""
     return bool(rid) and c.execute(f"SELECT 1 FROM {table} WHERE id=?{soft}", (rid,)).fetchone() is not None
 
 
 class CanvasPresets:
-    def __init__(self, db: Database, canvases: Canvases, notes: Notes | None = None):
+    def __init__(self, db: Database, canvases: Canvases, docs: Docs):
         self.db = db
         self.canvases = canvases
-        self.notes = notes
+        self.docs = docs
         with db.tx() as c:
             c.executescript(SCHEMA)
             for old, new in _RENAMED_DEFAULTS:
@@ -105,39 +105,33 @@ class CanvasPresets:
             c.execute("DELETE FROM canvas_presets WHERE id=?", (id,))
 
     # ---------- portable files ----------
-    # Notes travel with their content; every other referent stays a ref (a chat must never leave the
-    # machine, and a project has no body that fits a window).
+    # Every referent stays a ref: a chat must never leave the machine, and a project or doc has no body that fits a window.
     def export(self, id: str) -> dict[str, Any] | None:
         p = self.get(id)
-        if not p or not self.notes:
+        if not p:
             return None
-        embedded: dict[str, Any] = {}
-        windows = []
-        for w in p["windows"] or []:
-            ref, kind = w.get("ref_id"), w.get("kind")
-            if kind == "note" and ref:
-                n = self.notes.get(ref)
-                if not n:
-                    continue
-                embedded[ref] = {"kind": "note", "body": n["body"], "color": n["color"]}
-            windows.append({**w, "project_id": None})
+        windows = [{**w, "project_id": None} for w in p["windows"] or []]
         return {"grain_preset": 1, "name": p["name"], **{k: p[k] for k in ("snap_mode", "grid_size", "zoom", "pan_x", "pan_y", "wallpaper")},
-                "windows": windows, "embedded": embedded}
+                "windows": windows, "embedded": {}}
 
     def import_file(self, data: dict[str, Any], instantiate: bool = True) -> dict[str, Any]:
-        """Recreate each embedded referent under a new id, store the preset against the new ids, optionally make its canvas.
+        """Store the preset, optionally make its canvas. Files exported before sticky notes became docs embed
+        `{"kind": "note", "body": ...}` entries: each becomes a doc under a new id and its window turns into a doc window.
         Raises ValueError on a file that is not a preset export."""
-        if data.get("grain_preset") != 1 or not isinstance(data.get("windows"), list) or not self.notes:
+        if data.get("grain_preset") != 1 or not isinstance(data.get("windows"), list):
             raise ValueError("Not a preset file")
         emb = data.get("embedded") or {}
         remap: dict[str, str] = {}
         for old, e in emb.items():
-            if e.get("kind") == "note":
-                remap[old] = self.notes.create(str(e.get("body", "")), str(e.get("color") or "yellow"))["id"]
+            if isinstance(e, dict) and e.get("kind") == "note":
+                body = str(e.get("body", ""))
+                remap[old] = self.docs.create(title_from_body(body), body)["id"]
         windows = []
         for w in data["windows"]:
             if not isinstance(w, dict) or not all(isinstance(w.get(k), (int, float)) for k in ("x", "y", "w", "h")):
                 continue
+            if w.get("kind") == "note":
+                w = {**w, "kind": "doc"}
             windows.append({**w, "ref_id": remap.get(w.get("ref_id"), w.get("ref_id")), "project_id": None})
         pid = new_id()
         t = now()

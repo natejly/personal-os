@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react'
 import { setBase } from '../../lib/api'
-import { pageSizeFor } from '../../lib/printDoc'
+import { diagramsPending, pageSizeFor } from '../../lib/printDoc'
+import { useStore } from '../../store'
 import MarkdownPreview from '../../components/MarkdownPreview'
 import { stripAiFences } from './exportDoc'
 import '../../styles/print.css'
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** Resolves once fonts are in and every image has loaded (or 5 s have passed), plus a beat for charts and maths layout. */
+/** Resolves once fonts are in, every image has loaded (or 5 s have passed) and every diagram has drawn (or 15 s), plus a beat for maths layout. */
 async function settle(): Promise<void> {
   const until = Date.now() + 5000
   await document.fonts.ready
   await sleep(200)
   while (Date.now() < until && [...document.images].some((i) => !i.complete)) await sleep(100)
+  const drawn = Date.now() + 15000
+  while (Date.now() < drawn && diagramsPending(document)) await sleep(100)
   await sleep(300)
 }
 
@@ -22,6 +25,8 @@ export default function PrintSurface(): JSX.Element | null {
 
   useEffect(() => {
     document.documentElement.dataset.theme = 'light'
+    // Settings never load in this window, so diagrams would otherwise draw in the store's dark default on white paper.
+    useStore.setState((st) => ({ settings: { ...st.settings, theme: 'light' } }))
     document.documentElement.classList.add('print-surface')
     const style = document.createElement('style')
     style.textContent = `@page { size: ${pageSizeFor(navigator.language)}; margin: 2.2cm; }`

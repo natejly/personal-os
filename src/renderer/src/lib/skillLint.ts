@@ -18,8 +18,3 @@ export function debounceLatest<A, R>(fn: (a: A) => Promise<R>, ms: number, onRes
   }
   return { call, cancel }
 }
-
-/** Whether approved skills go into the prompt whole or as an index, by the same rule the backend applies. */
-export function skillDisclosure(block: string, budget: number): 'inline' | 'index' {
-  return block.length > budget ? 'index' : 'inline'
-}

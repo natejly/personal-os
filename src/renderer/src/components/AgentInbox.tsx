@@ -574,24 +574,11 @@ function ShipStart({ jobId, prev }: { jobId: string; prev: ShipChecklist | null 
   )
 }
 
-/** The fixed time cap of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
-const JOB_MAX_MINUTES = 4
-
-/** Which model a job's runs use, and the tighter caps it may set for itself. */
+/** Which model a job's runs use. */
 function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<typeof api.jobs.update>[1]) => Promise<void> }): JSX.Element {
   const models = useStore((s) => s.models)
   const ids = chatModelIds(models)
   if (job.model && !ids.includes(job.model)) ids.unshift(job.model)
-  const budget = job.budget ?? {}
-  // A cleared or out-of-range field drops that cap, so the job falls back to the fixed one.
-  const setCap = (key: 'maxRunSeconds', raw: string, scale: number, max: number): void => {
-    const n = Number(raw) * scale
-    const next = { ...budget }
-    if (raw.trim() && n > 0 && n <= max * scale) next[key] = n
-    else delete next[key]
-    if (next[key] === budget[key]) return
-    void save({ budget: Object.keys(next).length ? next : null })
-  }
   return (
     <div className="job-run-settings">
       <label className="small">
@@ -602,18 +589,6 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
           {ids.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
         </select>
       </label>
-      <details>
-        <summary className="muted small">Advanced: a tighter time limit per run</summary>
-        <label className="small">
-          <span className="muted">Max minutes</span>{' '}
-          <input key={`s${budget.maxRunSeconds ?? ''}`} type="number" min={0.5} max={JOB_MAX_MINUTES} step={0.5}
-            placeholder={String(JOB_MAX_MINUTES)} defaultValue={budget.maxRunSeconds ? budget.maxRunSeconds / 60 : ''}
-            aria-label={`Max minutes per run of ${job.name}`}
-            onBlur={(e) => setCap('maxRunSeconds', e.target.value, 60, JOB_MAX_MINUTES)} />
-        </label>
-        <p className="muted small">Every scheduled run already stops after {JOB_MAX_MINUTES} minutes; this can
-          only lower that, and your own settings still win when they are stricter.</p>
-      </details>
     </div>
   )
 }

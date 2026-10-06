@@ -9,7 +9,7 @@ import { mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, AudioLines, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
-import SkipPermissionsToggle from './SkipPermissionsToggle'
+import { PermissionModePill } from './PermissionMode'
 import WorkingFolder from './WorkingFolder'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
@@ -457,7 +457,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
         {conversationId !== '\u0000page-agent' && (
           <>
-            <SkipPermissionsToggle conversationId={conversationId} />
+            <PermissionModePill />
             {/* A chat working autonomously plans by its desk's autonomy, so its own plan mode steps aside. */}
             {!deskBound && <PlanModeToggle conversationId={conversationId} />}
             <AutonomyToggle conversationId={conversationId} />

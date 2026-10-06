@@ -21,12 +21,11 @@ const dropAllow = (x: PermissionRules | undefined, r: string): PermissionRules =
  *  tool modes that differ from the tool's default, saved allow rules and global connector grants; a revoke there saves
  *  at once and patches the modal draft too, so the modal's Save cannot write it back. Chat, agent, project, connector
  *  and session rows list only 'on' overrides, so every revoke narrows: dropping an 'ask' or 'off' override could widen.
- *  Chats that skip their cards on their own switch are listed too; revoking sets that chat's switch off. */
+ */
 export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const toast = useStore((s) => s.toast)
   const settings = useStore((s) => s.settings)
   const saveSettings = useStore((s) => s.saveSettings)
-  const setChatSettings = useStore((s) => s.setChatSettings)
   const tools = useStore((s) => s.tools)
   const allProjects = useStore((s) => s.projects)
   const conversations = useStore((s) => s.conversations)
@@ -68,9 +67,8 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
   const projects = g.project_overrides.filter((o) => o.mode === 'on')
   const mcp = g.mcp.filter((m) => m.mode === 'on' && m.scope !== 'global')
   const agents = (g.agent_overrides ?? []).filter((o) => o.mode === 'on')
-  const skips = g.chat_skip ?? []
   const none = !modes.length && !allow.length && !globalMcp.length && !g.session.length && !chats.length && !projects.length && !mcp.length
-    && !agents.length && !skips.length
+    && !agents.length
 
   return (
     <>
@@ -115,19 +113,6 @@ export default function GrantsPanel({ draft, patch }: { draft: Settings; patch: 
               <li key={`${o.conversation_id}:${o.tool}`}><span><code>{o.tool}</code> <small className="muted">in {o.title}</small></span>
                 <button className="icon-btn" aria-label={`Revoke ${o.tool} in ${o.title}`}
                   onClick={act(() => api.conversations.patch(o.conversation_id, { settings: { tools: without(chatTools(o.conversation_id), o.tool) } }))}><X size={12} /></button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {skips.length > 0 && (
-        <div className="perm-rule-group">
-          <b>Chats skipping permissions</b> <small className="muted">Their own switch, whatever the global one says.</small>
-          <ul>
-            {skips.map((o) => (
-              <li key={`skip:${o.conversation_id}`}><span>{o.title || o.conversation_id}</span>
-                <button className="icon-btn" aria-label={`Stop skipping permissions in ${o.title}`}
-                  onClick={act(() => setChatSettings({ skipPermissions: false }, o.conversation_id))}><X size={12} /></button>
               </li>
             ))}
           </ul>

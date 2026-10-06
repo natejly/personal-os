@@ -856,6 +856,16 @@ class Toolbox:
             out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER and name in locked else v
         return out
 
+    def explicit(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
+                 agent_tools: dict[str, str] | None = None) -> dict[str, str]:
+        """The modes a user set on purpose, same precedence as `effective`: {tool: on|ask|off}, defaults left out."""
+        out: dict[str, str] = {}
+        for m in (global_tools, project_tools, agent_tools, chat_tools):
+            for k, v in (m or {}).items():
+                if (n := self._norm(v)):
+                    out[k] = n
+        return out
+
     def cap_modes(self, tools: dict[str, Any]) -> dict[str, Any]:
         """A tool map as it may be stored: an ask-locked tool saved as 'on' becomes 'ask'. Names that are not built-in
         tools (connector slugs, unknown keys) pass through unchanged."""

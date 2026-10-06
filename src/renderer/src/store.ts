@@ -64,10 +64,9 @@ export const readDocMode = (): DocMode => {
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections, one per rail entry in SettingsModal.
- *  'memory' holds the Memory panel above the learning and search-index controls.
- *  'permissions' is the one place every permission is set; 'cowork' is the Autonomy tab. */
-export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'workspace' | 'system' | 'cowork' | 'modules' | 'behavior' | 'data'
+/** Settings sections, one per rail entry in SettingsModal. Older ids still work in openSettings (lib/settingsTabs). */
+import { resolveTab, type AdvancedGroup, type LegacySettingsTab, type SettingsTab } from './lib/settingsTabs'
+export type { SettingsTab }
 export type { Scope, SessionStatus }
 
 /**
@@ -261,6 +260,8 @@ export interface State {
   settingsOpen: boolean
   /** The tab Settings opens on. Read once when the dialog mounts. */
   settingsTab: SettingsTab
+  /** The Advanced group to open when Settings opens on the Advanced tab. */
+  settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   toasts: Toast[]
   /** The ⌘K command palette. */
@@ -390,7 +391,7 @@ export interface State {
   /** Open the help overlay on a section; null closes it. */
   openHelp: (section: 'shortcuts' | 'guide' | null) => void
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
-  openSettings: (tab: SettingsTab) => void
+  openSettings: (tab: SettingsTab | LegacySettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
@@ -1951,7 +1952,8 @@ export const useStore = create<State>((set, get) => {
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
-    settingsTab: 'provider',
+    settingsTab: 'model',
+    settingsGroup: null,
     projectModal: null,
     toasts: [],
     paletteOpen: false,
@@ -2161,9 +2163,9 @@ export const useStore = create<State>((set, get) => {
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
-    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'provider' } : { settingsOpen }),
+    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'model', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
-    openSettings: (settingsTab) => set({ settingsOpen: true, settingsTab }),
+    openSettings: (id) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq

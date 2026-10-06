@@ -113,11 +113,9 @@ def test_learn_survives_non_strings_and_keeps_rest(monkeypatch: Any) -> None:
         out = _learn(memories, graph, {
             "updates": [{"id": 1, "content": 5}], "forget": [None, 3],
             "memories": [{"content": 42}, {"content": "User likes tea a lot"}],
-            "entities": [{"label": 7}, {"label": "Tea", "type": 9}],
-            "relations": [{"source": 1, "target": "Tea", "relation": "x"}],
         }, monkeypatch)
         assert [m["content"] for m in out["memories"]] == ["User likes tea a lot"]
-        assert [n["label"] for n in out["nodes"]] == ["Tea"]
+        assert out["nodes"] == [] and out["edges"] == []  # the graph has its own extraction call (graph_learn)
 
 
 def test_learn_rechecks_pin_at_apply_time(monkeypatch: Any) -> None:

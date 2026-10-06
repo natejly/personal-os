@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from typing import Any
 
@@ -20,6 +21,7 @@ import numpy as np
 
 from . import memory_limits as ml
 from .db import Database
+from . import graph_recall
 from .embed import Embedder, pack, rrf, unpack
 from .repos import Graph, Memories, _scope_clause, live_mem
 
@@ -46,6 +48,7 @@ class MemoryIndex:
         self.db, self.memories, self.graph = db, memories, graph
         self.embedder = embedder or Embedder()
         self._tasks: set[asyncio.Task[Any]] = set()
+        self.recall: Any = None  # GraphRecall, set by app: node vectors for graph-seeded ranking
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -148,12 +151,19 @@ class MemoryIndex:
         scored.sort(key=lambda s: -s[0])
         return [mid for _, mid in scored[:ml.RANK_DEPTH]]
 
-    def _graph_seeded(self, c: Any, where: str, args: list[Any], project_id: str | None, query: str) -> list[str]:
-        labels = [n["label"].lower() for n in self.graph.neighborhood(project_id, query)["nodes"] if len(n["label"]) > 2]
+    def _graph_seeded(self, c: Any, where: str, args: list[Any], project_id: str | None, query: str,
+                      qvec: np.ndarray | None = None, model: str = "") -> list[str]:
+        """Memories that name an entity the query seeds. The self node and value nodes are left out: every
+        "User prefers ..." memory would otherwise match "User"."""
+        vec_hits = self.recall.similar(project_id, qvec, model) if self.recall is not None and qvec is not None else None
+        labels = {nm.lower() for n in graph_recall.subgraph(self.graph, project_id, query, vec_hits)["nodes"]
+                  if not (graph_recall.is_self(n) or graph_recall.is_literal(n)) for nm in graph_recall.names(n) if len(nm) > 2}
         if not labels:
             return []
+        # Whole words, as graph_recall.mentions matches: "Sam" must not seed every memory that says "same".
+        named = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(lb) for lb in sorted(labels, key=len, reverse=True)) + r")(?!\w)")
         rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND {live_mem()} ORDER BY updated_at DESC", args).fetchall()
-        return [r["id"] for r in rows if any(lb in r["content"].lower() for lb in labels)][:ml.RANK_DEPTH]
+        return [r["id"] for r in rows if named.search(r["content"].lower())][:ml.RANK_DEPTH]
 
     def search(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
                settings: dict[str, Any] | None = None, include_global: bool = True) -> list[dict[str, Any]]:
@@ -165,7 +175,7 @@ class MemoryIndex:
             lexical = [m["id"] for m in self.memories.matching(project_id, query, ml.RANK_DEPTH, include_global)]
             with self.db.tx() as c:
                 cos = self._cosine(c, where, args, query_vec, model)
-                graph = self._graph_seeded(c, where, args, project_id, query)
+                graph = self._graph_seeded(c, where, args, project_id, query, query_vec, model)
                 matched = list(dict.fromkeys([*lexical, *cos, *graph]))
                 if not matched:
                     return []

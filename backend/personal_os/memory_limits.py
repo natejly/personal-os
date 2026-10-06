@@ -60,3 +60,32 @@ TIDY_AT_KEY = "memoryTidyAt"
 # How long after an assistant reply finished an auto-learn write can land (extraction is one LLM call
 # queued behind the reply); a wider window would start guessing which reply a memory came from.
 BACKFILL_WINDOW_S = 180
+
+# ---- Graph extraction ----
+GRAPH_MIN_CONFIDENCE = 0.6          # an extracted edge the model rates below this is dropped (guesses read as facts later)
+GRAPH_PROMPT_CANDIDATES = 40        # existing entities shown to the extractor so it reuses them instead of making near-duplicates
+GRAPH_USER_TEXT_CHARS = 4000        # user text the extractor reads (the same cut the memory extractor uses)
+GRAPH_ASSISTANT_TEXT_CHARS = 1500   # the reply is context only (nothing is extracted from it), so less of it is enough
+GRAPH_RESOLVE_SIMILARITY = 0.85     # embedding cosine above which a new name is the same entity as an existing one
+GRAPH_PROMPT_EDGES = 60             # known relations shown to the extractor; more is context it cannot use and tokens it pays for
+GRAPH_MAX_TRIPLES = 12              # per exchange; more than this is the model transcribing, not remembering
+GRAPH_DEFAULT_CONFIDENCE = 0.8      # a triple with no usable confidence: kept (the model did not hedge) but under the 0.9 it gives for outright statements
+GRAPH_NAME_CHARS = 200              # an entity name or edge endpoint shown or stored; a longer one is pasted text, not a name
+GRAPH_ALIAS_CHARS = 80              # a nickname or abbreviation; short by nature, so a long one is not one
+GRAPH_RELATION_CHARS = 80           # a stored relation phrase (legacy rows may hold a free-form one) in a prompt or a context line
+GRAPH_LABEL_CHARS = 80              # a related_to label is a short phrase; longer is the model quoting the sentence
+
+# ---- Graph retrieval ----
+GRAPH_MATCH_SIMILARITY = 0.55       # message-to-entity cosine that seeds retrieval without a literal mention
+GRAPH_MIN_MENTION_CHARS = 2         # shortest label or alias matched as a whole word in the message ("PG")
+GRAPH_CONTEXT_MAX_SEEDS = 8         # entities a message may seed; past this the block is a graph dump, not context
+GRAPH_CONTEXT_MAX_EDGES = 24        # live 1-hop edges considered before the token budget trims
+GRAPH_RECENCY_HALF_LIFE_DAYS = 90   # an edge's recency weight halves every this many days since it became true
+GRAPH_QUALIFIER_CHARS = 120         # the role or relationship note shown after an edge line; longer is a sentence, not a qualifier
+GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher
+
+# ---- Graph backfill ----
+GRAPH_BACKFILL_DELAY_SECONDS = 1.0  # pause between extraction calls, so a backfill never crowds out live chat on the proxy
+GRAPH_INDEX_BATCH = 200             # nodes embedded per index() call: one embedding request burst, not one per node
+GRAPH_BACKFILL_PROGRESS_SECONDS = 5  # how often the command-line backfill prints its counts
+GRAPH_BACKFILL_BATCH = 200          # user messages read per database page

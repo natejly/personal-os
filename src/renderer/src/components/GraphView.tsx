@@ -5,14 +5,14 @@ import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
 import type { GraphData, GraphEdge, GraphNode } from '@shared/types'
 
-interface SimNode extends SimulationNodeDatum { id: string; label: string; type: string; global: boolean; degree: number }
+interface SimNode extends SimulationNodeDatum { id: string; label: string; type: string; global: boolean; degree: number; literal: boolean }
 interface SimLink extends SimulationLinkDatum<SimNode> { id: string; relation: string; ended?: boolean }
 
 const TYPE_COLORS: Record<string, string> = {
-  person: '#3b9edb', project: '#d97757', organization: '#8e6fdb', tool: '#46a758', place: '#e5a13b', concept: '#d95c9e', entity: '#8b8b8b', other: '#8b8b8b'
+  person: '#3b9edb', org: '#8e6fdb', project: '#d97757', repo: '#2fb5a8', tool: '#46a758', place: '#e5a13b', topic: '#d95c9e', event: '#c9b037'
 }
 const colorFor = (t: string): string => TYPE_COLORS[t] ?? '#8b8b8b'
-const TYPES = Object.keys(TYPE_COLORS).filter((t) => t !== 'entity')
+const TYPES = Object.keys(TYPE_COLORS)
 
 function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }): JSX.Element {
   const graph = useStore((s) => s.graph)
@@ -62,7 +62,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
       <label><span>Label</span><input value={label} onChange={(e) => setLabel(e.target.value)} onBlur={() => void save()} /></label>
       <label><span>Type</span>
         <select value={type} onChange={(e) => { setType(e.target.value); void api.graph.updateNode(node.id, { type: e.target.value }).then(refreshGraph) }}>
-          {[...new Set(['entity', ...TYPES, type])].map((t) => <option key={t}>{t}</option>)}
+          {[...new Set([...TYPES, type])].map((t) => <option key={t}>{t}</option>)}
         </select>
       </label>
       <label><span>Properties (JSON)</span><textarea rows={3} value={props} onChange={(e) => setProps(e.target.value)} onBlur={() => void save()} spellCheck={false} /></label>
@@ -147,7 +147,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
     for (const e of graph.edges) { degree[e.source_id] = (degree[e.source_id] ?? 0) + 1; degree[e.target_id] = (degree[e.target_id] ?? 0) + 1 }
     const nodes: SimNode[] = graph.nodes.map((n) => ({
       ...(prev[n.id] ?? { x: size.w / 2 + (Math.random() - 0.5) * 200, y: size.h / 2 + (Math.random() - 0.5) * 200 }),
-      id: n.id, label: n.label, type: n.type, global: n.project_id === null, degree: degree[n.id] ?? 0
+      id: n.id, label: n.label, type: n.type, global: n.project_id === null, degree: degree[n.id] ?? 0, literal: n.properties?.literal === true
     }))
     const ids = new Set(nodes.map((n) => n.id))
     const links: SimLink[] = graph.edges.filter((e) => ids.has(e.source_id) && ids.has(e.target_id)).map((e) => ({ id: e.id, relation: e.relation, ended: e.invalid_at != null, source: e.source_id, target: e.target_id }))
@@ -256,17 +256,17 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
               return (
                 <g key={l.id} className={`link ${dim ? 'dim' : ''} ${l.ended ? 'ended' : ''}`}>
                   <line x1={s.x} y1={s.y} x2={t.x} y2={t.y} markerEnd="url(#arrow)" />
-                  <text x={(s.x! + t.x!) / 2} y={(s.y! + t.y!) / 2 - 4} textAnchor="middle">{l.relation}</text>
+                  <text x={(s.x! + t.x!) / 2} y={(s.y! + t.y!) / 2 - 4} textAnchor="middle">{l.relation.replace(/_/g, ' ')}</text>
                 </g>
               )
             })}
             {nodesRef.current.map((n) => {
-              const r = 10 + Math.min(10, n.degree * 1.5)
+              const r = n.literal ? 6 : 10 + Math.min(10, n.degree * 1.5)
               const dim = (matches && !matches.has(n.id)) || (neighbors && !neighbors.has(n.id))
               return (
                 <g key={n.id} className={`node ${n.id === selected ? 'selected' : ''} ${dim ? 'dim' : ''}`} transform={`translate(${n.x ?? 0},${n.y ?? 0})`}
                   onPointerDown={(e) => { e.stopPropagation(); setSelected(n.id); onPointerDown(e, n) }}>
-                  <circle r={r} fill={colorFor(n.type)} strokeDasharray={n.global ? '3 2' : undefined} />
+                  <circle r={r} fill={n.literal ? '#8b8b8b' : colorFor(n.type)} strokeDasharray={n.global ? '3 2' : undefined} />
                   <text y={r + 13} textAnchor="middle">{n.label}</text>
                 </g>
               )

@@ -4,7 +4,8 @@
  * Main then prints that page. The window never shows.
  */
 import { BrowserWindow } from 'electron'
-import { join } from 'path'
+import { existsSync } from 'fs'
+import { extname, join } from 'path'
 import { handle, on } from './ipc'
 import { guardNavigation } from './navigation'
 import { footerTemplate } from './pdfTemplate'
@@ -45,4 +46,13 @@ export async function renderNotePdf(title: string, content: string): Promise<Buf
     jobs.delete(id)
     if (!w.isDestroyed()) w.destroy()
   }
+}
+
+/** `dir/name`, or `dir/name (2)`, `dir/name (3)`, … when that file already exists. Never points at an existing file. */
+export function uniquePath(dir: string, name: string): string {
+  const ext = extname(name)
+  const stem = name.slice(0, name.length - ext.length)
+  let p = join(dir, name)
+  for (let n = 2; existsSync(p); n++) p = join(dir, `${stem} (${n})${ext}`)
+  return p
 }

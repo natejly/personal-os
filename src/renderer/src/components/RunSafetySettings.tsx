@@ -20,9 +20,9 @@ export function SnapshotToggle({ draft, patch }: Props): JSX.Element {
   const snapOk = draft.snapshotsAvailable !== false
   return (
     <label className="toggle-row plain">
-      <span className="toggle-text"><b>Snapshot workspace folders before changes</b>
+      <span className="toggle-text"><b>Snapshot folders before changes</b>
         <small>{snapOk
-          ? 'Lets Undo reverse shell effects too. Keeps a copy before a reply first changes a workspace folder.'
+          ? 'Lets Undo reverse shell effects too. Keeps a copy before a reply first changes a folder.'
           : 'Unavailable on this Mac: folder snapshots need git installed (xcode-select --install).'}</small></span>
       <input type="checkbox" disabled={!snapOk} checked={snapOk && draft.snapshotsEnabled !== false}
         onChange={(e) => patch({ snapshotsEnabled: e.target.checked })} /><span className="switch" />

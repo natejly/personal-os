@@ -787,6 +787,30 @@ export interface Message {
   followups?: string[] | null
   /** Set on a user message that replaced an earlier one (edit-and-resend). */
   edited_from?: string | null
+  /** 'wake': a hidden user-role turn that tells the assistant a background worker ended. Never rendered as a user message. */
+  kind?: string | null
+}
+
+/** GET /conversations/{id}/workers: one detached background worker of a chat (the assistant's `delegate` tool). */
+export type WorkerStatus = 'queued' | 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted' | 'stopped'
+export interface WorkerInfo {
+  id: string
+  conversation_id: string
+  title: string
+  goal: string
+  status: WorkerStatus
+  /** One-line current action while running, else ''. */
+  now: string
+  queue_position: number | null
+  started_at: number
+  ended_at: number | null
+  resume_of: string | null
+  /** An ended worker with a stored transcript can continue with its history. */
+  resumable: boolean
+  pending_approvals: { call_id: string; tool: string; args: Record<string, unknown> }[]
+  depth: number
+  /** Info only. */
+  cost: number | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1518,6 +1542,13 @@ export interface Settings {
   microAt?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
+  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
+  delegationForce?: boolean
+  delegationAfterRounds?: number
+  /** Workers running at once (1-16, default 4); the rest queue. */
+  workerMaxConcurrent?: number
+  /** Send the assistant's reply to a finished worker to Telegram (default off). */
+  telegramPushWorkerResults?: boolean
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1762,6 +1793,8 @@ export type BackgroundEvent =
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
   /** A shell job started, ended or was killed: the Running list refetches. */
   | { event: 'shell_jobs'; data: { live: number } }
+  /** A background worker changed status or asked for approval. */
+  | { event: 'workers'; data: { conversation_id: string; worker: WorkerInfo } }
   | { event: 'todos_changed'; data: Record<string, never> }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }

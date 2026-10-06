@@ -6,7 +6,7 @@ import { useStore } from '../store'
 import Face from './Face'
 import MarkdownPreview from './MarkdownPreview'
 
-const DONE = ['done', 'error', 'interrupted']
+const DONE = ['done', 'error', 'interrupted', 'stopped']
 
 /**
  * One subagent, opened from its run card or its face in the crew ring: the transcript as it grows, and a box to

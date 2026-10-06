@@ -35,7 +35,7 @@ SCHEMA = "CREATE TABLE IF NOT EXISTS kg_backfill_done (message_id TEXT PRIMARY K
 # The stored half of the decision app.py makes before it queues a LearnJob (a run's taint and the global
 # autoLearn switch are not stored per message; the chat's own settings are).
 _ELIGIBLE = """FROM messages m JOIN conversations c ON c.id = m.conversation_id
-  WHERE m.role = 'user' AND TRIM(m.content) <> '' AND m.superseded_at IS NULL AND c.deleted_at IS NULL
+  WHERE m.role = 'user' AND COALESCE(m.kind,'') != 'wake' AND TRIM(m.content) <> '' AND m.superseded_at IS NULL AND c.deleted_at IS NULL
     AND COALESCE(json_extract(c.settings,'$.deskId'),'') = '' AND COALESCE(json_extract(c.settings,'$.job_id'),'') = ''
     AND COALESCE(json_extract(c.settings,'$.private'),0) = 0 AND COALESCE(json_extract(c.settings,'$.tainted'),0) = 0
     AND COALESCE(json_extract(c.settings,'$.autoLearn'),1) != 0 AND COALESCE(json_extract(c.settings,'$.useMemory'),1) != 0

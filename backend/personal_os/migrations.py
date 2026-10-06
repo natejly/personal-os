@@ -349,6 +349,13 @@ def _drop_legacy_texting_keys(c: sqlite3.Connection) -> None:
     c.execute(f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_LEGACY_TEXTING_KEYS))})", _LEGACY_TEXTING_KEYS)
 
 
+def _messages_kind(c: sqlite3.Connection) -> None:
+    """messages.kind: NULL for what was said in the chat, 'wake' for the hidden turn that hands a finished worker's report
+    to the assistant. Wake rows are replayed to the model and hidden from the transcript, search and exports."""
+    if "kind" not in {r[1] for r in c.execute("PRAGMA table_info(messages)")}:
+        c.execute("ALTER TABLE messages ADD COLUMN kind TEXT")
+
+
 BUDGET_SETTING_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subagentMaxRounds", "deskMaxTurns",
                        "codingSessionTimeoutMinutes", "contextBudget", "skillsInlineBudget", "usageAlerts")
 
@@ -380,6 +387,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (18, "graph_canonical_types", _graph_canonical_types),
     (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
     (20, "drop_budget_settings", _drop_budget_settings),
+    (21, "messages_kind", _messages_kind),
 ]
 
 

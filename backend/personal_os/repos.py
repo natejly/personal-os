@@ -205,7 +205,7 @@ class Conversations:
                 scope += f" AND c.id NOT IN ({','.join('?' * len(ex))})"
                 sargs = [*sargs, *ex]
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
-                "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL "
+                "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL AND COALESCE(m.kind,'') != 'wake' "
                 "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
                 "AND COALESCE(json_extract(c.settings,'$.private'),0)=0" + scope)
         cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
@@ -346,20 +346,20 @@ class Conversations:
             c.execute("DELETE FROM conversations WHERE id=?", (id,))
 
     def add_message(self, conv_id: str, role: str, content: str, model: str | None = None, *, variant_of: str | None = None,
-                    attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                    attachments: list[dict[str, Any]] | None = None, kind: str | None = None) -> dict[str, Any]:
         mid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of,attachments) VALUES(?,?,?,?,?,?,?,?)",
-                (mid, conv_id, role, content, model, t, variant_of, json.dumps(attachments) if attachments else None),
+                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of,attachments,kind) VALUES(?,?,?,?,?,?,?,?,?)",
+                (mid, conv_id, role, content, model, t, variant_of, json.dumps(attachments) if attachments else None, kind),
             )
             c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
             # A row opened into an existing regenerate group announces its siblings, so the switcher shows on
             # the live event rather than after a reload.
             variants = self._variant_groups(c, conv_id).get(variant_of) if variant_of else None
         return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None,
-                "outcome": None, "error_kind": None, "variant_of": variant_of, "variants": variants, "attachments": attachments or None}
+                "outcome": None, "error_kind": None, "variant_of": variant_of, "variants": variants, "attachments": attachments or None, "kind": kind}
 
     def for_model(self, row: dict[str, Any]) -> str:
         """A message dict's content as the model reads it, attachments inlined (see model_content)."""
@@ -550,10 +550,10 @@ class Conversations:
                 (cid, src["project_id"], f"{src['title']} (branch)", src["model"], json.dumps(st), t, t))
             # Original timestamps keep the order (and the inserts keep rowid ties in order); later turns sort after.
             c.executemany(
-                "INSERT INTO messages(id,conversation_id,role,content,model,error,context_used,tool_events,created_at,outcome,error_kind) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO messages(id,conversation_id,role,content,model,error,context_used,tool_events,created_at,outcome,error_kind,kind) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(new_id(), cid, r["role"], r["content"], r["model"], r["error"], r["context_used"], r["tool_events"],
-                  r["created_at"], r["outcome"], r["error_kind"]) for r in rows])
+                  r["created_at"], r["outcome"], r["error_kind"], r["kind"]) for r in rows])
         return self.get(cid)  # type: ignore[return-value]
 
     def history(self, conv_id: str) -> list[dict[str, str]]:

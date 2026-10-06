@@ -1398,6 +1398,9 @@ export interface Settings {
   contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
+  /** Coding sessions: OpenCode stops after this many minutes (1-1440, default 30); how many run at once (1-20, default 3). */
+  codingSessionTimeoutMinutes?: number
+  codingSessionMaxConcurrent?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1814,6 +1817,8 @@ export interface GrainApi {
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
+  /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
+  codingAttach: (externalId: string) => Promise<boolean>
   /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
   sysAccess: {
     status: () => Promise<import('./systemAccess').MainStatus>

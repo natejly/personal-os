@@ -242,6 +242,7 @@ class Job:
         self.want_notify = notify      # notify is only honoured for background jobs; a promoted foreground job takes it up
         self.on_timeout = "kill"       # background | kill: what a foreground timeout does
         self.max_background = 4
+        self.pool = "shell"            # concurrency pool a background job counts against ("coding" for coding sessions)
         self.promoted = asyncio.Event()  # set when a foreground job that hit its timeout carries on in the background
         self.egress_token: str | None = None
         self.net: dict[str, list[str]] | None = None   # what the proxy saw, frozen when the job ends
@@ -361,8 +362,8 @@ class ShellJobs:
             except Exception:  # noqa: BLE001 - a UI refresh must never fail a shell job
                 pass
 
-    def running_background(self) -> int:
-        return sum(1 for j in self.jobs.values() if j.background and j.status in ("running", "orphaned"))
+    def running_background(self, pool: str = "shell") -> int:
+        return sum(1 for j in self.jobs.values() if j.background and j.pool == pool and j.status in ("running", "orphaned"))
 
     def drain_notes(self, conversation_id: str | None) -> list[str]:
         return self.notes.pop(conversation_id or "", [])
@@ -370,8 +371,11 @@ class ShellJobs:
     # -- starting and finishing --
     async def start(self, argv: list[str], *, command: str, cwd: str, env: dict[str, str], tmp: str | None,
                     conversation_id: str | None, run_id: str | None, background: bool, notify: bool,
-                    timeout: float, max_background: int, on_timeout: str = "kill", egress_token: str | None = None) -> Job:
-        if background and self.running_background() >= max_background:
+                    timeout: float, max_background: int, on_timeout: str = "kill", egress_token: str | None = None,
+                    pool: str = "shell") -> Job:
+        if background and self.running_background(pool) >= max_background:
+            if pool != "shell":
+                raise ShellError(f"{max_background} {pool} jobs are already running; wait for one to finish or stop one.")
             raise ShellError(f"{max_background} background jobs are already running (shellMaxBackground). "
                              "shell_poll or shell_kill one first.")
         self._make_room()
@@ -379,7 +383,7 @@ class ShellJobs:
                   BG_BUFFER if background else FG_CAPTURE)
         job.tmp = tmp
         job.want_notify = notify   # a foreground job that is later promoted announces its end like a background one
-        job.on_timeout, job.max_background, job.egress_token = on_timeout, max_background, egress_token
+        job.on_timeout, job.max_background, job.egress_token, job.pool = on_timeout, max_background, egress_token, pool
         try:
             job.proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
@@ -456,7 +460,7 @@ class ShellJobs:
 
     def _promote(self, job: Job) -> bool:
         """Turn a foreground job that hit its timeout into a background one, if the caller allowed it and a slot is free."""
-        if job.background or job.on_timeout != "background" or self.running_background() >= job.max_background:
+        if job.background or job.on_timeout != "background" or self.running_background(job.pool) >= job.max_background:
             return False
         job.background, job.notify, job.cap = True, job.want_notify, BG_BUFFER
         job.promoted.set()

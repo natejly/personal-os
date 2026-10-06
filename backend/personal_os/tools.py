@@ -121,6 +121,10 @@ class ToolSpec:
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
         # (args, ctx) -> True when this particular call must ask whatever the mode says (shell_run unsandboxed, or networked in a tainted run)
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the forced card is HARD: auto mode's reviewer may not lift it (counts as force_ask too)
+        self.force_card: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the run's taint comes only from this call's own subject, so it does not count as tainted here
+        self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None
 
@@ -898,6 +902,17 @@ class Toolbox:
         spec = self.specs.get(name)
         return bool(spec and spec.force_ask and spec.force_ask(args, ctx or {}))
 
+    def forces_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """A forced ask that auto mode's reviewer may not lift either."""
+        spec = self.specs.get(name)
+        return bool(spec and spec.force_card and spec.force_card(args, ctx or {}))
+
+    def tainted_for(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """ctx's taint as it counts for this call: a tool may exempt taint that only its own subject caused."""
+        ctx = ctx or {}
+        spec = self.specs.get(name)
+        return bool(ctx.get("tainted")) and not (spec and spec.taint_ok and spec.taint_ok(args, ctx))
+
     def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
         """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created). The proxy mode counts:
         an allowed host can still carry out what a tainted reply read, so it asks like the shell's allowlist does."""
@@ -921,7 +936,7 @@ class Toolbox:
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
         reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
-        if spec and mode == "on" and ctx.get("tainted") and not reviewed and (
+        if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
@@ -993,6 +1008,7 @@ class Toolbox:
                               alternative=ALTERNATIVE.get(name))
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
+            ctx.setdefault("taint_sources", []).append(name)  # every taint is sourced (Toolbox.tainted_for relies on it)
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
         return checked(name, out)

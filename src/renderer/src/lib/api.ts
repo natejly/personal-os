@@ -1,6 +1,6 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
-  ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
+  ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
@@ -211,6 +211,10 @@ export const api = {
     req<{ ok: boolean }>(`/permissions/agent/${encodeURIComponent(agentId)}?tool=${encodeURIComponent(tool)}`, { method: 'DELETE' }),
   /** Answered approvals, the latest decision first. */
   decidedApprovals: (limit = 50) => req<PendingApproval[]>(`/approvals?status=decided&order=desc&limit=${limit}`),
+  /** The approval history, newest first; filters are optional and `more` says another page exists. */
+  approvalHistory: (f: { limit?: number; offset?: number; tool?: string; decision?: string; q?: string } = {}) =>
+    req<{ items: ApprovalLogEntry[]; more: boolean }>(`/approvals/history?${new URLSearchParams(
+      Object.entries(f).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]))}`),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */

@@ -210,7 +210,9 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
           created_at REAL NOT NULL,
           updated_at REAL NOT NULL)""")
     c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(title, content, doc_id UNINDEXED, tokenize='porter unicode61')")
-    for n in c.execute("SELECT id, project_id, body, created_at, updated_at FROM notes").fetchall():
+    # A project that vanished while foreign keys were off would fail the docs FK and abort startup: file it personal.
+    proj = "CASE WHEN project_id IN (SELECT id FROM projects) THEN project_id END" if has("projects") else "NULL"
+    for n in c.execute(f"SELECT id, {proj}, body, created_at, updated_at FROM notes").fetchall():
         if c.execute("SELECT 1 FROM docs WHERE id=?", (n[0],)).fetchone():
             continue
         title = title_from_body(n[2])

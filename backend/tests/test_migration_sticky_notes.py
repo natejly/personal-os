@@ -31,6 +31,7 @@ def _db(with_docs: bool = True) -> sqlite3.Connection:
         ("n2", None, "  \n\n- [ ] 1. Plan the trip\nsecond", "yellow", 33.0, 44.0),
         ("n3", None, "", "pink", 55.0, 66.0),
         ("n4", None, "x" * 200, "green", 77.0, 88.0),
+        ("n5", "gone", "orphan", "yellow", 1.0, 2.0),  # its project vanished while foreign keys were off
     ])
     c.execute("CREATE TABLE canvas_windows (id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref_id TEXT, x REAL)")
     c.executemany("INSERT INTO canvas_windows VALUES (?,?,?,?)",
@@ -52,7 +53,8 @@ class StickyNotesIntoDocs(unittest.TestCase):
         c = _db()
         self.assertEqual(migrations.run(c), [12])
         rows = {r["id"]: r for r in c.execute("SELECT * FROM docs")}
-        self.assertEqual(set(rows), {"n1", "n2", "n3", "n4"})
+        self.assertEqual(set(rows), {"n1", "n2", "n3", "n4", "n5"})
+        self.assertIsNone(rows["n5"]["project_id"])
         d = rows["n1"]
         self.assertEqual((d["title"], d["content"], d["project_id"], d["folder"]), ("Buy milk", BODY, "p1", ""))
         self.assertEqual((d["created_at"], d["updated_at"]), (11.5, 22.5))
@@ -105,7 +107,7 @@ class StickyNotesIntoDocs(unittest.TestCase):
         migrations.run(c)
         cols = {r["name"] for r in c.execute("PRAGMA table_info(docs)")}
         self.assertTrue({"id", "project_id", "title", "content", "folder", "starred", "created_at", "updated_at"} <= cols)
-        self.assertEqual(c.execute("SELECT COUNT(*) FROM docs").fetchone()[0], 4)
+        self.assertEqual(c.execute("SELECT COUNT(*) FROM docs").fetchone()[0], 5)
 
     def test_no_notes_table_means_nothing_to_do(self) -> None:
         c = sqlite3.connect(":memory:", isolation_level=None)

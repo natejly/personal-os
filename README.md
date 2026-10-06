@@ -26,8 +26,7 @@ instructions, files, memories and graph.
 ```
 
 Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
-every view; Meetings and Activity are shown too (showing a view records
-nothing). Settings → Modules puts any of them in the sidebar, in the title bar,
+every view. Settings → Modules puts any of them in the sidebar, in the title bar,
 or out of sight. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
@@ -63,8 +62,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.
 3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
-   ⌘⇧N makes a note, ⌘⇧D opens today's. Record or dictate into any note on
-   macOS, and the transcript stays apart from your text. Paste or drop an image into
+   ⌘⇧N makes a note, ⌘⇧D opens today's. Paste or drop an image into
    a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
    that one's chat. The assistant can edit a note (you accept each diff) and can
@@ -82,7 +80,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    and saved (with Undo), and a chat's menu has **Don't learn from this chat**.
 6. **Spaces.** ⌘⇧C opens Spaces, a desktop of live windows. Use **Add widget**
    or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
-   uploads, recap, project, usage, activity, face or crew window; drag a chat, a
+   uploads, recap, project, usage, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
    its own OS window. Save a layout as a preset from the Spaces bar, and lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
@@ -196,15 +194,13 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     in instead, still showing the diff and still undoable from the history.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. Export menu → *Export as PDF…* typesets the note (maths,
-    code, tables) for A4 or Letter, or files the PDF straight into Uploads. On macOS any note can be recorded or dictated into, with the
-    transcript kept apart from the text and a summary proposed for you to
-    accept. See [docs/docs-editor.md](docs/docs-editor.md).
+    code, tables) for A4 or Letter, or files the PDF straight into Uploads. See [docs/docs-editor.md](docs/docs-editor.md).
   - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
-  docs, memory, graph, uploads, recap, project, usage, activity, face and crew
+  docs, memory, graph, uploads, recap, project, usage, face and crew
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
@@ -215,41 +211,6 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Activity monitor** (macOS, on by default, records only what macOS has
-  granted). Watches what you actually
-  do — frontmost app and window, browser URLs, typing and click rhythm, the text
-  you type, microphone and system audio — summarizes it every few minutes, and
-  writes the result to `context/activity.md`, which is fed back into chats so the
-  assistant knows what you were working on. Every signal is a separate switch;
-  password managers and sign-in windows are never recorded; macOS secure input
-  stops keystroke capture dead; credentials and PII are redacted before anything
-  is stored; raw samples expire after 48h. The raw log is browsable row by row
-  and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
-- **Habits and automation suggestions.** On top of that data, a local miner keeps
-  one counts-only row per day — which outlives the 48h sample retention — and
-  detects what recurs: the apps that own your mornings, the site you open eleven
-  times a day, the two apps you ping-pong between, where your long uninterrupted
-  stretches actually land, how much of the day lands after seven. Those patterns
-  are the panel's evidence, computed with no model and no network. A slower pass
-  then turns them into **habits**, each owning one row in your Memory panel so
-  chats already know how you work, and **suggestions** for what the app could do
-  instead — a digest widget to replace the tab reflex, a project for the topic that
-  keeps coming back, a calendar block around your real focus window. Suggestions
-  are proposals: the common action opens a chat pre-loaded with the request rather
-  than acting, "not now" hides one for a week, and dismissing one is permanent.
-- **Meetings** (macOS, on by default; nothing records until you consent on the
-  first Record). A notepad that listens: type
-  during a call while the recorder captures it natively (AVAudioEngine and, on
-  macOS 14.2+, a Core Audio tap for the far side of the call), segments
-  transcribe in the background, and afterwards the enhance pass proposes your
-  outline with the transcript filled in around it — as a diff you accept or
-  reject. Your typed notes live in their own column and no model ever writes
-  them. Calendar events happening now offer a Record button; action items become
-  todos on a click. Nothing is recorded until you acknowledge a modal naming the
-  exact directory the audio lands in. Transcription prefers on-device Speech,
-  then whisper.cpp or the Whistle local backend, then your LLM proxy. Meetings never expire, are unreachable
-  from the activity monitor's purge, and never reach auto-learn. See
-  [docs/meetings.md](docs/meetings.md).
 - **Work autonomously** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
   once. Long autonomy is bought by chaining bounded replies, never by a longer leash: each
@@ -277,8 +238,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Agent inbox.** Everything agents left for you, in one list on Today, with the
   total on the sidebar's Today row: approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
-  other review queue (proposed doc edits, meeting notes, skills and workflow runs
-  to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
+  other review queue (proposed doc edits, skills and workflow runs
+  to approve, memory tidy-ups). A plan or a desk's question
   opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
   the procedures it can be asked to repeat; **Agents**, roles with their own
@@ -317,8 +278,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   message that starts with `@name` goes to that agent's latest chat, and an
   `@name` elsewhere hints the reply to hand the work to it. See
   [docs/agents.md](docs/agents.md).
-- **Context management.** Per-chat toggles for memory, graph, files, activity,
-  meetings, auto-learn and tools; an inspector showing exactly what was injected into
+- **Context management.** Per-chat toggles for memory, graph, files,
+  auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
   JSON spec rendered as a bar / line / area / pie / scatter chart, each with
@@ -398,9 +359,8 @@ Electron (TypeScript)               Python (FastAPI)                      LiteLL
 
 Electron spawns the backend on a free port with a data directory under the
 app's user-data folder. State is one SQLite file plus folders beside it:
-`uploads/` and `doc_assets/` (your files and pasted images), `recordings/` (meeting
-audio you keep), `cowork/` (desk workspaces), `context/` (`activity.md`),
-`backups/` and `logs/`. API keys and Google tokens are kept in the macOS
+`uploads/` and `doc_assets/` (your files and pasted images), `cowork/` (desk
+workspaces), `backups/` and `logs/`. API keys and Google tokens are kept in the macOS
 Keychain, or a 0600 file in the data folder when the Keychain is unavailable.
 In development, `scripts/dev.sh` runs LiteLLM, the backend (autoreload) and
 Electron (HMR) together.
@@ -545,8 +505,8 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘7 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory / Activity |
-| ⌘⇧M | Meetings (maths while typing in a doc) |
+| ⌘0 … ⌘6 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory |
+| ⌘⇧M | Maths (while typing in a doc) |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
@@ -556,7 +516,7 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Meetings, Data |
+| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Data |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
@@ -762,55 +722,20 @@ proxy does not price can be set by hand in Settings, which re-prices the whole
 history. When a provider does not return a usage block, tokens are estimated
 from character counts and the row is flagged `estimated`.
 
-## Activity monitor
+## Voice input
 
-On by default, but a signal that needs a macOS grant stays off until you grant it
-in the **Activity** panel (⌘7), where each signal is a
-separate switch with a plain description of what it records — or flip **Record
-everything** for one switch that records everything, with the redaction and
-“never record” filters down. Turning that mode off restores the settings it
-replaced rather than resetting to defaults.
-
-One script installs what can be installed and prints what is left to grant:
+The mic button in the chat composer dictates into the message box. On-device Speech is the default
+when macOS has granted it; otherwise Whistle, whisper.cpp or your LLM proxy (a default `litellm.yaml`
+has nothing behind `/v1/audio/transcriptions`, so pick a backend in Settings → Behavior → Voice input).
 
 ```bash
-./scripts/activity-setup.sh
-```
-
-The panel's access checklist probes all six macOS permissions — Accessibility,
-Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk
-Access — says which signals each one gates, and offers a **Grant** button that
-asks macOS directly plus a deep link to the right Settings pane. Restart the app
-after granting: a keystroke tap created before the grant stays dead. In
-development the grants go to **Electron**, not Personal OS.
-
-Full design, privacy model, API and limits:
-[docs/activity-monitor.md](docs/activity-monitor.md).
-
-## Meetings
-
-On by default and a separate switch from the activity monitor; calendar
-detection runs, recording waits for your consent. Open the
-**Meetings** view (⌘⇧M), pick a microphone, and press **Test** before you rely on
-it. On-device Speech is the default when macOS has granted it; otherwise a
-default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so the
-self-test is what tells you transcription works, and a failing one blocks
-Record rather than warning.
-
-ffmpeg, whisper.cpp and BlackHole are optional fallbacks, not a setup tax:
-
-```bash
-cd backend && uv pip install -e '.[activity]'   # AVAudioEngine, process tap, Speech
-# only if you want the fallbacks:
-brew install ffmpeg                             # truncated-wav repair
+cd backend && uv pip install -e '.[mac]'        # Speech and the macOS permission probes
+# only if you want the alternatives:
+cd backend && uv pip install -e '.[whistle]'    # a 17 MB on-device model
 brew install whisper-cpp                        # instead of Apple Speech
-brew install blackhole-2ch                      # system audio on macOS older than 14.2
 ```
 
-Attribution is channel-level — you versus them — not per person.
-
-Full design, pipeline, privacy model, the Audio MIDI Setup recipe, API and limits:
-[docs/meetings.md](docs/meetings.md).
+Setup, settings and permissions: [docs/voice-input.md](docs/voice-input.md).
 
 ## Sandbox
 
@@ -830,9 +755,7 @@ src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py
                     docs.py · recap.py · usage.py · trace.py · llm.py
-                    activity.py collectors, privacy gate, rollup, activity.md
-                    meetings.py repo + service · meeting_notes.py templates/enhance
-                    meeting_recorder.py capture threads · stt.py · audiocap.py · native_audio.py · redact.py
+                    stt.py voice input · macos.py permission probes · audiocap.py · redact.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
@@ -841,9 +764,7 @@ docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
-docs/activity-monitor.md  Activity monitor: signals, privacy model, API
-docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
-docs/digest.md      The quiet daily digest in the Agent Inbox
+docs/voice-input.md Voice input: backends, settings, permissions
 docs/permissions.md Permissions: the one store, its migration, the one Settings tab
 docs/help.md        In-app help and the shortcut registry
 ```
@@ -870,8 +791,7 @@ its models join the picker. The LiteLLM key stays the fallback. The flow must
 name the account being charged before the first call, since a Plus or Pro
 subscription is not a pool of API credits.
 
-**Private inference.** Jobs that read the sensitive store (activity summaries,
-meeting enhance, auto-learn, voice extraction) go to a local model through
+**Private inference.** Jobs that read the sensitive store (auto-learn, voice extraction) go to a local model through
 LiteLLM's `ollama/` route and fail closed if it is down, while chat can stay on
 a cloud model. `extractionModel` today is only a cheaper LiteLLM name, not an
 on-device guarantee.
@@ -881,7 +801,7 @@ are useless with the lid closed: scheduled tasks, the morning brief, and
 watches that propose into the Agent inbox. Each task has one home, local or
 cloud. The worker keeps its own per-domain database (see
 [docs/sources-of-truth.md](docs/sources-of-truth.md)), proposes rather than
-acts, and never sees the filesystem, activity log or meeting audio.
+acts, and never sees the filesystem.
 
 **RLHF on company data (enterprise, later).** Approve/deny, accept/reject and
 edited-vs-sent signals become labelled pairs for a tenant-local policy trained

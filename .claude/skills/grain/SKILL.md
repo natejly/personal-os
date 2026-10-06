@@ -16,11 +16,11 @@ Mental model:
 - **Chats** run a tool loop. Tools read and write the app, Google, the Mac and a sandbox.
 - **Memory and graph**: auto-learn saves memories and graph links after replies. **Projects** group chats with their own instructions, files and memories.
 - **Files** (⌘4) holds notes you write and uploads. Settings → Memory (⌘6) reviews memory and the writing Voice profile.
-- **Lists** (todos), **Calendar**, **Mail** and **Health** are apps at the top right of the title bar. Meetings and Activity ship hidden. Settings → Modules moves any view to the sidebar, the title bar or out of sight (`navPlacement`, `src/renderer/src/shell/nav.tsx`).
-- **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, activity, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
+- **Lists** (todos), **Calendar**, **Mail** and **Health** are apps at the top right of the title bar. Settings → Modules moves any view to the sidebar, the title bar or out of sight (`navPlacement`, `src/renderer/src/shell/nav.tsx`).
+- **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
 - **Autonomy**: a reply can hand work to subagents (`agent_spawn`). "Work autonomously" in any chat (beside plan mode; Plan first / Ask as it goes / Work and propose, with a turn limit) turns it into a longer session with its own plan and workspace: a strip above the composer (state, turns, Needs you, Start/Pause/Resume/Stop) opens a side panel with Files / Changes / Review; settings are under Settings → Autonomy. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
-- **Settings** (⌘,) tabs: Provider & cost, Tools, Memory, Behavior, Modules, Integrations, Meetings, Data.
+- **Settings** (⌘,) tabs: Provider & cost, Tools, Memory, Behavior, Modules, Integrations, Data.
 
 ## Using it
 
@@ -36,7 +36,7 @@ First run, as a user:
 8. Spaces: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
 Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I page agent, ⌘⇧C
-Spaces, ⌘0 to ⌘7 views (Today, Chats, Lists, Calendar, Files, Mail, Memory, Activity), ⌘, settings,
+Spaces, ⌘0 to ⌘6 views (Today, Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
 ⌘⇧P cycle plan mode, ⌘⇧F search chats.
 
 Composer features:
@@ -47,7 +47,7 @@ Composer features:
 - **Always-ask list** (`alwaysAsk` in `llm.py` `DEFAULT_SETTINGS`): `gmail_send`, `calendar_delete`, `trash_local_file`, `move_local_file`, `run_shortcut`, `python_install`, `schedule_task`. No setting or card turns these fully on.
 - **Allow-host card**: when a reply that read the web wants to fetch another page, approve it or pick **Allow <host> from now on** (Settings → Tools → Allowed hosts, `fetchAllowlist`).
 - **Side panel**: the `show` tool opens HTML, SVG, charts and files beside the chat ([docs/side-panel.md](../../../docs/side-panel.md)).
-- Related docs: [docs/docs-editor.md](../../../docs/docs-editor.md), [docs/meetings.md](../../../docs/meetings.md), [docs/health.md](../../../docs/health.md), [docs/activity-monitor.md](../../../docs/activity-monitor.md), [docs/writing-style.md](../../../docs/writing-style.md).
+- Related docs: [docs/docs-editor.md](../../../docs/docs-editor.md), [docs/health.md](../../../docs/health.md), [docs/writing-style.md](../../../docs/writing-style.md).
 
 Backups: Settings → Data keeps daily backups (newest 7 plus one a week), has **Back up now**, a restore
 that applies on next start (`backups.apply_pending_restore`), and **Export all data** as a zip. Deleted
@@ -73,7 +73,7 @@ Groups, by what they do (every tool, danger and default in reference.md):
 | knowledge, docs, memory, graph | search/read uploads and notes, edit notes (you accept a diff), long-term memory, graph |
 | web, browser, vision | search, fetch, feeds, video and repo reads, a driven browser, image reading |
 | google | Calendar (events, find time, propose), Gmail (search, draft, send with undo hold), Tasks, Drive, Docs, Sheets |
-| todos, health, meetings, activity, style | lists, health data, recorded meetings, the activity monitor, writing voice |
+| todos, health, style | lists, health data, writing voice |
 | files, mac, shell, opencode, code | local files (home-scoped), shortcuts, shell in a working folder, coding agent, Python |
 | sandbox | isolated Linux container tools (`sandbox_*`), needs a container runtime |
 | agents, workflows, desk, schedule, skills, spaces | subagents, saved workflows, desks, scheduling, skill authoring, arranging Spaces |

@@ -751,16 +751,21 @@ def test_deleting_a_chat_stops_its_workers_unannounced() -> None:
 
 
 def test_deleting_a_project_stops_its_chats_workers_unannounced() -> None:
+    """Live and archived chats alike: an archived chat's worker may still be running."""
     pid = appmod.projects.create("Doomed project")["id"]
-    cid = appmod.convos.create(pid, "Orchestration", "test-model")["id"]
-    GATES["Doomed project job"] = threading.Event()
-    wid = start_workers(cid, ["Doomed project job"])[0]["worker_id"]
-    wait(lambda: STARTS == ["Doomed project job"], "it to run")
+    chats = {t: appmod.convos.create(pid, "Orchestration", "test-model")["id"] for t in ("Doomed project job", "Archived project job")}
+    wids = {}
+    for title, cid in chats.items():
+        GATES[title] = threading.Event()
+        wids[title] = start_workers(cid, [title])[0]["worker_id"]
+    wait(lambda: len(STARTS) == 2, "both to run")
+    appmod.convos.update(chats["Archived project job"], {"archived": True})
     assert client.delete(f"/projects/{pid}").status_code == 200
-    wait(lambda: store.get(wid)["ended_at"], "the worker to end")
-    assert store.get(wid)["status"] == "interrupted", "stopped, not left to finish as done"
+    for title, wid in wids.items():
+        wait(lambda wid=wid: store.get(wid)["ended_at"], f"{title} to end")
+        assert store.get(wid)["status"] == "interrupted", "stopped, not left to finish as done"
     time.sleep(0.1)
-    assert not seat("wake") and mgr.pending_wakes(cid) == []
+    assert not seat("wake") and all(mgr.pending_wakes(cid) == [] for cid in chats.values())
 
 
 def test_workers_do_not_serialize_on_a_shared_writable_root() -> None:

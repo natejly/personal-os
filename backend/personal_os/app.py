@@ -1165,7 +1165,7 @@ async def delete_project(id: str) -> dict[str, Any]:
     # async so each run's stop Event is set on the loop that owns it. Stop is cooperative: the replies wind down and
     # persist what they wrote, and the chats are still there to restore.
     stopped = 0
-    for c in convos.list(id, include_jobs=True, include_desks=True):
+    for c in (*convos.list(id, include_jobs=True, include_desks=True), *convos.list(id, include_jobs=True, include_desks=True, archived=True)):
         stopped += bool(bus.stop(c["id"]))
         await workers_mgr.stop_conversation(c["id"])  # its background workers end with it, unannounced
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal

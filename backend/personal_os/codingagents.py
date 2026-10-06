@@ -6,8 +6,10 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   user's own account and tools, and prompts for permission inside its own session: a prompt shows as state "blocked",
   which becomes `needs_you` here, and the user answers it with `claude attach <id>`. Progress is read from the plain
   files the CLI keeps under ~/.claude/jobs/<id>/ (state.json, timeline.jsonl), never by following the session's
-  output. Those files are untrusted text. No permission flag is passed unless the caller names a permission_mode, and
-  that is only ever `acceptEdits` or `bypassPermissions`, for that one session.
+  output. Those files are untrusted text. A finished session stays open in the daemon, so a follow-up runs in a copy
+  with a new id that the row then follows; a stopped one is woken under the same id. No permission flag is passed
+  unless the caller names a permission_mode, and that is only ever `acceptEdits` or `bypassPermissions`, for that one
+  session.
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
   has no prompt to answer: the sandbox is its boundary. The registry's hard job cap (600 s) ends it; a follow-up
   `--continue`s the same opencode state folder.
@@ -44,7 +46,7 @@ CLAUDE_HINT = "Claude Code is not installed on this Mac (no `claude` in ~/.local
 ID_RE = re.compile(r"\b[0-9a-f]{8}\b")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}")
-CLAUDE_STATES = {"working": "working", "blocked": "needs_you", "done": "done", "stopped": "stopped"}
+CLAUDE_STATES = {"working": "working", "running": "working", "blocked": "needs_you", "done": "done", "stopped": "stopped", "failed": "failed"}
 JOB_STATES = {"running": "working", "killed": "stopped", "timed_out": "failed", "orphaned": "blocked", "failed": "failed"}
 GIT = ["git", "-c", "core.fsmonitor=false"]  # a repo's own config must not be able to run a program on `git status`
 
@@ -72,9 +74,10 @@ def claude_env() -> dict[str, str]:
 
 
 def parse_job_id(out: str) -> str | None:
-    """The short job id `claude --bg` prints (8 hex chars), or None."""
-    m = ID_RE.search(out or "")
-    return m.group(0) if m else None
+    """The short job id `claude --bg` prints (8 hex chars), or None. The id after "backgrounded" wins: when the CLI
+    starts a copy, its note names the original first."""
+    m = re.search(r"backgrounded\W+([0-9a-f]{8})\b", out or "") or ID_RE.search(out or "")
+    return m.group(m.lastindex or 0) if m else None
 
 
 def _lead(text: str) -> str:
@@ -145,7 +148,7 @@ def read_claude(home: Path, job_id: str, lines: int = 30) -> tuple[dict[str, Any
         except ValueError:
             continue
         t = ev.get("text") or ev.get("detail") if isinstance(ev, dict) else None
-        if isinstance(t, str) and t.strip():
+        if isinstance(t, str) and t.strip() and (not out or out[-1] != t.strip()):  # the CLI repeats the same detail many times in a row
             out.append(t.strip())
     return state, out
 
@@ -155,7 +158,11 @@ def map_claude(state: dict[str, Any]) -> tuple[str, str] | None:
     status = CLAUDE_STATES.get(str(state.get("state")))
     if not status:
         return None
-    detail = (state.get("waitingFor") if status == "needs_you" else None) or state.get("detail") or ""
+    needs = state.get("needs")  # set while "working" too (e.g. an approval pending), or with "blocked"
+    needs = needs.strip() if isinstance(needs, str) else ""
+    if needs and status == "working":
+        status = "needs_you"
+    detail = (needs if status == "needs_you" else None) or state.get("detail") or ""
     return status, shell._scrub(str(detail))[:300]
 
 
@@ -381,8 +388,9 @@ class CodingSessions:
         row["external_id"], row["session_id"] = jid, sess if isinstance(sess, str) and UUID_RE.fullmatch(sess) else None
 
     async def _find_agent(self, exe: str, row: dict[str, Any], jid: str | None = None) -> tuple[str | None, str | None]:
-        """(short id, sessionId) from `claude agents --json`: the entry with this id, else the newest one for this worktree and name."""
-        ok, out = await self.run([exe, "agents", "--json"], row["worktree"], GIT_TIMEOUT, claude_env())
+        """(short id, sessionId) from `claude agents --json --all` (completed sessions too): the entry with this id, else
+        the newest one for this worktree and name."""
+        ok, out = await self.run([exe, "agents", "--json", "--all"], row["worktree"], GIT_TIMEOUT, claude_env())
         try:
             agents = json.loads(out[out.index("["):]) if ok and "[" in out else []
         except ValueError:
@@ -428,7 +436,8 @@ class CodingSessions:
             new = parse_job_id(out)
             detail = "follow-up sent"
             if new and new != row["external_id"]:  # the CLI started a copy instead of continuing this one
-                row["external_id"], row["session_id"], detail = new, None, "the CLI started a copy of this session for the follow-up"
+                row["external_id"], row["session_id"] = new, None
+                detail = f"the original session was still open, so Claude Code continued in a copy ({new}); this session now follows the copy"
                 state, _ = read_claude(self.claude_home, new)
                 sess = (state or {}).get("sessionId")
                 if isinstance(sess, str) and UUID_RE.fullmatch(sess):
@@ -438,6 +447,8 @@ class CodingSessions:
             job = self.jobs.jobs.get(row.get("external_id") or "")
             if (job is not None and job.status in ("running", "orphaned")) or row["status"] in LIVE:
                 raise CodingError("OpenCode is still working on this session; wait for it to finish or stop it first.")
+            if row["status"] == "blocked":  # the job record was lost; the process may still run on the same state folder
+                raise CodingError("OpenCode may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
             try:
                 await self._launch_opencode(row, ctx, message, True)
             except shell.ShellError as e:
@@ -604,7 +615,8 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         ("coding_session_status", "Read one coding session's status, current step and the end of its log. Refreshes it first.",
          _obj({**sid, "lines": {"type": "integer", "default": 30}}, ["id"]), coding_session_status, "safe"),
         ("coding_session_send", "Send a follow-up message to a coding session that has finished or been stopped. A session "
-         "that is still working or waiting for the user cannot take one: wait, or stop it first. Always asks the user.",
+         "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
+         "may continue as a copy with a new external_id. Always asks the user.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),
         ("coding_session_stop", "Stop a running coding session. It keeps its files and can be continued with "
          "coding_session_send. Never removes a session.", _obj(sid, ["id"]), coding_session_stop, "executes"),

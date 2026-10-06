@@ -18,6 +18,10 @@ from personal_os import codingagents as ca
 from personal_os.db import Database
 
 SID = "0b7e6f2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b"
+START_OUT = "backgrounded · 45622d2f · grain-harden-probe\n  claude agents             list sessions\n  claude attach 45622d2f    open in this terminal\n"
+COPY_OUT = ("note: session 45622d2f is already running in the background, so this started a copy as fffebd7b. `claude attach 45622d2f` "
+            "opens the original.\nbackgrounded · fffebd7b\n  claude agents             list sessions\n")
+WOKE_OUT = "note: woke session 45622d2f with its saved options (-n, --model).\nbackgrounded · 45622d2f · grain-harden-probe\n"
 
 
 class Fake:
@@ -121,6 +125,27 @@ class ClaudeDriver(CodingTestCase):
         self.assertEqual(ca.parse_job_id("Started background session a1b2c3d4 (fix)\n"), "a1b2c3d4")
         self.assertIsNone(ca.parse_job_id("no id here, just words"))
         self.assertIsNone(ca.parse_job_id(""))
+        self.assertEqual(ca.parse_job_id(START_OUT), "45622d2f")
+        self.assertEqual(ca.parse_job_id(COPY_OUT), "fffebd7b")  # the note names the original first; the row follows the copy
+        self.assertEqual(ca.parse_job_id(WOKE_OUT), "45622d2f")
+
+    def test_map_claude(self) -> None:
+        self.assertEqual(ca.map_claude({"state": "failed", "detail": "source session x not found"}), ("failed", "source session x not found"))
+        self.assertEqual(ca.map_claude({"state": "blocked", "detail": "d", "needs": "API unavailable"}), ("needs_you", "API unavailable"))
+        self.assertEqual(ca.map_claude({"state": "working", "detail": "d", "needs": "approve message"}), ("needs_you", "approve message"))
+        self.assertEqual(ca.map_claude({"state": "working", "detail": "d", "needs": None}), ("working", "d"))
+        self.assertEqual(ca.map_claude({"state": "running", "detail": "d"}), ("working", "d"))
+        self.assertEqual(ca.map_claude({"state": "blocked", "detail": "d"}), ("needs_you", "d"))
+        self.assertIsNone(ca.map_claude({"state": "weird"}))
+
+    def test_read_claude_drops_consecutive_duplicate_lines(self) -> None:
+        d = self.home / "abcd1234"
+        d.mkdir()
+        (d / "state.json").write_text('{"state": "working"}')
+        evs = [{"detail": "a", "text": ""}, {"detail": "a", "text": ""}, {"detail": "b", "text": "said hi"}, {"detail": "b", "text": ""},
+               {"detail": "a", "text": ""}, {"detail": "a", "text": ""}]
+        (d / "timeline.jsonl").write_text("\n".join(json.dumps(e) for e in evs))
+        self.assertEqual(ca.read_claude(self.home, "abcd1234")[1], ["a", "said hi", "b", "a"])
 
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
@@ -157,11 +182,11 @@ class ClaudeDriver(CodingTestCase):
         cases = [("working", "working", "working"), ("blocked", "needs_you", "needs_you"), ("done", "done", "idle"),
                  ("stopped", "stopped", "idle")]
         for state, status, attention in cases:
-            self.job_files("deadbeef", state, "step", [{"detail": "a"}, {"text": "b"}], waitingFor="permission prompt")
+            self.job_files("deadbeef", state, "step", [{"detail": "a"}, {"text": "b"}])
             row = self.cs.refresh(row)
             self.assertEqual(row["status"], status, state)
             self.assertEqual(ca.summary(row)["attention"], attention, state)
-        self.job_files("deadbeef", "blocked", "x", waitingFor="permission prompt")
+        self.job_files("deadbeef", "blocked", "x", needs="permission prompt")
         row = self.cs.refresh(row)
         s = ca.summary(row)
         self.assertEqual((row["detail"], s["attach_hint"]), ("permission prompt", "claude attach deadbeef"))
@@ -203,6 +228,21 @@ class ClaudeDriver(CodingTestCase):
         self.assertEqual(row["external_id"], "0badf00d")
         self.assertIn("copy", row["detail"])
 
+    async def test_a_follow_up_on_an_open_session_follows_the_copy(self) -> None:
+        row = await self.started()
+        self.job_files("deadbeef", "done")
+        self.fake.out["copy it"] = (True, COPY_OUT)
+        self.job_files("fffebd7b", "working")
+        row = await self.cs.send(row["id"], "copy it")
+        self.assertEqual((row["external_id"], row["status"]), ("fffebd7b", "working"))
+        self.assertIn("copy (fffebd7b)", row["detail"])
+        self.fake.out["wake it"] = (True, WOKE_OUT.replace("45622d2f", "fffebd7b"))
+        self.job_files("fffebd7b", "stopped")
+        self.cs.resumed.clear()  # the grace window after a follow-up would hide "stopped"
+        row = self.cs.refresh(row)
+        row = await self.cs.send(row["id"], "wake it")
+        self.assertEqual((row["external_id"], row["detail"]), ("fffebd7b", "follow-up sent"))
+
     async def test_stop_calls_claude_stop_and_never_rm(self) -> None:
         row = await self.started()
         row = await self.cs.stop(row["id"])
@@ -230,6 +270,14 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual(ca.map_job(job("timed_out"))[0], "failed")
         self.assertIn("600", ca.map_job(job("timed_out"))[1])
         self.assertEqual(ca.map_job(job("orphaned"))[0], "blocked")
+
+    async def test_send_refused_when_the_job_record_was_lost(self) -> None:
+        wt, t = str(self.repo), 1.0
+        with self.cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s2','opencode','gone',?,?,'n','p','blocked','',?,?)", (wt, wt, t, t))
+        with self.assertRaisesRegex(ca.CodingError, "Stop it first"):
+            await self.cs.send("s2", "more")
 
     async def test_send_refused_while_the_job_runs_and_a_gone_job_is_blocked(self) -> None:
         wt, t = str(self.repo), 1.0

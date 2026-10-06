@@ -16,7 +16,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail,
+  BackupInfo, DataOverview, IMessageStatus, SandboxStatus, ShellJobInfo, ShellJobTail,
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
@@ -193,6 +193,9 @@ export const api = {
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
   sandboxes: () => req<SandboxStatus>('/sandboxes'),
+  imessageStatus: () => req<IMessageStatus>('/imessage/status'),
+  imessageTest: (handle?: string) => req<{ ok: boolean; error?: string }>('/imessage/test', { method: 'POST', body: json(handle ? { handle } : {}) }),
+  imessageOpenFda: () => req<{ ok: boolean }>('/imessage/open-fda', { method: 'POST' }),
   resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),

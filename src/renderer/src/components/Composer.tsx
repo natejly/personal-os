@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Attachment, Command, Skill } from '@shared/types'
+import type { Attachment, Command, DeskAutonomy, Skill } from '@shared/types'
 import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
@@ -10,7 +10,6 @@ import { ArrowUp, AudioLines, Square, Paperclip, Loader2, EyeOff, Sparkles, Down
 import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
 import { PermissionModePill } from './PermissionMode'
-import WorkingFolder from './WorkingFolder'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
 import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
@@ -23,6 +22,7 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { compactNow } from '../lib/compact'
+import { startAutonomy } from '../lib/autonomyDefault'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, setDraftFiles, useDraft, useDraftFiles } from '../lib/drafts'
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
@@ -68,6 +68,10 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const cardPending = useStore((s) => !!queueId && (s.sessions[queueId]?.pendingApprovals ?? 0) > 0)
   const desk = useStore((s) => !!queueId && s.desks.some((d) => d.conversation_id === queueId))
   const deskBound = useStore((s) => !!s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.deskId)
+  // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget, page agent or a pop-out.
+  const newChat = !onSend && !compact && !activeId
+  const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
+    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent, private: st.draftPrivate })
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
@@ -278,7 +282,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const here = activeId ? st.sessions[activeId]?.conversation.settings.agent : st.draftChatSettings.agent
     const to = onSend ? null : routeMention(t, agentRows.map((a) => a.name))
     const ok = await (onSend ? onSend(t, sent)
-      : to && to.agent !== here ? st.sendToAgent(to.agent, to.text, sent) : send(t, conversationId, sent)).catch(() => false)
+      : to && to.agent !== here ? st.sendToAgent(to.agent, to.text, sent) : send(t, conversationId, sent, newChatAutonomy(st))).catch(() => false)
     const k1 = keyNow()
     // The new chat has its row now: anything typed while it was being made follows it.
     if (k0.startsWith('new:') && k1.startsWith('c:')) moveDraft(k0, k1)
@@ -460,8 +464,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             <PermissionModePill />
             {/* A chat working autonomously plans by its desk's autonomy, so its own plan mode steps aside. */}
             {!deskBound && <PlanModeToggle conversationId={conversationId} />}
-            <AutonomyToggle conversationId={conversationId} />
-            <WorkingFolder conversationId={conversationId} />
+            <AutonomyToggle conversationId={conversationId} draft={newChat} />
           </>
         )}
       </div>

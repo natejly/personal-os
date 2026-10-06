@@ -283,13 +283,13 @@ def test_tainted_run_asks_before_putting_text_into_a_page(env) -> None:
 def test_upload_containment_and_ask(env, tmp_path: Path) -> None:
     root = env.ws.ensure("d1")
     (root / "outputs" / "r.txt").write_text("x")
-    outside = tmp_path / "secret.txt"
+    outside = tmp_path / ".env"  # a credential file is refused; an ordinary file outside the workspace is not
     outside.write_text("x")
     out = env.run("browser_manage", action="upload", ref="e9", paths=["outputs/r.txt"])
     assert env.cards[-1]["action"] == "upload" and env.cards[-1]["files"] == ["r.txt"]
     assert env.fake.calls[-1][0] == "act" and env.fake.calls[-1][1]["paths"] == [str(root / "outputs" / "r.txt")] and "error" not in out
     n = len(env.fake.calls)
-    for bad in (str(outside), "../../../secret.txt", "outputs/missing.txt"):
+    for bad in (str(outside), "../../../.env", "outputs/missing.txt"):
         assert env.run("browser_manage", action="upload", ref="e9", paths=[bad]).get("error"), bad
     assert len(env.fake.calls) == n
     env.answers.append(False)

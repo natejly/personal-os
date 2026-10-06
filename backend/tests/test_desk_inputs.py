@@ -64,23 +64,26 @@ def test_uploaded_document_copies_its_stored_bytes(tmp_path: Path) -> None:
     assert (workspace.desk_root(desk["id"]) / "inputs" / "report.pdf").read_bytes() == stored.read_bytes()
 
 
-def test_local_path_must_be_under_home(home: Path, tmp_path: Path) -> None:
+def test_local_path_may_be_anywhere_but_the_protected_places(home: Path, tmp_path: Path) -> None:
     inside = home / "notes.txt"
     inside.write_text("hello")
     desk = new_desk(inputs=[{"kind": "path", "path": str(inside)}])
     assert (workspace.desk_root(desk["id"]) / "inputs" / "notes.txt").read_text() == "hello"
 
-    outside = tmp_path / "elsewhere.txt"
-    outside.write_text("nope")
-    r = client.post("/cowork/desks", json={"brief": "x", "start": False, "inputs": [{"kind": "path", "path": str(outside)}]})
-    assert r.status_code == 400 and "home" in r.text
+    outside = tmp_path / "elsewhere.txt"  # outside the home folder: fine
+    outside.write_text("fine")
+    other = new_desk(inputs=[{"kind": "path", "path": str(outside)}])
+    assert (workspace.desk_root(other["id"]) / "inputs" / "elsewhere.txt").read_text() == "fine"
     link = home / "sneaky.txt"
     link.symlink_to(outside)
     r = client.post(f"/cowork/desks/{desk['id']}/inputs", json={"inputs": [{"kind": "path", "path": str(link)}]})
-    assert r.status_code == 400, "a symlink that escapes home is refused"
+    assert r.status_code == 200, "a symlink is judged where it points, and that is fine"
     (home / "id_rsa").write_text("secret")
     r = client.post(f"/cowork/desks/{desk['id']}/inputs", json={"inputs": [{"kind": "path", "path": str(home / 'id_rsa')}]})
     assert r.status_code == 400, "credential files are refused"
+    grains = workspace.desk_root(desk["id"]) / "inputs" / "notes.txt"  # Grain's own data folder
+    r = client.post(f"/cowork/desks/{desk['id']}/inputs", json={"inputs": [{"kind": "path", "path": str(grains)}]})
+    assert r.status_code == 400 and "off limits" in r.text
 
 
 def test_oversize_inputs_are_refused_by_quota(tmp_path: Path) -> None:
@@ -100,7 +103,7 @@ def test_inputs_are_read_only_to_desk_writers(tmp_path: Path) -> None:
                  lambda: ws.reserve_file("d1", "inputs/download.bin")):
         with pytest.raises(WorkspaceError, match="read-only"):
             call()
-    g = fsx.Grants([], ws.desk_root("d1").resolve())
+    g = fsx.Grants(ws.desk_root("d1").resolve())
     with pytest.raises(fsx.FsError, match="read-only"):
         fsx.resolve_path("inputs/x.md", g, write=True)
     # A shell write gets past the guards; the baseline makes it show up instead of passing silently.

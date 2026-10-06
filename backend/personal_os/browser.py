@@ -327,8 +327,6 @@ def register(tb: Any) -> None:
                 p = fsx.resolve_path(raw, g)
                 if why := fsx.sensitive_reason(raw, p):
                     raise fsx.FsError(why)
-                if not (g.in_desk(p) or g.in_roots(p)):
-                    raise fsx.FsError("it is outside the desk workspace and every granted folder")
                 if not p.is_file():
                     raise fsx.FsError("it is not a file")
             except fsx.FsError as e:

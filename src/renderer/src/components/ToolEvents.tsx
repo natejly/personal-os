@@ -20,6 +20,7 @@ import { latestBrowserCall } from '../lib/browserApproval'
 import '../styles/cowork.css'
 import '../styles/docs.css'
 import Face from './Face'
+import { reviewLine, reviewTitle } from '../lib/approvalHistory'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />, show: <PanelRight size={13} />,
@@ -368,6 +369,7 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
             {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
           </>
         ) : <Row render={() => genericRow(t)} />}
+        {reviewLine(t.review) && <div className="tool-review muted small" title={reviewTitle(t.review)}>{reviewLine(t.review)}</div>}
         <OutputFiles event={t} conversationId={conversationId} />
       </RenderBoundary>
     )

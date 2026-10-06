@@ -3602,6 +3602,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
     # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
     if (not error and text and not gone and not proposal_only(run)
+            and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
         user_only = bool(tool_ctx["tainted"])

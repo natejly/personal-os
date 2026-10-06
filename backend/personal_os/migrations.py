@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from bisect import bisect_left, bisect_right
 from typing import Callable
 
-from .memory_limits import BACKFILL_LOOKBACK_S, BACKFILL_WINDOW_S
+from .memory_limits import BACKFILL_WINDOW_S
 
 Step = Callable[[sqlite3.Connection], None]
 
@@ -278,29 +279,32 @@ def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
     Extraction lands within BACKFILL_WINDOW_S of its reply finishing. Exactly one reply in that window is a
     match; none or several is ambiguous and the memory stays unlinked, because a wrong source is worse than none.
     Finish time is the latest trace span end (epoch ms) of the reply itself, else the row's created_at. The
-    auto-learn span is skipped: it is appended after the memory is written, so it always ends later."""
-    if "source_message_id" not in _cols(c, "memories") or "trace" not in _cols(c, "messages"):
+    auto-learn span is skipped: it is appended after the memory is written, so it always ends later. A memory
+    that replaced another row (an edit or a merge) is skipped too."""
+    if not {"source_message_id", "superseded_by"} <= _cols(c, "memories") or "trace" not in _cols(c, "messages"):
         return
+    # A row that replaced another is a user edit or a tidy-up merge, not a fresh learn: its time says nothing about a reply.
     mems = c.execute("SELECT id, created_at FROM memories WHERE source='auto' "
-                     "AND source_conversation_id IS NULL AND source_message_id IS NULL").fetchall()
+                     "AND source_conversation_id IS NULL AND source_message_id IS NULL "
+                     "AND id NOT IN (SELECT superseded_by FROM memories WHERE superseded_by IS NOT NULL)").fetchall()
+    replies = []  # (finish, id, conversation_id, created_at), computed once and sorted by finish
+    for mid, conv, created, trace in c.execute("SELECT id, conversation_id, created_at, trace FROM messages WHERE role='assistant'").fetchall():
+        fin = created
+        try:
+            ends = [sp["end"] / 1000 for sp in json.loads(trace or "[]")
+                    if isinstance(sp, dict) and sp.get("kind") != "learn" and isinstance(sp.get("end"), (int, float))]
+            fin = max(ends) if ends else created
+        except (ValueError, TypeError):
+            pass
+        replies.append((fin, mid, conv, created))
+    replies.sort()
+    fins = [r[0] for r in replies]
     for mem in mems:
         t = mem[1]
-        cands = []
-        for mid, conv, created, trace in c.execute(
-                "SELECT id, conversation_id, created_at, trace FROM messages WHERE role='assistant' AND created_at<=? AND created_at>=?",
-                (t, t - BACKFILL_LOOKBACK_S)).fetchall():
-            fin = created
-            try:
-                ends = [sp["end"] / 1000 for sp in json.loads(trace or "[]")
-                        if isinstance(sp, dict) and sp.get("kind") != "learn" and isinstance(sp.get("end"), (int, float))]
-                fin = max(ends) if ends else created
-            except (ValueError, TypeError):
-                pass
-            if t - BACKFILL_WINDOW_S <= fin <= t:
-                cands.append((mid, conv, created))
+        cands = [r for r in replies[bisect_left(fins, t - BACKFILL_WINDOW_S):bisect_right(fins, t)] if r[3] <= t]
         if len(cands) != 1:
             continue
-        _, conv, created = cands[0]
+        _, _, conv, created = cands[0]
         um = c.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' AND created_at<=? ORDER BY created_at DESC LIMIT 1",
                        (conv, created)).fetchone()
         if um:

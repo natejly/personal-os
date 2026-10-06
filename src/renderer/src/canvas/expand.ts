@@ -3,7 +3,7 @@ import { handoff } from '../lib/handoff'
 import { viewHidden } from '../moduleToggles'
 import { useStore } from '../store'
 
-/** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */
+/** Kinds with a classic equivalent. Usage has none, so they get no Expand. */
 const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
 
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Views). Memory lives in
@@ -12,7 +12,7 @@ const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
   todos: 'todos', calendar: 'calendar'
 }
 
-/** Whether a window kind has a reachable classic equivalent (false for note, usage, or a hidden view). */
+/** Whether a window kind has a reachable classic equivalent (false for usage, or a hidden view). */
 export const canExpand = (w: CanvasWindow): boolean => {
   if (!EXPANDABLE.has(w.kind)) return false
   const view = HIDEABLE_VIEW[w.kind]

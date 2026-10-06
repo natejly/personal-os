@@ -66,7 +66,6 @@ from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAU
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
 from .microvm import SandboxError, Sandboxes
-from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .filesnap import FileSnapshots, router as filesnap_router
@@ -6874,11 +6873,10 @@ async def recap(force: bool = False) -> dict[str, Any]:
     return {**recaps.save(day, content), "cached": False}
 
 
-# ---------------- canvas mode: spaces, windows, notes ----------------
+# ---------------- canvas mode: spaces and windows ----------------
 canvases = Canvases(db)
 toolbox.canvases = canvases
-notes = Notes(db)
-presets = CanvasPresets(db, canvases, notes)
+presets = CanvasPresets(db, canvases, docs)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -6964,19 +6962,6 @@ class WindowLayoutIn(BaseModel):
 
 class LayoutIn(BaseModel):
     windows: list[WindowLayoutIn] = []
-
-
-class NoteIn(BaseModel):
-    body: str = ""
-    color: str = "yellow"
-    project_id: str | None = None
-
-
-class NotePatch(BaseModel):
-    body: str | None = None
-    color: str | None = None
-    project_id: str | None = None
-    clear_project: bool = False
 
 
 @app.get("/canvases")
@@ -7073,45 +7058,6 @@ def raise_canvas_window(wid: str) -> dict[str, Any]:
 @app.delete("/windows/{wid}")
 def delete_canvas_window(wid: str) -> dict[str, bool]:
     canvases.delete_window(wid)
-    return {"ok": True}
-
-
-@app.get("/notes")
-def list_notes(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
-    scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return notes.list(scope, q)
-
-
-@app.post("/notes")
-def create_note(body: NoteIn) -> dict[str, Any]:
-    return notes.create(body.body, body.color, wsid(body.project_id))
-
-
-@app.get("/notes/{id}")
-def get_note(id: str) -> dict[str, Any]:
-    n = notes.get(id)
-    if not n:
-        raise HTTPException(404)
-    return n
-
-
-@app.put("/notes/{id}")
-def update_note(id: str, body: NotePatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
-    if body.clear_project:
-        patch["project_id"] = None
-    elif "project_id" in patch:
-        patch["project_id"] = wsid(patch["project_id"])
-    n = notes.update(id, patch)
-    if not n:
-        raise HTTPException(404)
-    return n
-
-
-@app.delete("/notes/{id}")
-def delete_note(id: str) -> dict[str, bool]:
-    notes.delete(id)
-    canvases.delete_windows_for("note", id)
     return {"ok": True}
 
 

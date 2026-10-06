@@ -1,8 +1,7 @@
 """Docs: long-form markdown notes with a revision history and reviewable assistant edits.
 
-Distinct from two neighbours that sound similar:
+Distinct from a neighbour that sounds similar:
   * `documents` — files the user uploads, chunked for retrieval. Read-only knowledge.
-  * `notes` — canvas mode's sticky notes: a body, a colour, no history.
 
 A doc is something the user writes. Every change lands as a revision, so the editor can show a diff
 and walk backwards. Assistant edits never touch `docs.content`: they land as a *pending* revision the
@@ -28,7 +27,7 @@ from .repos import ALL, _scope_clause, cjk_like, fts_query, is_isolated
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
   id TEXT PRIMARY KEY,
-  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like todos and notes
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like todos
   title TEXT NOT NULL DEFAULT 'Untitled',
   content TEXT NOT NULL DEFAULT '',
   folder TEXT NOT NULL DEFAULT '',
@@ -189,6 +188,19 @@ def doc_hit(r: Any) -> dict[str, Any]:
 # A burst of keystrokes is one edit, not forty. Consecutive user revisions inside this window are
 # folded into the newest one, so the history reads as sessions rather than as a keylogger.
 COALESCE_SECONDS = 180.0
+
+
+_LEAD_MARKS = re.compile(r"^\s*(?:#{1,6}(?:\s+|$)|[-*+](?:\s+|$)(?:\[[ xX]\](?:\s+|$))?|\d+[.)](?:\s+|$)|>\s*)+")
+
+
+def title_from_body(body: str, fallback: str = "Sticky note", limit: int = 60) -> str:
+    """A doc title for text that never had one: its first non-empty line, minus leading heading / list / quote
+    markers, clipped to `limit`. Used when a sticky note became a doc (migration 12, old preset files)."""
+    for line in (body or "").splitlines():
+        t = _LEAD_MARKS.sub("", line).strip()
+        if t:
+            return t[:limit].rstrip()
+    return fallback
 
 
 # The folder daily notes live in (personal tree), and the shape of a wiki link: [[Title]] or [[Title|alias]].

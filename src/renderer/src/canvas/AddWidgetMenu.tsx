@@ -12,7 +12,6 @@ const noop = (): void => undefined
 const FAILED: MenuEntry[] = [{ label: "Couldn't load", disabled: true, run: noop }]
 const RECENT_CHATS = 12
 const RECENT_NOTES = 10
-const NOTE_LABEL = 40
 
 /** Any load behind a submenu: a failure is a disabled row, never a throw into the menu. */
 const safe = (load: () => MenuEntry[] | Promise<MenuEntry[]>) => async (): Promise<MenuEntry[]> => {
@@ -26,12 +25,6 @@ const safe = (load: () => MenuEntry[] | Promise<MenuEntry[]>) => async (): Promi
 /** A create-then-open action: its failure is a toast, since the menu is already gone. */
 const act = (fn: () => Promise<unknown>) => (): void => {
   fn().catch((e: unknown) => useStore.getState().toast((e as Error)?.message ?? String(e), 'error'))
-}
-
-const noteLabel = (body: string): string => {
-  const line = body.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
-  if (!line) return 'Empty note'
-  return line.length > NOTE_LABEL ? `${line.slice(0, NOTE_LABEL - 1)}…` : line
 }
 
 /** Registry icons are drawn for widget chrome (15–18px); a menu row wants them at 14. */
@@ -63,25 +56,6 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
       { kind: 'header', label: 'Recent' },
       // ensureWindow: a chat already in this space is focused, not duplicated.
       ...recent.map((c): MenuEntry => ({ label: c.title || 'Untitled', run: act(() => cv().ensureWindow(canvasId, 'chat', c.id, undefined, at)) }))
-    ]
-  }
-
-  const note = async (): Promise<MenuEntry[]> => {
-    const notes = (await api.notes.list('all')).sort((a, b) => b.updated_at - a.updated_at).slice(0, RECENT_NOTES)
-    const fresh: MenuEntry = {
-      label: 'New sticky note',
-      icon: <Plus size={14} />,
-      run: act(async () => {
-        const n = await api.notes.create({ project_id: projectOf() })
-        await open('note', n.id)
-      })
-    }
-    if (!notes.length) return [fresh]
-    return [
-      fresh,
-      { kind: 'separator' },
-      { kind: 'header', label: 'Recent notes' },
-      ...notes.map((n): MenuEntry => ({ label: noteLabel(n.body), run: act(() => open('note', n.id)) }))
     ]
   }
 
@@ -132,7 +106,6 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 
   const pickers: Partial<Record<WidgetKind, () => MenuEntry[] | Promise<MenuEntry[]>>> = {
     chat,
-    note,
     doc,
     project,
     crew

@@ -199,7 +199,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     code, tables) for A4 or Letter, or files the PDF straight into Uploads. On macOS any note can be recorded or dictated into, with the
     transcript kept apart from the text and a summary proposed for you to
     accept. See [docs/docs-editor.md](docs/docs-editor.md).
-  - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other
+  - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a

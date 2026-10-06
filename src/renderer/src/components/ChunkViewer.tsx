@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileText, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { lineAt, meetingView, rangeSpan, splitHighlight } from '../lib/highlight'
+import { lineAt, rangeSpan, splitHighlight } from '../lib/highlight'
 import { useStore } from '../store'
 import type { ContextUsed } from '@shared/types'
 
@@ -18,11 +18,6 @@ export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClo
     const id = (isDoc && chunk.doc_id) || chunk.document_id || ''
     void (async () => {
       try {
-        if (chunk.source === 'meeting' && chunk.meeting_id) {
-          // A transcript is not part of the meeting payload: show the cited lines on their own.
-          setView(meetingView(chunk, await api.meetings.get(chunk.meeting_id)))
-          return
-        }
         const [span, text] = await Promise.all([
           chunk.chunk_id ? api.chunkSpan(isDoc, id, chunk.chunk_id) : rangeSpan(chunk),
           isDoc ? api.docs.get(id).then((d) => d.content) : api.documents.get(id).then((d) => d.text ?? '')

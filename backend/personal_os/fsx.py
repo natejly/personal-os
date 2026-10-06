@@ -1,19 +1,19 @@
-"""File tools over granted folders: glob, grep, exact-string edit, copy and mkdir.
+"""File tools for anywhere on this Mac: glob, grep, exact-string edit, copy and mkdir.
 
 The agent works on a folder cheaply and safely with these instead of rewriting whole files. Three ideas hold
 the module together:
 
-* Granted folders. Reads may go anywhere `mac.allowed_path` allows. A write must land inside the active desk's
-  workspace (always fine), or inside a folder the user listed under the `workspaceRoots` setting. Anything else
-  is not refused outright: `needs_approval` says so, the reply loop turns the call into an approval card, and the
-  tool only proceeds when the loop sets `ctx["fs_outside_ok"]` after the user said yes. A tainted reply (it has
-  read untrusted content) must ask even inside a granted folder, and an unattended background run may only
-  write inside a desk workspace.
+* Scope and approval. The tools reach anywhere `mac.allowed_path` allows, which is the whole Mac minus Grain's own data
+  folder and app (`mac.protected_reason`). A call is not refused outright for being risky: `needs_approval` /
+  `needs_ask` say when it needs the user, the reply loop turns the call into an approval card, and the tool only
+  proceeds when the loop sets `ctx["fs_outside_ok"]` after the user said yes. That is the case for a credential
+  store (`mac.sensitive_reason`) read or written directly, and for any write outside the active desk's workspace
+  while the reply has read untrusted content. An unattended background run may only write inside a desk workspace.
 * Read before write. Every read that returns content records what was seen (file, mtime, character ranges) in
   `ReadLedger`. An edit needs the region it changes to have been read, an overwrite needs the whole file, and a
   file that changed since it was read is refused rather than clobbered.
-* Credentials stay out. Names that carry secrets (.env files, key files, cloud and ssh folders) and /dev, /proc
-  are refused for reads and skipped by glob and grep, whichever way a symlink reaches them.
+* Credentials stay out of scans. glob and grep skip credential files inside a tree, whichever way a symlink reaches
+  them; device files (/dev, /proc) are refused outright.
 
 Nothing here talks to the network or a shell. `register` adds the tools to a Toolbox.
 """
@@ -47,13 +47,6 @@ DIFF_MAX_CHARS = 8_000
 BLOCK_SIMILARITY = 0.65
 RESERVED_DESK_DIRS = (".baseline", ".trash", "inputs")  # bookkeeping and the user's input snapshots, never a write target
 
-SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".azure", "gcloud", ".docker"})
-SENSITIVE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".ppk"})
-SENSITIVE_NAMES = frozenset({".netrc", ".npmrc", ".pgpass", ".git-credentials", ".pypirc", "credentials", "credentials.json",
-                             "application_default_credentials.json"})
-SENSITIVE_PREFIXES = ("/dev/", "/proc/")
-KEY_FILE_RE = re.compile(r"^id_(rsa|dsa|ecdsa|ed25519)(?!.*\.pub$)")
-
 
 class FsError(Exception):
     """A clean one-line failure for the tool error envelope."""
@@ -61,17 +54,16 @@ class FsError(Exception):
 
 # ---------------------------------------------------------------- grants and paths
 class Grants:
-    def __init__(self, roots: list[Path], desk: Path | None) -> None:
-        self.roots, self.desk = roots, desk
+    """What a run is sure to be allowed to touch: its desk's workspace (which sits in the protected data folder)."""
+
+    def __init__(self, desk: Path | None) -> None:
+        self.desk = desk
 
     def in_desk(self, p: Path) -> bool:
         return self.desk is not None and (p == self.desk or p.is_relative_to(self.desk))
 
-    def in_roots(self, p: Path) -> bool:
-        return mac.in_roots(p, self.roots)
-
-    def default_root(self) -> Path | None:
-        return self.desk or (self.roots[0] if self.roots else None)
+    def default_root(self) -> Path:
+        return self.desk or mac.home()
 
 
 def carry_desk_copies(box: Any, ctx: dict[str, Any], g: Grants, paths: list[Path]) -> None:
@@ -97,16 +89,6 @@ def carry_desk_copies(box: Any, ctx: dict[str, Any], g: Grants, paths: list[Path
 
 
 def grants_for(box: Any, ctx: dict[str, Any]) -> Grants:
-    roots: list[Path] = []
-    # The run's settings first: a chat bound to a working folder carries it in its own workspaceRoots.
-    raw = permissions.get(ctx.get("settings") or box.settings(), "workspaceRoots") or []
-    for r in raw if isinstance(raw, list) else []:
-        try:
-            p = mac.allowed_root(str(r))
-        except mac.LocalPathError:
-            continue
-        if p.is_dir() and p not in roots:
-            roots.append(p)
     desk: Path | None = None
     did, ws = ctx.get("desk_id"), getattr(box, "workspace", None)
     if did and ws is not None:
@@ -114,33 +96,18 @@ def grants_for(box: Any, ctx: dict[str, Any]) -> Grants:
             desk = ws.desk_root(str(did)).resolve()
         except Exception:  # noqa: BLE001 - a malformed id means "no desk", not a crash
             desk = None
-    return Grants(roots, desk)
+    return Grants(desk)
 
 
 def sensitive_reason(*paths: str | Path) -> str | None:
-    """Why a path may not be read, or None. Judge the spelled path AND the resolved one: a symlink named
-    notes.txt that points at ~/.aws/credentials is refused by the second."""
-    for raw in paths:
-        s = str(raw)
-        if s.startswith(SENSITIVE_PREFIXES) or s in ("/dev", "/proc"):
-            return "device and process files are off limits"
-        parts = Path(s).parts
-        name = parts[-1] if parts else ""
-        low = name.lower()
-        if low == ".env" or low.startswith(".env.") or low == ".envrc":
-            return "environment files hold secrets and are off limits"
-        if KEY_FILE_RE.match(low) or Path(low).suffix in SENSITIVE_SUFFIXES:
-            return "key files are off limits"
-        if low in SENSITIVE_NAMES:
-            return "credential files are off limits"
-        if any(x in SENSITIVE_DIRS for x in parts[:-1]) or name in SENSITIVE_DIRS:
-            return "credential folders are off limits"
-    return None
+    """`mac.sensitive_reason`: why a path is a credential store (or a device file). Kept here for the callers that
+    refuse such a path outright (mail attachments, uploads, the browser)."""
+    return mac.sensitive_reason(*paths)
 
 
 def resolve_path(raw: Any, g: Grants, *, write: bool = False) -> Path:
     """Spell out a path the way the user meant it, resolve symlinks, and require it to be somewhere the agent
-    may be: inside the desk workspace, or anywhere `mac.allowed_path` allows."""
+    may be: inside the desk workspace, or anywhere `mac.allowed_path` allows (the whole Mac but Grain's own folder and app)."""
     s = str(raw or "").strip()
     if not s:
         raise FsError("empty path")
@@ -159,6 +126,8 @@ def resolve_path(raw: Any, g: Grants, *, write: bool = False) -> Path:
             r = mac.allowed_path(str(r))
         except mac.LocalPathError as e:
             raise FsError(str(e)) from None
+        if mac.is_device(r):
+            raise FsError("device and process files are off limits")
     if write:
         bad = next((x.lower() for x in (Path(q).suffix for q in r.parts) if x.lower() in mac.BLOCKED_WRITE_SUFFIXES), None)
         if bad:
@@ -172,19 +141,31 @@ LOCAL_SOURCES = frozenset({"read_local_file", "fs_grep", "fs_glob", "find_files"
 
 def untrusted(ctx: dict[str, Any]) -> bool:
     """The reply has read content from outside the user's own folders (web, mail, a connector). Reading a local file
-    alone does not count: the user granted that folder to the agent."""
+    alone does not count: they are the user's own files."""
     if not ctx.get("tainted"):
         return False
     sources = ctx.get("taint_sources") or []
     return not sources or any(x not in LOCAL_SOURCES for x in sources)
 
 
-def needs_approval(p: Path, ctx: dict[str, Any], g: Grants) -> bool:
-    """True for a write the user has not pre-authorised: outside every granted folder, or inside a granted
-    folder (not a desk) while the reply has read untrusted content."""
+def approval_reason(p: Path, ctx: dict[str, Any], g: Grants, *, write: bool = True, raw: Any = None) -> str | None:
+    """Why this access needs the user's OK, or None. Inside the desk workspace never. Elsewhere a credential store
+    (the spelled path or the resolved one) always does, for a read as well as a write, and a write also does while
+    the reply has read untrusted content."""
     if g.in_desk(p):
-        return False
-    return (not g.in_roots(p)) or untrusted(ctx)
+        return None
+    spelled = mac._spelled(raw) if isinstance(raw, (str, Path)) and str(raw).strip() else p
+    if why := mac.sensitive_reason(spelled, p):
+        return why
+    if write and untrusted(ctx):
+        return "this reply has read untrusted content, so a write outside the desk workspace needs a yes"
+    return None
+
+
+def needs_approval(p: Path, ctx: dict[str, Any], g: Grants, raw: Any = None) -> bool:
+    """True for a write the user has not pre-authorised: a credential store, or any write outside a desk workspace
+    while the reply has read untrusted content."""
+    return approval_reason(p, ctx, g, raw=raw) is not None
 
 
 def write_target(raw: Any, ctx: dict[str, Any], g: Grants) -> Path:
@@ -193,30 +174,76 @@ def write_target(raw: Any, ctx: dict[str, Any], g: Grants) -> Path:
         return p
     if ctx.get("proposal_only"):
         raise FsError("this is an unattended background run, which may only write inside a desk workspace")
-    if needs_approval(p, ctx, g) and not ctx.get("fs_outside_ok"):
-        raise FsError(f"{p} is not inside a folder the user granted, so it needs their approval; "
-                      "tell them what you would change, or ask them to add the folder under Settings, Tools, Workspace folders")
+    if (why := approval_reason(p, ctx, g, raw=raw)) and not ctx.get("fs_outside_ok"):
+        raise FsError(f"{p.name}: {why}; it needs the user's approval, so tell them what you would change")
     return p
 
 
-# Which argument of each writing tool names a path the user must have granted.
-WRITE_ARGS = {"fs_edit": ("path",), "fs_mkdir": ("path",), "fs_copy": ("dst",)}
+# Which argument of each tool names a path the user may have to approve: writes (a credential store, or any path
+# after untrusted content) and reads of a credential store.
+WRITE_ARGS = {"fs_edit": ("path",), "fs_mkdir": ("path",), "fs_copy": ("dst",), "write_local_file": ("path",),
+              "move_local_file": ("path", "to"), "trash_local_file": ("path",)}
+LOCAL_TOOLS = frozenset({"read_local_file", "write_local_file", "move_local_file", "trash_local_file"})
+READ_ARGS = {"read_local_file": ("path",), "fs_grep": ("root",), "fs_glob": ("root",), "fs_copy": ("src",)}
 
 
 def needs_ask(box: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> bool:
     """For the reply loop: should this call be shown to the user as an approval card? A path that does not
     resolve is not a reason to ask; the tool reports it."""
-    keys = WRITE_ARGS.get(name)
-    if not keys or not isinstance(args, dict):
+    if not isinstance(args, dict) or (name not in WRITE_ARGS and name not in READ_ARGS):
         return False
-    g = grants_for(box, ctx)
-    for k in keys:
+    g = Grants(None) if name in LOCAL_TOOLS else grants_for(box, ctx)  # the local-file tools never target a desk workspace
+    for write, keys in ((True, WRITE_ARGS.get(name, ())), (False, READ_ARGS.get(name, ()))):
+        for k in keys:
+            if not str(args.get(k) or "").strip():
+                continue
+            try:
+                if needs_approval_for(args[k], ctx, g, write):
+                    return True
+            except FsError:
+                continue
+    return False
+
+
+def needs_approval_for(raw: Any, ctx: dict[str, Any], g: Grants, write: bool) -> bool:
+    p = resolve_path(raw, g, write=write)
+    return approval_reason(p, ctx, g, write=write, raw=raw) is not None
+
+
+def system_write(box: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    """True when a write this call makes lands in a system area (mac.system_area): a soft force, so manual mode shows a
+    card, auto mode sends it to strict review and allow-all runs it."""
+    if not isinstance(args, dict):
+        return False
+    g = Grants(None) if name in LOCAL_TOOLS else grants_for(box, ctx)
+    for k in WRITE_ARGS.get(name, ()):
+        if not str(args.get(k) or "").strip():
+            continue
         try:
-            if needs_approval(resolve_path(args.get(k), g, write=True), ctx, g):
-                return True
+            p = resolve_path(args[k], g, write=True)
         except FsError:
             continue
+        if not g.in_desk(p) and mac.system_area(p):
+            return True
     return False
+
+
+def guard_local(box: Any, ctx: dict[str, Any], name: str, args: dict[str, Any]) -> None:
+    """Run before write_local_file / move_local_file / trash_local_file: raises mac.LocalPathError when the call needs the
+    user's OK (a credential store, or a write after untrusted content) and the reply loop has not got it."""
+    if ctx.get("fs_outside_ok"):
+        return
+    g = Grants(None)
+    for k in WRITE_ARGS.get(name, ()):
+        raw = args.get(k)
+        if not str(raw or "").strip():
+            continue
+        try:
+            p = resolve_path(raw, g, write=True)
+        except FsError:
+            continue  # the tool reports a path it cannot use
+        if why := approval_reason(p, ctx, g, raw=raw):
+            raise mac.LocalPathError(f"{p.name}: {why}; it needs the user's approval, so tell them what you would change")
 
 
 # ---------------------------------------------------------------- read ledger
@@ -555,7 +582,8 @@ def _walk(base: Path):
         yield d, dirs, sorted(files)
 
 
-def glob_files(base: Path, pattern: str) -> tuple[list[dict[str, Any]], bool]:
+def glob_files(base: Path, pattern: str, allow_sensitive: bool = False) -> tuple[list[dict[str, Any]], bool]:
+    """`allow_sensitive`: the user approved a credential folder as the root, so what is inside it is listed."""
     rx = glob_regex(pattern)
     hits: list[tuple[float, dict[str, Any]]] = []
     scanned = 0
@@ -568,13 +596,13 @@ def glob_files(base: Path, pattern: str) -> tuple[list[dict[str, Any]], bool]:
             rel = full.relative_to(base).as_posix()
             if not rx.match(rel):
                 continue
-            if sensitive_reason(full):
+            if not allow_sensitive and sensitive_reason(full):
                 continue
             try:
                 st = full.lstat()
                 if full.is_symlink():
                     tgt = full.resolve()
-                    if not (tgt == base or tgt.is_relative_to(base.resolve())) or sensitive_reason(tgt):
+                    if not (tgt == base or tgt.is_relative_to(base.resolve())) or (not allow_sensitive and sensitive_reason(tgt)):
                         continue
             except OSError:
                 continue
@@ -611,19 +639,20 @@ def _grep_files(base: Path, glob: str | None):
             yield full, rel
 
 
-def grep_python(base: Path, pattern: str, glob: str | None, context: int, ignore_case: bool) -> tuple[list[dict[str, Any]], bool]:
+def grep_python(base: Path, pattern: str, glob: str | None, context: int, ignore_case: bool,
+                allow_sensitive: bool = False) -> tuple[list[dict[str, Any]], bool]:
     try:
         rx = re.compile(pattern, re.I if ignore_case else 0)
     except re.error as e:
         raise FsError(f"bad regular expression: {e}") from None
     out: list[dict[str, Any]] = []
     for full, _rel in _grep_files(base, glob):
-        if sensitive_reason(full):
+        if not allow_sensitive and sensitive_reason(full):
             continue
         try:
             if full.is_symlink():
                 tgt = full.resolve()
-                if sensitive_reason(tgt) or (base.is_dir() and not tgt.is_relative_to(base.resolve())):
+                if (not allow_sensitive and sensitive_reason(tgt)) or (base.is_dir() and not tgt.is_relative_to(base.resolve())):
                     continue
             if full.stat().st_size > GREP_FILE_BYTES or _is_binary(full):
                 continue
@@ -647,7 +676,8 @@ def grep_python(base: Path, pattern: str, glob: str | None, context: int, ignore
     return out, False
 
 
-def grep_rg(rg: str, base: Path, pattern: str, glob: str | None, context: int, ignore_case: bool) -> tuple[list[dict[str, Any]], bool]:
+def grep_rg(rg: str, base: Path, pattern: str, glob: str | None, context: int, ignore_case: bool,
+            allow_sensitive: bool = False) -> tuple[list[dict[str, Any]], bool]:
     argv = [rg, "--json", "--no-config", "-n", "--max-filesize", str(GREP_FILE_BYTES), "-g", "!node_modules", "-g", "!.git",
             "-g", "!.env*", "-g", "!*.pem", "-g", "!*.key", "-g", "!id_rsa*"]
     if ignore_case:
@@ -677,10 +707,10 @@ def grep_rg(rg: str, base: Path, pattern: str, glob: str | None, context: int, i
         if not path or text is None:
             continue
         pp = Path(path)
-        if sensitive_reason(pp):
+        if not allow_sensitive and sensitive_reason(pp):
             continue
         try:
-            if pp.is_symlink() and (sensitive_reason(pp.resolve()) or (base.is_dir() and not pp.resolve().is_relative_to(base.resolve()))):
+            if pp.is_symlink() and ((not allow_sensitive and sensitive_reason(pp.resolve())) or (base.is_dir() and not pp.resolve().is_relative_to(base.resolve()))):
                 continue
         except OSError:
             continue
@@ -697,14 +727,13 @@ def grep_rg(rg: str, base: Path, pattern: str, glob: str | None, context: int, i
 
 # ---------------------------------------------------------------- hooks for read_local_file / write_local_file
 def pre_read(box: Any, ctx: dict[str, Any], path: str, offset: int, length: int) -> dict[str, Any] | None:
-    """Run before read_local_file. Raises mac.LocalPathError for a secret path; returns a result to send back
-    instead of reading (a stub, or a refusal) when the same unchanged slice is requested again and again."""
+    """Run before read_local_file. Raises mac.LocalPathError for a device file, or for a credential store the user has not
+    approved (`ctx["fs_outside_ok"]`, set by the reply loop after a yes); returns a result to send back instead of reading
+    (a stub, or a refusal) when the same unchanged slice is requested again and again."""
     p = mac.allowed_path(path)
-    s = os.path.expanduser(str(path).strip())
-    spelled = s if os.path.isabs(s) else str(mac.home() / s)
-    why = sensitive_reason(os.path.normpath(spelled), p)
-    if why:
-        raise mac.LocalPathError(f"{p.name}: {why}")
+    why = sensitive_reason(mac._spelled(path), p)
+    if why and (mac.is_device(p) or not ctx.get("fs_outside_ok")):
+        raise mac.LocalPathError(f"{p.name}: {why}" + ("" if mac.is_device(p) else "; it needs the user's approval"))
     if not p.is_file():
         return None
     verdict = box.fs_reads.repeat(str(ctx.get("conversation_id") or ""), p, int(offset), int(length), p.stat().st_mtime_ns)
@@ -789,13 +818,12 @@ def register(box: Any) -> None:
         if root:
             base = resolve_path(root, g)
         else:
-            base = g.default_root()  # type: ignore[assignment]
-            if base is None:
-                raise FsError("no folder to search: pass root, or add a workspace folder under Settings, Tools")
+            base = g.default_root()
             if not base.exists() and g.in_desk(base):
                 base.mkdir(parents=True, exist_ok=True)
-        if sensitive_reason(base):
-            raise FsError(sensitive_reason(base) or "off limits")
+        why = None if g.in_desk(base) else sensitive_reason(mac._spelled(root) if root else base, base)
+        if why and (mac.is_device(base) or not ctx.get("fs_outside_ok")):
+            raise FsError(f"{base.name}: {why}" + ("" if mac.is_device(base) else "; it needs the user's approval"))
         if not base.exists():
             raise FsError(f"{base} does not exist")
         return g, base
@@ -807,7 +835,7 @@ def register(box: Any) -> None:
             _g, base = base_for(root, ctx)
             if not base.is_dir():
                 raise FsError(f"{base} is not a folder")
-            rows, truncated = await asyncio.to_thread(glob_files, base, pattern.strip())
+            rows, truncated = await asyncio.to_thread(glob_files, base, pattern.strip(), bool(sensitive_reason(base)))
         except (FsError, mac.LocalPathError) as e:
             return fail("fs_glob", e, field="pattern", example={"pattern": "**/*.md"})
         total = len(rows)
@@ -820,9 +848,9 @@ def register(box: Any) -> None:
             shown.append(item)
         return {"root": redact.scrub_command_output(str(base)), "pattern": pattern, "files": shown, "total": total,
                 "truncated": truncated or total > GLOB_CAP, "note": "newest first; dot-folders, node_modules and .git are skipped"}
-    R("fs_glob", ToolSpec("fs_glob", "List files and folders under a root that match a glob (`**` crosses folders; a pattern with no slash matches at any depth), newest first, at most 500. Skips dot-folders, node_modules and .git. Root defaults to the desk workspace or the first workspace folder.",
+    R("fs_glob", ToolSpec("fs_glob", "List files and folders under a root that match a glob (`**` crosses folders; a pattern with no slash matches at any depth), newest first, at most 500. Skips dot-folders, node_modules and .git. Root defaults to the desk workspace, else the home folder.",
         _obj({"pattern": {"type": "string", "description": "e.g. **/*.py or src/*.ts"},
-              "root": {"type": "string", "description": "Folder to search; absolute or ~/ path"}}, ["pattern"]), fs_glob, "files",
+              "root": {"type": "string", "description": "Folder to search; absolute or ~/ path, anywhere on this Mac"}}, ["pattern"]), fs_glob, "files",
         examples=[{"pattern": "**/*.md", "root": "~/Documents/notes"}, {"pattern": "*.csv"}]))
 
     def record_grep(conv: str, rows: list[dict[str, Any]]) -> None:
@@ -849,14 +877,15 @@ def register(box: Any) -> None:
                 raise FsError("pattern is empty")
             _g, base = base_for(root, ctx)
             ctxn = max(0, min(int(context or 0), 5))
+            approved = bool(sensitive_reason(base))  # base_for let a credential root through: the user said yes
             rg = shutil.which("rg")
             if rg:
                 try:
-                    rows, truncated = await asyncio.to_thread(grep_rg, rg, base, pattern, glob, ctxn, bool(ignore_case))
+                    rows, truncated = await asyncio.to_thread(grep_rg, rg, base, pattern, glob, ctxn, bool(ignore_case), approved)
                 except (subprocess.TimeoutExpired, OSError):
-                    rows, truncated = await asyncio.to_thread(grep_python, base, pattern, glob, ctxn, bool(ignore_case))
+                    rows, truncated = await asyncio.to_thread(grep_python, base, pattern, glob, ctxn, bool(ignore_case), approved)
             else:
-                rows, truncated = await asyncio.to_thread(grep_python, base, pattern, glob, ctxn, bool(ignore_case))
+                rows, truncated = await asyncio.to_thread(grep_python, base, pattern, glob, ctxn, bool(ignore_case), approved)
         except (FsError, mac.LocalPathError) as e:
             return fail("fs_grep", e, field="pattern", example={"pattern": "TODO", "glob": "**/*.py"})
         await asyncio.to_thread(record_grep, conv_of(ctx), rows)
@@ -881,7 +910,7 @@ def register(box: Any) -> None:
         examples=[{"pattern": "TODO", "root": "~/Documents/project", "glob": "**/*.py"}, {"pattern": "def main", "context": 2}], taints=True))
 
     def snapshot(ctx: dict[str, Any], p: Path) -> dict[str, Any] | None:
-        """Pre-image for undo. Desk workspaces sit outside the home folder rules and keep their own baseline."""
+        """Pre-image for undo. A desk workspace is in Grain's own data folder, which is off limits here, and keeps its own baseline."""
         fs = box.filesnap
         if fs is None:
             return None
@@ -939,7 +968,7 @@ def register(box: Any) -> None:
         if isinstance(out.get("syntax_error"), str):
             out["syntax_error"] = redact.scrub_command_output(out["syntax_error"])
         return out
-    R("fs_edit", ToolSpec("fs_edit", "Change a file by replacing exact text: old must match once (or pass replace_all). If the exact text is not found it also tries matching ignoring each line's indentation, then matching by a block's first and last line. Returns a unified diff and which matcher applied. Read the part you are changing first. Python, JSON, TOML and YAML files are syntax-checked afterwards. Outside the desk workspace and the user's workspace folders it asks first.",
+    R("fs_edit", ToolSpec("fs_edit", "Change a file by replacing exact text: old must match once (or pass replace_all). If the exact text is not found it also tries matching ignoring each line's indentation, then matching by a block's first and last line. Returns a unified diff and which matcher applied. Read the part you are changing first. Python, JSON, TOML and YAML files are syntax-checked afterwards. A credential store (~/.ssh, keychains, browser cookies, .env files) needs the user's approval.",
         _obj({"path": {"type": "string"}, "old": {"type": "string", "description": "Text to replace, copied exactly"},
               "new": {"type": "string", "description": "Replacement text"},
               "replace_all": {"type": "boolean", "default": False}}, ["path", "old", "new"]), fs_edit, "files", "writes",
@@ -973,9 +1002,9 @@ def register(box: Any) -> None:
             s = resolve_path(src, g)
             if not s.exists():
                 raise FsError(f"{s} does not exist")
-            why = sensitive_reason(Path(os.path.expanduser(str(src))), s)
-            if why:
-                raise FsError(why)
+            why = None if g.in_desk(s) else sensitive_reason(mac._spelled(src), s)
+            if why and (mac.is_device(s) or not ctx.get("fs_outside_ok")):
+                raise FsError(f"{s.name}: {why}" + ("" if mac.is_device(s) else "; it needs the user's approval"))
             d = write_target(dst, ctx, g)
             if d.is_dir() and not (s.is_dir() and not any(d.iterdir())):
                 d = write_target(str(d / s.name), ctx, g)
@@ -1014,7 +1043,7 @@ def register(box: Any) -> None:
             if isinstance(out.get(key), str):
                 out[key] = redact.scrub_command_output(out[key])
         return out
-    R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files, symlinks, hidden and dependency folders are not copied (counted in skipped). Writing outside the desk workspace and the user's workspace folders asks first.",
+    R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files, symlinks, hidden and dependency folders are not copied (counted in skipped). A credential store needs the user's approval.",
         _obj({"src": {"type": "string"}, "dst": {"type": "string"}}, ["src", "dst"]), fs_copy, "files", "writes",
         examples=[{"src": "~/Documents/project/config.json", "dst": "~/Documents/project/config.backup.json"}]))
 
@@ -1030,6 +1059,10 @@ def register(box: Any) -> None:
         except OSError as e:
             return fail("fs_mkdir", e.strerror or e, field="path")
         return {"path": redact.scrub_command_output(str(p)), "created": not existed}
-    R("fs_mkdir", ToolSpec("fs_mkdir", "Create a folder, with any missing parents. Succeeds quietly if it already exists. Outside the desk workspace and the user's workspace folders it asks first.",
+    R("fs_mkdir", ToolSpec("fs_mkdir", "Create a folder, with any missing parents. Succeeds quietly if it already exists. A credential store (~/.ssh, keychains, browser cookies, .env files) needs the user's approval.",
         _obj({"path": {"type": "string"}}, ["path"]), fs_mkdir, "files", "writes",
         examples=[{"path": "~/Documents/project/reports/2026"}]))
+
+    for tool in WRITE_ARGS:  # a write into a system area is a soft force, on top of any force the tool already has
+        if spec := box.specs.get(tool):
+            spec.force_ask = (lambda a, c, n=tool, prev=spec.force_ask: bool(prev and prev(a, c)) or system_write(box, n, a, c))

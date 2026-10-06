@@ -310,8 +310,8 @@ def test_a_patched_home_relative_folder_is_stored_resolved(home_dir: str) -> Non
     assert len(tick(T0 + 1)) == 1, "the folder is still watched"
 
 
-def test_a_directory_outside_home_or_hidden_is_refused() -> None:
-    for bad in ("/etc", os.path.join(os.path.expanduser("~"), ".ssh")):
+def test_a_protected_or_credential_directory_is_refused() -> None:
+    for bad in ("/Applications/Grain.app", os.path.join(os.path.expanduser("~"), ".ssh")):
         r = client.post("/jobs", json={"name": "w", "prompt": "p", "kind": "watch", "watch_dir": bad})
         assert r.status_code == 400, bad
 
@@ -413,7 +413,7 @@ def test_a_clock_fire_has_no_changed_files_block() -> None:
     assert appmod._job_prompt({"prompt": "plain"}, {"trigger": "clock"}) == "plain"  # noqa: SLF001
 
 
-def test_schedule_task_can_watch_a_folder_and_still_refuses_a_hidden_one(home_dir: str) -> None:
+def test_schedule_task_can_watch_a_folder_and_still_refuses_a_credential_one(home_dir: str) -> None:
     tool = appmod.toolbox.specs["schedule_task"]
     assert tool.danger == "schedules"
     ok = asyncio.run(tool.fn({}, name="Sort downloads", prompt="File what arrived.", watch_dir=home_dir))

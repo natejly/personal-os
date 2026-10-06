@@ -132,7 +132,7 @@ check(st["doc_chunks"] == st["doc_embedded"] > 0, "index-status reports doc vect
 
 # (f) build_context
 cfg = settings()
-conv = {"useMemory": False, "useGraph": False, "useActivity": False, "useSkills": False, "useStyle": False, "useMeetings": False}
+conv = {"useMemory": False, "useGraph": False, "useSkills": False, "useStyle": False}
 
 
 def ctx(conv_settings: dict[str, Any], cfg_: dict[str, Any], hits: Any) -> tuple[str, dict[str, Any]]:

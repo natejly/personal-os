@@ -53,7 +53,7 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         self.events: list[tuple[str, dict[str, Any]]] = []
         self.jobs = SimpleNamespace(jobs={})
         self.cs = ca.CodingSessions(Database(self.tmp / "data"), self.jobs, self.fake, lambda e, d: self.events.append((e, d)),
-                                    lambda: {}, roots=lambda: [self.tmp / "work"], claude_home=self.home)
+                                    lambda: {}, claude_home=self.home)
         p = unittest.mock.patch.object(ca, "claude_binary", return_value="/bin/claude")
         p.start()
         self.addCleanup(p.stop)
@@ -75,13 +75,6 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class Validation(CodingTestCase):
-    async def test_repo_outside_a_granted_root_is_refused(self) -> None:
-        other = self.tmp / "elsewhere"
-        (other / ".git").mkdir(parents=True)
-        with self.assertRaises(ca.CodingError):
-            await self.cs.start("claude", str(other), "x")
-        self.assertEqual(self.fake.calls, [])
-
     async def test_folder_without_git_is_refused(self) -> None:
         plain = self.tmp / "work" / "plain"
         plain.mkdir()
@@ -261,7 +254,7 @@ class ClaudeDriver(CodingTestCase):
     async def test_recover_rereads_live_claude_sessions(self) -> None:
         row = await self.started()
         self.job_files("deadbeef", "done")
-        again = ca.CodingSessions(self.cs.db, self.jobs, self.fake, lambda e, d: None, lambda: {}, roots=lambda: [],
+        again = ca.CodingSessions(self.cs.db, self.jobs, self.fake, lambda e, d: None, lambda: {},
                                   claude_home=self.home)
         self.assertEqual(again.get(row["id"])["status"], "done")
 

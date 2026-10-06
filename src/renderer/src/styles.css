@@ -459,16 +459,6 @@ kbd {
   white-space: nowrap; cursor: pointer;
 }
 .composer-ctl:hover, .composer-ctl:focus-within, .composer-ctl[aria-expanded='true'] { background: var(--hover); color: var(--text); }
-/* Working folder: the pick button and, once bound, a small clear button share the one control. */
-.composer-ctl.working-folder { padding: 0; gap: 0; }
-.composer-ctl.working-folder.on { color: var(--text); }
-.working-folder-pick, .working-folder-clear {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px;
-  background: transparent; color: inherit; font: inherit; cursor: pointer; max-width: 180px; overflow: hidden; text-overflow: ellipsis;
-}
-.working-folder-clear { padding: 0 6px 0 2px; }
-.working-folder-clear:hover { color: var(--danger, var(--text)); }
-
 /* Model picker: trigger, searchable list, Edit panel for effort and Fast. */
 .model-menu { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 0 1 auto; }
 /* The label and its select read as one control; the select draws no box of its own. */
@@ -888,6 +878,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
 .test-msg.fail { color: var(--danger); }
+.model-prompt { color: var(--warn); font-size: 12px; }
 /* Pinned to the bottom of the scroller, so Save/Cancel is always reachable. */
 .modal footer {
   display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;
@@ -923,11 +914,11 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* One rhythm for every tab: a column with a single gap, and nothing inside brings a margin of its own.
    The Knowledge base tab lays itself out (.knowledge-section). */
 .settings-pane > section:not(.knowledge-section),
-.settings-pane .mtg-settings, .settings-pane .usage, .settings-pane .perm-rules, .settings-pane .workspace-roots {
+.settings-pane .usage, .settings-pane .perm-rules, .settings-pane .workspace-roots {
   display: flex; flex-direction: column; gap: 14px;
 }
 .settings-pane > section:not(.knowledge-section) > *,
-.settings-pane > section .mtg-settings > *, .settings-pane > section .usage > *,
+.settings-pane > section .usage > *,
 .settings-pane > section .perm-rules > *, .settings-pane > section .workspace-roots > * { margin: 0; }
 /* The tab's title is a heading, so the uppercase eyebrow is left to the sections under it. */
 .settings-pane h3:not(.modal-free *) { font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
@@ -953,11 +944,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .setting-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; }
 .settings-pane .setting-list > label.toggle-row { margin: 0; padding: 9px 12px; }
 .setting-list > * + * { border-top: 1px solid var(--border); }
-/* The activity-style field (Meetings) is the same row here; `.modal label` had stacked it. */
-.settings-pane label.act-field { flex-direction: row; align-items: center; gap: 16px; padding: 0; border-bottom: 0; }
-.settings-pane .act-field b { color: var(--text); }
-.settings-pane .act-field small { font-size: 12px; line-height: 1.5; color: var(--text-muted); }
-.settings-pane .act-field > input, .settings-pane .act-field > select { flex: 0 1 280px; width: 280px; }
 /* A list with nothing in it yet, inside a pane or a card: one quiet line rather than a full-page empty state. */
 .empty-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px; border: 1px dashed var(--border-strong); border-radius: 10px; color: var(--text-muted); font-size: 13px; }
 .empty-row svg { flex-shrink: 0; color: var(--text-faint); }
@@ -1110,9 +1096,22 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .show-body > .markdown { padding: 16px 20px; max-width: 72ch; width: 100%; margin: 0 auto; line-height: 1.7; }
 .show-pdf-frame { flex: 1; min-height: 0; display: flex; padding: 10px; background: var(--bg); }
 .show-pdf { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); color-scheme: light dark; }
-.show-image { margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
-.show-image img { max-width: 100%; height: auto; }
+.show-image { margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; flex: 1; min-height: 0; }
+.show-image img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; cursor: zoom-in; }
+.show-image.full { flex: none; align-items: flex-start; }
+.show-image.full img { max-width: none; max-height: none; cursor: zoom-out; }
 .show-image figcaption { font-size: 11.5px; color: var(--text-muted); }
+.show-media { padding: 12px; display: flex; justify-content: center; }
+.show-media audio, .show-media video { width: 100%; max-height: 100%; }
+.show-bar { display: flex; justify-content: flex-end; padding: 6px 10px 0; }
+.show-bar .ghost-btn.on { background: var(--hover); color: var(--text); }
+.show-note { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.show-table { padding: 8px 12px 16px; overflow: auto; }
+.show-table table { border-collapse: collapse; font-size: 12px; }
+.show-table th, .show-table td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; vertical-align: top; white-space: pre-wrap; max-width: 36ch; overflow-wrap: anywhere; }
+.show-table th { position: sticky; top: 0; background: var(--bg-elev); font-weight: 600; }
+.show-table-note { margin: 8px 0 0; font-size: 11.5px; color: var(--text-muted); }
+.modal.upload-preview { width: min(980px, calc(100vw - 80px)); height: min(760px, calc(100vh - 60px)); display: flex; flex-direction: column; overflow: hidden; }
 .show-loading, .show-nopreview { padding: 24px; color: var(--text-muted); font-size: 13px; text-align: center; }
 .ctx-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .ctx-section h4, .node-panel h4 { margin: 0 0 8px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
@@ -2241,6 +2240,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .usage-tile-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-tile-sub { font-size: 10.5px; color: var(--text-faint); }
 .usage-charts { display: flex; flex-direction: column; }
+.usage-sub { margin: 16px 0 6px; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; border: 1px solid var(--border); border-radius: var(--radius); }
+.usage-table th, .usage-table td { padding: 5px 10px; border-top: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.usage-table thead th { border-top: 0; background: var(--hover); color: var(--text-muted); font-weight: 600; font-size: 11px; }
+.usage-table th:first-child { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.usage-table tbody th { font-weight: 400; }
+.usage-periods .usage-tile-value { font-size: 16px; }
+.usage-more { margin-top: 14px; }
+.usage-more > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .usage-prices { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
 .usage-prices table { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* --text-faint is only 4.01:1 over the --hover header fill. */
@@ -2370,231 +2378,13 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   color: var(--on-accent);
   font-weight: 600;
 }
-/* ---------- Activity monitor ---------- */
-.activity-page .page-body { display: flex; flex-direction: column; gap: 14px; }
-/* The body is the scroller, so its cards keep their content height. Shrinkable, the overflow-hidden
-   .act-card was crushed to a sliver (header clipped, the last permission check cut off). */
-.activity-page .page-body > * { flex-shrink: 0; }
-.act-h { margin: 6px 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-
-/* Hero: state, the live line, counters, then the tab strip. */
-.act-hero { padding: 14px 20px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
-.act-state { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.act-state.live { color: var(--danger); }
-.act-state.paused { color: var(--warn); }
-.act-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
-.act-state.live .act-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }
-.act-state.paused .act-dot { background: var(--warn); }
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-.act-now { margin: 0; font-size: 15px; color: var(--text); }
-.act-stats { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.act-warn { display: flex; align-items: flex-start; gap: 7px; margin: 0; font-size: 12px; color: var(--warn); }
-.act-warn svg { flex-shrink: 0; margin-top: 2px; }
-.activity-page .act-hero .tabs { margin-top: 4px; }
-
-/* Pills speak the semantic tokens: fine is --ok, needs attention is --warn, blocking is --danger,
-   and anything optional or merely informative stays neutral. */
-.act-pill { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--hover); color: var(--text-muted); }
-.act-pill.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
-.act-pill.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-.act-pill.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
-
-/* Collapsible cards (capabilities, profile) */
-.act-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
-.act-card-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; font-size: 13px; color: var(--text); text-align: left; }
-.act-card-head.static { cursor: default; }
-.act-card-head svg { transition: transform 0.15s; color: var(--text-faint); }
-.act-card-head svg.rot90 { transform: rotate(90deg); }
-.act-card-head .muted { margin-left: auto; }
-.act-card-head .link { margin-left: 8px; }
-
-.act-caps { list-style: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; gap: 9px; }
-.act-caps li { display: flex; gap: 9px; font-size: 12px; }
-.act-caps li > svg { flex-shrink: 0; margin-top: 2px; }
-.act-caps li.ok > svg { color: var(--ok); }
-.act-caps li.bad > svg { color: var(--warn); }
-.act-caps li b { font-size: 12px; }
-.act-caps li p { margin: 1px 0 0; color: var(--text-muted); }
-.act-fix { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0 !important; padding: 5px 8px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 9%, transparent); color: var(--warn) !important; font-size: 11px; }
-.act-fix svg { flex-shrink: 0; margin-top: 1px; }
-
-/* Access checklist: a missing optional row is amber, a blocking one is red, and every permission
-   row carries its macOS state so "denied" never hides behind a generic cross. */
-.act-caps li.warn > svg { color: var(--warn); opacity: 0.8; }
-.act-caps li.bad > svg { color: var(--danger); }
-.act-state-pill { margin-left: 6px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); font-size: 10px; color: var(--text-muted); vertical-align: 1px; }
-.act-state-pill.granted { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-.act-state-pill.denied { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.act-state-pill.unasked, .act-state-pill.unknown { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
-.act-state-pill.opt { color: var(--st-idle); }
-.act-cap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 /* 11px type in a 24px target. */
 .ghost-btn.xs, .link.xs { display: inline-flex; align-items: center; min-height: 24px; font-size: 11px; padding: 2px 7px; }
-/* The grant-all action is a button, not a banner: its own width, with the one caveat beside it. */
-.act-grant-all { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 12px 10px; }
-.act-intro { margin: 0; max-width: 72ch; line-height: 1.5; }
-
-/* Record-everything mode: the one control that turns protections off, so it looks like it. */
-.act-card.record-all { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-.act-card.record-all.armed { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.act-card.record-all .act-card-head svg { color: var(--danger); }
-.act-record-all-body { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
-.act-record-all-body > button { align-self: flex-start; margin-top: 3px; }
-.act-record-all-confirm { padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 12px; }
-.act-record-all-confirm p { margin: 0 0 7px; }
-
-.act-profile { padding: 0 12px 10px; font-size: 13px; color: var(--text-muted); }
-.act-profile h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin: 10px 0 4px; }
-.act-profile ul { margin: 0; padding-left: 18px; }
-.act-profile li { margin: 2px 0; }
-
-/* Signals: one card per signal, sensitive ones outlined. */
-.act-signals { display: flex; flex-direction: column; gap: 8px; }
-.act-signal { border: 1px solid var(--border); border-radius: 10px; padding: 4px 12px 8px; background: var(--bg-elev); }
-.act-signal.on { border-color: var(--border-strong); }
-.act-signal.heavy.on { border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.act-signal .toggle-row { padding: 8px 0; align-items: flex-start; }
-.act-signal .toggle-icon { margin-top: 2px; }
-.act-signal .toggle-text small { line-height: 1.5; margin-top: 2px; }
-.act-signal input:checked + .switch { background: var(--accent-solid); }
-.act-signal.heavy input:checked + .switch { background: var(--danger); }
-
-/* Compact label + control rows */
-.act-field { display: flex; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-.act-field > span:first-child { flex: 1; display: flex; flex-direction: column; }
-.act-field b { font-size: 13px; font-weight: 500; }
-.act-field small { color: var(--text-faint); font-size: 11px; margin-top: 1px; }
-.act-field input, .act-field select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
-.act-field input:focus, .act-field select:focus { border-color: var(--accent); }
-.act-field select { min-width: 220px; }
-.act-num { display: inline-flex; align-items: center; gap: 6px; }
-.act-num input { width: 84px; font-variant-numeric: tabular-nums; }
-.act-num em { font-style: normal; font-size: 11px; color: var(--text-faint); }
-
-/* Exclusion list editors */
-.act-list-editor { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: var(--bg-elev); }
-.act-list-editor > b { font-size: 13px; }
-.act-list-editor > p { margin: 3px 0 9px; }
-.act-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
-.act-tag { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 11px; color: var(--text-muted); }
-.act-add { display: flex; gap: 7px; }
-.act-add input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 9px; font: inherit; font-size: 12px; color: var(--text); outline: 0; }
-.act-add input:focus { border-color: var(--accent); }
-
-.act-danger { display: flex; flex-wrap: wrap; gap: 8px; }
 .primary-btn.danger { background: var(--danger); border-color: var(--danger); }
 /* Without this the shared hover turned a red button accent-green under the pointer. */
 .primary-btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 86%, #000); }
 
-/* Timeline of rolled-up periods */
-.act-timeline { display: flex; flex-direction: column; gap: 10px; }
-.act-period { border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 0 10px 10px 0; padding: 10px 13px; background: var(--bg-elev); }
-.act-period header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
-.act-period time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.act-period header b { flex: 1; font-size: 13px; }
-.act-period p { margin: 4px 0; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
-.act-period ul { margin: 4px 0; padding-left: 18px; font-size: 12px; color: var(--text-muted); }
-.act-period footer { margin-top: 6px; }
-
-/* The context file */
-.act-injected { margin: 0; padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--text-muted); white-space: pre-wrap; max-height: 320px; overflow: auto; }
-.act-md { border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px 14px; background: var(--bg-elev); font-size: 13px; color: var(--text-muted); max-height: 560px; overflow: auto; }
-.act-md h1 { font-size: 17px; color: var(--text); }
-.act-md h2 { font-size: 14px; color: var(--text); margin-top: 18px; }
-.act-md h3 { font-size: 12px; color: var(--text); text-transform: none; letter-spacing: 0; margin-top: 12px; }
-.act-md p, .act-md li { line-height: 1.6; }
-.act-md em { color: var(--text-faint); font-size: 11px; }
-
-/* Raw log */
-.act-log { border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 620px; }
-.act-log table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.act-log thead th { position: sticky; top: 0; z-index: 1; text-align: left; padding: 7px 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); background: var(--bg-elev); border-bottom: 1px solid var(--border); }
-.act-log td { padding: 5px 10px; border-top: 1px solid var(--border); vertical-align: top; }
-.act-log tr.rolled { color: var(--text-faint); }
-.act-log tr:hover { background: var(--bg-elev); }
-.act-t { font-family: var(--mono); font-size: 11px; white-space: nowrap; color: var(--text-faint); }
-.act-app { white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
-.act-detail { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.act-dur { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-faint); }
-.act-text { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
-.act-kind { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--border); color: var(--text-muted); white-space: nowrap; }
-.act-kind.audio { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-.act-kind.input { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
-.act-kind.idle { background: transparent; border: 1px solid var(--border-strong); }
-
-/* Sidebar recording indicator */
-/* ---------- Insights: patterns as evidence, suggestions as proposals ---------- */
-.act-patterns, .act-habits { list-style: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; }
-.act-pattern { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
-.act-pattern:first-child { border-top: 0; }
-.act-pattern-icon { color: var(--text-faint); margin-top: 2px; flex-shrink: 0; }
-.act-pattern span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.act-pattern small, .act-habit small { color: var(--text-muted); font-size: 11.5px; display: flex; align-items: center; gap: 4px; }
-.act-conf { margin-left: auto; flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-faint); }
-
-/* Habits. Each one owns a memory row, which is why Forget sits right next to it. */
-.act-habits { padding: 0; gap: 0; }
-.act-habit { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-.act-habit .act-conf { margin-left: 0; width: 34px; text-align: right; }
-.act-habit-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-.act-habit button { margin-left: auto; opacity: 0; transition: opacity 0.12s; }
-.act-habit:hover button { opacity: 1; }
-
-/* Bars and the hour strip: the deterministic half, shown before any suggestion. */
-.act-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 12px 4px; }
-.act-split h5, .activity-page .page-body > section h5 { margin: 6px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
-.activity-page .page-body > section > h5 { padding: 0 12px; }
-.act-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.act-bars li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.act-bar-label { width: 108px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
-.act-bar-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-input); overflow: hidden; }
-.act-bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent); opacity: 0.75; }
-.act-bar-value { width: 48px; text-align: right; flex-shrink: 0; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.act-catbar { display: flex; height: 10px; margin: 4px 12px 8px; border-radius: 5px; overflow: hidden; background: var(--bg-input); }
-.act-catbar span { display: block; height: 100%; opacity: 0.8; }
-.act-catlegend { list-style: none; margin: 0; padding: 0 12px 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-muted); }
-.act-catlegend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
-.act-catlegend em { font-style: normal; color: var(--text-faint); }
-.act-rules { display: flex; flex-direction: column; gap: 6px; padding: 6px 12px 12px; }
-.act-rule { display: grid; grid-template-columns: 1fr 1.4fr 84px auto; gap: 6px; align-items: center; }
-.act-rule input, .act-rule select, .act-test { font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
-.act-test { width: 100%; resize: vertical; box-sizing: border-box; }
-.act-test-out { margin: 4px 0 0; padding: 6px 8px; font: 12px var(--mono); white-space: pre-wrap; background: var(--bg-input); border-radius: 6px; }
-.act-hours { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 0 12px 12px; }
-.act-hours > span { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
-.act-hours i { display: block; width: 100%; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.55; }
-.act-hours > span:hover i { opacity: 1; }
-.act-hours em { font-size: 9px; font-style: normal; color: var(--text-faint); }
-
-/* One suggestion. A card, not a banner: it has to carry its own evidence. */
-.act-sugs { display: flex; flex-direction: column; gap: 10px; }
-.act-sug { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--bg-elev); padding: 11px 13px; display: flex; flex-direction: column; gap: 7px; }
-.act-sug.hygiene { border-left-color: var(--warn); }
-.act-sug.platform { border-left-color: var(--text-faint); }
-.act-sug.ruled { opacity: 0.6; border-left-style: dashed; }
-.act-sug header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.act-sug header b { font-size: 13.5px; }
-.act-sug .act-pill { margin-left: 0; background: var(--bg-input); color: var(--text-muted); }
-.act-sug .act-pill.automation { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.act-sug .act-pill.hygiene { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-.act-impact { font-size: 11px; color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border-radius: 999px; padding: 1px 7px; }
-.act-sug-detail { margin: 0; font-size: 12.5px; color: var(--text); }
-.act-sug-why { margin: 0; font-size: 12px; color: var(--text-muted); }
-.act-sug-why b { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; margin-right: 4px; }
-.act-evidence { display: flex; flex-wrap: wrap; gap: 5px; }
-.act-evidence .act-tag { padding: 2px 8px; font-size: 10.5px; gap: 4px; }
-.act-sug footer { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding-top: 2px; }
-.act-sug footer .muted { margin-left: auto; }
-/* A suggestion you ruled on: taken up is done; dismissed or snoozed is set aside, not an error. */
-.act-state-pill.accepted, .act-state-pill.done { color: var(--st-done); border-color: color-mix(in srgb, var(--st-done) 40%, transparent); }
-.act-state-pill.dismissed, .act-state-pill.snoozed { color: var(--st-idle); }
-
-.act-indicator { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.act-indicator:hover { background: color-mix(in srgb, var(--danger) 15%, transparent); }
-.act-indicator.live .act-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }
-.act-indicator.paused { color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
-.act-indicator.paused:hover { background: color-mix(in srgb, var(--warn) 15%, transparent); }
-.act-indicator.paused .act-dot { background: var(--warn); }
 /* ---------- Form controls (one select treatment everywhere) ---------- */
 /* .model-picker draws its own chevron in markup, so it stays out of these lists. */
 .add-row select, .node-panel select, .modal select:not(.modal-free *) {

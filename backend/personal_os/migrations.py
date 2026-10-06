@@ -251,6 +251,16 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     c.execute("DROP TABLE notes")
 
 
+def _drop_meetings_activity(c: sqlite3.Connection) -> None:
+    """The meetings recorder and the activity monitor are gone: drop their tables (child tables first; an index
+    goes with its table, and a virtual table takes its shadow tables with it). Settings rows `meetings`, `activity`
+    and `digest` are left alone: stt.config_for seeds the voice config from a legacy `meetings` row at read time."""
+    for table in ("meeting_action_items", "meeting_revisions", "meeting_segments", "meeting_vectors", "meetings_fts",
+                  "meetings", "activity_events", "activity_summaries", "activity_profile", "activity_day_stats",
+                  "activity_habits", "activity_suggestions", "activity_patterns"):
+        c.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 def _memories_expires_at(c: sqlite3.Connection) -> None:
     """Short-lived notes: a memory past `expires_at` (epoch seconds) leaves context and search but stays as history.
     NULL = no expiry."""
@@ -352,7 +362,8 @@ def _drop_legacy_texting_keys(c: sqlite3.Connection) -> None:
 def _messages_kind(c: sqlite3.Connection) -> None:
     """messages.kind: NULL for what was said in the chat, 'wake' for the hidden turn that hands a finished worker's report
     to the assistant. Wake rows are replayed to the model and hidden from the transcript, search and exports."""
-    if "kind" not in {r[1] for r in c.execute("PRAGMA table_info(messages)")}:
+    cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+    if cols and "kind" not in cols:  # no columns: no messages table yet (the schema creates it with the rest)
         c.execute("ALTER TABLE messages ADD COLUMN kind TEXT")
 
 
@@ -363,6 +374,12 @@ BUDGET_SETTING_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subage
 def _drop_budget_settings(c: sqlite3.Connection) -> None:
     """Round, token, time, turn and spend limits no longer exist; their stored values are dead rows."""
     c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in BUDGET_SETTING_KEYS])
+
+
+def _autonomous_by_default(c: sqlite3.Connection) -> None:
+    """Every existing install gets `autonomousByDefault` true: a new chat starts as a task (a desk) that works through its
+    steps, and a plain question is simply answered. A value already stored (impossible before this step) is kept."""
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('autonomousByDefault', ?)", (json.dumps(True),))
 
 
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
@@ -387,7 +404,9 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (18, "graph_canonical_types", _graph_canonical_types),
     (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
     (20, "drop_budget_settings", _drop_budget_settings),
-    (21, "messages_kind", _messages_kind),
+    (21, "autonomous_by_default", _autonomous_by_default),
+    (22, "drop_meetings_activity", _drop_meetings_activity),
+    (23, "messages_kind", _messages_kind),
 ]
 
 

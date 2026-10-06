@@ -152,7 +152,7 @@ function CodingSessionCard(props: ToolCardProps): JSX.Element {
           {agent === 'claude' && (
             <div className="tc-muted small">Runs outside Grain&apos;s sandbox with your own account; Claude Code asks for permission in its own session.</div>
           )}
-          {agent === 'opencode' && <div className="tc-muted small">Runs inside the OS sandbox, writing only within the workspace folder that holds the repo.</div>}
+          {agent === 'opencode' && <div className="tc-muted small">Runs inside the OS sandbox.</div>}
         </>
       )}
       {pending && tool === 'coding_session_send' && (

@@ -160,7 +160,7 @@ def cite_check(reply: str, refs: list[dict[str, Any]]) -> dict[int, dict[str, An
 
 def range_ref(source: str, name: str, text: str, start: int, end: int, **ids: Any) -> dict[str, Any]:
     """A cited span of a whole source, by character offsets into the text the viewer loads (no chunk id).
-    `ids` names the source: document_id for a file, doc_id for a doc, meeting_id plus part for a meeting."""
+    `ids` names the source: document_id for a file, doc_id for a doc."""
     return {"source": source, "kind": "range", "name": name, "start": start, "end": end,
             "text": text[start:end][:400], "heading": "", "page": None, **ids}
 
@@ -168,9 +168,7 @@ def range_ref(source: str, name: str, text: str, start: int, end: int, **ids: An
 def context_taints(used: dict[str, Any]) -> list[str]:
     """Prompt sections that put text the user did not write as an instruction into the turn. A pinned file is the
     user's own choice and never tainted a turn, so its range citation does not count as a 'chunks' excerpt."""
-    keys = [k for k in ("meetings", "activity") if used.get(k)]
-    if "activity" in keys and used.get("activity_foreign") is False:
-        keys.remove("activity")
+    keys: list[str] = []
     if any(c.get("kind") != "range" for c in used.get("chunks") or []):
         keys.append("chunks")
     return keys
@@ -246,11 +244,9 @@ def build_context(
     settings: dict[str, Any],
     conv_settings: dict[str, Any],
     global_system_prompt: str,
-    activity: Any = None,
     skills: Any = None,
     page: dict[str, Any] | None = None,
     style: Any = None,
-    meetings: Any = None,
     doc_hits: list[dict[str, Any]] | None = None,
     memory_hits: list[dict[str, Any]] | None = None,
     graph_hits: dict[str, Any] | None = None,
@@ -272,8 +268,8 @@ def build_context(
         parts.append(f"Hidden in this app right now: {', '.join(hidden)}. Before pointing the user at one of them, "
                      "say they can turn it on in Settings → Modules.")
     volatile: list[str] = []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None,
-                            "skills": [], "profile": [], "page": None, "style": None, "meetings": None, "pinned": [], "trimmed": {}}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None,
+                            "skills": [], "profile": [], "page": None, "style": None, "pinned": [], "trimmed": {}}
     trimmed: dict[str, int] = used["trimmed"]
 
     if project:
@@ -443,26 +439,6 @@ def build_context(
                              "guidelines": profile["guidelines"], "block": block}
         elif block and conv_settings.get("useTools", True):  # no tools, no writing_style to call
             parts.append(STYLE_HINT)
-
-    # Observed computer activity. Off unless the user turned the monitor on, and skippable per chat
-    # like every other context source.
-    if activity is not None and conv_settings.get("useActivity", True):
-        block = activity.context_block()
-        if block:
-            block = _trim_block(block, shares["activity"], "activity", trimmed)
-            volatile.append(block)
-            used["activity"] = block
-            # The monitor ships on; a block of app names only is the user's own data and must not taint the turn.
-            used["activity_foreign"] = activity.context_has_foreign_text()
-
-    # Recent meetings: titles and accepted notes, never raw transcript. Off per chat like the rest,
-    # and empty until the user records something.
-    if meetings is not None and conv_settings.get("useMeetings", True):
-        block = meetings.context_block()
-        if block:
-            block = _trim_block(block, shares["meetings"], "meetings", trimmed)
-            volatile.append(block)
-            used["meetings"] = block
 
     stable = "\n\n".join(parts)
     system = "\n\n".join(parts + volatile)

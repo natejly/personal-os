@@ -260,7 +260,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'permissions' && (
           <>
-            <p className="muted">Optional. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
+            <p className="muted">Optional. Grain can work anywhere on this Mac; Full Disk Access also opens Desktop, Documents, Downloads, Mail and Messages. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
             <PermissionsPanel compact />
           </>
         )}
@@ -269,7 +269,6 @@ export default function Onboarding(): JSX.Element {
           <div role="status" aria-live="polite">
             {saved.state === 'saving' && <p className="muted"><Loader2 size={13} className="spin" /> Saving…</p>}
             {saved.state === 'ok' && <p className="ob-lead">Grain is connected to {provider?.name}. Start a chat and ask it anything.</p>}
-            {saved.state === 'ok' && <p className="muted small">Meetings and Activity are on, and nothing records without your say: a meeting records only after you accept the recording notice, and Activity sees more only after you grant macOS permissions in its panel. A quiet daily digest in the Agent Inbox lists what is still missing.</p>}
             {saved.state === 'fail' && (
               <>
                 <p className="ob-error" role="alert">Could not save your setup: {saved.error}</p>

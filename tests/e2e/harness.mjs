@@ -142,9 +142,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   }
   // Skip the first-run wizard and seed anything the test wants before the renderer loads.
   try {
-    // The daily digest (one inbox row after 8 am local) stays off, or every inbox count would depend on the clock;
-    // a test that wants it passes settings.digest itself.
-    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), digest: { enabled: false }, ...settings } })
+    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), ...settings } })
     if (beforeApp) await beforeApp({ api, backend, dataDir })
   } catch (e) { await abandon(e) }
 

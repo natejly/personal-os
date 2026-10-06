@@ -74,11 +74,11 @@ def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms
             pass
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # baseUrl and apiKey stay empty until onboarding (or an upgrade from a stored baseUrl). defaultModel is Grain's own
-    # proxy model: onboarding overwrites it with the chosen provider's model, and a saved value always wins over this one.
+    # Empty until onboarding (or an upgrade from a stored baseUrl). Nothing here is a model alias that only
+    # one provider knows: an unsaved defaultModel is filled per provider (providers.default_model, in app.settings()).
     "baseUrl": "",
     "apiKey": "",
-    "defaultModel": "ember-1",
+    "defaultModel": "",
     # Preset id from providers.py, or None to infer it from baseUrl. onboardedAt is the ISO time setup finished.
     "provider": None,
     "onboardedAt": None,
@@ -114,14 +114,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
     "quickAskShortcut": "Alt+Space",
-    # Hold this in the Files editor to dictate while held; a quick tap latches it on.
+    # Hold this in the chat box to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Read aloud (the platform speech engine) and the hands-free voice chat loop's safety cap.
     "ttsVoice": "",
     "ttsRate": 1.0,
     "voiceLoopMaxTurns": VOICE_LOOP_MAX_TURNS,
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
-    # Meetings / Activity ship shown; showing a view records nothing (consent and OS permissions gate that).
     "homeWidgets": {},
     "hiddenViews": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
@@ -167,6 +166,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.
     "deskAutoResume": False,
+    # A new chat's first message starts it as a task (a desk) that works through its steps; a plain question is answered
+    # and the desk settles done. The composer's Autonomous switch starts from this value.
+    "autonomousByDefault": True,
     # Subagents (subagents.py): how many may run at once across the app and how deep they may nest. Hang
     # detection: a child with no model or tool activity for subagentStaleSeconds, or stuck inside one tool for
     # subagentToolSeconds, is stopped and returns what it had.
@@ -225,7 +227,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sandboxMountDesk": True,
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
-    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
+    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox: any folder, minus Grain's own data and the credential stores.
     "shellTimeoutSec": SHELL_TIMEOUT_SECONDS,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": SHELL_MAX_BACKGROUND,     # live background jobs at once
     "codingSessionMaxConcurrent": CODING_SESSION_MAX_CONCURRENT,    # live coding sessions at once (own pool)
@@ -249,15 +251,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "microsoftToken": {},
     # Which account Mail, Calendar, the mail/calendar tools, the reply tracker and the outbox use: "google" | "microsoft".
     "pimProvider": "google",
-    # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
-    # /activity/config rather than /settings so the merge is a deep one.
-    "activity": {"enabled": True},
-    # Meetings. Shape and defaults live in meetings.DEFAULT_CONFIG; patched through
-    # /meetings/config rather than /settings so the merge is a deep one.
-    "meetings": {"enabled": True},
-    # Daily digest (digest.py): one quiet Agent Inbox row a day, never an OS notification.
-    # hour: local hour of day (0-23) it is written at, or the first launch after it.
-    "digest": {"enabled": True, "hour": 8},
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
@@ -269,8 +262,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMinSimilarity": RETRIEVAL_MIN_SIMILARITY,
     # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
     "hybridRetrieval": True,
-    # Embed meeting summaries/transcripts for by-meaning meeting search (meeting_index.py). Off: it sends meeting text to the embedding provider.
-    "meetingEmbeddings": False,
     "retrievalPerDocCap": RETRIEVAL_PER_DOC_CAP,
     "retrievalCandidates": RETRIEVAL_CANDIDATES,
     # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
@@ -1352,7 +1343,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     return text
 
 
-def audio_usage(model: str, seconds: float, kind: str = "meeting-stt") -> None:
+def audio_usage(model: str, seconds: float, kind: str = "voice-stt") -> None:
     """Record transcribed audio in the usage log; duration_ms carries the audio length, not wall time.
 
     Synchronous and silent on purpose: transcription runs on worker threads, and a missing

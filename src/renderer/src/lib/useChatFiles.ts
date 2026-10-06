@@ -2,8 +2,8 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { api, fetchRaw, req } from './api'
 import { useStore } from '../store'
-import { fileViewer } from './showPanel'
-import { filesQuery, rowAction, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
+import { fileViewer, uploadShowItem } from './showPanel'
+import { filesQuery, rowAction, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
 
 /** Network and store side of chat files; the grouping and click routing are pure, in chatFiles.ts. */
 export const chatFilesApi = {
@@ -49,10 +49,17 @@ async function showOutput(f: ChatFile, chat: string): Promise<void> {
   useStore.getState().openShow(chat, { kind: 'markdown', title: f.name, source })
 }
 
+/** An upload opens in the chat's side panel when there is a chat, else in the standalone viewer. */
+export async function openUpload(id: string, chat: string | null | undefined): Promise<void> {
+  const s = useStore.getState()
+  if (uploadTarget(chat) === 'viewer') return s.openUploadPreview(id)
+  s.openShow(chat!, uploadShowItem(await api.documents.get(id)))
+}
+
 /**
  * Does what a click on a row means (see rowAction). `jump` opens the chat, which a side-panel file needs when the
  * click came from the sidebar (the canvas passes its own); null means the chat is already on screen.
- * A project file no chat touched has no chat to open: a note opens in the editor, an upload in the project's Artifacts tab.
+ * A project file no chat touched has no chat to open: a note opens in the editor, an upload in the standalone viewer.
  */
 export async function openChatFile(f: ChatFile, jump: ((conversationId: string) => void) | null = (id) => void useStore.getState().selectChat(id)): Promise<void> {
   const s = useStore.getState()
@@ -63,13 +70,7 @@ export async function openChatFile(f: ChatFile, jump: ((conversationId: string) 
     switch (action) {
       case 'jump-to-chat': return
       case 'open-doc': return await s.openDoc(f.ref)
-      case 'open-upload': {
-        if (!chat) return f.project_id ? s.openProject(f.project_id, 'artifacts') : undefined
-        const d = await api.documents.get(f.ref)
-        if (d.text) s.openShow(chat, { kind: 'markdown', title: f.name, source: d.text })
-        else s.openFiles('uploads')
-        return
-      }
+      case 'open-upload': return await openUpload(f.ref, chat)
       case 'open-output': return chat ? await showOutput(f, chat) : undefined
       case 'open-local': return chat ? s.openShow(chat, { kind: 'file', title: f.name, path: f.ref, name: f.name }) : undefined
     }

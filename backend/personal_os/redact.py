@@ -1,16 +1,14 @@
 """Named redaction rules: one copy of the patterns, selectable by subset.
 
-Lifted out of activity.py's gate so meetings can reuse the credential patterns without
-hand-copying a security-relevant list that would then drift. activity.Gate.scrub is
-`scrub(text)` with the defaults, byte for byte; meetings call `scrub_secrets`, which keeps
-the rules that catch credentials and drops the two that destroy a conversation.
+One list of credential patterns for everything that must not echo a secret. `scrub_secrets` keeps
+the rules that catch credentials and drops the two (email, phone) that would destroy a conversation.
 """
 from __future__ import annotations
 
 import re
 from typing import Iterable
 
-# Anything matching these is scrubbed out of typed text and transcripts before it is stored.
+# Anything matching these is scrubbed out of text before it is stored or shown to the model.
 # Deliberately blunt: a false positive costs a few characters of context, a miss stores a secret.
 # Insertion order IS the application order, and `REDACTIONS` below depends on it.
 RULES: dict[str, tuple[re.Pattern[str], str]] = {
@@ -36,9 +34,8 @@ RULES: dict[str, tuple[re.Pattern[str], str]] = {
 }
 
 # A word that announces a secret, plus whatever follows it - that is where the value lives.
-# Scoped to the value rather than the whole line on purpose: typed text arrives as one long
-# single-line buffer, so dropping the line would throw away thousands of harmless characters
-# because of one word.
+# Scoped to the value rather than the whole line on purpose: a long single-line buffer
+# would lose thousands of harmless characters to one word if the whole line went.
 SECRET_ASSIGN = re.compile(
     r"(?:password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key|credit ?card|cvv|"
     r"pin ?code|seed phrase)\s*(?:is|are|=|:)?\s*\S{0,64}",
@@ -47,18 +44,15 @@ SECRET_ASSIGN = re.compile(
 
 ALL_RULES: tuple[str, ...] = tuple(RULES)
 
-# Credentials only. `email` and `phone` are deliberately absent: a meeting transcript is a
-# record of who said what to whom, and the gate's identity rules replace every address with
-# [email] and every phone-shaped run of digits with [phone]
-# (redact.py), which would erase attendee identity from inside the conversation.
-# A leaked API key is a breach; a colleague's email address in their own meeting is the point.
+# Credentials only. `email` and `phone` are deliberately absent: replacing every address with [email]
+# and every phone-shaped run of digits with [phone] would erase who is who in the text.
+# A leaked API key is a breach; a colleague's email address is the point.
 SECRET_RULES: tuple[str, ...] = (
     "private_key", "url_userinfo", "url_secret_param", "card", "ssn", "token", "aws_key",
     "github_pat", "google_api", "google_oauth", "slack_webhook", "jwt", "entropy",
 )
 
-# The exact object activity.py used to define at module level, re-exported so nothing that
-# iterated it has to change.
+# The rules in application order.
 REDACTIONS: list[tuple[re.Pattern[str], str]] = [RULES[k] for k in ALL_RULES]
 
 
@@ -66,7 +60,7 @@ def scrub(text: str, rules: Iterable[str] = ALL_RULES, secret_assign: bool = Tru
     """Apply the named rules in the order given, then the announce-a-secret sweep.
 
     Unknown names are skipped rather than raised on: callers pass rule sets built from
-    settings, and a stale name must not take a collector down.
+    settings, and a stale name must not break the caller.
     """
     if not text:
         return ""
@@ -96,7 +90,7 @@ def scrub_command_output(text: str) -> str:
 
 
 def scrub_secrets(text: str) -> str:
-    """What the meetings feature calls: strip credentials, keep the people."""
+    """Strip credentials, keep the people."""
     return scrub(text, SECRET_RULES, secret_assign=True)
 
 
@@ -104,7 +98,7 @@ def scrub_secrets(text: str) -> str:
 #
 # Propose-validate-score with the stdlib: a regex proposes, a validator checks, nearby words nudge the
 # score, a threshold decides. Everything above is untouched; `scrub`/`scrub_secrets` keep their
-# exact behaviour and meetings still call them. The activity gate calls `scrub_v2`.
+# exact behaviour. `sanitize_url` (MCP import) is built on `analyze`.
 
 import math  # noqa: E402
 from dataclasses import dataclass  # noqa: E402

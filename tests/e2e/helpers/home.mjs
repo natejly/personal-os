@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['Provider & cost', 'Permissions', 'Autonomy', 'Memory', 'Behavior', 'Modules', 'Integrations', 'Meetings', 'Data']
+export const TABS = ['Provider & cost', 'Permissions', 'Autonomy', 'Memory', 'Behavior', 'Modules', 'Integrations', 'Data']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 

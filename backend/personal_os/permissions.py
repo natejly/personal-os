@@ -42,8 +42,8 @@ DEFAULTS: dict[str, Any] = {
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
-    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything but denied
-    # calls and writes outside the workspace folders.
+    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything except denied
+    # calls (hard-deny paths included), credential-store reads and writes, and writes after untrusted content.
     "permissionMode": "auto",
     # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
     # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
@@ -56,8 +56,8 @@ DEFAULTS: dict[str, Any] = {
     "fetchAllowlist": [],
     # How doc_edit lands. "review" proposes a diff; "apply" writes it.
     "docEditMode": "review",
-    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
-    # own workspace is always granted; anywhere else those tools ask first.
+    # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
+    # reads it for scope; it is still stored and returned so an older client keeps working.
     "workspaceRoots": [],
     # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
     "planMode": "off",
@@ -233,12 +233,4 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
     if key == "workspaceRoots":
         if not all(isinstance(x, str) for x in v):
             raise ValueError("workspaceRoots must be a list of folders")
-        # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
-        # would refuse is rejected here rather than stored and then silently ignored. The home folder itself is refused too.
-        from . import mac
-        for root in v:
-            try:
-                mac.allowed_root(root)
-            except mac.LocalPathError as e:
-                raise ValueError(f"{root} cannot be a workspace folder: {e}") from e
     return v

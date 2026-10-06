@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
+import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
-import { useDocRec } from '../features/docrec/store'
 import { mailWatchLines } from '../lib/todayCards'
 import { hasModelKey } from '../lib/modelLabel'
 import { api } from '../lib/api'
-import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
 import { inboxBadge } from '../lib/inboxBadge'
-import type { Meeting, MeetingCandidate } from '@shared/types'
 import { moduleHome } from '../shell/registry'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
@@ -32,137 +29,6 @@ const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 // Google Tasks dues are midnight UTC; take the date part so it doesn't shift a day locally.
 const fmtDue = (iso: string): string => new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-/** Meeting timestamps are epoch SECONDS, not the ISO strings the calendar rows carry. */
-const fmtClock = (secs: number): string => new Date(secs * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-const fmtLength = (ms: number): string => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : `${Math.round(ms / 60_000)} min`)
-
-/** How often the calendar nudge is re-asked. The backend caches it for 60s, so this is its period. */
-const SUGGEST_MS = 60_000
-
-/**
- * Today's meetings, whatever is waiting to be reviewed, and the calendar events the backend is
- * offering to take notes on.
- *
- * Its own component so the 60s poll lives and dies with the card rather than with Today. Nothing
- * here starts a recording on its own: a candidate is an offer with a button, and the one headless
- * path (`autoRecord`) is a setting the user has to turn on in the Meetings panel.
- */
-function MeetingsCard(): JSX.Element {
-  // Today's list is deliberately NOT the store's `meetings` array: that one is the Meetings rail's
-  // search result, so a query still sitting in the rail's box would silently filter Today - with no
-  // search box on this page to explain the gap, and with a filtered-out meeting costing its
-  // candidate the "take notes" button. This card owns an unfiltered copy instead.
-  const [meetings, setMeetings] = useState<Meeting[]>([])
-  const dataScope = useStore((s) => s.dataScope)
-  const meetingsPending = useStore((s) => s.meetingsPending)
-  const meetingStatus = useStore((s) => s.meetingStatus)
-  const meetingBusy = useStore((s) => s.meetingBusy)
-  const openMeeting = useStore((s) => s.openMeeting)
-  const startRecording = useStore((s) => s.startRecording)
-  const recordCandidate = useStore((s) => s.recordCandidate)
-  const setView = useStore((s) => s.setView)
-  const startFromEvent = useDocRec((s) => s.startFromEvent)
-  const docBusy = useDocRec((s) => s.busy)
-  const [candidates, setCandidates] = useState<MeetingCandidate[]>([])
-
-  useEffect(() => {
-    void api.meetings.list(dataScope, '').then(setMeetings).catch(() => undefined)
-  }, [dataScope, meetingStatus?.active?.meeting_id, meetingsPending])
-  useEffect(() => {
-    // `/meetings/suggest` answers [] rather than erroring when Google is unconnected, so there is
-    // nothing to guard on here and a failure just leaves the offer list empty.
-    const ask = (): void => void api.meetings.suggest().then(setCandidates).catch(() => undefined)
-    ask()
-    const timer = setInterval(ask, SUGGEST_MS)
-    return () => clearInterval(timer)
-  }, [])
-
-  const today = new Date().toDateString()
-  const todays = meetings.filter((m) => {
-    const at = m.started_at ?? m.scheduled_start
-    return at !== null && new Date(at * 1000).toDateString() === today
-  })
-  const active = meetingStatus?.active ?? null
-  // Filtered on the meeting's STATE, not merely on whether it is the live one: /meetings/suggest
-  // keeps offering an event for its whole window, so a call that was already recorded and stopped
-  // comes back with its meeting id, and starting that id again restarts the segment counter in the
-  // same directory and overwrites the beginning of the recording.
-  const offers = offerableCandidates(candidates, meetings, active?.meeting_id ?? null)
-  // The backend refuses `start` while the master switch is off, so the offer says why up front.
-  const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
-  const OFF_TITLE = 'The meeting recorder is off. Turn it on in Settings → Meetings.'
-
-  return (
-    <section className="widget">
-      <header>
-        <Mic size={14} /> Meetings
-        {meetingsPending > 0 && <span className="muted small">{meetingsPending} awaiting review</span>}
-        <button className="link small" onClick={() => setView('meetings')}>View all</button>
-      </header>
-
-      {active && (
-        <ul className="events">
-          <li {...rowButton(() => setView('meetings'))} title="Open the meeting that is recording">
-            <span className="ev-time">{formatOffset(active.elapsed_ms / 1000)}</span>
-            <span className="ev-title">Recording now</span>
-          </li>
-        </ul>
-      )}
-
-      {offers.length > 0 && (
-        <ul className="events">
-          {offers.map((c) => (
-            <li key={`${c.calendar_id}:${c.event_id}`}>
-              <span className="ev-time">{fmtTime(c.start, false)}</span>
-              <span className="ev-title">{c.title || '(untitled event)'}</span>
-              {/* Navigate first: the consent modal is hosted by the Meetings view, so a first-ever
-                  recording started from here would otherwise gate on a dialog with nowhere to render. */}
-              <button className="link small" disabled={meetingBusy || active !== null || recorderOff}
-                title={recorderOff ? OFF_TITLE : undefined}
-                onClick={() => { setView('meetings'); void recordCandidate(c) }}>
-                take notes
-              </button>
-              <button className="link small" disabled={docBusy || meetingBusy || active !== null || recorderOff}
-                title={recorderOff ? OFF_TITLE : 'Create a file for this event and record into it'}
-                onClick={() => { setView('meetings'); void startFromEvent(c) }}>
-                in a file
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {todays.length > 0 && (
-        <ul className="events">
-          {todays.map((m) => {
-            const at = m.started_at ?? m.scheduled_start
-            return (
-              <li key={m.id} {...rowButton(() => void openMeeting(m.id))} title="Open these notes">
-                <span className="ev-time">{at !== null ? fmtClock(at) : ''}</span>
-                <span className="ev-title">{m.title || 'Untitled meeting'}</span>
-                <span className="muted small">
-                  {m.duration_ms > 0 ? fmtLength(m.duration_ms) : m.status}
-                  {m.has_pending ? ' · review' : ''}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {!active && offers.length === 0 && todays.length === 0 && (
-        <div className="widget-empty">
-          <p className="muted">No meetings today.</p>
-          <button className="primary-btn" disabled={meetingBusy || recorderOff}
-            title={recorderOff ? OFF_TITLE : undefined}
-            onClick={() => { setView('meetings'); void startRecording() }}>
-            <Mic size={14} /> Record one
-          </button>
-        </div>
-      )}
-    </section>
-  )
-}
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -446,7 +312,6 @@ export default function HomeView(): JSX.Element {
             ))}
           </section>}
 
-          {on('meetings') && <MeetingsCard />}
 
           {on('projects') && <section className="widget">
             <header><FolderKanban size={14} /> Projects</header>

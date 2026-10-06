@@ -1597,6 +1597,21 @@ export type BackgroundEvent =
   | { event: 'todos_changed'; data: Record<string, never> }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }
+  /** A ship checklist moved (ship.py): the whole row, so the card and the job row update without a refetch. */
+  | { event: 'ship_checklist'; data: ShipChecklist }
+
+/** One step of a ship checklist. awaiting_confirm is only ever the merge step. */
+export type ShipStepStatus = 'pending' | 'running' | 'green' | 'red' | 'skipped' | 'awaiting_confirm'
+export interface ShipStep {
+  name: 'tests' | 'push' | 'pr' | 'merge'; status: ShipStepStatus
+  started_at: number | null; ended_at: number | null; log_tail: string; link: string | null
+}
+/** GET /ship/{id}: tests -> push -> PR -> merge for one branch; the merge runs only after the user confirms. */
+export interface ShipChecklist {
+  id: string; job_id: string | null; run_id: string | null; repo_path: string; branch: string; base: string
+  test_command: string | null; status: 'running' | 'awaiting_confirm' | 'done' | 'failed' | 'cancelled'
+  steps: ShipStep[]; pr_url: string | null; merged_sha: string | null; created_at: number; updated_at: number
+}
 
 /** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
 export interface ShellJobInfo {

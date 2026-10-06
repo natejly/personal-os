@@ -484,6 +484,8 @@ async def _reliability_shutdown() -> None:
 work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
+from . import teach  # noqa: E402
+teach_svc = teach.Teach(db)  # teach-a-task recordings (screen frames -> a candidate skill)
 guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
@@ -8535,6 +8537,144 @@ def preview_skills(project_id: str | None = None) -> dict[str, Any]:
     return {"block": block, "tokens_estimate": estimate_tokens(block),
             "included": [{"id": s["id"], "name": s["name"]} for s in rows[:MAX_INJECTED_SKILLS]],
             "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
+
+
+# ---------------- teach a task: a screen recording becomes a candidate skill (teach.py) ----------------
+class TeachStepsIn(BaseModel):
+    title: str = ""
+    goal: str = ""
+    inputs: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+
+
+class TeachScheduleIn(BaseModel):
+    kind: Literal["cron", "once"] = "cron"
+    cron: str = ""
+    run_at: float | None = None
+    timezone: str | None = None
+    test: bool = False  # kick a dry run of the new job as the test run
+
+
+def _teach_row(rid: str) -> dict[str, Any]:
+    row = teach_svc.get(rid)
+    if not row:
+        raise HTTPException(404, "No such recording")
+    return row
+
+
+@app.get("/teach")
+def teach_list() -> list[dict[str, Any]]:
+    return teach_svc.list()
+
+
+@app.post("/teach/start")
+def teach_start() -> dict[str, Any]:
+    """Start a screen recording. {needs_permission: true} when macOS has not granted Screen Recording: the panel
+    then offers the same Grant / Open System Settings as the Activity panel (/activity/permissions/*)."""
+    try:
+        return teach_svc.start()
+    except teach.TeachError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/teach/stop")
+async def teach_stop() -> dict[str, Any]:
+    row = await asyncio.to_thread(teach_svc.stop)
+    if not row:
+        raise HTTPException(409, "Nothing is recording")
+    return row
+
+
+@app.post("/teach/import")
+async def teach_import(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Cut an existing screen recording into frames (needs ffmpeg). The video is deleted once its frames are out."""
+    tmp = db.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    dest = tmp / f"teach-{new_id()}{teach.safe_suffix(file.filename or '')}"
+    size = 0
+    try:
+        with dest.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > teach.MAX_IMPORT_BYTES:
+                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
+                out.write(chunk)
+        return await asyncio.to_thread(teach_svc.import_video, dest)
+    except teach.TeachError as e:
+        raise HTTPException(422, str(e)) from e
+    finally:
+        dest.unlink(missing_ok=True)
+
+
+@app.get("/teach/{rid}")
+def teach_get(rid: str) -> dict[str, Any]:
+    return _teach_row(rid)
+
+
+@app.get("/teach/{rid}/frames/{n}")
+def teach_frame(rid: str, n: int) -> FileResponse:
+    _teach_row(rid)
+    p = teach_svc.frame_path(rid, n)
+    if not p:
+        raise HTTPException(404, "No such frame")
+    return FileResponse(p, media_type="image/jpeg", headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/teach/{rid}/extract")
+async def teach_extract(rid: str) -> dict[str, Any]:
+    """One model call over a spread of frames and the app timeline. The result is a draft the user edits."""
+    _teach_row(rid)
+    try:
+        return await teach_svc.extract(rid, settings())
+    except teach.TeachError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.put("/teach/{rid}/steps")
+def teach_steps(rid: str, body: TeachStepsIn) -> dict[str, Any]:
+    _teach_row(rid)
+    return teach_svc.set_steps(rid, body.model_dump())
+
+
+@app.post("/teach/{rid}/save")
+def teach_save(rid: str) -> dict[str, Any]:
+    """The draft as a *candidate* skill (source 'teach'): lint and approval apply exactly as to any other skill."""
+    row = _teach_row(rid)
+    if not (row.get("steps") or {}).get("steps"):
+        raise HTTPException(422, "Extract or write the steps first")
+    name, desc, procedure = teach.to_skill(row["steps"])
+    s = skills.propose(name, desc, procedure, source="teach",
+                       rationale=f"Taught from a screen recording ({time.strftime('%Y-%m-%d', time.localtime(row['created_at']))})")
+    teach_svc.attach(rid, skill_id=s["id"], status="saved")
+    return {"skill": s, "findings": _lint_skill(s["name"], s["description"], s["procedure"], s["id"]), "recording": teach_svc.get(rid)}
+
+
+@app.post("/teach/{rid}/schedule")
+async def teach_schedule(rid: str, body: TeachScheduleIn) -> dict[str, Any]:
+    """A routine that follows the saved skill, created through POST /jobs so every job check applies. Only an
+    approved skill can be scheduled: a job run reads it with skill_view, which shows approved skills only."""
+    row = _teach_row(rid)
+    s = skills.get(row.get("skill_id") or "")
+    if not s:
+        raise HTTPException(409, "Save the steps to the library first")
+    if s["status"] != "approved":
+        raise HTTPException(409, "Approve the skill in the Library first: a routine can only follow an approved skill")
+    job = await create_job(JobIn(name=s["name"][:120], kind=body.kind, cron=body.cron, run_at=body.run_at,
+                                 timezone=body.timezone, enabled=True,
+                                 prompt=f'Follow the approved skill "{s["name"]}" (read it with skill_view {s["id"]}) and carry out the task.'))
+    teach_svc.attach(rid, job_id=job["id"])
+    out: dict[str, Any] = {"job": job, "recording": teach_svc.get(rid)}
+    if body.test:
+        out["test"] = await dry_run_job(job["id"])
+    return out
+
+
+@app.delete("/teach/{rid}")
+async def teach_delete(rid: str) -> dict[str, bool]:
+    """Discard a recording: its frames and timeline are deleted. A skill or routine made from it stays."""
+    _teach_row(rid)
+    await asyncio.to_thread(teach_svc.delete, rid)
+    return {"ok": True}
 
 
 class InduceIn(BaseModel):

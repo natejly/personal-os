@@ -306,11 +306,11 @@
 .widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
 .widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
 .widget .messages-inner .avatar .lucide { width: 11px; height: 11px; }
-/* The assistant's face: the page sizes it to 30px, which out-ranks the 20px above by stylesheet order. */
-.widget .messages-inner .avatar.face-avatar { width: 22px; height: 22px; margin-top: 0; }
-/* Rows that line up with the reply text, re-aligned to the 22px face + 8px gap (the page uses 38px). */
-.widget .regen-row { padding-left: 30px; margin-top: -8px; }
-.widget .run-error-row { margin-left: 30px; font-size: 12px; }
+/* The assistant's face: the page sizes it to 38px, which out-ranks the 20px above by stylesheet order. */
+.widget .messages-inner .avatar.face-avatar { width: 28px; height: 28px; margin-top: 0; }
+/* Rows that line up with the reply text, re-aligned to the 28px face + 8px gap (the page uses 46px). */
+.widget .regen-row { padding-left: 36px; margin-top: -8px; }
+.widget .run-error-row { margin-left: 36px; font-size: 12px; }
 .widget .messages-inner .msg-actions { min-height: 22px; }
 /* Page-sized headings read as shouting in a panel, and an image wider than the window scrolls it sideways. */
 .widget .markdown h1 { font-size: 15px; }

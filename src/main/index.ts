@@ -18,6 +18,7 @@ import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListen
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 import { startUpdater } from './updater'
+import { registerSystemAccess } from './systemAccess'
 import { background, goBackground, reveal } from './background'
 
 let win: BrowserWindow | null = null
@@ -421,6 +422,7 @@ if (gotLock) app.whenReady().then(async () => {
     if (st !== 'not-determined') return st
     return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : 'denied'
   })
+  registerSystemAccess()
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

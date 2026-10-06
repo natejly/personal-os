@@ -38,6 +38,12 @@ module.exports = {
         'Grain uses AppleScript and Shortcuts to read the frontmost app and to run actions you ask for.',
       NSScreenCaptureUsageDescription:
         'Grain can read on-screen context for the Activity monitor, only when you turn it on.',
+      NSCameraUsageDescription: 'Grain uses the camera only for photos and video you choose to capture.',
+      NSContactsUsageDescription: 'Grain reads and updates Contacts when you ask it to.',
+      NSCalendarsUsageDescription: 'Grain reads and updates Calendar events when you ask it to.',
+      NSCalendarsFullAccessUsageDescription: 'Grain reads and updates Calendar events when you ask it to.',
+      NSRemindersUsageDescription: 'Grain reads and updates Reminders when you ask it to.',
+      NSRemindersFullAccessUsageDescription: 'Grain reads and updates Reminders when you ask it to.',
       NSDesktopFolderUsageDescription: 'Grain reads and writes files on your Desktop when you ask it to.',
       NSDocumentsFolderUsageDescription: 'Grain reads and writes files in Documents when you ask it to.',
       NSDownloadsFolderUsageDescription: 'Grain reads and writes files in Downloads when you ask it to.'

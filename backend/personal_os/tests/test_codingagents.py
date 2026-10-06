@@ -272,7 +272,6 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual(ca.map_job(job("exited", 2))[0], "failed")
         self.assertEqual(ca.map_job(job("killed"))[0], "stopped")
         self.assertEqual(ca.map_job(job("timed_out"))[0], "failed")
-        self.assertIn("30 minutes", ca.map_job(job("timed_out"))[1])
         self.assertEqual(ca.map_job(job("orphaned"))[0], "blocked")
 
     async def test_send_refused_when_the_job_record_was_lost(self) -> None:

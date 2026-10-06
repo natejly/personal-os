@@ -1,4 +1,4 @@
-"""limits.py: the derived window, worker slots and round cap, and old stored values for knobs that became automatic.
+"""limits.py: the derived window, worker slots and context shares, and old stored values for knobs that became automatic.
 
 Run: python backend/tests/test_limits.py
 """
@@ -60,12 +60,21 @@ class SlotsTests(unittest.TestCase):
         self.assertEqual(limits.slots({"parallelReads": 0}, "parallelReads"), limits.worker_slots())
         self.assertEqual(limits.slots({}, "deskMaxLive"), limits.worker_slots())
 
-    def test_max_rounds(self) -> None:
-        self.assertEqual(limits.max_rounds({"maxToolRounds": 0}), limits.MAX_ROUNDS_HARD)
-        self.assertEqual(limits.max_rounds({"maxToolRounds": 25}), 25)
-        self.assertEqual(limits.max_rounds({"maxToolRounds": 500}), limits.MAX_ROUNDS_HARD)
-        self.assertEqual(limits.max_rounds({"maxToolRounds": "x"}), limits.MAX_ROUNDS_HARD)
-        self.assertEqual(limits.max_rounds({}), 100)
+
+class ContextSharesTests(unittest.TestCase):
+    def test_shares_scale_with_the_window(self) -> None:
+        small, mid, big = (limits.context_shares(w) for w in (8_000, limits.CONTEXT_WINDOW_FALLBACK, 1_000_000))
+        for k in limits.CONTEXT_SHARES:
+            self.assertLess(small[k], mid[k], k)
+            self.assertLess(mid[k], big[k], k)
+        self.assertEqual(mid["memories"], int(limits.CONTEXT_WINDOW_FALLBACK * limits.CONTEXT_SHARES["memories"]))
+
+    def test_no_budget_constants_remain(self) -> None:
+        for name in ("RUN_TOKENS", "RUN_SECONDS", "MAX_ROUNDS_HARD", "JOB_MAX_ROUNDS", "JOB_RUN_TOKENS", "JOB_RUN_SECONDS",
+                     "JOB_HARD_SECONDS", "SUBAGENT_MAX_ROUNDS", "DESK_MAX_TURNS", "CODING_SESSION_TIMEOUT_MINUTES",
+                     "SKILLS_INLINE_BUDGET", "CONTEXT_BUDGET", "max_rounds"):
+            self.assertFalse(hasattr(limits, name), name)
+        self.assertGreater(limits.JOB_IDLE_SECONDS, 0)
 
 
 class StoredValueTests(unittest.TestCase):
@@ -74,7 +83,7 @@ class StoredValueTests(unittest.TestCase):
             self.assertEqual(llm.DEFAULT_SETTINGS[k], 0, k)
 
     def test_put_accepts_every_old_value_and_zero(self) -> None:
-        for k, v in (("maxToolRounds", 25), ("contextWindow", 128000), ("subagentMaxConcurrent", 4), ("deskMaxLive", 4),
+        for k, v in (("contextWindow", 128000), ("subagentMaxConcurrent", 4), ("deskMaxLive", 4),
                      ("parallelReads", 4), ("stuckDetection", False)):
             self.assertEqual(client.put("/settings", json={k: v}).status_code, 200, k)
         for k in limits.AUTOMATIC:

@@ -1,10 +1,15 @@
 // electron-builder config. Kept as JS (not package.json "build") so signing and notarization can
 // follow the environment: see docs/releasing.md.
 //
-// Signing: with CSC_NAME / CSC_LINK set, electron-builder signs with that identity. Otherwise it skips
-// signing and scripts/adhoc-sign.cjs (afterSign) ad-hoc signs, so a local build still launches.
-// Notarization runs only when all three APPLE_* variables are present.
-const signing = Boolean(process.env.CSC_NAME || process.env.CSC_LINK)
+// Signing (scripts/mac-signing.cjs): CSC_NAME / CSC_LINK if set; else the self-signed "Grain Local
+// Signing" identity when it is in this Mac's keychain, so privacy grants survive rebuilds; else
+// electron-builder skips signing and scripts/adhoc-sign.cjs (afterSign) ad-hoc signs, so a local build
+// still launches. Notarization runs only when all three APPLE_* variables are present.
+const { resolveSigning, LOCAL_IDENTITY } = require('./scripts/mac-signing.cjs')
+
+const signingMode = resolveSigning()
+const signing = signingMode !== 'adhoc'
+if (signingMode === 'local') console.log(`  • signing with local identity "${LOCAL_IDENTITY}"`)
 const notarize = Boolean(
   process.env.APPLE_ID && process.env.APPLE_TEAM_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD
 )
@@ -26,6 +31,9 @@ module.exports = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     // null skips electron-builder's signing (and its keychain auto-discovery); the hook ad-hoc signs instead.
     ...(signing ? {} : { identity: null }),
+    // A self-signed identity gets no secure timestamp, and asking Apple's server for one costs seconds
+    // per file across thousands of bundled Python files.
+    ...(signingMode === 'local' ? { timestamp: 'none' } : {}),
     notarize,
     extendInfo: {
       NSMicrophoneUsageDescription:

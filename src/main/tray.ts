@@ -6,6 +6,7 @@
  * — that macOS tints for light, dark and highlighted bars.
  */
 import { app, Menu, nativeImage, Tray } from 'electron'
+import { shortcut as registered } from '../shared/shortcuts'
 import { gather, gatherState, listPopouts, OPACITY_LEVELS, popoutsInFront, scatter, syncPopoutOpacity, syncPopoutPinned, toggleFront } from './popouts'
 import { toggleAsk } from './quickAsk'
 import { askShortcut, gatherShortcut } from './shortcuts'
@@ -38,7 +39,7 @@ const menu = (open: () => void): Menu => {
       label: 'Bring Pop-outs to Front',
       type: 'checkbox',
       checked: popoutsInFront(),
-      accelerator: 'Alt+Command+F',
+      accelerator: registered('popouts-front').keys,
       click: (item) => { item.checked = toggleFront() }
     },
     {

@@ -174,6 +174,8 @@ def context_taints(used: dict[str, Any]) -> list[str]:
     """Prompt sections that put text the user did not write as an instruction into the turn. A pinned file is the
     user's own choice and never tainted a turn, so its range citation does not count as a 'chunks' excerpt."""
     keys = [k for k in ("meetings", "activity") if used.get(k)]
+    if "activity" in keys and used.get("activity_foreign") is False:
+        keys.remove("activity")
     if any(c.get("kind") != "range" for c in used.get("chunks") or []):
         keys.append("chunks")
     return keys
@@ -429,6 +431,8 @@ def build_context(
             block = _trim_block(block, _budget(settings, "activity"), "activity", trimmed)
             volatile.append(block)
             used["activity"] = block
+            # The monitor ships on; a block of app names only is the user's own data and must not taint the turn.
+            used["activity_foreign"] = activity.context_has_foreign_text()
 
     # Recent meetings: titles and accepted notes, never raw transcript. Off per chat like the rest,
     # and empty until the user records something.

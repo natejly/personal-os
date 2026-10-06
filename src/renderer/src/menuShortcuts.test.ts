@@ -141,6 +141,23 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   useStore.setState({ settings: orig, toasts: [] })
 })
 
+test('help toggles the shortcut overlay; help:guide opens it on the guide', () => {
+  assert.equal(useStore.getState().helpOpen, false)
+  fire('help')
+  assert.equal(useStore.getState().helpOpen, true)
+  assert.equal(useStore.getState().helpSection, 'shortcuts')
+  fire('help')
+  assert.equal(useStore.getState().helpOpen, false)
+  fire('help:guide')
+  assert.equal(useStore.getState().helpOpen, true)
+  assert.equal(useStore.getState().helpSection, 'guide')
+  // ⌘/ while the guide shows switches to shortcuts rather than closing.
+  fire('help')
+  assert.equal(useStore.getState().helpSection, 'shortcuts')
+  assert.equal(useStore.getState().helpOpen, true)
+  useStore.getState().openHelp(null)
+})
+
 test('view:library routes with no view-specific wiring', () => {
   fire('view:library')
   assert.equal(useStore.getState().view, 'library')
@@ -187,7 +204,8 @@ test('chat:next and chat:prev step through the list, clamp, and ignore the canva
 
 test("the doc editor's chords are not menu accelerators, which would swallow them", async () => {
   const { readFileSync } = await import('node:fs')
-  const menu = readFileSync('src/main/index.ts', 'utf8')
+  const { SHORTCUTS } = await import('@shared/shortcuts')
+  const menu = new Set(SHORTCUTS.filter((s) => s.scope === 'menu' || s.scope === 'window').map((s) => s.keys))
   const editor = readFileSync('src/renderer/src/components/MarkdownEditor.tsx', 'utf8')
   // The hint bar is the list the editor advertises; each chord must be free in the menu.
   const hints = /className="md-hints">([^<]+)</.exec(editor)?.[1] ?? ''
@@ -203,14 +221,16 @@ test("the doc editor's chords are not menu accelerators, which would swallow the
   for (const c of chords) {
     assert.ok(accel[c], `map ${c} to its accelerator here`)
     if (forwarded[c] && store.includes(forwarded[c])) continue
-    assert.ok(!menu.includes(`'${accel[c]}'`), `${c} is a menu accelerator`)
+    assert.ok(!menu.has(accel[c]), `${c} is a menu accelerator`)
   }
 })
 
 test('⌘0…⌘n are contiguous, each used once, each a distinct target', async () => {
-  const { readFileSync } = await import('node:fs')
-  const menu = readFileSync('src/main/index.ts', 'utf8')
-  const rows = [...menu.matchAll(/accelerator: 'CmdOrCtrl\+(\d)', click: \(\) => sendMenu\('([^']+)'\)/g)].map((m) => [Number(m[1]), m[2]] as const)
+  const { SHORTCUTS } = await import('@shared/shortcuts')
+  const rows = SHORTCUTS.flatMap((s) => {
+    const d = /^CmdOrCtrl\+(\d)$/.exec(s.keys)
+    return d && s.action ? [[Number(d[1]), s.action] as const] : []
+  })
   assert.equal(rows.length, 8, 'Today, Chats, Todos, Calendar, Files, Mail, Memory, Activity')
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
   assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')

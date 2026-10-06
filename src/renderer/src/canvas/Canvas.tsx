@@ -18,6 +18,7 @@ import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point,
 import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
+import { MessageSquarePlus, Plus } from 'lucide-react'
 import { lines, usePageContext } from '../lib/pageContext'
 
 const MIN_ZOOM = 0.5
@@ -38,6 +39,11 @@ const EAGER = true
 const HEAVY_CAP = 6
 const GHOST = { w: 420, h: 360 }
 const IDLE_MS = 180
+/** Set once the first-run Spaces explainer is dismissed; after that an empty space shows the one-line hint. */
+const INTRO_KEY = 'grain.spacesIntroSeen'
+const introSeen = (): boolean => {
+  try { return localStorage.getItem(INTRO_KEY) === '1' } catch { return false /* private window */ }
+}
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
 /**
@@ -180,7 +186,13 @@ export default function Canvas(): JSX.Element {
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [ghost, setGhost] = useState<Rect | null>(null)
-  const [menu, setMenu] = useState<{ screen: Point; at: Point } | null>(null)
+  // `at` is the grid cell a right-click landed on; the explainer's button opens the menu without one.
+  const [menu, setMenu] = useState<{ screen: Point; at?: Point } | null>(null)
+  const [intro, setIntro] = useState(() => !introSeen())
+  const dismissIntro = (): void => {
+    setIntro(false)
+    try { localStorage.setItem(INTRO_KEY, '1') } catch { /* private window */ }
+  }
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // A locked space keeps the pan, the zoom and every rect it had: the plane stops taking gestures,
@@ -461,6 +473,8 @@ export default function Canvas(): JSX.Element {
   // Mounted for the whole space, hidden below the threshold, so an imperative zoom can reveal it.
   const gridOn = canvas?.snap_mode === 'grid' || canvas?.snap_mode === 'both'
   const shown = useMemo(() => renderOrder(windows), [windows])
+  // Putting anything on a space is the explainer's point, so the first window retires it for good.
+  useEffect(() => { if (intro && shown.length) dismissIntro() }, [intro, shown.length])
 
   return (
     <div className="canvas-root">
@@ -498,7 +512,18 @@ export default function Canvas(): JSX.Element {
           {ghost && <div className="drop-ghost" style={screenRect(ghost, view)} />}
         </div>
         {marquee && <div className="canvas-marquee" style={screenRect(marquee, view)} />}
-        {loaded && !shown.length && (
+        {loaded && !shown.length && intro && !locked && canvas && (
+          <div className="canvas-empty canvas-intro" role="note" aria-label="About spaces">
+            <strong>This is a space</strong>
+            <span>Lay out chats, notes, docs and your apps side by side, then pop any window out on top of other apps. Drag anything here from the sidebar.</span>
+            <div className="canvas-intro-actions">
+              <button className="primary-btn" onClick={() => void useCanvas.getState().newChatWindow()}><MessageSquarePlus size={14} /> New chat</button>
+              <button className="ghost-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ screen: { x: r.left, y: r.bottom + 4 } }) }}><Plus size={14} /> Add a widget</button>
+              <button className="ghost-btn" onClick={dismissIntro}>Got it</button>
+            </div>
+          </div>
+        )}
+        {loaded && !shown.length && !(intro && !locked && canvas) && (
           <div className="canvas-empty">
             <strong>Empty space</strong>
             <span>{locked ? 'This space is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>

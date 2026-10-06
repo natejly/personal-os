@@ -43,7 +43,9 @@ log = logging.getLogger("personal_os.activity")
 SIGNALS = ("apps", "browserUrls", "input", "text", "micAudio", "outputAudio")
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "enabled": False,
+    # On, but every probe stays silent: app names come from lsappinfo without any permission, and the
+    # input counts and window titles wait until the user grants them from the Activity panel.
+    "enabled": True,
     "signals": {
         "apps": True,          # frontmost app + window title
         "browserUrls": False,  # URL of the active tab in the frontmost browser
@@ -2011,6 +2013,18 @@ class Monitor:
                 first = self.gate.scrub((s["body"].strip().split("\n\n")[0] or "").strip())
                 parts.append(f"- {_clock(s['period_start'])}-{_clock(s['period_end'])} {one_line(self.gate.scrub(str(s['headline'])), 120)}: {one_line(first, 200)}")
         return "\n".join(parts)[:max_chars]
+
+    def context_has_foreign_text(self) -> bool:
+        """True when the injected block carries text the user did not write: a window title, or a profile or
+        summary distilled from titles. App names alone (the monitor without Accessibility) are the user's own
+        installed apps, so a block made of just those must not taint the turn."""
+        if not self.running:
+            return False
+        if self.last_focus.get("title"):
+            return True
+        if self.store.profile()["content"].strip():
+            return True
+        return bool(self.store.summaries(since=now() - 86400, limit=1))
 
     # ---- background loop ----
     async def loop(self) -> None:

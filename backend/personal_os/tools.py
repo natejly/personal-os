@@ -27,7 +27,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import egress, mac
+from . import egress, mac, permissions
 from .embed import rrf
 from . import fsx
 from . import skillbuild
@@ -428,7 +428,7 @@ def _chrome_ipv4(host: str) -> str | None:
 def _allowed_hosts(settings: dict[str, Any]) -> set[str]:
     """The user's standing per-host trust, from settings only. A host the model or a fetched page surfaced is not enough."""
     # A value stored before PUT /settings validated it ("com", "*") cannot widen the list.
-    return {h for x in (settings.get("fetchAllowlist") or ()) if (h := egress.normalize_entry(str(x).strip().lstrip(".")))}
+    return {h for x in (permissions.get(settings, "fetchAllowlist") or ()) if (h := egress.normalize_entry(str(x).strip().lstrip(".")))}
 
 
 def _norm_url(url: str) -> str | None:
@@ -822,9 +822,8 @@ class Toolbox:
     # ---- permission model: mode per tool = on | ask | off ----
     def always_ask(self) -> frozenset[str]:
         """The alwaysAsk setting (tools that stay a card whatever else says) plus the calls that are cards by nature."""
-        from . import llm
-        v = self.settings().get("alwaysAsk")
-        return frozenset(v if isinstance(v, list) else llm.DEFAULT_SETTINGS["alwaysAsk"]) | ALWAYS_CARD
+        v = permissions.get(self.settings(), "alwaysAsk")
+        return frozenset(v if isinstance(v, list) else permissions.DEFAULTS["alwaysAsk"]) | ALWAYS_CARD
 
     def ask_locked(self, spec: ToolSpec) -> bool:
         """The mode tops out at 'ask' and no card grants the whole tool: an external or schedules tool under alwaysAsk."""
@@ -895,7 +894,7 @@ class Toolbox:
         if not sb or spec.group != "sandbox" or spec.danger != "executes":
             return False
         try:
-            return bool(sb.reaches_out(ctx.get("conversation_id") or "") or net_mode(sb.settings().get("sandboxNetwork")) != "off")
+            return bool(sb.reaches_out(ctx.get("conversation_id") or "") or net_mode(permissions.get(sb.settings(), "sandboxNetwork")) != "off")
         except Exception:  # noqa: BLE001 - unknown means assume it can reach out
             return True
 
@@ -910,7 +909,7 @@ class Toolbox:
         cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
-        reviewed = name == "doc_edit" and str((ctx.get("settings") or {}).get("docEditMode") or "review") != "apply"
+        reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
         if spec and mode == "on" and ctx.get("tainted") and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
@@ -2575,7 +2574,7 @@ def _register_docs(self: Toolbox) -> None:
             return _missing(ctx, doc)
         # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
         # A scheduled run has nobody at the keyboard, so accept-all does not apply there either.
-        if (str((ctx.get("settings") or {}).get("docEditMode") or "review") == "apply"
+        if (str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") == "apply"
                 and not ctx.get("proposal_only")):
             applied = self.docs.accept(rev["id"])
             if not applied:

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { GoogleCalendar } from '@shared/types'
 import { calendarShown, readVisibility, toggleCalendar, writeVisibility, type CalendarVisibility } from '../lib/calendarVisibility'
 import { useStore } from '../store'
+import { pimConnected } from '../lib/pim'
 import { loadCalendarMeta } from './EventEditor'
 
 /**
@@ -18,7 +19,7 @@ export function useVisibleCalendars(): {
   shown: (c: GoogleCalendar) => boolean
   toggle: (c: GoogleCalendar) => void
 } {
-  const connected = useStore((s) => !!s.google?.connected)
+  const connected = useStore(pimConnected)
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([])
   const [pref, setPref] = useState<CalendarVisibility>(readVisibility)
   const [ready, setReady] = useState(false)

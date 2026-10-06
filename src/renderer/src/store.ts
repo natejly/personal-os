@@ -64,8 +64,9 @@ export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
  *  'memory' holds the Memory panel above the learning and search-index controls.
- *  'modules' is the tab labelled Views; the id is kept so existing callers keep working. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'appearance' | 'advanced' | 'data' | 'trash'
+ *  'modules' is the tab labelled Views; the id is kept so existing callers keep working.
+ *  'permissions' is the one place every permission is set (it was 'tools'); 'cowork' is the Autonomy tab. */
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'cowork' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'appearance' | 'advanced' | 'data' | 'trash'
 export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 
@@ -258,6 +259,9 @@ export interface State {
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
+  /** The help overlay (⌘/ or ?): shortcuts, or the "Using Grain" guide. */
+  helpOpen: boolean
+  helpSection: 'shortcuts' | 'guide'
 
   conversations: Conversation[]
   /** Loaded conversations, keyed by id. Each one streams independently. */
@@ -377,6 +381,8 @@ export interface State {
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
+  /** Open the help overlay on a section; null closes it. */
+  openHelp: (section: 'shortcuts' | 'guide' | null) => void
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
   openSettings: (tab: SettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
@@ -1063,6 +1069,8 @@ export const useStore = create<State>((set, get) => {
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'palette') set((st) => ({ paletteOpen: !st.paletteOpen }))
+      else if (action === 'help') s.openHelp(s.helpOpen && s.helpSection === 'shortcuts' ? null : 'shortcuts')
+      else if (action === 'help:guide') s.openHelp('guide')
       else if (action === 'new-note') void s.createDoc({})
       else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
@@ -1089,6 +1097,14 @@ export const useStore = create<State>((set, get) => {
         s.openFiles('uploads')
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
+    })
+    // ? opens the shortcut overlay, like ⌘/, whenever no text field has the key.
+    window.addEventListener?.('keydown', (e) => {
+      if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      e.preventDefault()
+      get().openHelp('shortcuts')
     })
   }
 
@@ -1897,6 +1913,8 @@ export const useStore = create<State>((set, get) => {
     projectModal: null,
     toasts: [],
     paletteOpen: false,
+    helpOpen: false,
+    helpSection: 'shortcuts',
     conversations: [],
     sessions: {},
     liveRuns: {},
@@ -2102,6 +2120,7 @@ export const useStore = create<State>((set, get) => {
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
     setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'provider' } : { settingsOpen }),
+    openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (settingsTab) => set({ settingsOpen: true, settingsTab }),
     setProjectModal: (projectModal) => set({ projectModal }),
     toast: (text, kind = 'info', action) => {

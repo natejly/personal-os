@@ -544,7 +544,7 @@ def test_set_config_deep_merges_and_drops_an_unknown_source() -> None:
     assert cfg["sources"] == ["mic", "output"]
     assert cfg["sttBackend"] == "auto"                      # not in stt.BACKENDS
     assert cfg["nudgeSeconds"] == 30                        # the earlier patch survived
-    assert cfg["enabled"] is False and cfg["segmentSeconds"] == 20
+    assert cfg["enabled"] is True and cfg["segmentSeconds"] == 20      # on by default (detection only)
     assert set(cfg) == set(meetings.DEFAULT_CONFIG)
     assert svc.config()["nudgeSeconds"] == 30               # and it persisted
 
@@ -555,12 +555,12 @@ def test_set_config_deep_merges_and_drops_an_unknown_source() -> None:
 
 def test_consent_is_the_only_thing_that_unblocks_the_consent_blocker() -> None:
     _, svc = _svc(_tmp())
-    assert svc.config()["consentedAt"] == 0.0               # off by default; recording is blocked
+    assert svc.config()["consentedAt"] == 0.0               # unstamped by default; recording is blocked
     assert svc.consent()["consentedAt"] > 0
     with devices_are("MacBook Pro Microphone"):
         st = svc.status()                                  # status() reads the device cache too
     assert st["consented"] is True
-    assert st["active"] is None and st["enabled"] is False
+    assert st["active"] is None and st["enabled"] is True
     assert st["devices"] == [{"index": "0", "name": "MacBook Pro Microphone", "loopback": False}]
     assert st["counts"] == {"total": 0, "pending": 0}
 
@@ -895,6 +895,7 @@ def test_the_master_switch_blocks_the_start_path() -> None:
     repo, svc = _svc(_tmp())
     mid = repo.create(title="Pricing call")["id"]
     svc.consent()
+    svc.set_config({"enabled": False})                       # on by default; the user switches it off
     assert svc.config()["enabled"] is False
 
     with devices_are("MacBook Pro Microphone"), selftest_ok():

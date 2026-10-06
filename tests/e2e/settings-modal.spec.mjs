@@ -47,10 +47,12 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await field(page, 'Context window').fill('64000')
   await field(page, 'Keep recent messages verbatim').fill('12')
   // Tools
-  await dialog(page).getByRole('tab', { name: 'Tools' }).click()
+  await dialog(page).getByRole('tab', { name: 'Permissions' }).click()
   await field(page, 'Dangerously skip permissions').setChecked(true, { force: true })
   await dialog(page).getByRole('button', { name: 'Accept all', exact: true }).click()
   await field(page, 'Plan mode for new chats').selectOption('auto')
+  // Autonomy
+  await dialog(page).getByRole('tab', { name: 'Autonomy' }).click()
   await field(page, 'Max tool rounds per reply').fill('17')
   // Integrations
   await dialog(page).getByRole('tab', { name: 'Integrations' }).click()
@@ -83,7 +85,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await expect(dialog(p2).getByLabel('Global system prompt')).toHaveValue('Always answer in haiku.')
   await dialog(p2).getByRole('tab', { name: 'Memory' }).click()
   await expect(field(p2, 'Context window')).toHaveValue('64000')
-  await dialog(p2).getByRole('tab', { name: 'Tools' }).click()
+  await dialog(p2).getByRole('tab', { name: 'Autonomy' }).click()
   await expect(field(p2, 'Max tool rounds per reply')).toHaveValue('17')
   await expect(dialog(p2).getByRole('button', { name: 'Accept all', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await dialog(p2).getByRole('tab', { name: 'Provider & cost' }).click()
@@ -110,7 +112,7 @@ test('dirty modal asks before discarding; Esc answers the question', async ({ gr
 test('invalid values are clamped or rejected without breaking the modal', async ({ grain }) => {
   const { page, api } = grain
   const before = await api('/settings')
-  await openSettings(page, 'Tools')
+  await openSettings(page, 'Autonomy')
   // maxToolRounds: 0, negative, huge, blank all clamp in the form.
   let cur = before.maxToolRounds
   for (const [v, want] of [['0', () => cur], ['-5', () => cur], ['999', () => 60], ['', () => cur], ['2.6', () => 3]]) {
@@ -119,7 +121,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
     await expect(dialog(page)).toHaveCount(0)
     cur = (await api('/settings')).maxToolRounds
     expect(cur, `rounds ${v}`).toBe(want())
-    await openSettings(page, 'Tools')
+    await openSettings(page, 'Autonomy')
   }
   // Out-of-range context window: the backend refuses (422), the modal stays open with the draft.
   await dialog(page).getByRole('tab', { name: 'Memory' }).click()
@@ -300,7 +302,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   const { page } = grain
   await setWindowSize(grain, 820, 520)
   await page.waitForTimeout(500)
-  await openSettings(page, 'Tools')
+  await openSettings(page, 'Permissions')
   const box = await dialog(page).boundingBox()
   const vp = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
   expect(box.width).toBeLessThanOrEqual(vp.w + 1)

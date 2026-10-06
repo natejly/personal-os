@@ -3,13 +3,14 @@ import { X } from 'lucide-react'
 import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode, type SandboxNetMode } from '../lib/coworkSettings'
+import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode } from '../lib/coworkSettings'
 
 /**
- * The Cowork section of Settings: how long and how costly a desk may run, what its shell and browser may reach,
- * which model reads pictures, and the Python environment its code runs in. It edits the modal's `draft` through
- * `patch` like every other section, so nothing is saved until Save — except the environment build, which is an
- * action on the machine, not a setting.
+ * The Autonomy tab of Settings: how long a desk may run, which model reads pictures, and the Python environment its
+ * code runs in. What a desk's shell and browser may reach, and its finishing checks, are permissions: ShellNetwork,
+ * BrowserAccess and DeskGates below are mounted in Settings > Permissions. Everything edits the modal's `draft` through
+ * `patch`, so nothing is saved until Save — except the environment build and browser sign-ins, which are actions on
+ * the machine, not settings.
  */
 
 const Toggle = ({ title, help, checked, onChange }: { title: string; help: string; checked: boolean; onChange: (v: boolean) => void }): JSX.Element => (
@@ -124,17 +125,6 @@ const NETWORK_HELP: Record<NetworkMode, string> = {
   open: 'Commands can reach any address.'
 }
 
-const SANDBOX_NET: { mode: SandboxNetMode; label: string }[] = [
-  { mode: 'off', label: 'Off' },
-  { mode: 'proxy', label: 'Registries and allowed hosts' },
-  { mode: 'open', label: 'Open' }
-]
-const SANDBOX_NET_HELP: Record<SandboxNetMode, string> = {
-  off: 'The Linux sandbox has no network at all.',
-  proxy: 'The sandbox can reach package registries and the allowed hosts above, through a proxy that is its only way out. Results count as untrusted once it reaches a host that is not a registry.',
-  open: 'The sandbox can reach any address, and everything it returns counts as untrusted.'
-}
-
 /** What a build of the work environment is doing: nothing yet, running, or failed with the reason. */
 function WorkEnv({ draft, saved, patch }: { draft: Settings; saved: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const [st, setSt] = useState<{ ready: boolean; python: string | null; packages: string[]; error: string | null } | null>(null)
@@ -212,26 +202,14 @@ function PackageList({ value, onChange }: { value: string[]; onChange: (next: st
   )
 }
 
-export default function CoworkSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
-  const saved = useStore((s) => s.settings)
-  const models = useStore((s) => s.models)
+/** Network for shell commands (the egress proxy), and the hosts it lets through. The sandbox's own network is one
+ *  control in SandboxSettings; the host list shows when either one uses it. */
+export function ShellNetwork({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const mode = networkMode(draft)
   const hosts = draft.shellAllowedDomains ?? []
   const pickMode = (m: NetworkMode): void => patch(networkPatch(m, m === 'off' ? [] : hosts))
-  const sbxMode = sandboxNetMode(draft.sandboxNetwork)
   return (
     <div className="cowork-settings">
-      <h4>Desks</h4>
-      <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
-        help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
-      <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
-        checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
-      <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
-        checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
-
-      <h4>Shell</h4>
-      <Toggle title="Run sandboxed commands without asking" help="Run sandboxed commands inside a desk's own folder without asking."
-        checked={draft.deskShellAuto !== false} onChange={(deskShellAuto) => patch({ deskShellAuto })} />
       <div className="send-hold cowork-net">
         <span className="toggle-text"><b>Network for commands</b><small>{NETWORK_HELP[mode]}</small></span>
         <div className="seg" role="group" aria-label="Network for commands">
@@ -241,27 +219,53 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         </div>
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
-      {(mode !== 'off' || sbxMode === 'proxy') && (
-        <HostList title="Allowed hosts" help="Hostnames a command may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
+      {(mode !== 'off' || sandboxNetMode(draft.sandboxNetwork) === 'proxy') && (
+        <HostList title="Allowed hosts" help="Hostnames a command or the Linux sandbox may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
+    </div>
+  )
+}
 
-      <h4>Sandbox</h4>
-      <div className="send-hold cowork-net">
-        <span className="toggle-text"><b>Network for the Linux sandbox</b><small>{SANDBOX_NET_HELP[sbxMode]} A change applies to new sandboxes; reset one to pick it up.</small></span>
-        <div className="seg" role="group" aria-label="Network for the Linux sandbox">
-          {SANDBOX_NET.map((n) => (
-            <button key={n.mode} type="button" className={sbxMode === n.mode ? 'on' : ''} aria-pressed={sbxMode === n.mode} onClick={() => patch({ sandboxNetwork: n.mode })}>{n.label}</button>
-          ))}
-        </div>
-      </div>
-
-      <h4>Browser</h4>
+/** The agent's browser: whether desks get one, the sites it may open after reading untrusted content, its sign-ins. */
+export function BrowserAccess({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  return (
+    <div className="cowork-settings">
       <Toggle title="Let desks use a browser" help="Gives desks a browser they can read and click in. It asks before submitting forms, entering passwords or uploading."
         checked={draft.browserEnabled !== false} onChange={(browserEnabled) => patch({ browserEnabled })} />
-      <HostList title="Allowed sites" help="Sites a desk may open even when a link came from something it read, instead of being asked. A name also allows its subdomains."
+      <HostList title="Allowed sites" help="Sites the browser may open even when a link came from something it read, instead of being asked. The fetch allowlist above counts too. A name also allows its subdomains."
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
       <SignIns />
+    </div>
+  )
+}
+
+/** What a desk may do without a card, and what it must pass before it may finish. */
+export function DeskGates({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  return (
+    <div className="cowork-settings">
+      <Toggle title="Run sandboxed commands without asking" help="Run sandboxed commands inside a desk's own folder without asking."
+        checked={draft.deskShellAuto !== false} onChange={(deskShellAuto) => patch({ deskShellAuto })} />
+      <Toggle title="Check before finishing" help="Don't let a desk finish with open steps or missing files."
+        checked={draft.deskDoneGate !== false} onChange={(deskDoneGate) => patch({ deskDoneGate })} />
+      <Toggle title="Review against the brief" help="Have a reviewer check the result against the brief before finishing."
+        checked={draft.deskSelfReview !== false} onChange={(deskSelfReview) => patch({ deskSelfReview })} />
+    </div>
+  )
+}
+
+export default function CoworkSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  const saved = useStore((s) => s.settings)
+  const models = useStore((s) => s.models)
+  return (
+    <div className="cowork-settings">
+      <h4>Desks</h4>
+      <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
+        help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
+      <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
+        checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
+      <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
+        checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
 
       <h4>Vision</h4>
       <label>
@@ -278,7 +282,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   )
 }
 
-/** Desk limits and finishing checks, shown under Settings → Tools → Advanced. Same keys and defaults as before. */
+/** Desk limits, shown under Settings → Autonomy → Advanced. The finishing checks moved to Permissions (DeskGates). */
 export function CoworkAdvanced({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   return (
     <div className="cowork-settings">
@@ -289,10 +293,6 @@ export function CoworkAdvanced({ draft, patch }: { draft: Settings; patch: (p: P
         help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
       <NumField title="Tabs per desk" settingKey="browserMaxTabs" value={draft.browserMaxTabs} fallback={4}
         help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
-      <Toggle title="Check before finishing" help="Don't let a desk finish with open steps or missing files."
-        checked={draft.deskDoneGate !== false} onChange={(deskDoneGate) => patch({ deskDoneGate })} />
-      <Toggle title="Review against the brief" help="Have a reviewer check the result against the brief before finishing."
-        checked={draft.deskSelfReview !== false} onChange={(deskSelfReview) => patch({ deskSelfReview })} />
       <label className="toggle-row plain">
         <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
         <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />

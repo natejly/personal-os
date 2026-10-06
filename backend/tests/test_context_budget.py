@@ -69,6 +69,9 @@ class Block:
     def context_block(self) -> str:
         return self.text
 
+    def context_has_foreign_text(self) -> bool:
+        return False
+
 
 big = "## Recent activity\n" + "\n".join(f"- line {i} " + "z" * 100 for i in range(100))
 _, used = build(activity=Block(big), meetings=Block(big.replace("activity", "meetings")))

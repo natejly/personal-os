@@ -7,11 +7,13 @@ import { handle } from './ipc'
 import { toggleGather } from './popouts'
 import { toggleAsk } from './quickAsk'
 import { toggleCapture } from './quickCapture'
+import { shortcut } from '../shared/shortcuts'
 import type { ShortcutState } from '../shared/types'
 
-export const DEFAULT_GATHER = 'Control+Alt+Command+Space'
-export const DEFAULT_CAPTURE = 'CommandOrControl+Shift+Space'
-export const DEFAULT_ASK = 'Alt+Space'
+// The defaults live in the shortcut registry so the help overlay shows the same keys.
+export const DEFAULT_GATHER = shortcut('global-gather').keys
+export const DEFAULT_CAPTURE = shortcut('global-capture').keys
+export const DEFAULT_ASK = shortcut('global-ask').keys
 
 let getMain: () => BrowserWindow | null = () => null
 

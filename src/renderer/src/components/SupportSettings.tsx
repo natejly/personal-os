@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Download, FolderOpen, RefreshCw } from 'lucide-react'
+import { CircleHelp, Copy, Download, FolderOpen, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { Settings } from '@shared/types'
@@ -106,6 +106,7 @@ export default function SupportSettings(): JSX.Element {
         Diagnostics bundle versions, settings with keys masked, the last 300 log lines (secrets redacted) and the backend's restart history. Your messages and files are not included.
       </p>
       <div className="button-row">
+        <button type="button" className="ghost-btn" onClick={() => useStore.getState().openHelp('guide')}><CircleHelp size={14} /> Help</button>
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void copy()}><Copy size={14} /> Copy diagnostics</button>
         <button type="button" className="ghost-btn" disabled={busy} onClick={() => void save()}><Download size={14} /> Save diagnostics…</button>
         <button type="button" className="ghost-btn" onClick={() => void window.os.openLogs()}><FolderOpen size={14} /> Open logs</button>

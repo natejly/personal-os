@@ -260,6 +260,7 @@ export default function Onboarding(): JSX.Element {
           <div role="status" aria-live="polite">
             {saved.state === 'saving' && <p className="muted"><Loader2 size={13} className="spin" /> Saving…</p>}
             {saved.state === 'ok' && <p className="ob-lead">Grain is connected to {provider?.name}. Start a chat and ask it anything.</p>}
+            {saved.state === 'ok' && <p className="muted small">Meetings and Activity are on, and nothing records without your say: a meeting records only after you accept the recording notice, and Activity sees more only after you grant macOS permissions in its panel. A quiet daily digest in the Agent Inbox lists what is still missing.</p>}
             {saved.state === 'fail' && (
               <>
                 <p className="ob-error" role="alert">Could not save your setup: {saved.error}</p>

@@ -168,14 +168,38 @@ class LoopTests(unittest.TestCase):
 class ModulesStampTests(unittest.TestCase):
     def test_stamp_4_shows_library_and_cowork_once_and_keeps_other_hides(self) -> None:
         from personal_os import app as appmod
-        appmod.db.set_settings({"modulesDefault": 3, "hiddenViews": ["library", "cowork", "meetings"]})
+        appmod.db.set_settings({"modulesDefault": 3, "hiddenViews": ["library", "cowork", "health"]})
         appmod._seed_hidden_modules()
         s = appmod.db.get_settings()
-        self.assertEqual(s["hiddenViews"], ["meetings"])
-        self.assertEqual(s["modulesDefault"], 4)
-        appmod.db.set_settings({"hiddenViews": ["library"]})  # hidden again by the user after stamp 4
+        self.assertEqual(s["hiddenViews"], ["health"])
+        self.assertEqual(s["modulesDefault"], 5)
+        appmod.db.set_settings({"hiddenViews": ["library"]})  # hidden again by the user after the stamp
         appmod._seed_hidden_modules()
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["library"])
+
+    def test_stamp_5_shows_meetings_and_activity_once(self) -> None:
+        from personal_os import app as appmod
+        appmod.db.set_settings({"modulesDefault": 4, "hiddenViews": ["meetings", "activity", "health"],
+                                "homeWidgets": {"meetings": False, "drive": False}})
+        appmod._seed_hidden_modules()
+        s = appmod.db.get_settings()
+        self.assertEqual(s["hiddenViews"], ["health"])
+        self.assertEqual(s["homeWidgets"], {"drive": False})
+        self.assertEqual(s["modulesDefault"], 5)
+        # Hidden again by the user after stamp 5: the next launch leaves it hidden.
+        appmod.db.set_settings({"hiddenViews": ["activity"], "homeWidgets": {"meetings": False}})
+        appmod._seed_hidden_modules()
+        s = appmod.db.get_settings()
+        self.assertEqual(s["hiddenViews"], ["activity"])
+        self.assertEqual(s["homeWidgets"], {"meetings": False})
+
+    def test_fresh_install_hides_nothing(self) -> None:
+        from personal_os import app as appmod
+        appmod.db.set_settings({"modulesDefault": 0, "hiddenViews": [], "homeWidgets": {}})
+        appmod._seed_hidden_modules()
+        s = appmod.db.get_settings()
+        self.assertEqual(s["hiddenViews"], [])
+        self.assertEqual(s["homeWidgets"], {})
 
 
 if __name__ == "__main__":

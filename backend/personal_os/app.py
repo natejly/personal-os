@@ -6416,6 +6416,17 @@ def google_calendars(refresh: bool = False) -> Any:
     return _gcall(pim.calendars, refresh=refresh)
 
 
+class GoogleDocIn(BaseModel):
+    title: str = "Untitled"
+    content: str = ""
+
+
+@app.post("/integrations/google/docs")
+def google_doc_create(body: GoogleDocIn) -> Any:
+    """Copy text into a new Google Doc: the Files editor's "Send to Google Docs" export (Google only; 409 when not connected)."""
+    return _gcall(google.docs_create, body.title.strip() or "Untitled", body.content)
+
+
 @app.get("/integrations/google/calendar")
 def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]

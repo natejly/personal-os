@@ -91,7 +91,14 @@ def _approval_history(c: sqlite3.Connection) -> None:
 
 
 def _teach_recordings(c: sqlite3.Connection) -> None:
-    """Slot reserved for teach-a-task screen recordings (owner: teach-a-task)."""
+    """Teach-a-task recordings (teach.py): a folder of screen frames plus the step draft extracted from them,
+    and the skill / routine that came out of it. Frames live under <data_dir>/teach/<id>/, deleted with the row."""
+    c.execute("CREATE TABLE IF NOT EXISTS teach_recordings ("
+              "id TEXT PRIMARY KEY, created_at REAL NOT NULL, "
+              "status TEXT NOT NULL DEFAULT 'recording', "  # recording | ready | extracted | saved
+              "source TEXT NOT NULL DEFAULT 'screen', "     # screen | import
+              "dir TEXT NOT NULL, frame_count INTEGER NOT NULL DEFAULT 0, "
+              "steps_json TEXT, skill_id TEXT, job_id TEXT)")
 
 
 def _ship_checklists(c: sqlite3.Connection) -> None:

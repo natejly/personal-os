@@ -95,7 +95,23 @@ def _teach_recordings(c: sqlite3.Connection) -> None:
 
 
 def _ship_checklists(c: sqlite3.Connection) -> None:
-    """Slot reserved for the job ship checklist (owner: ship-checklist)."""
+    """A job's ship checklist (ship.py): tests -> push -> pr -> merge for one branch, each step's status, log tail
+    and link in steps_json (a fixed ordered list). status: running | awaiting_confirm | done | failed | cancelled."""
+    c.execute("""CREATE TABLE IF NOT EXISTS ship_checklists (
+      id TEXT PRIMARY KEY,
+      job_id TEXT,
+      run_id TEXT,
+      repo_path TEXT NOT NULL,
+      branch TEXT NOT NULL,
+      base TEXT NOT NULL,
+      test_command TEXT,
+      status TEXT NOT NULL,
+      steps_json TEXT NOT NULL,
+      pr_url TEXT,
+      merged_sha TEXT,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ship_checklists_job ON ship_checklists(job_id, created_at)")
 
 
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.

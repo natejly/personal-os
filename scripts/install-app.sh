@@ -39,7 +39,8 @@ if pgrep -f "^$DEST/Contents/MacOS/" >/dev/null; then
 fi
 
 codesign --verify --deep --strict "$SRC"
-AUTH=$(codesign -dv --verbose=4 "$SRC" 2>&1 | awk -F= '/^Authority=/{print $2; exit}')
+# awk reads to the end (no early exit): with pipefail, an early exit SIGPIPEs codesign and set -e kills the script.
+AUTH=$(codesign -dv --verbose=4 "$SRC" 2>&1 | awk -F= '/^Authority=/ && !a {a=$2} END {print a}')
 echo "install-app: $SRC (signed by: ${AUTH:-ad-hoc})"
 
 TMP="$DEST.installing-$$"

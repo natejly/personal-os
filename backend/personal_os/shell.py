@@ -127,7 +127,7 @@ def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
                 raise ShellError(f"{p} is not a folder.")
             return p, r
     raise ShellError(f"{p} is outside the folders this shell may work in ({', '.join(str(r) for r in roots)}). "
-                     "Ask the user to add it under Settings (Workspace roots).")
+                     "Ask the user to add it under Settings (Workspace folders).")
 
 
 def reaches_out(settings: dict[str, Any]) -> bool:

@@ -67,7 +67,7 @@ export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections, one per rail entry in SettingsModal.
  *  'memory' holds the Memory panel above the learning and search-index controls.
  *  'permissions' is the one place every permission is set; 'cowork' is the Autonomy tab. */
-export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'cowork' | 'modules' | 'behavior' | 'data'
+export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'workspace' | 'system' | 'cowork' | 'modules' | 'behavior' | 'data'
 export type { Scope, SessionStatus }
 
 /**

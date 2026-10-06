@@ -176,7 +176,7 @@ class Bridge:
         # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
         mode = self.tb.gate(name, raw, self.ctx, args)
         # Then the user's argument-pattern rules and this chat's session grants: a deny refuses, an ask rule cards.
-        cfg = self.ctx.get("settings") or {}
+        cfg = self.ctx.get("settings") or self.tb.settings()
         roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
         if self.ctx.get("desk_id") and (ws := getattr(self.tb, "workspace", None)) is not None:
             roots.append(str(ws.desk_root(self.ctx["desk_id"])))

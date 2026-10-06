@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mic, ShieldCheck, Bot, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mic, ShieldCheck, Bot, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, KeyRound, FolderOpen, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
@@ -18,6 +18,7 @@ import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
+import { PermissionsPanel } from './PermissionsPanel'
 import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings from './RunSafetySettings'
 import SandboxSettings from './SandboxSettings'
@@ -46,6 +47,7 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
     tabs: [
       { id: 'provider', label: 'Provider & cost', icon: Cpu },
       { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
+      { id: 'workspace', label: 'Workspace folders', icon: FolderOpen },
       { id: 'cowork', label: 'Autonomy', icon: Bot },
       { id: 'memory', label: 'Memory', icon: Brain }
     ]
@@ -62,6 +64,7 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
   {
     label: 'System',
     tabs: [
+      { id: 'system', label: 'System access', icon: KeyRound },
       { id: 'data', label: 'Data', icon: Database }
     ]
   }
@@ -69,7 +72,7 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
 const TABS = GROUPS.flatMap((g) => g.tabs)
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['meetings'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['meetings', 'system', 'workspace'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -572,6 +575,13 @@ export default function SettingsModal(): JSX.Element {
               })()}
             </section>}
 
+            {tab === 'system' && <section className="system-tab">
+              <h3>System access</h3>
+              <PermissionsPanel onEditFolders={() => setTab('workspace')} />
+            </section>}
+
+            {tab === 'workspace' && <section className="workspace-tab"><WorkspaceRoots /></section>}
+
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
               <p className="muted">Everything that decides whether the assistant acts, asks first or is refused, in one place. A chat, agent or project can narrow or widen a tool for itself (chat beats agent beats project beats this page); a deny rule and Always ask beat all of them.</p>
@@ -585,7 +595,7 @@ export default function SettingsModal(): JSX.Element {
               <GrantsPanel draft={draft} patch={patch} />
               <h4>Run safety</h4>
               <RunSafetySettings draft={draft} patch={patch} />
-              <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
+              <p className="muted small">Folders the assistant may work in are under <button type="button" className="link-btn" onClick={() => setTab('workspace')}>Workspace folders</button>.</p>
               <h4>Shell and sandbox network</h4>
               <ShellNetwork draft={draft} patch={patch} />
               <SandboxSettings draft={draft} patch={patch} />
@@ -692,7 +702,7 @@ export default function SettingsModal(): JSX.Element {
               <label><span className="toggle-text"><b>Global system prompt</b><small>Instructions the assistant gets in every chat.</small></span>
                 <textarea rows={6} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} />
               </label>
-              <label className="setting-row"><span className="toggle-text"><b>Response style</b><small>How replies are shaped in new chats. A chat can change its own under the text box.</small></span>
+              <label className="setting-row"><span className="toggle-text"><b>Response style</b><small>How replies are shaped in new chats.</small></span>
                 <select value={draft.responseStyle ?? 'default'} onChange={(e) => patch({ responseStyle: e.target.value })}>
                   {RESPONSE_STYLES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>

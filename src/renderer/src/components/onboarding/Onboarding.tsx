@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
 import { ABOUT_EXAMPLES, STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { PermissionsPanel } from '../PermissionsPanel'
 import './onboarding.css'
 
 /** Opens in the real browser: the main process turns window.open into shell.openExternal. */
@@ -17,6 +18,7 @@ const TITLES: Record<WizardState['step'], string> = {
   test: 'Testing the connection',
   google: 'Connect your accounts',
   about: 'Tell Grain about you',
+  permissions: 'Give Grain access',
   done: 'You are all set'
 }
 
@@ -116,7 +118,7 @@ export default function Onboarding(): JSX.Element {
   const canNext = !blocker && state.step !== 'done'
   // Leaving the Google step unconnected, or the about step empty, is a skip, and the one forward button
   // says so: it steps back to a quiet style so the step's own action stays the main one.
-  const skipping = (state.step === 'google' && !google?.connected && !microsoft?.connected) || (state.step === 'about' && !state.about.trim())
+  const skipping = (state.step === 'google' && !google?.connected && !microsoft?.connected) || (state.step === 'about' && !state.about.trim()) || state.step === 'permissions'
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
@@ -253,6 +255,13 @@ export default function Onboarding(): JSX.Element {
               ))}
             </div>
             <p className="muted small"><Lock size={11} /> Stored on this Mac. Edit or delete it any time in Memory.</p>
+          </>
+        )}
+
+        {state.step === 'permissions' && (
+          <>
+            <p className="muted">Optional. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
+            <PermissionsPanel compact />
           </>
         )}
 

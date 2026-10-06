@@ -137,6 +137,8 @@ def register(tb: Any) -> None:
                     p = chat[0].resolve_in(chat[1], rel)
                     if p.is_file():
                         outputs.append(chat[0].output_entry(chat[1], p))
+                        if chat[0].on_save is not None:  # the desktop app wrote it, so save_bytes never saw it
+                            chat[0].on_save(chat[1], p)
                 except (WorkspaceError, OSError):
                     pass
         if outputs:

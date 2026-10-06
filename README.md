@@ -437,6 +437,30 @@ snapshot the filesystem to a local image (3 per chat) and roll back to it;
 `sandboxRuntime` (default `docker`) are configurable in settings. The tools
 only appear when the runtime is actually reachable.
 
+## Host shell
+
+`shell_run` runs a command in `/bin/zsh` on the Mac itself, inside a macOS
+Seatbelt profile (`sandbox.shell_profile`): the disk is readable except secrets
+(`~/.ssh`, `~/.aws`, gcloud config, keychains, any `.env`, the app's data
+directory), writes land only in the folder the command runs in plus a private
+temp dir, `.git/hooks` and `.git/config` are never writable, and the network is
+off unless `shellNetwork` is set (a networked run taints the reply). The
+folder is the active desk's workspace or an entry of `workspaceRoots`; a `cwd`
+outside those is refused. The environment is a short allowlist, never the app's
+own. The tool is in the `executes` tier and defaults to **ask**. Output is
+stdout and stderr together, cut to the last 2000 lines or 50 KB with the rest
+behind a `result_id` (swept after 7 days) and credential shapes redacted.
+`timeout_s` defaults to `shellTimeoutSec` (120, max 600); on timeout the whole
+process group gets SIGTERM, then SIGKILL after 3 s.
+
+`background=true` returns a `job_id` for `shell_poll` / `shell_kill`; at most
+`shellMaxBackground` (4) run at once, finished ones are kept 30 minutes (64
+tracked), and completion is passed to the model at its next round. Jobs die
+with the run that started them and with the app; pid/pgid are persisted so a
+job that outlived a crash shows up as `orphaned` with a kill and is never
+adopted. If `sandbox-exec` is missing or refuses the profile nothing runs;
+`unsandboxed=true` is a forced approval no standing grant can remove.
+
 ## Traces
 
 Each assistant message carries a `trace`: spans of kind `context`, `llm`, `tool`

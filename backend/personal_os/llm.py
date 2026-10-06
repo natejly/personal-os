@@ -147,6 +147,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
+    # shell_run (shell.py): network inside its OS sandbox (a networked run taints the reply), default and background caps.
+    "shellNetwork": False,
+    "shellTimeoutSec": 120,
+    "shellMaxBackground": 4,
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

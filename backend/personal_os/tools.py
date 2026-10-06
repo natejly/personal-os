@@ -68,10 +68,13 @@ class ToolSpec:
                  examples: list[dict[str, Any]] | None = None, taints: bool = False):
         self.name, self.description, self.parameters, self.fn, self.group, self.danger = name, description, parameters, fn, group, danger
         self.examples, self.taints = examples or [], taints
+        self.default: str | None = None  # a per-tool default mode that differs from its tier's (shell_run: executes, ask)
+        # Arguments that make one call forced-ask whatever the mode or any grant says (shell_run unsandboxed=true).
+        self.force_ask: Callable[[dict[str, Any]], bool] | None = None
 
     @property
     def default_mode(self) -> str:
-        return DEFAULT_MODE.get(self.danger, "on")
+        return self.default or DEFAULT_MODE.get(self.danger, "on")
 
     def schema(self) -> dict[str, Any]:
         d = self.description
@@ -420,6 +423,8 @@ class Toolbox:
             self._register_skills()
         if desks is not None and workspace is not None:
             self._register_cowork()
+        from . import shell
+        shell.register(self)
         if meetings is not None:
             self._register_meetings()
         if artifacts is not None:
@@ -510,10 +515,12 @@ class Toolbox:
         """True if a proposal-only run must record this call instead of making it."""
         return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
 
-    def gate(self, name: str, mode: str, ctx: dict[str, Any]) -> str:
+    def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
         """Effective mode for one call. Untrusted content in the run forces every external tool to ask."""
         spec = self.specs.get(name)
         if spec and spec.danger == "external" and mode == "on" and ctx.get("tainted"):
+            return "ask"
+        if spec and spec.force_ask and mode == "on" and args is not None and spec.force_ask(args):
             return "ask"
         return mode
 

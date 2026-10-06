@@ -403,7 +403,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     return modes, schemas
 
 
-def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
+def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
     Every MCP tool is `external` by construction (mcp_client.MCP_DANGER), so the taint rule the
@@ -411,7 +411,7 @@ def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
     """
     if mcp_is(name):
         return "ask" if mode == "on" and ctx.get("tainted") else mode
-    return toolbox.gate(name, mode, ctx)
+    return toolbox.gate(name, mode, ctx, args)
 
 
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -1002,7 +1002,7 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
-    if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
+    if run is None or run.store is None or spec is None or (spec.danger not in IDEMPOTENT_DANGER and name != "shell_run"):
         return await toolbox.call(name, args, ctx)
     result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
                                                   inherit=(run.input or {}).get("resume_of"))
@@ -1178,6 +1178,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The desk tools derive their workspace root from this and never take one as an argument, so
     # desk A cannot address desk B's files.
     tool_ctx["desk_id"] = desk_id
+    tool_ctx["modes"] = modes  # the live map (grants mutate it in place): what a run_python script's bridged calls honour
 
     def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
         """One function, because the always_chat/always_global grant path recomputes the schemas; a
@@ -1351,6 +1352,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
+            # A background shell job that finished since the last round says so here, once.
+            for note in toolbox.shell.drain_notes(conv_id):
+                messages.append({"role": "system", "content": note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
@@ -1434,7 +1438,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
                 danger = spec.danger if spec else "safe"
-                mode = _gate(c["name"], raw_mode, tool_ctx)
+                mode = _gate(c["name"], raw_mode, tool_ctx, args)
                 forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
@@ -1740,6 +1744,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        await toolbox.shell.kill_conversation(conv_id)  # background shell jobs live as long as the run that started them
 
     text = "".join(buf).strip()
     reasoning = "".join(rbuf).strip() or None
@@ -3004,6 +3009,7 @@ async def _shutdown() -> None:
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
+    await toolbox.shell.shutdown()
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
 

@@ -416,6 +416,11 @@ wizard asks a few things about you and has you pick a model provider (Fireworks
 AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
 OpenAI-compatible endpoint). Google is connected from Settings → Integrations. With no workspace folder set, file and shell tools work in `~/Grain`.
 
+On your own Mac, `npm run install-app` puts the build at `/Applications/Grain.app` (keep only that
+copy). If a self-signed "Grain Local Signing" identity is in your keychain, `npm run package` signs
+with it, so macOS keeps Full Disk Access and other grants across rebuilds; otherwise builds are
+ad-hoc signed. See [docs/releasing.md](docs/releasing.md#signing).
+
 ## Development
 
 Requirements: Node 20+, Python 3.10+, [uv](https://docs.astral.sh/uv/), and a

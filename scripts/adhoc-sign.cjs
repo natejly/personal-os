@@ -1,11 +1,14 @@
 // electron-builder afterSign hook. When no signing identity is configured, electron-builder skips
 // signing, which leaves the (modified) Electron app with an invalid signature and macOS on Apple
 // Silicon refuses to launch it. Ad-hoc sign the nested Python binaries and the app so local builds run.
+// When a real identity signed the app (CSC_NAME / CSC_LINK, or the local "Grain Local Signing"
+// identity picked by scripts/mac-signing.cjs), do nothing: re-signing ad-hoc would throw that away.
 const { execFileSync } = require('child_process')
 const { join } = require('path')
+const { resolveSigning } = require('./mac-signing.cjs')
 
 exports.default = async function adhocSign(context) {
-  if (process.env.CSC_NAME || process.env.CSC_LINK || context.electronPlatformName !== 'darwin') return
+  if (context.electronPlatformName !== 'darwin' || resolveSigning() !== 'adhoc') return
   const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
   const ent = join(context.packager.projectDir, 'build', 'entitlements.mac.plist')
   const sign = (p, extra = []) =>

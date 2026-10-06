@@ -214,6 +214,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "responseStyleText": "",
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
     "gmailSendHold": {"enabled": True, "seconds": 90},
+    # When set (or when the FIRECRAWL_API_KEY environment variable is), Firecrawl answers web_search and fetch_url first; the engines below are the fallback.
+    "firecrawlApiKey": "",
     "braveApiKey": "",
     "tavilyApiKey": "",
     # Without a Brave/Tavily key, web_search uses Exa (keyless via its hosted MCP server; a key lifts the rate limit).

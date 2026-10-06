@@ -129,7 +129,7 @@ def test_allow_runs_and_the_event_and_log_record_the_verdict() -> None:
     assert not ev["error"] and ev["review"]["verdict"] == "allow" and ev["review"]["reason"] == "matches the request"
     assert ev["review"]["confidence"] == "high" and ev["review"]["ms"] >= 0 and ev["review"]["model"] is not None
     new = log_rows("doc_create")[: len(log_rows("doc_create")) - before]
-    assert [(r["decision"], r["scope"], r["note"], r["reviewer_verdict"]) for r in new] == [("auto", "auto-review", "mode: auto", "allow")]
+    assert [(r["decision"], r["scope"], r["note"], r["reviewer_verdict"]) for r in new] == [("auto", "auto-review", "mode: auto · confidence: high", "allow")]
 
 
 def test_ask_opens_a_card_with_the_reason_and_approve_runs() -> None:
@@ -151,7 +151,7 @@ def test_deny_refuses_with_the_reason_and_logs_it() -> None:
     assert ev["error"] and "refused by the safety reviewer: the user never asked for this" in json.dumps(ev)
     assert not store.approvals("pending", run_id=rid)
     deny = [r for r in log_rows("doc_create") if r["decision"] == "deny" and r["scope"] == "auto-review"]
-    assert deny and deny[0]["reviewer_verdict"] == "deny" and deny[0]["note"] == "mode: auto"
+    assert deny and deny[0]["reviewer_verdict"] == "deny" and deny[0]["note"].startswith("mode: auto")
 
 
 def test_a_reviewer_error_or_garbage_asks() -> None:

@@ -60,7 +60,8 @@ async def fake_stream(settings: Any, model: str, messages: list[dict[str, Any]],
 def stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm, "complete", fake_complete)
     monkeypatch.setattr(llm, "stream_chat", fake_stream)
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "toolDeferAbove": 0, "subagentMaxConcurrent": 6})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "toolDeferAbove": 0, "subagentMaxConcurrent": 6,
+                            "permissionMode": "manual"})  # the reviewer is not under test here
     COMPLETE.clear()
     PARENT_SEEN.clear()
     CLAIMS.clear()

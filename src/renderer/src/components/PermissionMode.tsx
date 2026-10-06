@@ -20,8 +20,9 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
     const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
     if (!d) return
     e.preventDefault()
-    const next = MODES[(MODES.findIndex((x) => x.id === mode) + d + MODES.length) % MODES.length].id
-    pick(next)
+    // Arrows move focus only; Space or Enter picks, so arrowing past Allow everything never opens its dialog.
+    const at = MODES.findIndex((x) => x.id === (document.activeElement as HTMLElement | null)?.dataset?.mode)
+    const next = MODES[((at < 0 ? MODES.findIndex((x) => x.id === mode) : at) + d + MODES.length) % MODES.length].id
     ;(e.currentTarget.querySelector(`[data-mode="${next}"]`) as HTMLElement | null)?.focus()
   }
   return (

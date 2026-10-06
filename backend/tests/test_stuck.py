@@ -131,19 +131,15 @@ def test_pingpong_nudged_then_stopped() -> None:
     check(len(SEEN) == len(breakers) + 1, "one tool-free final round followed the stop")
 
 
-def test_setting_off_keeps_old_behaviour() -> None:
+def test_legacy_off_setting_is_ignored() -> None:
+    """Stuck detection is always on: a stored stuckDetection=False (the old switch) no longer disables it."""
     appmod.db.set_settings({"stuckDetection": False})
     try:
         cid = appmod.convos.create(None, "t", "m")["id"]
         SEEN.clear()
-        ROUNDS[:] = pingpong(12)
+        ROUNDS[:] = pingpong(24)
         breakers = breakers_of(run_chat(cid))
-        check("stuck" not in breakers and "stuck_nudge" not in breakers, "no stuck breaker when off")
-        check(not any("[stuck_notice]" in (m.get("content") or "") for r in SEEN for m in r), "no notice when off")
-        cid = appmod.convos.create(None, "t", "m")["id"]
-        ROUNDS[:] = [{"text": "", "calls": [call(f"d{i}", "list_documents", {})]} for i in range(8)]
-        breakers = breakers_of(run_chat(cid))
-        check("stuck" not in breakers and len(breakers) == appmod.REPEAT_LIMIT - 1, "REPEAT_LIMIT still ends it (the 5th identical call never runs)")
+        check("stuck_nudge" in breakers and "stuck" in breakers, "still nudged and stopped with the old key off")
     finally:
         appmod.db.set_settings({"stuckDetection": True})
 

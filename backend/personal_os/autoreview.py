@@ -16,10 +16,10 @@ import time
 from typing import Any
 
 from . import llm, permissions, redact
+from .limits import REVIEW_TIMEOUT_SECONDS
 from .runs import args_digest
 
 ARGS_CAP = 2000
-REVIEW_TIMEOUT_SECONDS = 30  # a hung reviewer call fails closed (-> a card)
 MODES = ("auto", "manual", "allow_all")
 CONTEXT_MESSAGES, CONTEXT_MESSAGE_CHARS, CONTEXT_CHARS = 4, 300, 1500
 

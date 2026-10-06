@@ -375,7 +375,6 @@ export interface ApprovalLogEntry {
   reviewer_verdict: string | null
   reviewer_reason: string | null
   /** 'high' | 'medium' | 'low' when the automatic reviewer gave one. */
-  reviewer_confidence?: string | null
   reviewer_model: string | null
   reviewer_ms: number | null
   call_id: string | null

@@ -30,7 +30,7 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="satest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import llm  # noqa: E402
+from personal_os import limits, llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import subagents as sa  # noqa: E402
@@ -1120,7 +1120,8 @@ def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
         if k != "permissionMode":  # a permissions key (permissions.DEFAULTS), not an llm setting
             check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
-    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
+    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 0 and limits.slots(llm.DEFAULT_SETTINGS, "subagentMaxConcurrent") >= 2
+          and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
           and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
     reset()
     store = appmod.run_store

@@ -143,8 +143,9 @@ def test_a_stop_during_the_overflow_summarizer_ends_as_stopped() -> None:
 def test_window_never_exceeds_the_setting_and_shrinks_on_overflow() -> None:
     cfg = {"contextWindow": 100000}
     assert compaction.window_for(cfg, "m1", None) == 100000
-    assert compaction.window_for(cfg, "m1", 500000) == 100000
-    assert compaction.window_for(cfg, "m1", 32000) == 32000
+    assert compaction.window_for(cfg, "m1", 500000) == 100000, "a stored value overrides the proxy's figure"
+    assert compaction.window_for({"contextWindow": 0}, "m1", 32000) == 32000, "0 = automatic: the proxy's figure"
+    assert compaction.window_for({}, "m1", None) == 128000, "no override, no proxy figure: the fallback"
     compaction.note_overflow("m1", 16000, 40000)
     assert compaction.window_for(cfg, "m1", 32000) == 16000
     compaction.note_overflow("m1", None, 30000)

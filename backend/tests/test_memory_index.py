@@ -75,15 +75,14 @@ def test_paraphrase_found_with_embeddings_and_fallback_without(env) -> None:
     qv = asyncio.run(idx.query_vec(CFG, q))
     assert qv is not None
     assert idx.search(None, q, qv, limit=3, settings=CFG)[0]["id"] == target["id"]
-    # Embeddings off or failing: same call degrades to lexical + recency, no raise.
+    # Embeddings off or failing: the same call degrades to lexical + graph only (nothing matches here), no raise.
     assert asyncio.run(idx.query_vec({"embeddingModel": ""}, q)) is None
     assert asyncio.run(idx.query_vec({**CFG, "hybridRetrieval": False}, q)) is None
-    rows = idx.search(None, q, None, limit=3, settings=CFG)
-    assert len(rows) == 3
+    assert idx.search(None, q, None, limit=3, settings=CFG) == []  # no recency fill without a match
     fake.fail = True
     idx.embedder.reset()
     assert asyncio.run(idx.query_vec(CFG, q)) is None
-    assert idx.search(None, q, None, limit=3, settings=CFG)
+    assert [m["id"] for m in idx.search(None, "manager", None, limit=3, settings=CFG)] == [target["id"]]
 
 
 def test_index_idempotent_reembeds_and_cascades(env) -> None:
@@ -111,7 +110,7 @@ def test_invalid_rows_are_not_indexed_or_returned(env) -> None:
 def test_trashed_rows_neither_ranked_nor_reembedded(env) -> None:
     db, memories, graph, idx, fake = env
     gone = memories.create(None, "User visited Austin in Austin", kind="fact")
-    live = memories.create(None, "User lives in Denver", kind="fact")
+    live = memories.create(None, "User lives in Austin now", kind="fact")
     with db.tx() as c:
         c.execute("UPDATE memories SET deleted_at=1 WHERE id=?", (gone["id"],))
     assert [m["id"] for m in idx.search(None, "Austin", limit=1)] == [live["id"]]
@@ -177,7 +176,7 @@ def test_learn_indexes_new_memories(env, monkeypatch) -> None:
 
 def test_context_unchanged_without_memory_hits(env) -> None:
     db, memories, graph, idx, fake = env
-    memories.create(None, "User prefers dark mode", kind="preference")
+    memories.create(None, "User prefers dark mode", kind="fact")
     kw = dict(memories=memories, graph=graph, documents=Documents(db), project=None, project_id=None,
               query="dark", settings={}, conv_settings={}, global_system_prompt="sys")
     base, used = build_context(**kw)

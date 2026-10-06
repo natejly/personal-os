@@ -614,6 +614,9 @@ class Memories:
         content = content.strip()
         prov = provenance or {}
         with self.db.tx() as c:
+            # The duplicate check and the insert must be one write: two creates of the same content at once (a
+            # double-click) each saw no row and both inserted. IMMEDIATE takes the write lock before the SELECT.
+            c.execute("BEGIN IMMEDIATE")
             dup = c.execute(
                 f"SELECT id FROM memories WHERE invalid_at IS NULL AND deleted_at IS NULL AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
                 (content,) if project_id is None else (content, project_id),

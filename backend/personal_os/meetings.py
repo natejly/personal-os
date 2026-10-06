@@ -167,7 +167,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS meetings_fts USING fts5(
 SOURCES = ("mic", "output")
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "enabled": False,
+    # On: the 45 s tick reads the calendar and lists meetings happening now. Nothing records until
+    # consentedAt is set by the consent notice, and autoRecord stays off.
+    "enabled": True,
     "consentedAt": 0.0,       # unix seconds the consent modal was acknowledged; 0 blocks recording
     "autoRecord": False,
     "nudgeSeconds": 120,
@@ -2470,8 +2472,11 @@ class MeetingService:
             try:
                 await asyncio.to_thread(self.start, m["id"])
             except MeetingBlocked as e:
-                # autoRecord must not silently fail: the row carries why nothing was recorded.
-                self.meetings.patch(m["id"], {"error": "; ".join(b["detail"] for b in e.blockers)})
+                # autoRecord must not silently fail: the row carries why nothing was recorded. Written once
+                # per reason, not every 45 s tick while the same blocker stands.
+                why = "; ".join(b["detail"] for b in e.blockers)
+                if why != m.get("error"):
+                    self.meetings.patch(m["id"], {"error": why})
             except Exception as e:  # noqa: BLE001
                 log.warning("meetings: auto-record %s: %s", m["id"], e)
 

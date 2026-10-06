@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, type SettingsTab, type View } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -187,9 +187,14 @@ function ReportBody({ text }: { text: string }): JSX.Element {
   )
 }
 
+
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const setView = useStore((s) => s.setView)
+  const openSettings = useStore((s) => s.openSettings)
+  // The daily digest's fix-it links: one per setup gap, to the view or Settings tab that fixes it.
+  const links = r.links ?? []
   // An unread problem opens itself; reading it (Mark all read included) collapses it.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
@@ -231,6 +236,12 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           {r.summary ? <ReportBody text={r.summary} /> : (
             !r.error && <p className="muted">It wrote nothing. {r.tool_calls} tool call{r.tool_calls === 1 ? '' : 's'}.</p>
           )}
+          {links.map((l) => (
+            <button key={l.label} className="ghost-btn sm"
+              onClick={() => { if (l.settings) openSettings(l.settings as SettingsTab); else if (l.view) setView(l.view as View) }}>
+              {l.label} <ArrowRight size={13} />
+            </button>
+          ))}
         </>
       )}
     </li>

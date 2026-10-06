@@ -185,8 +185,6 @@ export default function SidebarSpaces(): JSX.Element {
   const order = useCanvas((s) => s.order)
   const loaded = useCanvas((s) => s.loaded)
   const loadFailed = useCanvas((s) => s.loadFailed)
-  // A fresh install has one empty space: say what spaces are for until something is in one.
-  const fresh = useCanvas((s) => s.order.length <= 1 && !s.order.some((id) => s.canvases[id]?.windows.length))
   const [open, setOpen] = useState(true)
 
   return (
@@ -210,7 +208,6 @@ export default function SidebarSpaces(): JSX.Element {
             </p>
           )}
           {order.map((id) => <SpaceRow key={id} canvasId={id} />)}
-          {loaded && fresh && <p className="empty-hint">Lay out chats, notes, the web and your apps side by side; pop any window out on top of other apps.</p>}
         </div>
       )}
     </>

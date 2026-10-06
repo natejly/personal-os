@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from email.utils import getaddresses
 from typing import Any, Iterable
 
+from . import permissions
+
 # Rule names that are not tool names: the subject kinds `subject_for` emits.
 PSEUDO_TOOLS = frozenset({"Bash", "Read", "Edit", "Agent", "external_directory"})
 # Verdicts: 'deny' | 'ask' | 'allow' | None (no opinion: the tool's own mode stands).
@@ -1068,7 +1070,7 @@ def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any
     conv = conv_settings or {}
     if "skipPermissions" in conv:
         return bool(conv["skipPermissions"])
-    return bool((cfg or {}).get("skipPermissions"))
+    return bool(permissions.get(cfg or {}, "skipPermissions"))
 
 
 def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",

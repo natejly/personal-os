@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X } from 'lucide-react'
 import { useStore } from '../store'
+import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
@@ -64,6 +65,7 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
 }): JSX.Element {
   const { titleId, backdrop, modal } = useModal(onClose)
   const starred = isStarred(m)
+  const gmail = useStore(pimProvider) === 'google'
   return (
     <div className="modal-backdrop" {...backdrop}>
       <div className="modal wide mail-reader" {...modal}>
@@ -87,7 +89,7 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
           </button>
           <button className="icon-btn" title="Mark unread" aria-label="Mark unread" onClick={onUnread}><Mail size={15} /></button>
           <span className="spacer" />
-          <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${m.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
+          {gmail && <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${m.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>}
           <button className="ghost-btn" onClick={onArchive}><Archive size={14} /> Archive</button>
           <button className="ghost-btn" onClick={onSnooze}>Snooze</button>
           <button className="ghost-btn" onClick={onAsk}><MessageSquare size={14} /> Ask assistant</button>
@@ -174,7 +176,9 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
 }
 
 export default function MailView(): JSX.Element {
-  const google = useStore((s) => s.google)
+  // The active mail account (Google or Microsoft); the name keeps the old one to keep the diff small.
+  const google = useStore(pimStatus)
+  const label = useStore(pimLabel)
   const { toast, askAboutEmail } = useStore()
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
@@ -199,6 +203,8 @@ export default function MailView(): JSX.Element {
   const [painted, setPainted] = useState('')
   const seq = useRef(0)
   const watch = useMailWatch()
+  const narrowed = !!range || read !== 'all' || starred || attachments || !!search
+  const clearFilters = (): void => { setRange(''); setRead('all'); setStarred(false); setAttachments(false); setSearch('') }
 
   const query = useMemo(() => {
     const parts: string[] = []
@@ -405,8 +411,8 @@ export default function MailView(): JSX.Element {
         <div className="empty-state">
           <MailIcon size={28} />
           <h2>Connect your inbox</h2>
-          <p>Grain reads and triages Gmail once Google is connected. Nothing is sent without asking you first.</p>
-          <button className="primary-btn" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button>
+          <p>Grain reads and triages your mail once {label} is connected. Nothing is sent without asking you first.</p>
+          <button className="primary-btn" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button>
         </div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
@@ -446,6 +452,9 @@ export default function MailView(): JSX.Element {
             <MailIcon size={28} />
             <h2>No mail here</h2>
             <p>Nothing in {folderLabel} matches these filters. Try a wider time range or another folder.</p>
+            {narrowed
+              ? <button className="primary-btn" onClick={clearFilters}>Clear filters</button>
+              : <button className="primary-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>}
           </div>
         )}
         <div className="mail-list">

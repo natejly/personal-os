@@ -5,8 +5,9 @@ transcribes it in the background, and afterwards proposes a cleaned-up version o
 your notes with the transcript filled in around them — as a diff you accept or
 reject.
 
-It is off until you turn it on, nothing is recorded without a one-time
-acknowledgement, and the notes you typed are never overwritten by a model.
+It ships on, which means it watches your calendar for meetings happening now and
+nothing more: nothing is recorded without a click and a one-time acknowledgement,
+and the notes you typed are never overwritten by a model.
 
 ---
 
@@ -171,10 +172,13 @@ colleague's email address inside their own meeting is the point. Switch it off
 entirely with `redactSecrets: false`.
 
 **Nothing starts itself by default.** There is no background capture: a recording
-begins with a click or an HTTP call. The one exception is opt-in and off by
+begins with a click or an HTTP call. With `meetings.enabled` on (the default) the
+45 s tick only reads the calendar and lists the meeting as `scheduled`; it never
+opens the microphone and never asks macOS for anything. The one exception is opt-in and off by
 default — `autoRecord` will start a meeting the nudge found once it has begun, and
 even then only if consent is acknowledged and the preflight passes; a blocked
-auto-start writes the reason onto the row instead of failing silently.
+auto-start writes the reason onto the row once (not on every tick) instead of
+failing silently.
 
 **Meetings never reach auto-learn.** Nothing feeds a meeting into
 `learn_from_exchange`, which writes durable memories re-injected into unrelated
@@ -397,9 +401,16 @@ Logic lives in `meeting_import.py`; progress is the existing segments poll.
 In the UI: the **Meetings** view (⌘⇧M, or the sidebar row), an **Upcoming
 meetings** card on Today, and a live-recording indicator in the sidebar visible
 from every view. The sidebar badge is the number of enhance proposals awaiting
-review, not a meeting count. The sidebar row and the Today card both start
-hidden; turn them on in Settings → Modules. *Recording* is a separate switch
-(`meetings.enabled` plus the consent acknowledgement) and is off.
+review, not a meeting count. The sidebar row and the Today card are shown by
+default (module stamp 5 shows them once on older installs too; hide them in
+Settings → Modules and they stay hidden). *Recording* needs the consent
+acknowledgement, asked on the first Record, and the Microphone grant. A daily
+digest in the Agent Inbox lists recordings, notes waiting for review and any
+missing grant ([digest.md](digest.md)).
+
+Older databases: migration 6 flips a stored bare `{"enabled": false}` to true.
+A full stored config with `enabled: false` (what turning the recorder off writes)
+is left off.
 
 ## Limits
 

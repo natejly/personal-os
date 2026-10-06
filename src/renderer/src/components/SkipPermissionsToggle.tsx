@@ -17,14 +17,17 @@ export default function SkipPermissionsToggle({ conversationId }: { conversation
   const setChatSettings = useStore((s) => s.setChatSettings)
 
   const on = convSkip ?? globalOn
-  const title = on
+  // A chat with no switch of its own follows Settings → Permissions; say so, since the two look the same here.
+  const source = convSkip === undefined ? ` Following the default in Settings → Permissions (${globalOn ? 'on' : 'off'}).` : ` Set for this chat; the default in Settings → Permissions is ${globalOn ? 'on' : 'off'}.`
+  const title = (on
     ? 'Dangerously skip permissions is on. Ordinary tools run without an approval card. Deny rules, ask rules, mail and other external actions, shell commands, flagged content, repeated calls, plans and questions still ask.'
-    : 'Permissions ask first. Turn this on to let tools run without an approval card in this chat.'
+    : 'Permissions ask first. Turn this on to let tools run without an approval card in this chat.') + source
 
   return (
     <button
       className={`ghost-btn skip-perms ${on ? 'on' : ''}`}
       aria-pressed={on}
+      data-inherited={convSkip === undefined || undefined}
       title={title}
       onClick={() => void setChatSettings({ skipPermissions: !on }, convId ?? undefined)}
     >

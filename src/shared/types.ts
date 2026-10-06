@@ -1451,6 +1451,8 @@ export interface Settings {
   gmailSendHold?: { enabled: boolean; seconds: number }
   /** Read-only here: the full shape is MeetingConfig, patched through /meetings/config so the merge is a deep one. */
   meetings?: { enabled: boolean }
+  /** The quiet daily digest in the Agent Inbox (digest.py): on by default, written once a day at `hour`. */
+  digest?: { enabled?: boolean; hour?: number }
 }
 
 export interface ModelPrice {
@@ -2168,6 +2170,8 @@ export interface RunInfo {
 // ---------------- scheduled jobs + the Agent Inbox ----------------
 
 export type JobKind = 'cron' | 'once' | 'watch' | 'mail' | 'calendar'
+/** Inbox run rows: a job kind, or the synthetic daily digest (digest.py), which no job fired. */
+export type RunKind = JobKind | 'digest'
 
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
@@ -2271,7 +2275,7 @@ export interface JobRunSummary {
   status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   job_id: string | null
   job: string
-  kind: JobKind
+  kind: RunKind
   due_at: number | null
   fired_at: number
   late: boolean
@@ -2289,6 +2293,8 @@ export interface JobRunSummary {
   tool_calls: number
   proposals: number
   pending_proposals: number
+  /** Digest only: one fix-it link per setup gap, to a view or a Settings tab (names, so this file imports nothing). */
+  links?: { label: string; view?: string; settings?: string }[]
   /** Marked read in the Agent Inbox (inbox_seen). A read card collapses to one line. */
   seen: boolean
   /** The run's own report, from the event tape. Shown as the body; headed sections are split out for display only. */

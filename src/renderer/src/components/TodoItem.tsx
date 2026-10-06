@@ -1,6 +1,7 @@
 import { memo, useRef, useState } from 'react'
 import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from 'lucide-react'
 import { useStore } from '../store'
+import { pimConnected } from '../lib/pim'
 import { api } from '../lib/api'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { dragProps } from '../canvas/dnd'
@@ -49,7 +50,7 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
   const toast = useStore((s) => s.toast)
-  const google = useStore((s) => s.google)
+  const connected = useStore(pimConnected)
   const addTodo = useStore((s) => s.addTodo)
   const [editing, setEditing] = useState(false)
   const [sub, setSub] = useState<string | null>(null)
@@ -127,13 +128,13 @@ function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag 
             <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
           </select>
         )}
-        {google?.connected && !todo.calendar_event_id && !todo.done && (
-          <button className="icon-btn ghost" title="Add to Google Calendar" aria-label={`Add ${todo.title} to calendar`} onClick={() => void toCalendar()}>
+        {connected && !todo.calendar_event_id && !todo.done && (
+          <button className="icon-btn ghost" title="Add to calendar" aria-label={`Add ${todo.title} to calendar`} onClick={() => void toCalendar()}>
             <CalendarPlus size={13} />
           </button>
         )}
         {todo.calendar_link && (
-          <a className="icon-btn ghost" href={todo.calendar_link} target="_blank" rel="noreferrer" title="Open in Google Calendar" aria-label={`Open ${todo.title} in Google Calendar`}>
+          <a className="icon-btn ghost" href={todo.calendar_link} target="_blank" rel="noreferrer" title="Open in calendar" aria-label={`Open ${todo.title} in calendar`}>
             <ExternalLink size={13} />
           </a>
         )}

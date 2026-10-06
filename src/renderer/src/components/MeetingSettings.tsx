@@ -212,7 +212,7 @@ export default function MeetingSettings(): JSX.Element {
         <span className="toggle-icon"><Mic size={15} /></span>
         <span className="toggle-text">
           <b>Meeting recorder</b>
-          <small>Off means no capture at all. Notes still work; the audio and transcript parts stay dark.</small>
+          <small>On, it lists calendar meetings happening now; nothing records until you press Record and accept the notice once. Off means no capture and no detection. Notes still work.</small>
         </span>
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
         <span className="switch" />

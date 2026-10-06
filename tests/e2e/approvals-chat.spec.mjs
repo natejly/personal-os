@@ -82,7 +82,7 @@ test('always allow in this chat: grant listed in Settings, next call runs withou
 
     // Settings → Tools lists it, and Revoke takes it away
     await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('tab', { name: 'Tools' }).click()
+    await page.getByRole('tab', { name: 'Permissions' }).click()
     const revoke = page.getByRole('button', { name: /^Revoke shell_run in / })
     await expect(revoke).toBeVisible()
     await revoke.click()

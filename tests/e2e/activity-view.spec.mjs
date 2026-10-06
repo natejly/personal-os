@@ -19,19 +19,21 @@ const permLog = (g) => {
 }
 const now = () => Date.now() / 1000
 
-test('Activity is hidden until modules are turned on; first view is off, with the access checklist', async ({ grain }) => {
+test('Activity ships shown and on; the first view carries the access checklist and records only app focus', async ({ grain }) => {
   const { page, api } = grain
-  await expect(page.locator('.nav-item', { hasText: 'Activity' })).toHaveCount(0)
+  // Shown by default now (hiddenViews ships empty); showing the view records nothing extra.
+  await expect(page.locator('.nav-item', { hasText: 'Activity' })).toHaveCount(1)
   await openActivity(grain)
-  await expect(page.locator('.act-state')).toHaveText('Off')
-  await expect(page.getByRole('button', { name: 'Turn on' })).toBeVisible()
+  await expect(page.locator('.act-state')).not.toHaveText('Off')
+  await expect(page.getByRole('button', { name: 'Turn off' })).toBeVisible()
   await expect(page.getByText('Access on this machine')).toBeVisible()
   // the checklist states what is missing and why, never silently
   await expect(page.locator('.act-caps li').first()).toBeVisible()
   await expect(page.locator('.act-caps li.bad, .act-caps li.warn').first()).toContainText(/\w/)
-  expect((await api('/activity/status')).running).toBe(false)
-  // nothing recorded just by opening the page
-  expect((await api('/activity/events')).length).toBe(0)
+  expect((await api('/activity/status')).running).toBe(true)
+  // Off is one click and sticks: nothing more is recorded after it.
+  await page.getByRole('button', { name: 'Turn off' }).click()
+  await expect.poll(async () => (await api('/activity/status')).running, { timeout: 30_000 }).toBe(false)
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 

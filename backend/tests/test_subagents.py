@@ -1118,7 +1118,8 @@ def test_a_token_in_a_subagent_id_is_stripped() -> None:
 
 def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
-        check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
+        if k != "permissionMode":  # a permissions key (permissions.DEFAULTS), not an llm setting
+            check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
     check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
           and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
     reset()

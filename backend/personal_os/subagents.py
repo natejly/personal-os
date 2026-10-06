@@ -57,7 +57,8 @@ CHILD_BLOCK = frozenset({
 # stream, and the always-ask list is gated the same way as for the parent.
 CHILD_DANGER_BLOCK = ("plan", "schedules")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
-SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run")
+SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_session_start", "coding_session_list",
+               "coding_session_status", "coding_session_send", "coding_session_stop", "coding_session_diff")
 # Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
 UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
@@ -71,7 +72,7 @@ def parallel_safe(spec: Any, name: str, mode: str) -> bool:
 
 
 WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_import_sandbox"})
-PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "to")
+PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "repo_path", "to")
 
 READ_TOOLS = (
     "search_documents", "read_document", "list_documents", "search_memory", "graph_search", "graph_traverse",

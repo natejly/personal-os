@@ -34,3 +34,16 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   expect((await grain.api('/docs')).some((x) => /report/i.test(x.title) || /Hello from the desk/.test(x.content || ''))).toBe(true)
   expect(realErrors(grain)).toEqual([])
 })
+
+test('with autonomy on by default a new chat is a desk from its first message', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: { autonomousByDefault: true } })
+  await grain.page.reload()
+  const { page } = grain
+  await newChat(page)
+  await say(page, '!!reply Hello there.')
+  await expect(page.locator('.msg.assistant').last()).toContainText('Hello there.', { timeout: 60_000 })
+  expect(await grain.api('/conversations')).toEqual([]) // desks are left out of the plain list
+  const [chat] = await grain.api('/conversations?include_desks=true')
+  await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
+  expect(realErrors(grain)).toEqual([])
+})

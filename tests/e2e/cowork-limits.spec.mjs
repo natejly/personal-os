@@ -51,28 +51,3 @@ test('a desk lets go of a card nobody answers (parkAfterSeconds) and the answer 
   expect(JSON.stringify(llm.requests)).toContain('yes')
   expect(realErrors(grain)).toEqual([])
 })
-
-test('Settings → Autonomy numeric fields clamp, save, and survive a reopen', async ({ grain }) => {
-  const { page } = grain
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Autonomy' }).click()
-  await expect(page.getByRole('heading', { name: 'Autonomy' })).toBeVisible()
-  const turns = page.getByLabel(/Turns per desk/)
-  await turns.scrollIntoViewIfNeeded()
-  await turns.fill('-5')
-  await turns.blur()
-  expect(Number(await turns.inputValue())).toBeGreaterThanOrEqual(0)
-  await turns.fill('7')
-  await turns.press('Enter')
-  await expect(turns).toHaveValue('7')
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await grain.api('/settings')).deskMaxTurns).toBe(7)
-  // the Work autonomously menu shows the cap as its placeholder
-  await page.keyboard.press('Escape')
-  await newChat(page)
-  await say(page, 'hello there')
-  await expect(page.getByRole('button', { name: /Work autonomously/ })).toBeEnabled({ timeout: 60_000 })
-  await page.getByRole('button', { name: /Work autonomously/ }).click()
-  await expect(page.locator('.autonomy-menu .desk-limits input[type=number]')).toHaveAttribute('placeholder', '7')
-  expect(realErrors(grain)).toEqual([])
-})

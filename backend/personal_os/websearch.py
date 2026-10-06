@@ -1,6 +1,6 @@
-"""web_search backends: Brave, Tavily, Exa, DuckDuckGo and a user-run SearXNG, merged with reciprocal rank fusion.
+"""web_search backends: Firecrawl, Brave, Tavily, Exa, DuckDuckGo and a user-run SearXNG, merged with reciprocal rank fusion.
 
-A search key (Brave, then Tavily) answers alone, as it always has. Without one, SearXNG (when `searxngUrl` is set)
+A search key answers alone (Firecrawl first when its key is set, then Brave, then Tavily), as it always has. Without one, SearXNG (when `searxngUrl` is set)
 and Exa run side by side and their results are fused; DuckDuckGo is the fallback when both come back empty."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from . import reach
+from . import firecrawl, reach
 
 TIME_RANGES = ("day", "week", "month", "year")
 BRAVE_FRESH = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
@@ -218,12 +218,15 @@ async def search(cfg: dict[str, Any], query: str, want: int, time_range: str = "
     async def one(name: str, fn: Any) -> list[dict[str, Any]]:
         return await fn(cfg, q, want, tr)
 
-    for nm, key, fn in (("brave", "braveApiKey", brave), ("tavily", "tavilyApiKey", tavily)):
-        if cfg.get(key):
+    for nm, key, fn in (("firecrawl", firecrawl.key(cfg), firecrawl.search), ("brave", cfg.get("braveApiKey"), brave), ("tavily", cfg.get("tavilyApiKey"), tavily)):
+        if key:
             try:
                 meta["engines_used"] = [nm]
-                return await _retrying(fn, cfg, q, want, tr), meta
-            except httpx.HTTPError as e:  # keyed engine down: note it and fall through as if no key were set
+                rows = await _retrying(fn, cfg, q, want, tr)
+                if failed:
+                    meta["failed"] = dict(failed)
+                return rows, meta
+            except (httpx.HTTPError, reach.ReachError) as e:  # keyed engine down: note it and fall through as if no key were set
                 failed[nm] = _why(e)
     meta.pop("engines_used", None)
     names = (["searxng"] if searxng_base_safe(cfg) else []) + ["exa"]

@@ -1870,6 +1870,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             plan_mode=str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off") in ("auto", "always"),
             fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
         model = routed[0]
+    user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
     regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
     placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
@@ -1918,6 +1919,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 convos.update(conv_id, {"title": "New chat"})
                 conv = {**conv, "title": "New chat"}
         um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None)
+        user_msg_id = um["id"]
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text or attachments[0]["name"])
@@ -1931,6 +1933,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "error", {"message": "Nothing to resume"}
             return
         user_text = users[-1]["content"]
+        user_msg_id = users[-1]["id"]
     else:
         # regenerate: the trailing answer is superseded, not deleted, so it survives a failed or stopped replacement
         msgs = conv["messages"]
@@ -1959,7 +1962,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                               if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
+        user_msg_id = users[-1]["id"]
 
+    run_user_texts: list[str] = [user_text]  # every user message this run answered (steers add to it): all a tainted chat may learn from
     tracer = Tracer()
     _desk = (run.desk_id if run else None) or conv["settings"].get("deskId")
     _job = conv["settings"].get("job_id")
@@ -2071,7 +2076,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
-            "proposal_only": proposal_only(run), "message_id": am["id"],
+            "proposal_only": proposal_only(run), "message_id": am["id"], "user_message_id": user_msg_id,
             "skip_permissions": skip_permissions, "permission_mode": pmode, "user_text": user_text,
             "review_cache": review_cache,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
@@ -2664,6 +2669,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
                         messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable())})})
                     user_text = um["content"]
+                    user_msg_id = tool_ctx["user_message_id"] = um["id"]
+                    run_user_texts.append(um["content"])
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
                 # the work it asks for. Budget and round count are the run's and stay.
@@ -3594,9 +3601,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # topic — the run ends here either way. A failure here is as quiet as a failed memory extraction.
     # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
     # that did nothing — and never leaves a span open for the UI to show as still running.
-    # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
-    # sample of how the user writes. The voice profile is injected into later chats.
-    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+    # A tainted chat may still bank the user's own prose: only the user's half ever reaches this, and
+    # looks_like_prose already rejects pastes and quotes. The voice profile is injected into later chats.
+    if (not error and not gone and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -3621,16 +3628,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
     # A scheduled run never writes to long-term memory either way: it is one more model call nobody
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
-    # A tainted reply has read someone else's page or transcript. Mining it into memory would
-    # plant that text in later chats. The user can still save a memory by approving the tool.
-    if (not error and text and not gone and not proposal_only(run) and not tool_ctx["tainted"]
+    # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
+    # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
+    if (not error and text and not gone and not proposal_only(run)
+            and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
+        user_only = bool(tool_ctx["tainted"])
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
-            user_text=user_text, assistant_text=text, model=model, settings=cfg,
-            spans=list(tracer.spans), tool_events=list(tool_events),
-            skills_in_use=learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
+            user_text="\n\n".join(run_user_texts) if user_only else user_text,
+            assistant_text="" if user_only else text, model=model, settings=cfg,
+            spans=list(tracer.spans), tool_events=[] if user_only else list(tool_events),
+            skills_in_use=[] if user_only else learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
+            user_only=user_only, user_message_id=user_msg_id,
         ))
 
     # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.

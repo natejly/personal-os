@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from bisect import bisect_left, bisect_right
 from typing import Callable
+
+from .memory_limits import BACKFILL_WINDOW_S
 
 Step = Callable[[sqlite3.Connection], None]
 
@@ -254,6 +257,67 @@ def _memories_expires_at(c: sqlite3.Connection) -> None:
         c.execute("ALTER TABLE memories ADD COLUMN expires_at REAL")
 
 
+def sync_memories_fts(c: sqlite3.Connection, ids: list[str] | None = None) -> None:
+    """Make memories_fts hold exactly the live memories (not trashed, not superseded or forgotten), for `ids` or all.
+    Idempotent. Trash and restore call it for the rows they flip, so search never ranks a row that context drops."""
+    for i in range(0, len(ids), 500) if ids is not None else [None]:
+        chunk = None if ids is None else ids[i:i + 500]
+        ph = "" if chunk is None else f" AND id IN ({','.join('?' * len(chunk))})"
+        fph = "" if chunk is None else f" AND memory_id IN ({','.join('?' * len(chunk))})"
+        args = tuple(chunk or ())
+        c.execute(f"DELETE FROM memories_fts WHERE memory_id NOT IN (SELECT id FROM memories WHERE deleted_at IS NULL AND invalid_at IS NULL){fph}", args)
+        c.execute(f"INSERT INTO memories_fts(content, memory_id) SELECT content, id FROM memories WHERE deleted_at IS NULL AND invalid_at IS NULL{ph} "
+                  "AND id NOT IN (SELECT memory_id FROM memories_fts)", args)
+
+
+def _cols(c: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in c.execute(f'PRAGMA table_info("{table}")')}
+
+
+def _memories_fts_live(c: sqlite3.Connection) -> None:
+    """Trashed and superseded memories kept their search rows, and some deletes left orphans: rebuild to the live set."""
+    if {"deleted_at", "invalid_at"} <= _cols(c, "memories") and _cols(c, "memories_fts"):
+        sync_memories_fts(c)
+
+
+def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
+    """Link an auto memory that has no source to the one assistant reply that finished just before it was written.
+
+    Extraction lands within BACKFILL_WINDOW_S of its reply finishing. Exactly one reply in that window is a
+    match; none or several is ambiguous and the memory stays unlinked, because a wrong source is worse than none.
+    Finish time is the latest trace span end (epoch ms) of the reply itself, else the row's created_at. The
+    auto-learn span is skipped: it is appended after the memory is written, so it always ends later. A memory
+    that replaced another row (an edit or a merge) is skipped too."""
+    if not {"source_message_id", "superseded_by"} <= _cols(c, "memories") or "trace" not in _cols(c, "messages"):
+        return
+    # A row that replaced another is a user edit or a tidy-up merge, not a fresh learn: its time says nothing about a reply.
+    mems = c.execute("SELECT id, created_at FROM memories WHERE source='auto' "
+                     "AND source_conversation_id IS NULL AND source_message_id IS NULL "
+                     "AND id NOT IN (SELECT superseded_by FROM memories WHERE superseded_by IS NOT NULL)").fetchall()
+    replies = []  # (finish, id, conversation_id, created_at), computed once and sorted by finish
+    for mid, conv, created, trace in c.execute("SELECT id, conversation_id, created_at, trace FROM messages WHERE role='assistant'").fetchall():
+        fin = created
+        try:
+            ends = [sp["end"] / 1000 for sp in json.loads(trace or "[]")
+                    if isinstance(sp, dict) and sp.get("kind") != "learn" and isinstance(sp.get("end"), (int, float))]
+            fin = max(ends) if ends else created
+        except (ValueError, TypeError):
+            pass
+        replies.append((fin, mid, conv, created))
+    replies.sort()
+    fins = [r[0] for r in replies]
+    for mem in mems:
+        t = mem[1]
+        cands = [r for r in replies[bisect_left(fins, t - BACKFILL_WINDOW_S):bisect_right(fins, t)] if r[3] <= t]
+        if len(cands) != 1:
+            continue
+        _, _, conv, created = cands[0]
+        um = c.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' AND created_at<=? ORDER BY created_at DESC LIMIT 1",
+                       (conv, created)).fetchone()
+        if um:
+            c.execute("UPDATE memories SET source_conversation_id=?, source_message_id=? WHERE id=?", (conv, um[0], mem[0]))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -271,6 +335,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (13, "permission_mode", _permission_mode),
     (14, "chat_files", _chat_files),
     (15, "memories_expires_at", _memories_expires_at),
+    (16, "memories_fts_live", _memories_fts_live),
+    (17, "memory_provenance_backfill", _memory_provenance_backfill),
 ]
 
 

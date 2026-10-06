@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 
 from .db import Database, now
 from .docs import Docs, drop_doc_windows
+from .migrations import sync_memories_fts
 from .todos import Todos
 from .workspace import Workspace, WorkspaceError
 
@@ -70,10 +71,13 @@ class Trash:
             hit = c.execute(f"UPDATE {table} SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (t, id)).rowcount
             if kind == "doc" and hit:
                 drop_doc_windows(c, [id])
+            if kind == "memory" and hit:
+                sync_memories_fts(c, [id])  # a trashed memory leaves search until it is restored
             if kind != "project" or not hit:
                 return bool(hit)
             for ct in CHILD_TABLES:
                 c.execute(f"UPDATE {ct} SET deleted_at=?, deleted_with=? WHERE project_id=? AND deleted_at IS NULL", (t, id, id))
+            sync_memories_fts(c, [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (id,)).fetchall()])
             self._demote(c, id)
             c.execute("DELETE FROM doc_folders WHERE scope=?", (id,))  # the tree is gone; the docs' own folder paths are not
         return True
@@ -106,10 +110,14 @@ class Trash:
                     moved = True
             if kind == "project":
                 c.execute("UPDATE projects SET deleted_at=NULL WHERE id=?", (id,))
+                mem_ids = [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (id,)).fetchall()]  # before deleted_with is cleared
                 for ct in CHILD_TABLES:
                     c.execute(f"UPDATE {ct} SET deleted_at=NULL, deleted_with=NULL WHERE deleted_with=?", (id,))
+                sync_memories_fts(c, mem_ids)
             elif kind != "todo":
                 c.execute(f"UPDATE {table} SET deleted_at=NULL, deleted_with=NULL WHERE id=?", (id,))
+                if kind == "memory":
+                    sync_memories_fts(c, [id])
         if kind == "todo":
             self.todos.restore(id)
         return {"ok": True, "type": kind, "id": id, "moved_to_personal": moved}

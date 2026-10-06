@@ -19,7 +19,12 @@ export function sql(dataDir, stmts) {
   execFileSync(PY, ['-c', prog, join(dataDir, 'personal-os.db')], { input: JSON.stringify(stmts), encoding: 'utf8' })
 }
 
-/** Turn on the modules that ship hidden. Reload the page afterwards so the renderer sees it. */
+/** Meetings and Activity ship on; a test of the hidden path starts from here. Reload the page afterwards so the renderer sees it. */
+export async function hideModules(api) {
+  await api('/settings', { method: 'PUT', body: { hiddenViews: ['meetings', 'activity'] } })
+}
+
+/** Show every module (undoes hideModules, and any install that hid some). Reload the page afterwards so the renderer sees it. */
 export async function enableModules(api) {
   await api('/settings', { method: 'PUT', body: { hiddenViews: [], homeWidgets: { meetings: true, health: true } } })
 }

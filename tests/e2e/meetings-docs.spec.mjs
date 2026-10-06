@@ -127,6 +127,7 @@ plain('rename and delete a recording; deleting asks first', async ({ grain }) =>
 plain('Record on a doc explains what blocks it: consent first, then switched off, then the self-test', async ({ grain }) => {
   const { page, api } = grain
   await api('/docs', { method: 'POST', body: { title: 'Call notes', content: 'x' } })
+  await api('/meetings/config', { method: 'PUT', body: { enabled: false } }) // on by default; step 2 needs it off
   await openDoc(grain, 'Call notes')
   const record = page.getByRole('button', { name: 'Record', exact: true })
   await record.click()

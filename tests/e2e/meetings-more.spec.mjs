@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect } from './helpers/fakemic.mjs'
-import { enableModules, reload, sql, seedSegments, realErrors } from './helpers/mah.mjs'
+import { enableModules, hideModules, reload, sql, seedSegments, realErrors } from './helpers/mah.mjs'
 
 test.beforeEach(() => test.setTimeout(240_000))
 
@@ -14,6 +14,8 @@ const openMeetings = async (grain) => {
 
 test('Settings -> Modules turns Meetings and Activity on, and off again', async ({ grain }) => {
   const { page, api } = grain
+  await hideModules(api)
+  await reload(page)
   await expect(page.locator('.nav-item', { hasText: 'Meetings' })).toHaveCount(0)
   await page.getByRole('button', { name: /Settings/ }).first().click()
   await page.getByRole('tab', { name: 'Modules' }).click()

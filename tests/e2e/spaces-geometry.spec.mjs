@@ -43,6 +43,8 @@ const geo = async (g, sid, id) => {
 
 test('move and resize persist exact geometry (snap off), min size honoured', async ({ grain }) => {
   const { page } = grain
+  // The store keeps the rect the drag produced; the pointer can land a float32 hair off a whole pixel.
+  const px = (r) => ({ ...r, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) })
   const { s, ws } = await seed(grain, [{ kind: 'note', x: 200, y: 150, w: 320, h: 260 }], { snap_mode: 'off' })
   const id = ws[0].id
   const tr = () => win(page, id).evaluate((e) => e.style.translate)
@@ -50,26 +52,26 @@ test('move and resize persist exact geometry (snap off), min size honoured', asy
   const p = await gripPoint(page, id)
   await drag(page, p, { x: p.x + 137, y: p.y + 83 })
   await expect.poll(async () => (await geo(grain, s.id, id)).x).toBe(337)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 337, y: 233, w: 320, h: 260 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 337, y: 233, w: 320, h: 260 })
   await expect.poll(tr).toBe('337px 233px')
 
   // resize from the SE corner (grab 3px inside the corner, so the delta is 80 x 44)
   const b = await win(page, id).boundingBox()
   await drag(page, { x: b.x + b.width - 3, y: b.y + b.height - 3 }, { x: b.x + b.width + 77, y: b.y + b.height + 41 })
   await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(400)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 337, y: 233, w: 400, h: 304 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 337, y: 233, w: 400, h: 304 })
 
   // resize from the west edge (grab 2px in, drag 42px left): x moves, right edge stays
   const b2 = await win(page, id).boundingBox()
   await drag(page, { x: b2.x + 2, y: b2.y + b2.height / 2 }, { x: b2.x - 40, y: b2.y + b2.height / 2 })
   await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(442)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 295, y: 233, w: 442, h: 304 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 295, y: 233, w: 442, h: 304 })
 
   // shrinking far below the minimum stops at the note's 200x160 floor
   const b3 = await win(page, id).boundingBox()
   await drag(page, { x: b3.x + b3.width - 3, y: b3.y + b3.height - 3 }, { x: b3.x + 30, y: b3.y + 30 })
   await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(200)
-  expect((await geo(grain, s.id, id)).h).toBe(160)
+  expect(px(await geo(grain, s.id, id)).h).toBe(160)
 
   // Esc mid-drag puts it back
   const before = await geo(grain, s.id, id)

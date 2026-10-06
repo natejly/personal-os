@@ -16,13 +16,13 @@ const bar = (page) => page.locator('.mtg-bar')
 test('Record -> live bar -> transcript fills -> Pause/Resume -> Stop leaves a finished meeting', async ({ grain }) => {
   const { page, api } = grain
   await openMeetings(grain)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(bar(page)).toBeVisible({ timeout: 60_000 })
   await expect(bar(page).locator('.act-state')).toHaveText('Recording')
   await expect(bar(page)).toContainText('microphone')
   await expect(bar(page)).toContainText('transcript ~5s behind')
   // while live: Record is disabled and the row cannot be deleted
-  await expect(page.getByRole('button', { name: 'Record' }).first()).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Record', exact: true }).first()).toBeDisabled()
   const live = (await api('/meetings/status')).active
   expect(live.meeting_id).toBeTruthy()
   await expect(page.locator(`button[aria-label^="Delete "]`).first()).toBeDisabled()
@@ -51,14 +51,14 @@ test('Record -> live bar -> transcript fills -> Pause/Resume -> Stop leaves a fi
   expect(['ready', 'stopped', 'transcribing', 'enhancing']).toContain(row.status)
   expect(row.duration_ms).toBeGreaterThan(3000)
   expect(row.transcript).toContain('stub speech')
-  await expect(page.getByRole('button', { name: 'Record' }).first()).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Record', exact: true }).first()).toBeEnabled()
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 
 test('transcription outage: failed clips are visible and retranscribe recovers them', async ({ grain }) => {
   const { page, api, stt } = grain
   await openMeetings(grain)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(bar(page)).toBeVisible({ timeout: 60_000 })
   // the route dies after the start-up self-test passed: clips close and fail
   stt.fail = true
@@ -86,7 +86,7 @@ test('transcription outage: failed clips are visible and retranscribe recovers t
 test('an open recording survives navigating away, and the app relaunching', async ({ grain }) => {
   const { page, api } = grain
   await openMeetings(grain)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(bar(page)).toBeVisible({ timeout: 60_000 })
   const id = (await api('/meetings/status')).active.meeting_id
   // navigate away: the sidebar indicator is the way back
@@ -107,7 +107,7 @@ test('the live bar stays reachable at 820x520 and the page does not scroll sidew
   const { page, app } = grain
   await openMeetings(grain)
   await small(app)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   const stop = bar(page).getByRole('button', { name: 'Stop' })
   await expect(stop).toBeVisible({ timeout: 60_000 })
   const box = await stop.boundingBox()
@@ -121,7 +121,7 @@ test('the live bar stays reachable at 820x520 and the page does not scroll sidew
 test('backend dies mid-recording: the bar does not crash the page and a reload reports no live recording', async ({ grain }) => {
   const { page, backend } = grain
   await openMeetings(grain)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(bar(page)).toBeVisible({ timeout: 60_000 })
   backend.child.kill('SIGKILL')
   await page.waitForTimeout(6000)
@@ -144,7 +144,7 @@ plain('Record is not blocked by a fast click before the status has loaded (no st
   })
   await reload(page)
   await page.locator('.nav-item', { hasText: 'Meetings' }).first().click()
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await page.waitForTimeout(4000)
   await expect(page.getByText('Before the first recording')).toHaveCount(0)
 })

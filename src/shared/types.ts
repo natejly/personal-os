@@ -135,6 +135,34 @@ export interface Skill {
   rationale?: string
 }
 
+/** Teach a task: the step draft extracted from a screen recording (teach.py normalize). */
+export interface TeachStep {
+  n: number
+  app: string
+  action: string
+  detail: string
+  /** The recording frame that shows this step, when the model named one. */
+  frame: number | null
+}
+export interface TeachDraft {
+  title: string
+  goal: string
+  inputs: { name: string; example: string }[]
+  steps: TeachStep[]
+}
+export interface TeachRecording {
+  id: string
+  created_at: number
+  status: 'recording' | 'ready' | 'extracted' | 'saved'
+  source: 'screen' | 'import'
+  frame_count: number
+  steps: TeachDraft | null
+  skill_id: string | null
+  job_id: string | null
+  /** Seconds since Start, only while recording. */
+  elapsed?: number
+}
+
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
 export interface ToolResultHandle {
   id: string

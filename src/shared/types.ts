@@ -1451,6 +1451,10 @@ export interface Settings {
   /** Texting channel: only the allowlisted handles can control Grain by iMessage. */
   imessageEnabled?: boolean
   imessageHandles?: string[]
+  /** The note-to-self thread Grain listens in and answers in. null = none confirmed yet. */
+  imessageSelfChatGuid?: string | null
+  /** Prefix on every text Grain sends, so it never reads its own replies as commands. Blank = the default. */
+  imessageReplyMarker?: string
   /** null = the dedicated "Texts" conversation. */
   imessageConversationId?: string | null
   imessageNotifyLongRuns?: boolean
@@ -1699,14 +1703,17 @@ export interface SandboxInfo {
 export interface IMessageStatus {
   enabled: boolean
   running: boolean
-  status: 'off' | 'running' | 'needs_full_disk_access' | 'locked' | 'error'
+  status: 'off' | 'running' | 'needs_full_disk_access' | 'locked' | 'error' | 'paused_loop_guard'
   fda_ok: boolean | null
   last_poll_at: number | null
   last_error: string | null
   ignored_count: number
   last_ignored_at: number | null
   target_conversation: { id: string; title: string } | null
+  self_chat: { guid: string | null; handle: string | null }
 }
+/** One candidate note-to-self thread (GET /imessage/self-chats); handle is masked, last_activity is unix seconds. */
+export interface IMessageSelfChat { guid: string; handle: string; last_activity: number | null; source: 'allowlist' | 'account'; best: boolean }
 
 export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 

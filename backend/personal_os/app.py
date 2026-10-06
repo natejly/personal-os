@@ -860,6 +860,16 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = _clean_imessage_handles(v)
         elif k == "imessageConversationId" and v is not None and not isinstance(v, str):
             raise HTTPException(422, "imessageConversationId must be a string or null")
+        elif k == "imessageSelfChatGuid":
+            if v is not None and not isinstance(v, str):
+                raise HTTPException(422, "imessageSelfChatGuid must be a string or null")
+            if v is not None and len(v.strip()) > 200:
+                raise HTTPException(422, "imessageSelfChatGuid is too long")
+            if v is not None and v.strip().startswith("-"):  # it is handed to osascript as an argv item
+                raise HTTPException(422, "imessageSelfChatGuid is not a chat id")
+            clean[k] = (v or "").strip() or None
+        elif k == "imessageReplyMarker" and len(v) > 16:
+            raise HTTPException(422, "imessageReplyMarker must be at most 16 characters")
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
@@ -10010,6 +10020,17 @@ async def imessage_test(body: IMessageTestIn) -> dict[str, Any]:
     res = await imessage_bridge.send_test(body.handle)
     if res.get("error") == "not_allowlisted":
         raise HTTPException(400, "That handle is not on the allowlist")
+    if res.get("error") == "no_self_chat":
+        raise HTTPException(400, "Pick your note-to-self chat or add your phone number to the allowlist first")
+    return res
+
+
+@app.get("/imessage/self-chats")
+async def imessage_self_chats() -> dict[str, Any]:
+    """Candidate note-to-self chats, never with message text: {"chats": [{guid, handle, last_activity, source, best}]}."""
+    res = await asyncio.to_thread(imessage_bridge.self_chats)
+    if res.get("error"):
+        raise HTTPException(409, res["error"])
     return res
 
 

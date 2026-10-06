@@ -46,9 +46,10 @@ export default function AutonomyToggle({ conversationId }: { conversationId?: st
   return (
     <span className="autonomy-ctl" ref={box}>
       <button className={`composer-ctl autonomy ${on ? 'on' : ''}`} aria-pressed={on} aria-expanded={open} disabled={!convId}
+        aria-label={on ? undefined : 'Work autonomously'}
         title={convId ? 'Let it keep working on this on its own, in its own folder, until it is done or needs you' : 'Send a message first: it works on what this chat is about'}
         onClick={() => setOpen((o) => !o)}>
-        <Bot size={13} /> {on ? `Autonomous: ${label}` : 'Work autonomously'}
+        <Bot size={13} /> {on ? `Autonomous: ${label}` : 'Autonomous'}
       </button>
       {open && (
         <div className="autonomy-menu" role="dialog" aria-label="Work autonomously">

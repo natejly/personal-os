@@ -1577,17 +1577,11 @@ export interface Settings {
   requireReadBeforeWrite?: boolean
   /** When set, Firecrawl answers web search and page reads first; the other engines are the fallback. Empty = the FIRECRAWL_API_KEY environment variable, if any. */
   firecrawlApiKey?: string
-  /** Texting channel: only the allowlisted handles can control Grain by iMessage. */
-  imessageEnabled?: boolean
-  imessageHandles?: string[]
-  /** The note-to-self thread Grain listens in and answers in. null = none confirmed yet. */
-  imessageSelfChatGuid?: string | null
-  /** Prefix on every text Grain sends, so it never reads its own replies as commands. Blank = the default. */
-  imessageReplyMarker?: string
-  /** null = the dedicated "Texts" conversation. */
-  imessageConversationId?: string | null
-  imessageNotifyLongRuns?: boolean
-  imessageLongRunMinutes?: number
+  /** Texting channel: Telegram bot, owner-only. */
+  telegramEnabled?: boolean
+  /** Also send approvals and finish notices for chat runs not started from Telegram. */
+  telegramNotifyLongRuns?: boolean
+  telegramLongRunMinutes?: number
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
@@ -1831,20 +1825,17 @@ export interface SandboxInfo {
   name: string; conversation_id: string | null; title: string | null; status: string; created: string
   last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
 }
-export interface IMessageStatus {
+export interface TelegramStatus {
   enabled: boolean
-  running: boolean
-  status: 'off' | 'running' | 'needs_full_disk_access' | 'locked' | 'error' | 'paused_loop_guard'
-  fda_ok: boolean | null
-  last_poll_at: number | null
+  has_token: boolean
+  bot_username: string | null
+  paired: boolean
+  owner_name: string | null
+  status: 'disabled' | 'no_token' | 'not_paired' | 'connected' | 'error' | 'bad_token' | 'conflict' | 'locked'
   last_error: string | null
-  ignored_count: number
-  last_ignored_at: number | null
-  target_conversation: { id: string; title: string } | null
-  self_chat: { guid: string | null; handle: string | null }
+  last_poll_at: number | null
+  pairing: { code: string; link: string; expires_at: number } | null
 }
-/** One candidate note-to-self thread (GET /imessage/self-chats); handle is masked, last_activity is unix seconds. */
-export interface IMessageSelfChat { guid: string; handle: string; last_activity: number | null; source: 'allowlist' | 'account'; best: boolean }
 
 export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 

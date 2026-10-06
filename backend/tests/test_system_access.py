@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import activity, codingagents, imessage, opencode, shell, system_access  # noqa: E402
+from personal_os import activity, codingagents, opencode, shell, system_access  # noqa: E402
 
 
 class _Base(unittest.TestCase):
@@ -30,11 +30,10 @@ class _Base(unittest.TestCase):
         app.include_router(system_access.router(lambda: self.cfg, lambda: self.stored, lambda: object()))
         self.c = TestClient(app)
         for target, val in [(activity, {"IS_MAC": True, "automation_status": lambda b: "granted",
-                                        "input_monitoring_status": lambda: "unasked", "full_disk_access": lambda: False,
+                                        "input_monitoring_status": lambda: "unasked", "full_disk_access": lambda: True,
                                         "installed_browsers": lambda: ["Safari"]}),
                             (codingagents, {"claude_binary": lambda: "/bin/claude"}),
                             (opencode, {"binary": lambda: None}),
-                            (imessage, {"_open_ro": lambda p: mock.Mock()}),
                             # tmp dirs sit outside home, which mac.allowed_root rightly refuses
                             (shell, {"granted_roots": lambda cfg, desk: [Path(os.path.realpath(r)) for r in cfg["workspaceRoots"]]})]:
             for k, v in val.items():
@@ -51,8 +50,8 @@ class AccessTests(_Base):
     def test_shape(self) -> None:
         d = self.c.get("/system/access").json()
         self.assertEqual(set(d), {"fullDisk", "inputMonitoring", "automation", "browsers", "roots", "clis"})
-        self.assertEqual(set(d["automation"]), {"messages", "finder", "systemEvents", "contacts", "calendar", "reminders"})
-        self.assertEqual(d["fullDisk"], "granted")  # chat.db probe succeeded
+        self.assertEqual(set(d["automation"]), {"finder", "systemEvents", "contacts", "calendar", "reminders"})
+        self.assertEqual(d["fullDisk"], "granted")
         self.assertEqual(d["inputMonitoring"], "unasked")
         self.assertEqual(d["browsers"], [{"name": "Safari", "state": "granted"}] if "Safari" in activity.BROWSER_BUNDLES
                          else d["browsers"])
@@ -65,13 +64,8 @@ class AccessTests(_Base):
         self.assertEqual(d["automation"]["finder"], "granted")
 
     def test_fda_denied(self) -> None:
-        with mock.patch.object(imessage, "_open_ro", side_effect=imessage.NeedsFullDiskAccess):
+        with mock.patch.object(activity, "full_disk_access", lambda: False):
             self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "denied")
-
-    def test_fda_granted_without_probe(self) -> None:
-        with mock.patch.object(activity, "full_disk_access", lambda: True), \
-                mock.patch.object(imessage, "_open_ro", side_effect=imessage.NeedsFullDiskAccess):
-            self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "granted")
 
     def test_fda_unknown_off_mac(self) -> None:
         with mock.patch.object(activity, "IS_MAC", False):

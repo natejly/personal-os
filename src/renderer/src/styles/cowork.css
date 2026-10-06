@@ -1,0 +1,427 @@
+/*
+ * Chats working autonomously: the status strip, the workspace panel (files, changes, review), and the action-plan card.
+ * Tokens come from styles.css, so both themes follow without a second palette here. Every class is
+ * feature-prefixed (.cowork-, .desk-, .aplan-) because styles.css is one flat namespace; the two
+ * diff classes the spec names are scoped under .desk-diff for the same reason.
+ */
+
+.cowork-page { display: flex; flex-direction: column; min-height: 0; }
+/* min-height/overflow keep the .app grid row definite, styles.css:120-126. */
+.cowork-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.cowork-side { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; min-height: 0; }
+.cowork-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* No desks: no rail, and the shared .empty-state takes the whole body. */
+.cowork-body.solo { grid-template-columns: minmax(0, 1fr); }
+
+/* ---- the rail ---- */
+.desk-rail { display: flex; flex-direction: column; gap: 10px; }
+.desk-section h4 {
+  display: flex; align-items: center; gap: 6px; margin: 4px 6px 4px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.desk-section h4 .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.desk-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px; border-radius: 8px; cursor: pointer; color: var(--text-muted);
+}
+.desk-row:hover { background: var(--hover); color: var(--text); }
+.desk-row.active { background: var(--active); color: var(--text); }
+.desk-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.desk-row-title {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-row-meta { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-faint); min-width: 0; }
+/* The status in words. Mixed towards --text so the amber and the pastel accent stay readable as
+   10px type in both themes; the ring beside it carries the pure colour. */
+.desk-row-status { flex: none; font-weight: 600; color: color-mix(in srgb, var(--ring, var(--text-faint)) 70%, var(--text)); }
+.desk-row-head { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-row-age { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.desk-badge {
+  flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px;
+  background: var(--border); color: var(--text-muted);
+  font-size: 10px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.desk-badge.ask { background: color-mix(in srgb, var(--st-needs-you) 16%, transparent); color: var(--st-needs-you); }
+
+/* ---- status ring: the app-wide --st-* vocabulary, shared by the rail ring, the row's status
+   label and the detail pill. Working is amber, anything waiting on you is the accent. ---- */
+.desk-ring {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--ring, var(--border-strong)); color: var(--ring, var(--text-muted));
+  background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
+}
+.desk-ring-draft, .desk-ring-paused, .desk-ring-queued, .desk-ring-stopped { --ring: var(--st-idle); }
+.desk-ring-planning, .desk-ring-working { --ring: var(--st-working); }
+.desk-ring-awaiting_plan, .desk-ring-needs_approval, .desk-ring-blocked, .desk-ring-review { --ring: var(--st-needs-you); }
+.desk-ring-interrupted, .desk-ring-failed { --ring: var(--st-failed); }
+.desk-ring-done { --ring: var(--st-done); }
+
+/* ---- new desk ---- */
+.desk-new { padding: 20px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
+.desk-new > header { display: flex; align-items: center; gap: 8px; }
+.desk-new > header h3 { margin: 0; font-size: 15px; }
+.desk-new > footer { display: flex; justify-content: flex-end; gap: 8px; }
+.desk-field { display: flex; flex-direction: column; gap: 5px; }
+.desk-field > span { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.desk-field textarea, .desk-field input {
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; outline: 0; resize: vertical;
+}
+.desk-field textarea:focus, .desk-field input:focus { border-color: var(--accent); }
+.desk-autonomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.desk-autonomy-opt {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; align-items: start;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+}
+.desk-autonomy-opt.on { border-color: var(--accent); background: var(--hover); }
+.desk-autonomy-opt b { font-size: 13px; font-weight: 600; }
+.desk-autonomy-opt small { grid-column: 2; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
+
+/* ---- detail header ---- */
+/* No rule under the header: the tab strip follows it directly and draws the one line for both. */
+.desk-head { padding: 12px 16px 0; }
+.desk-head-top { display: flex; align-items: center; gap: 8px; }
+.desk-title-input {
+  flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: 3px 6px; color: var(--text); font: inherit; font-size: 16px; font-weight: 600; outline: 0;
+}
+.desk-title-input:hover { border-color: var(--border); }
+.desk-title-input:focus { border-color: var(--accent); background: var(--bg-input); }
+.desk-pill {
+  flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--ring, var(--border-strong));
+  color: color-mix(in srgb, var(--ring, var(--text-muted)) 70%, var(--text));
+  background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
+}
+.desk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.desk-meter {
+  display: flex; align-items: center; gap: 12px; padding: 6px 6px 0;
+  font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums;
+}
+.desk-brief {
+  margin: 6px 6px 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
+  max-height: 3.2em; overflow: hidden; text-overflow: ellipsis;
+}
+
+.desk-tabs { flex: none; padding: 6px 16px 0; border-bottom: 1px solid var(--border); }
+/* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
+.desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
+
+/* What the desk is waiting on, in a band under the tabs. It scrolls on its own so a long approval
+   never pushes the transcript off screen, and collapses to nothing when there is nothing to say. */
+.desk-banners { flex: none; max-height: 45vh; overflow-y: auto; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.desk-banners:empty { display: none; }
+.desk-banner {
+  display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 10px;
+  font-size: 13px; background: var(--hover); border: 1px solid var(--border);
+}
+.desk-banner b { display: block; margin-bottom: 2px; }
+.desk-banner p { margin: 0; color: var(--text-muted); }
+.desk-banner > div { flex: 1; min-width: 0; }
+.desk-banner > svg { flex: none; margin-top: 2px; }
+.desk-banner.ask { background: var(--await-fill); border-color: var(--await-border); }
+.desk-banner.ask > svg { color: var(--st-needs-you); }
+.desk-banner.warn {
+  background: color-mix(in srgb, var(--st-failed) 8%, transparent);
+  border-color: color-mix(in srgb, var(--st-failed) 35%, transparent);
+}
+.desk-banner.warn > svg { color: var(--st-failed); }
+/* The answer box inside a banner is a field, not a second composer bar. */
+.desk-banner .desk-steer { padding: 8px 0 0; border-top: 0; }
+
+/* ---- waiting cards, desk settings, limits ---- */
+.desk-banner .desk-banner-action { margin-top: 6px; }
+.desk-cards { display: flex; flex-direction: column; gap: 8px; }
+.desk-card { display: flex; flex-direction: column; gap: 6px; }
+.desk-card + .desk-card { border-top: 1px solid var(--border); padding-top: 8px; }
+.desk-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.desk-card-head code { font-size: 12.5px; }
+.desk-card .approval-args { margin: 0; max-height: 160px; overflow: auto; }
+.desk-card .approval-actions, .desk-settings .approval-actions { display: flex; gap: 6px; }
+.desk-settings { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--hover); }
+.desk-limits { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
+.desk-limits label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.desk-limits input { width: 80px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; }
+.desk-limits input:focus { border-color: var(--accent); outline: none; }
+.desk-limits small { flex-basis: 100%; }
+.desk-inputs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.desk-inputs select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; max-width: 220px; }
+.desk-input-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 240px; padding: 2px 2px 2px 9px; border-radius: 12px;
+  background: var(--active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.desk-pane { flex: 1; min-height: 0; padding: 12px 16px; }
+.desk-pane.scroll { overflow-y: auto; }
+
+/* ---- steer box ---- */
+.desk-steer { display: flex; gap: 8px; align-items: flex-end; padding: 10px 16px 14px; border-top: 1px solid var(--border); }
+.desk-steer textarea {
+  flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; color: var(--text); font: inherit; outline: 0; resize: vertical; min-height: 38px;
+}
+.desk-steer textarea:focus { border-color: var(--accent); }
+.desk-steer textarea:disabled { opacity: 0.5; }
+
+/* ---- timeline ---- */
+.desk-timeline { margin-bottom: 10px; }
+.desk-timeline-head {
+  display: flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 0;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint);
+}
+.desk-timeline-head .rot90 { transform: rotate(90deg); }
+.desk-timeline ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.desk-timeline li { display: flex; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+.desk-timeline li.needs { color: var(--text); }
+.desk-timeline time { flex: none; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.desk-ev-kind { flex: none; width: 72px; color: var(--text-faint); }
+.desk-ev-body { flex: 1; min-width: 0; }
+
+/* ---- plan tab ---- */
+.desk-plan { display: flex; flex-direction: column; gap: 10px; }
+.desk-plan-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.desk-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.desk-checklist li { display: flex; gap: 8px; }
+.desk-checklist li.dropped, .desk-checklist li.rejected { opacity: 0.5; }
+.desk-mark { flex: none; display: inline-flex; color: var(--text-faint); padding-top: 2px; }
+.desk-checklist li.done .desk-mark { color: var(--st-done); }
+.desk-checklist li.consumed .desk-mark { color: var(--st-working); }
+.desk-checklist li.failed .desk-mark { color: var(--st-failed); }
+.desk-check-main { flex: 1; min-width: 0; }
+.desk-check-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+
+/* ---- files tab ---- */
+.desk-files { flex: 1; display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.desk-tree { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; min-height: 0; }
+.desk-tree-head { display: flex; align-items: center; gap: 6px; padding: 0 4px 6px; }
+.desk-folder {
+  display: flex; align-items: center; gap: 4px; width: 100%; min-height: 24px; padding: 4px 6px;
+  background: none; border: 0; cursor: pointer; color: var(--text-faint); font: inherit; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.desk-folder .rot90 { transform: rotate(90deg); }
+.desk-folder .count { margin-left: auto; }
+.desk-file-row {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px;
+  cursor: pointer; color: var(--text-muted); font-size: 12.5px;
+}
+.desk-file-row:hover { background: var(--hover); color: var(--text); }
+.desk-file-row.active { background: var(--active); color: var(--text); }
+.desk-file-icon { flex: none; opacity: 0.6; }
+.desk-file-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-file-size { flex: none; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.desk-file-state {
+  flex: none; padding: 0 5px; border-radius: 6px; font-size: 10px; font-weight: 600;
+  background: var(--border); color: var(--text-muted);
+}
+.desk-file-state.new { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.desk-file-state.modified { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+
+.desk-preview { overflow-y: auto; padding: 12px 16px; min-height: 0; }
+.desk-preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
+.desk-preview-md { font-size: 13.5px; }
+.desk-preview-text {
+  margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px;
+  background: var(--bg-input); border-radius: 8px; padding: 10px;
+}
+
+/* ---- diff ---- */
+.desk-diff { font-family: var(--mono); font-size: 11.5px; }
+.desk-diff-hunk { color: var(--text-faint); padding: 6px 0 2px; }
+.desk-diff-line { display: flex; gap: 6px; padding: 0 4px; white-space: pre-wrap; word-break: break-word; }
+.desk-diff-sign { flex: none; width: 10px; color: var(--text-faint); }
+.desk-diff-text { flex: 1; min-width: 0; }
+.desk-diff .diff-add { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.desk-diff .diff-del { background: color-mix(in srgb, var(--danger) 15%, transparent); }
+
+/* ---- output tab ---- */
+.desk-review { display: flex; flex-direction: column; gap: 10px; }
+.desk-review-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+/* 11px of underlined text is the label; the target is the 24px box around it. */
+.desk-review-head .link.small { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; }
+.desk-review-foot { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.desk-output { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-elev); }
+.desk-output.rejected, .desk-output.promoted { opacity: 0.75; }
+.desk-output > header { display: flex; align-items: center; gap: 8px; }
+.desk-output-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.desk-output-title b { font-size: 13px; }
+.desk-output-summary { margin: 6px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.desk-output-excerpt {
+  margin: 6px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-size: 11.5px; background: var(--bg-input); border-radius: 8px; padding: 8px;
+}
+.desk-output-dest { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.desk-verified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--st-done); }
+.desk-unverified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--st-failed); }
+
+/* ---- action plan card: same recipe as .approval (the Approvals section of styles.css), different
+   namespace ----
+   It mounts inline in a streaming assistant bubble as well as at the foot of a desk chat, which is why this
+   sheet is imported by ActionPlanCard.tsx itself. */
+.aplan {
+  margin: 0 0 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--await-fill); border: 1px solid var(--await-border);
+}
+.aplan.approved { background: var(--hover); border-color: var(--border); }
+.aplan.rejected, .aplan.superseded { background: var(--hover); border-color: var(--border); opacity: 0.8; }
+.aplan-head { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.aplan-head b { font-weight: 600; }
+.aplan-count { font-size: 11px; color: var(--text-faint); }
+.aplan-status { font-size: 11px; font-weight: 600; color: var(--accent); }
+.aplan-status.approved { color: var(--ok); }
+.aplan-status.rejected, .aplan-status.superseded { color: var(--text-faint); }
+.aplan-intent { margin: 6px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.aplan-effects { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.aplan-taint {
+  display: flex; gap: 6px; margin: 8px 0 0; padding: 7px 9px; border-radius: 8px;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+  background: color-mix(in srgb, var(--danger) 8%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+}
+.aplan-taint svg { flex: none; margin-top: 2px; }
+
+.aplan-steps { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.aplan-step { display: flex; gap: 8px; }
+.aplan-step.dropped { opacity: 0.45; }
+.aplan-idx {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  background: var(--bg-input); color: var(--text-muted);
+  font-size: 10.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.aplan-step-main { flex: 1; min-width: 0; }
+.aplan-step-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.aplan-tool {
+  display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border-radius: 6px;
+  font-family: var(--mono); font-size: 10.5px;
+  background: var(--border); color: var(--text-muted);
+}
+.aplan-tool.danger-writes { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.aplan-tool.danger-network { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
+.aplan-tool.danger-executes, .aplan-tool.danger-external { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.aplan-tool.danger-plan { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.aplan-drop { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; font-size: 11px; color: var(--text-faint); cursor: pointer; }
+.aplan-why { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+.aplan-args { margin: 5px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; font-size: 11.5px; }
+.aplan-args > div { display: contents; }
+.aplan-args > div.wide dd { white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; }
+.aplan-args dt { font-family: var(--mono); color: var(--text-faint); }
+.aplan-args dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+
+.aplan-edit-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 11.5px; color: var(--text-faint); }
+.aplan-edit-toggle:hover { color: var(--text); }
+.aplan-edit-toggle .rot90 { transform: rotate(90deg); }
+.aplan-edit textarea {
+  width: 100%; margin-top: 5px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px; color: var(--text); font-family: var(--mono); font-size: 11.5px;
+  outline: 0; resize: vertical;
+}
+.aplan-edit textarea:focus { border-color: var(--accent); }
+.aplan-invalid { margin: 4px 0 0; font-size: 11.5px; color: var(--danger); }
+
+.aplan-foot { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+.aplan-note, .aplan-answer {
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 9px; color: var(--text); font: inherit; font-size: 12.5px; outline: 0; resize: vertical;
+}
+.aplan-note:focus, .aplan-answer:focus { border-color: var(--accent); }
+.aplan-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.aplan-decided { margin: 8px 0 0; }
+
+.plan-mode.auto, .plan-mode.always { color: var(--accent); }
+
+/* ---- files tab: rich preview, delivered marks, changes ---- */
+.desk-preview-meta { white-space: nowrap; }
+.desk-preview-note { margin: 0 0 6px; }
+.desk-preview-image { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.desk-preview-image img { max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input); }
+.desk-preview-more { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.desk-file-delivered {
+  flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border-radius: 6px;
+  font-size: 10px; font-weight: 600; background: var(--border); color: var(--text-muted);
+}
+.desk-changes { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
+.desk-turn { padding: 6px; margin: 2px 0 6px; border-radius: 8px; background: var(--bg-input); font-size: 12px; }
+.desk-turn.undone { opacity: 0.7; }
+.desk-turn-head { display: flex; align-items: center; gap: 8px; }
+.desk-turn-files { list-style: none; margin: 4px 0 0; padding: 0; }
+.desk-turn-files li { display: flex; gap: 6px; min-width: 0; padding: 1px 0; }
+.desk-turn-status { flex: none; width: 54px; font-size: 10.5px; color: var(--text-faint); }
+.desk-turn-status.A { color: var(--chart-3, var(--text-muted)); }
+.desk-turn-status.D { color: var(--danger); }
+.desk-turn-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-changes-note { margin: 4px 0 0; }
+
+/* ---- browser tab ---- */
+.desk-browser { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.desk-browser-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.desk-browser-where { min-width: 0; }
+.desk-browser-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48ch; }
+.desk-browser-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; }
+.desk-browser-url b { color: var(--text); font-weight: 600; }
+.desk-browser-live { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.desk-browser-live .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--chart-3, var(--accent)); }
+.desk-browser-help, .desk-browser-error { margin: 0; }
+.desk-browser-error { color: var(--danger); }
+.desk-browser-frame { display: flex; justify-content: center; min-height: 0; }
+.desk-browser-frame img { max-width: 100%; max-height: calc(100vh - 260px); object-fit: contain; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-input); }
+
+/* ---- Desk approval cards (reuse the chat's approval pieces; these only lay them out) ---- */
+.desk-approval { display: flex; flex-direction: column; gap: 6px; }
+.desk-approval-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.desk-approval-sentence { margin: 0; color: var(--text); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.desk-approval-host { font-weight: 700; }
+.desk-approval-details { font-size: 12px; color: var(--text-muted); }
+.desk-approval-details summary { cursor: pointer; }
+.inline-note { display: flex; gap: 6px; align-items: center; margin: 8px 0 0; }
+.inline-note input {
+  flex: 1; min-width: 0; background: var(--bg-input); border: 1px solid var(--border); border-radius: 7px;
+  padding: 6px 9px; color: var(--text); font: inherit; font-size: 12.5px;
+}
+
+/* ---- Cowork settings ---- */
+.cowork-settings { display: flex; flex-direction: column; gap: 10px; }
+.cowork-settings h4 { margin: 14px 0 0; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+.cowork-num input { max-width: 120px; }
+.cowork-net .seg { align-self: flex-start; }
+.cowork-error { margin: 0; color: var(--danger); font-size: 12px; }
+.cowork-env-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- A chat working autonomously (DeskStrip, DeskPanel, AutonomyToggle) ---------- */
+.autonomy.on { color: var(--accent); }
+.autonomy-ctl { position: relative; display: inline-flex; }
+.autonomy-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; width: min(320px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 10px; padding: 10px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18));
+}
+.autonomy-menu .desk-autonomy { grid-template-columns: 1fr; }
+.desk-strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 auto 6px; padding: 5px 10px;
+  width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; font-size: 12.5px;
+  border: 1px solid var(--border); border-left: 3px solid var(--ring, var(--border)); border-radius: 8px; background: var(--bg-elev);
+}
+.desk-strip-status { font-weight: 600; white-space: nowrap; }
+.desk-strip-detail { color: var(--text-muted); min-width: 0; flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-strip-meta { color: var(--text-faint); white-space: nowrap; }
+.desk-inline { display: flex; flex-direction: column; gap: 8px; }
+.desk-inline:empty { display: none; }
+.desk-panel {
+  position: relative; width: var(--desk-panel-w, 460px); max-width: 60vw; flex-shrink: 0; min-height: 0;
+  display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-elev);
+}
+.desk-panel .desk-tabs { display: flex; align-items: center; padding: 6px 8px 0; }
+/* Narrower than the old desk pane: the tree sits above the preview rather than beside it. */
+.desk-panel .desk-files { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 40%) minmax(0, 1fr); }
+.desk-panel .desk-tree { border-right: 0; border-bottom: 1px solid var(--border); }
+@media (max-width: 760px) { .desk-panel { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 8; } }

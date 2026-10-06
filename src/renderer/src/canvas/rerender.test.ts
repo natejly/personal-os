@@ -11,6 +11,7 @@ import { createElement, type ReactNode } from 'react'
 import type { CanvasWindow } from '@shared/types'
 import { useStore, type ChatSession, type State } from '../store'
 import StatusRing from './StatusRing'
+import ToolEvents from '../components/ToolEvents'
 import { sameFrameProps } from './WindowFrame'
 
 type Sel = (s: State) => unknown
@@ -32,7 +33,7 @@ const mount = (selectors: Sel[]): (() => number) => {
 const msg = { id: 'm1', conversation_id: 'c1', role: 'assistant', content: '', model: null, error: null, context_used: null, tool_events: null, trace: null, created_at: 0 }
 const session = {
   conversation: { id: 'c1', title: 't', project_id: null, model: null, settings: {}, created_at: 0, updated_at: 0, messages: [msg] },
-  streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController() },
+  streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true },
   status: 'working',
   finishedAt: null,
   pendingApprovals: 0,
@@ -65,7 +66,7 @@ const APP: Sel[] = [
   (s) => s.projectModal,
   (s) => s.view,
   (s) => s.settings.theme,
-  (s) => s.mode
+  (s) => s.view === 'canvas'
 ]
 const SIDEBAR: Sel[] = [
   (s) => s.conversations,
@@ -73,10 +74,8 @@ const SIDEBAR: Sel[] = [
   (s) => s.focusedConversationId,
   (s) => s.view,
   (s) => s.projectViewId,
-  (s) => s.personalStats,
-  (s) => s.mode,
+  (s) => s.view === 'canvas',
   (s) => s.newChat,
-  (s) => s.toggleMode,
   (s) => s.selectChat,
   (s) => s.deleteChat,
   (s) => s.setSettingsOpen,
@@ -88,7 +87,7 @@ const SIDEBAR: Sel[] = [
 const COMPOSER: Sel[] = [
   (s) => s.focusedConversationId,
   (s) => s.sessions['c1']?.conversation.project_id ?? s.draftProjectId,
-  (s) => !!s.settings.apiKey,
+  (s) => !!s.settings.apiKeySet,
   (s) => s.send,
   (s) => s.stop,
   (s) => s.setSettingsOpen,
@@ -123,11 +122,11 @@ test('a legitimate App re-render still reaches Sidebar, so the selectors are not
 
 // ---- the canvas frame gate -----------------------------------------------------------
 
-const KINDS = ['chat', 'note', 'note', 'note', 'todos', 'board', 'calendar', 'graph', 'usage', 'dashboard-widget', 'memory', 'recap'] as const
+const KINDS = ['chat', 'note', 'note', 'note', 'todos', 'calendar', 'graph', 'usage', 'documents', 'memory', 'recap'] as const
 const WINDOWS: CanvasWindow[] = KINDS.map((kind, i) => ({
   id: `w${i}`, canvas_id: 'c1', kind, ref_id: kind === 'chat' ? 'c1' : `r${i}`, project_id: null, title: '',
   x: i * 40, y: i * 30, w: 400, h: 320, z: i, state: 'normal', restore_bounds: null, popout_bounds: null,
-  pinned: 0, config: {}, created_at: 0, updated_at: 0
+  pinned: 0, opacity: 1, config: {}, created_at: 0, updated_at: 0
 }))
 
 interface Frame { win: CanvasWindow; live: boolean; selected: boolean; status: ReactNode }
@@ -183,7 +182,7 @@ test('an App re-render that is not about the windows stops at the memo gate', ()
 const src = (p: string): string => readFileSync(`src/renderer/src/${p}`, 'utf8')
 
 test('nothing on the streamed-token path holds a selector-less useStore()', () => {
-  for (const f of ['App.tsx', 'components/Sidebar.tsx', 'components/Composer.tsx', 'components/Message.tsx']) {
+  for (const f of ['App.tsx', 'components/Sidebar.tsx', 'components/Composer.tsx', 'components/Message.tsx', 'components/ContextDrawer.tsx']) {
     const bare = src(f).split('\n').filter((l) => /\buseStore\(\)/.test(l) && !l.trimStart().startsWith('//'))
     assert.deepEqual(bare, [], `${f} subscribes to the whole store: ${bare.join(' | ')}`)
   }
@@ -193,4 +192,18 @@ test('MessageView carries no subscription at all, because its own memo cannot st
   const body = src('components/Message.tsx').slice(src('components/Message.tsx').indexOf('const MessageView = memo('))
   const hooks = body.split('\n').filter((l) => /\buseStore\(/.test(l) && !/useStore\.getState\(\)/.test(l))
   assert.deepEqual(hooks, [], `MessageView subscribes: ${hooks.join(' | ')}`)
+})
+
+test('a delta on one message re-renders no ToolEvents: rows keep identity and the list is memoised', () => {
+  const events = [{ id: 't1', name: 'web_search', arguments: {}, result_preview: '{}', duration_ms: 1, error: null }]
+  const other = { ...msg, id: 'm0', tool_events: events }
+  const streamed = { ...msg, tool_events: events }
+  useStore.setState({ sessions: { c1: { ...session, conversation: { ...session.conversation, messages: [other, streamed] } } } } as Partial<State>)
+  const before = useStore.getState().sessions['c1'].conversation.messages ?? []
+  token()
+  const after = useStore.getState().sessions['c1'].conversation.messages ?? []
+  assert.equal(after[0], before[0])
+  assert.equal(after[1].tool_events, before[1].tool_events)
+  // A memo wrapper skips a render whose props are shallow-equal, which is what the two checks above give it.
+  assert.equal((ToolEvents as unknown as { $$typeof: symbol }).$$typeof, Symbol.for('react.memo'))
 })

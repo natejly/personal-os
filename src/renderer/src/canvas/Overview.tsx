@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Lock, X } from 'lucide-react'
 import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'
@@ -78,6 +79,7 @@ function Thumb({ canvas }: { canvas: Canvas }): JSX.Element {
       <div className="overview-label">
         {project && <span className="space-dot" style={{ background: project.color }} />}
         <span>{canvas.name}</span>
+        {!!canvas.locked && <Lock size={11} className="space-lock" aria-label="Locked" />}
         <span className="space-count">{shown.length}</span>
       </div>
     </div>
@@ -90,6 +92,11 @@ export default function Overview(): JSX.Element {
   const canvases = useCanvas((s) => s.canvases)
   return (
     <div className="overview" onClick={() => useCanvas.getState().toggleOverview()}>
+      <div className="overview-head">
+        <b>Overview</b>
+        <span>Click a space to open it · drag a window onto another space · Esc to close</span>
+        <button className="icon-btn" aria-label="Close overview" title="Close (Esc)"><X size={15} /></button>
+      </div>
       {order.map((id) => canvases[id] && <Thumb key={id} canvas={canvases[id]} />)}
     </div>
   )

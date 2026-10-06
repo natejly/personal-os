@@ -1,0 +1,65 @@
+import { useEffect, useState } from 'react'
+import type { SandboxStatus, Settings } from '@shared/types'
+import { api } from '../lib/api'
+import { ageLabel, sandboxKey, sandboxTitle } from '../lib/runningViews'
+import { sandboxNetMode, type SandboxNetMode } from '../lib/coworkSettings'
+
+/**
+ * The Linux sandbox section of Settings > Tools: whether the container runtime answers (and why not), the settings
+ * every new container is made with, and the containers that exist now with a Reset each. The settings go through the
+ * modal's draft like the rest; the list and Reset act at once, because they are things on the machine.
+ */
+export default function SandboxSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
+  const [st, setSt] = useState<SandboxStatus | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const load = (): void => { void api.sandboxes().then(setSt).catch((e) => setError((e as Error).message)) }
+  useEffect(load, [])
+  const reset = async (key: string): Promise<void> => {
+    setBusy(key)
+    setError(null)
+    try { await api.resetSandbox(key) } catch (e) { setError((e as Error).message) } finally { setBusy(null); load() }
+  }
+  return (
+    <div className="workspace-roots">
+      <span><b>Linux sandbox</b></span>
+      <p className="muted small">
+        {st === null ? 'Checking the container runtime…'
+          : st.available ? `Available through ${st.runtime}. The sandbox tools run commands in a container inside a Linux VM.`
+          : `Unavailable, so the sandbox tools are hidden: ${st.reason}. Install a container runtime (for example colima with the docker CLI) and start it.`}
+        {' '}<button className="link small" onClick={load}>Check again</button>
+      </p>
+      <label><span>Network in new sandboxes <small className="muted">(applies to containers created or restored after saving)</small></span>
+        <select value={sandboxNetMode(draft.sandboxNetwork)} onChange={(e) => patch({ sandboxNetwork: e.target.value as SandboxNetMode })}>
+          <option value="off">Off</option>
+          <option value="proxy">Allowed hosts only (package registries plus the shell's allowed hosts)</option>
+          <option value="open">Open (output marks the chat as having read untrusted content)</option>
+        </select>
+      </label>
+      <label><span>Image <small className="muted">(what a fresh sandbox starts from)</small></span>
+        <input value={draft.sandboxImage ?? ''} placeholder="python:3.12-slim" spellCheck={false} onChange={(e) => patch({ sandboxImage: e.target.value })} />
+      </label>
+      <label><span>Runtime</span>
+        <select value={draft.sandboxRuntime ?? 'docker'} onChange={(e) => patch({ sandboxRuntime: e.target.value as Settings['sandboxRuntime'] })}>
+          <option value="docker">docker</option><option value="podman">podman</option><option value="nerdctl">nerdctl</option>
+        </select>
+      </label>
+      {st?.available && (st.items.length ? (
+        <ul className="plain-list">
+          {st.items.map((s) => (
+            <li key={s.name}>
+              <span><b>{sandboxTitle(s)}</b> <small className="muted">
+                {s.status}{s.last_used ? ` · used ${ageLabel(s.last_used)} ago` : ''}
+                {s.checkpoints.length ? ` · checkpoints: ${s.checkpoints.join(', ')}` : ''}
+                {s.networked ? ' · networked' : ''}{s.holds_import ? ' · holds library text' : ''}
+              </small></span>
+              <button className="link small" disabled={busy !== null} title="Remove the container and its checkpoints; the next sandbox call starts clean"
+                onClick={() => void reset(sandboxKey(s))}>{busy === sandboxKey(s) ? 'resetting…' : 'Reset'}</button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted small">No sandboxes exist right now.</p>)}
+      {error && <p className="muted small">{error}</p>}
+    </div>
+  )
+}

@@ -1,0 +1,92 @@
+/* ---- notes: caret menus, outline, backlinks, new/export menus, wikilinks ---- */
+
+/* Hangs off the caret inside .md-surface (position: relative). Placement is computed in JS so it can flip. */
+.caret-menu {
+  position: absolute; z-index: 20;
+  min-width: 190px; max-width: min(320px, 90%); max-height: 240px; overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-family: var(--font); font-size: 12.5px;
+}
+.caret-menu-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 5px 8px; border-radius: 5px; cursor: pointer; color: var(--text);
+}
+.caret-menu-row.on { background: var(--active); }
+.caret-menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret-menu-hint { color: var(--text-faint); font-family: var(--mono); font-size: 11px; flex: none; }
+
+/* Colour only: the mirror's metrics must not change. */
+.tk-tag { color: color-mix(in srgb, var(--accent) 65%, var(--text-muted)); }
+.tk-wikilink { color: color-mix(in srgb, var(--accent) 80%, var(--text)); }
+
+/* Status bar extras */
+.md-status .md-sel { color: var(--text-muted); }
+
+/* ---- outline ---- */
+.outline { display: flex; flex-direction: column; gap: 1px; padding: 6px; overflow-y: auto; min-height: 0; }
+.outline-item {
+  text-align: left; padding: 4px 8px; border-radius: 5px;
+  background: transparent; color: var(--text-muted); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.outline-item:hover { background: var(--hover); color: var(--text); }
+.outline-item.on { background: var(--active); color: var(--text); }
+.outline-empty { padding: 12px; color: var(--text-faint); font-size: 12px; }
+
+/* ---- backlinks ---- */
+.backlinks { padding: 10px 22px 18px; border-top: 1px solid var(--border); }
+.backlinks-head { margin: 0 0 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.backlinks-empty { color: var(--text-faint); font-size: 12px; }
+.backlink {
+  display: flex; flex-direction: column; gap: 2px; width: 100%;
+  text-align: left; padding: 6px 8px; margin: 0 -8px; border-radius: 6px;
+  background: transparent; color: var(--text);
+}
+.backlink:hover { background: var(--hover); }
+.backlink-title { font-size: 12.5px; font-weight: 500; }
+.backlink-snippet { font-size: 11.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- new / export menus ---- */
+.newdoc { position: relative; display: inline-flex; align-items: center; }
+.newdoc-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.newdoc-chev { padding-left: 4px; padding-right: 4px; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid var(--border); }
+.notes-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 190px;
+  padding: 4px; display: flex; flex-direction: column;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-size: 12.5px;
+}
+.notes-menu.right { left: auto; right: 0; }
+.notes-menu-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  text-align: left; padding: 6px 8px; border-radius: 5px; background: transparent; color: var(--text);
+}
+.notes-menu-row:hover { background: var(--hover); }
+.notes-menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
+.notes-menu-label { padding: 4px 8px 2px; font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* ---- preview: wikilinks and clickable tasks ---- */
+a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+a.wikilink.unknown { text-decoration-style: dashed; opacity: 0.75; }
+.task-list-item input[type='checkbox'].task-live { cursor: pointer; accent-color: var(--accent-solid); }
+
+/* In-flight dictation words under the caret. Display only; the settled clip is what gets typed. */
+.caret-pill {
+  position: absolute; z-index: 15; pointer-events: none;
+  max-width: min(360px, 80%);
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border-strong);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  font-family: var(--font); font-size: 12px; font-style: italic; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.markdown a.rec-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.15)); text-decoration: none; font-size: .92em }
+.markdown a.rec-chip.unknown { opacity: .6; cursor: default }
+.rec-chip-state { opacity: .7 }
+/* ---- formatting bar above the editor ---- */
+.fmt-bar { display: flex; align-items: center; gap: 2px; padding: 4px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; overflow-x: auto; }
+.fmt-btn { min-width: 26px; height: 24px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: inherit; opacity: 0.75; font-size: 11px; font-weight: 600; cursor: pointer; }
+.fmt-btn:hover { background: rgba(127, 127, 127, 0.15); opacity: 1; }
+.fmt-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--border); }

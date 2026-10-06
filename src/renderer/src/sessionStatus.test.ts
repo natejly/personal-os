@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { ChatEvent, Conversation, Message, Span, ToolEvent } from '@shared/types'
-import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
+import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -60,6 +60,7 @@ test('a steered run resurrects working after a segment done', () => {
   assert.equal(reduceStatus('done', ev('user_message', { id: 'u2' }), 0), 'working')
   assert.equal(reduceStatus('done', ev('assistant_message', { id: 'm2' }), 0), 'working')
   assert.equal(reduceStatus('done', ev('delta', { id: 'm2', text: 'hi' }), 0), 'working')
+  assert.equal(reduceStatus('done', ev('reasoning', { id: 'm2', text: '…' }), 0), 'working')
   // But an errored run stays red and a pending approval stays blocked.
   assert.equal(reduceStatus('error', ev('delta', { id: 'm2', text: 'hi' }), 0), 'error')
   assert.equal(reduceStatus('needs-approval', ev('user_message', { id: 'u2' }), 1), 'needs-approval')
@@ -158,4 +159,77 @@ test('tool events and spans survive a refetch that has none of them yet', () => 
   const merged = mergeConversation(convo([msg('m1', 'x', { tool_events: events, trace })]), convo([msg('m1', 'x', { tool_events: [], trace: null })]), true)
   assert.deepEqual(merged.messages?.[0].tool_events, events)
   assert.deepEqual(merged.messages?.[0].trace, trace)
+})
+
+const runInfo = (over: Partial<RunInfo> = {}): RunInfo =>
+  ({ run_id: 'r1', conversation_id: 'c1', message_id: null, seq: 12, started_at: 0, live: true, answering: true, status: 'running', ...over })
+
+test('an attach replays from just before the in-flight message, or from the head of the tape when there is none', () => {
+  assert.equal(replayCursor(runInfo({ message_seq: 7 })), 6)
+  assert.equal(replayCursor(runInfo({ message_seq: null })), 12)
+  assert.equal(replayCursor(runInfo()), 12)
+})
+
+test('run_state frames add an answering run and drop it only when that same run ends', () => {
+  let map = foldRunState({}, runInfo())
+  assert.deepEqual(map, { c1: { run_id: 'r1', status: 'running' } })
+  map = foldRunState(map, runInfo({ status: 'awaiting_approval' }))
+  assert.equal(map.c1.status, 'awaiting_approval')
+  const stale = foldRunState(map, runInfo({ run_id: 'old', answering: false, live: false }))
+  assert.equal(stale, map, 'the end of an older run leaves the newer one alone')
+  assert.deepEqual(foldRunState(map, runInfo({ answering: false })), {})
+})
+
+test('the pulse prefers the session, then falls back to the live run', () => {
+  assert.equal(pulseStatus('done', { status: 'running' }), 'done')
+  assert.equal(pulseStatus('idle', { status: 'awaiting_approval' }), 'needs-approval')
+  assert.equal(pulseStatus('idle', { status: 'running' }), 'working')
+  assert.equal(pulseStatus('idle', undefined), 'idle')
+})
+
+test('a steer segment closing keeps the run working; the final done settles it', () => {
+  const seg = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, segment: true } } as unknown as ChatEvent
+  assert.equal(reduceStatus('working', seg, 0), 'working')
+  const fin = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } } as unknown as ChatEvent
+  assert.equal(reduceStatus('working', fin, 0), 'done')
+})
+
+test('onScreen: the chat view showing it, or any surface that has it mounted', () => {
+  const retained = new Set(['w'])
+  assert.equal(onScreen('c1', { view: 'chat', focusedId: 'c1', retained }), true)
+  assert.equal(onScreen('c1', { view: 'home', focusedId: 'c1', retained }), false, 'focused but another view is showing')
+  assert.equal(onScreen('c1', { view: 'chat', focusedId: 'c2', retained }), false)
+  assert.equal(onScreen('w', { view: 'canvas', focusedId: null, retained }), true, 'a mounted window counts')
+})
+
+test('followRun: only a session on screen streams a run it did not start', () => {
+  const live = { run_id: 'r2', answering: true }
+  const ended = { run_id: 'r2', answering: false }
+  assert.equal(followRun(null, live, true), 'attach')
+  assert.equal(followRun(null, live, false), null, 'off screen: no stream, the end refetches')
+  assert.equal(followRun({ runId: 'r2' }, live, true), null, 'already watching it')
+  assert.equal(followRun(null, ended, false), 'open')
+  assert.equal(followRun({ runId: 'r1' }, ended, true), null, 'its own run is still streaming')
+})
+
+test('chatNotice: one kind per status transition, none for a stop or a steer segment', () => {
+  const seg = ev('done', { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, segment: true })
+  assert.equal(chatNotice('working', 'done', done(null)), 'reply')
+  assert.equal(chatNotice('working', 'error', done('boom')), 'failed')
+  assert.equal(chatNotice('working', 'error', ev('error', { message: 'x' })), 'failed')
+  assert.equal(chatNotice('working', 'needs-approval', ev('tool_call', {})), 'approval')
+  assert.equal(chatNotice('needs-approval', 'needs-approval', ev('tool_call', {})), null, 'the status did not move')
+  assert.equal(chatNotice('error', 'error', ev('error', { message: 'x' })), null)
+  assert.equal(chatNotice('working', 'working', seg), null)
+  assert.equal(chatNotice('working', 'done', done(null, true)), null, 'a stopped reply is not news')
+  assert.equal(chatNotice('working', 'working', ev('delta', { id: 'm1', text: 'a' })), null)
+})
+
+test('a stale fetch keeps the local error and outcome the stream stamped', () => {
+  const local = msg('m1', 'text', { error: 'Interrupted: the backend shut down.', outcome: 'interrupted' } as Partial<Message>)
+  const merged = mergeConversation(convo([local]), convo([msg('m1', 'text')]), false)
+  assert.equal(merged.messages?.[0].error, 'Interrupted: the backend shut down.')
+  assert.equal(merged.messages?.[0].outcome, 'interrupted')
+  const fresh = mergeConversation(convo([local]), convo([msg('m1', 'text', { error: 'Server said' })]), false)
+  assert.equal(fresh.messages?.[0].error, 'Server said', 'the server row still wins when it has one')
 })

@@ -1,5 +1,6 @@
 import { shell } from 'electron'
-import { backendUrl } from './backend'
+import { mainFrameNavigationAllowed } from './appUrl'
+import { frameNavigationAllowed } from './navPolicy'
 
 const openExternal = (url: string): void => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
@@ -11,26 +12,24 @@ const openExternal = (url: string): void => {
  * or paints no background leaves the transparent vibrancy window looking like an empty grey rectangle.
  * It would also hand the preload (window.os.backendToken()) to a page the model supplied.
  * Top-level navigation is not covered by CSP, so it is blocked here and handed to the system browser.
+ * Only the renderer's own URL passes (appUrl.ts): a file dropped beside the composer used to count
+ * as "local" and replace the app with the file. openExternal ignores it, so such a drop does nothing.
  */
 export function guardNavigation(contents: Electron.WebContents): void {
-  const local = (url: string, frame: boolean): boolean => {
-    if (url === 'about:blank' || url.startsWith('file://')) return true
-    const dev = process.env.ELECTRON_RENDERER_URL
-    if (dev && url.startsWith(dev)) return true
-    const base = backendUrl()
-    return frame && !!base && url.startsWith(`${base}/`) // widget iframes are served by the sidecar
-  }
   contents.on('will-navigate', (e, url) => {
-    if (local(url, false)) return
+    if (mainFrameNavigationAllowed(url)) return
     e.preventDefault()
     openExternal(url)
   })
   contents.on('will-frame-navigate', (details) => {
-    if (details.isMainFrame || local(details.url, true)) return // the main frame is handled by will-navigate
+    if (details.isMainFrame) return // the main frame is handled by will-navigate
+    if (frameNavigationAllowed(details.url, process.env.ELECTRON_RENDERER_URL)) return
     details.preventDefault()
   })
   contents.setWindowOpenHandler(({ url }) => {
     openExternal(url)
     return { action: 'deny' }
   })
+  // No window enables webviewTag, so a <webview> can never attach; this is belt and braces.
+  contents.on('will-attach-webview', (e) => e.preventDefault())
 }

@@ -2,25 +2,38 @@
  * Detached widget windows. One BrowserWindow per canvas window id, its screen bounds persisted back
  * to the backend, plus gather/scatter: centre every pop-out on the display under the cursor and undo it.
  */
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
+import { handle } from './ipc'
 import { join } from 'path'
-import { backendUrl } from './backend'
+import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
 import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
+import { reveal, stealFocus } from './background'
 
 const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
 const MIN_W = 280
 const MIN_H = 200
+/** Below this a pop-out is a ghost nobody can find or click, so it is the floor everywhere. */
+const MIN_OPACITY = 0.2
+/** The steps the menus offer and the renderer's More/Less Transparent walk, opaque first. */
+export const OPACITY_LEVELS = [1, 0.9, 0.75, 0.6, 0.45, 0.3] as const
 const SAVE_MS = 400
 /** Programmatic bounds changes keep firing move/resize for a while; never persist those. */
 const QUIET_MS = 600
 const GAP = 20
 const MARGIN = 0.1
 
+const clampOpacity = (o: unknown): number => {
+  const n = typeof o === 'number' && Number.isFinite(o) ? o : 1
+  return Math.min(1, Math.max(MIN_OPACITY, Math.round(n * 1000) / 1000))
+}
+
 interface Entry {
   win: BrowserWindow
   pinned: boolean
+  /** window alpha, 0.2..1; 1 is opaque */
+  opacity: number
   /** epoch ms until which move/resize is our own doing and must not be saved */
   quietUntil: number
   saveTimer: NodeJS.Timeout | null
@@ -47,6 +60,8 @@ const setFronted = (on: boolean): boolean => {
 }
 /** Set in before-quit so the 'closed' handler does not erase state:'popped' before relaunch reads it. */
 let quitting = false
+/** The update restart closes every window before before-quit fires, so it marks the quit itself. */
+export const markQuitting = (): void => { quitting = true }
 let getMain: () => BrowserWindow | null = () => null
 
 const state = (): GatherState => ({ gathered, popped: [...popouts.keys()] })
@@ -69,13 +84,19 @@ const boundsOf = (w: BrowserWindow): PopoutBounds => {
   return { x: b.x, y: b.y, width: b.width, height: b.height, display: screen.getDisplayMatching(b).id }
 }
 
+/** Main is a backend client like any renderer, so it carries the shared secret or every write 401s. */
+const authHeaders = (): Record<string, string> => {
+  const t = backendToken()
+  return t ? { 'X-Personal-OS-Token': t } : {}
+}
+
 const persist = async (windowId: string, body: Record<string, unknown>): Promise<void> => {
   const base = backendUrl()
   if (!base) return
   try {
     await fetch(`${base}/windows/${windowId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body)
     })
   } catch {
@@ -139,7 +160,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
     minWidth,
     minHeight,
     show: false,
-    title: req.title || 'Personal OS',
+    title: req.title || 'Grain',
     frame: false,
     roundedCorners: true,
     hasShadow: true,
@@ -151,15 +172,25 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   })
 
-  const entry: Entry = { win, pinned: !!req.pinned, quietUntil: Date.now() + QUIET_MS, saveTimer: null, pendingBounds: null, previousBounds: null }
+  const entry: Entry = {
+    win,
+    pinned: !!req.pinned,
+    opacity: clampOpacity(req.opacity ?? 1),
+    quietUntil: Date.now() + QUIET_MS,
+    saveTimer: null,
+    pendingBounds: null,
+    previousBounds: null
+  }
   popouts.set(windowId, entry)
   if (entry.pinned || gathered) win.setAlwaysOnTop(true, 'floating')
+  // Before ready-to-show, so a translucent pop-out never flashes opaque on open.
+  if (entry.opacity < 1) win.setOpacity(entry.opacity)
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => reveal(win))
   guardNavigation(win.webContents)
   const onBounds = (): void => scheduleSave(windowId, entry)
   win.on('move', onBounds)
@@ -224,6 +255,28 @@ export const syncPopoutPinned = (windowId: string, pinned: boolean): boolean => 
   return true
 }
 
+export const setPopoutOpacity = (windowId: string, opacity: number): boolean => {
+  const e = popouts.get(windowId)
+  if (!e || e.win.isDestroyed()) return false
+  e.opacity = clampOpacity(opacity)
+  e.win.setOpacity(e.opacity)
+  return true
+}
+
+/** setPopoutOpacity plus the row and the other renderers, the way syncPopoutPinned does it. */
+export const syncPopoutOpacity = (windowId: string, opacity: number): boolean => {
+  if (!setPopoutOpacity(windowId, opacity)) return false
+  const o = clampOpacity(opacity)
+  void persist(windowId, { opacity: o })
+  broadcast({ kind: 'window-bounds', windowId, data: { opacity: o } })
+  return true
+}
+
+export const popoutOpacity = (windowId: string): number | null => {
+  const e = popouts.get(windowId)
+  return e && !e.win.isDestroyed() ? e.opacity : null
+}
+
 export const setPopoutMinSize = (windowId: string, minWidth: number, minHeight: number): boolean => {
   const e = popouts.get(windowId)
   if (!e || e.win.isDestroyed()) return false
@@ -239,7 +292,7 @@ export const setPopoutMinSize = (windowId: string, minWidth: number, minHeight: 
 export const listPopouts = (): PopoutInfo[] =>
   [...popouts.entries()]
     .filter(([, e]) => !e.win.isDestroyed())
-    .map(([windowId, e]) => ({ windowId, bounds: boundsOf(e.win), pinned: e.pinned }))
+    .map(([windowId, e]) => ({ windowId, bounds: boundsOf(e.win), pinned: e.pinned, opacity: e.opacity }))
 
 export const gatherState = (): GatherState => state()
 
@@ -254,15 +307,16 @@ const raiseMain = (): void => {
     m.show()
     m.focus()
   }
-  app.focus({ steal: true })
+  stealFocus()
 }
 
 /**
  * Toggle every pop-out in place. On: show and raise, bounds unchanged. Off: hide.
  * Nothing popped out raises the main window and leaves the command unchecked.
+ * Pinned pop-outs are already kept on top, so the toggle neither raises nor hides them.
  */
 export const toggleFront = (): boolean => {
-  const live = livePopouts()
+  const live = livePopouts().filter(([, e]) => !e.pinned)
   if (!live.length) {
     setFronted(false)
     raiseMain()
@@ -289,9 +343,13 @@ const place = (windowId: string, e: Entry, target: Electron.Rectangle): void => 
   e.win.setAlwaysOnTop(true, 'floating')
 }
 
-/** Centre every pop-out in a grid on the display under the cursor. Nothing popped out: raise the app. */
+/**
+ * Centre every pop-out in a grid on the display under the cursor. Nothing popped out: raise the app.
+ * A pinned pop-out is where the user deliberately put it, so gather leaves it alone; only unpinning
+ * hands it back to the grid.
+ */
 export const gather = (): GatherState => {
-  const live = [...popouts.entries()].filter(([, e]) => !e.win.isDestroyed())
+  const live = [...popouts.entries()].filter(([, e]) => !e.win.isDestroyed() && !e.pinned)
   if (!live.length) {
     const m = getMain()
     if (m && !m.isDestroyed()) {
@@ -299,7 +357,7 @@ export const gather = (): GatherState => {
       m.show()
       m.focus()
     }
-    app.focus({ steal: true })
+    stealFocus()
     return state()
   }
 
@@ -344,13 +402,15 @@ export const gather = (): GatherState => {
   }
 
   setFronted(true)
-  app.focus({ steal: true })
+  stealFocus()
   return state()
 }
 
 export const scatter = (): GatherState => {
   for (const [id, e] of popouts) {
     if (e.win.isDestroyed()) continue
+    // A pinned pop-out that gather never moved has nothing to put back; one pinned mid-gather still returns.
+    if (e.pinned && !e.previousBounds) continue
     quiet(id, e)
     e.win.setVisibleOnAllWorkspaces(false)
     const b = e.previousBounds
@@ -373,13 +433,20 @@ export const restorePopouts = async (): Promise<void> => {
   const base = backendUrl()
   if (!base) return
   try {
-    const r = await fetch(`${base}/canvases`)
+    const r = await fetch(`${base}/canvases`, { headers: authHeaders() })
     if (!r.ok) return
-    const canvases = (await r.json()) as { windows?: { id: string; state?: string; title?: string; pinned?: number; popout_bounds?: PopoutBounds | null }[] }[]
+    const canvases = (await r.json()) as {
+      windows?: { id: string; state?: string; title?: string; pinned?: number; opacity?: number; popout_bounds?: PopoutBounds | null }[]
+    }[]
     for (const c of canvases) {
       for (const w of c.windows ?? []) {
         if (w.state !== 'popped') continue
-        const ok = openPopout(w.id, { bounds: w.popout_bounds ?? undefined, pinned: !!w.pinned, title: w.title || undefined })
+        const ok = openPopout(w.id, {
+          bounds: w.popout_bounds ?? undefined,
+          pinned: !!w.pinned,
+          opacity: w.opacity,
+          title: w.title || undefined
+        })
         if (!ok) await persist(w.id, { state: 'normal' })
       }
     }
@@ -390,17 +457,18 @@ export const restorePopouts = async (): Promise<void> => {
 
 export const registerPopouts = (mainWindow: () => BrowserWindow | null): void => {
   getMain = mainWindow
-  ipcMain.handle('popout:open', (_e, windowId: string, req?: PopoutOpenRequest) => openPopout(windowId, req ?? {}))
-  ipcMain.handle('popout:close', (_e, windowId: string) => closePopout(windowId))
-  ipcMain.handle('popout:focus', (_e, windowId: string) => focusPopout(windowId))
-  ipcMain.handle('popout:set-pinned', (_e, windowId: string, pinned: boolean) => setPopoutPinned(windowId, pinned))
-  ipcMain.handle('popout:set-min-size', (_e, windowId: string, minWidth: number, minHeight: number) =>
+  handle('popout:open', (_e, windowId: string, req?: PopoutOpenRequest) => openPopout(windowId, req ?? {}))
+  handle('popout:close', (_e, windowId: string) => closePopout(windowId))
+  handle('popout:focus', (_e, windowId: string) => focusPopout(windowId))
+  handle('popout:set-pinned', (_e, windowId: string, pinned: boolean) => setPopoutPinned(windowId, pinned))
+  handle('popout:set-opacity', (_e, windowId: string, opacity: number) => setPopoutOpacity(windowId, opacity))
+  handle('popout:set-min-size', (_e, windowId: string, minWidth: number, minHeight: number) =>
     setPopoutMinSize(windowId, minWidth, minHeight)
   )
-  ipcMain.handle('popout:list', () => listPopouts())
-  ipcMain.handle('popout:gather', () => gather())
-  ipcMain.handle('popout:scatter', () => scatter())
-  ipcMain.handle('popout:front', () => toggleFront())
+  handle('popout:list', () => listPopouts())
+  handle('popout:gather', () => gather())
+  handle('popout:scatter', () => scatter())
+  handle('popout:front', () => toggleFront())
   app.on('before-quit', () => {
     quitting = true
     for (const [, e] of popouts) if (!e.win.isDestroyed()) e.win.destroy()

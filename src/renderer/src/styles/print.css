@@ -1,0 +1,32 @@
+/* The print surface (`?surface=print`): one note on white paper. Page size is injected by PrintSurface from the locale. */
+html.print-surface, html.print-surface body, html.print-surface #root { height: auto; overflow: visible; background: #fff; color: #111; }
+.print-doc { font: 11.5pt/1.45 Charter, 'Iowan Old Style', Georgia, serif; color: #111; background: #fff; max-width: none; }
+.print-doc h1, .print-doc h2, .print-doc h3, .print-doc h4 { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; line-height: 1.2; break-after: avoid; }
+.print-doc h1 { font-size: 22pt; margin: 0 0 14pt; }
+.print-doc h2 { font-size: 16pt; margin: 18pt 0 6pt; }
+.print-doc h3 { font-size: 13pt; margin: 14pt 0 4pt; }
+.print-doc h4 { font-size: 11.5pt; margin: 12pt 0 4pt; }
+.print-doc p { margin: 0 0 8pt; orphans: 3; widows: 3; }
+.print-doc a { color: #111; text-decoration: underline; }
+.print-doc blockquote { margin: 0 0 8pt; padding-left: 10pt; border-left: 2pt solid #bbb; color: #444; break-inside: avoid; }
+.print-doc img, .print-doc svg, .print-doc .chart-block { max-width: 100%; break-inside: avoid; }
+.print-doc hr { border: 0; border-top: 0.5pt solid #bbb; margin: 12pt 0; }
+.print-doc code { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 9.5pt; }
+.print-doc :not(pre) > code { background: #f1f0ec; padding: 0 3pt; border-radius: 2pt; }
+.print-doc .code-block { background: #f6f5f2; color: #1f2328; border: 0.5pt solid #d5d3cc; border-radius: 4pt; break-inside: avoid; margin: 0 0 10pt; }
+.print-doc .code-head { display: none; }
+.print-doc .code-block pre { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8pt 10pt; margin: 0; }
+.print-doc .code-block pre code { font-size: 9pt; line-height: 1.4; color: inherit; }
+.print-doc .md-table-scroll { overflow: visible; break-inside: avoid; }
+.print-doc table { border-collapse: collapse; width: 100%; font-size: 10pt; }
+.print-doc th, .print-doc td { border: 0.5pt solid #888; padding: 3pt 6pt; vertical-align: top; }
+.print-doc th { background: #eceae4; }
+.print-doc .katex-display { break-inside: avoid; overflow: visible; }
+/* Code colours for white paper: the app's highlight theme is tuned for a dark block. */
+.print-doc .hljs-comment, .print-doc .hljs-quote { color: #6a737d; }
+.print-doc .hljs-keyword, .print-doc .hljs-selector-tag, .print-doc .hljs-type { color: #cf222e; }
+.print-doc .hljs-string, .print-doc .hljs-regexp, .print-doc .hljs-addition { color: #0a3069; }
+.print-doc .hljs-number, .print-doc .hljs-literal, .print-doc .hljs-attr, .print-doc .hljs-attribute { color: #0550ae; }
+.print-doc .hljs-title, .print-doc .hljs-section, .print-doc .hljs-function .hljs-title { color: #8250df; }
+.print-doc .hljs-built_in, .print-doc .hljs-variable, .print-doc .hljs-params { color: #953800; }
+.print-doc .hljs-deletion { color: #82071e; }

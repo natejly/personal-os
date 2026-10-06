@@ -1,0 +1,288 @@
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchBlobUrl } from '../features/notes/api'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import type { PluggableList } from 'unified'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import rehypeHighlight from 'rehype-highlight'
+import { Copy, Check } from 'lucide-react'
+import { normalizeMathBlocks } from '../lib/mathBlocks'
+import { repairStreamingMarkdown } from '../lib/streamRepair'
+import { splitMarkdown, blockStartLine } from '../lib/splitMarkdown'
+import RenderBoundary from './RenderBoundary'
+import ChartBlock from './ChartBlock'
+import InteractiveBlock from './InteractiveBlock'
+import MermaidBlock from './MermaidBlock'
+import HtmlBlock, { SvgBlock } from './HtmlBlock'
+import { fenceKind } from '../lib/htmlFence'
+import remarkWikilinks from '../features/notes/remarkWikilinks'
+import remarkAi from '../features/notes/remarkAi'
+import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
+import RecordingChip from '../features/docrec/RecordingChip'
+import { recordingIdFromHref } from '../features/docrec/recordingBlock'
+import { taskLineMap } from '../features/notes/tasks'
+import remarkCites, { citeNumber, citeTitle, type CiteInfo } from '../lib/remarkCites'
+import '../styles/notes.css'
+import 'katex/dist/katex.min.css'
+
+/**
+ * The one markdown pipeline in the app: GFM, syntax highlighting, KaTeX maths, and the ```chart /
+ * ```mermaid escape hatches. Chat replies and the doc preview render through this so a formula looks
+ * the same wherever it appears.
+ *
+ * Maths is written `$x^2$` inline and `$$…$$` as a block, on one line or several — `normalizeMathBlocks`
+ * reshapes the one-line form into what remark-math needs, accepts `\(…\)` / `\[…\]`, and escapes a price
+ * like "$5 and $10" (the parser itself would pair those two dollar signs into a formula).
+ *
+ * The source is cut into top-level blocks (splitMarkdown) and each is rendered by a memoised child, so a
+ * streaming reply re-parses only its last block and finished code / chart / diagram blocks are untouched.
+ */
+
+function CopyButton({ text }: { text: string }): JSX.Element {
+  const [ok, setOk] = useState(false)
+  return (
+    <button className="icon-btn ghost" title="Copy" aria-label={ok ? 'Copied' : 'Copy'} onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
+      {ok ? <Check size={13} /> : <Copy size={13} />}
+    </button>
+  )
+}
+
+/**
+ * Model and fetched content may contain links and images. A link must never navigate the app's own webContents
+ * (it carries the preload), and a remote <img> is an exfiltration channel, so it is downgraded to a link.
+ */
+function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
+  const ok = !!href && /^https?:\/\//i.test(href)
+  return (
+    <a {...rest} href={ok ? href : undefined} title={href} rel="noreferrer noopener"
+      onClick={(e) => { e.preventDefault(); if (ok) window.open(href, '_blank', 'noopener') }}>{children}</a>
+  )
+}
+
+/** A doc's own pasted image: the asset route wants the app token, which an <img> cannot send, so it is fetched into a blob. */
+function DocAsset({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [url, setUrl] = useState('')
+  const [big, setBig] = useState(false)
+  useEffect(() => {
+    let dead = false
+    let made = ''
+    fetchBlobUrl(src).then((u) => { made = u; if (dead) URL.revokeObjectURL(u); else setUrl(u) }).catch(() => undefined)
+    return () => { dead = true; if (made) URL.revokeObjectURL(made) }
+  }, [src])
+  return url ? <img src={url} alt={alt} title="Click to enlarge" style={{ maxWidth: big ? 'none' : '100%', cursor: 'zoom-in' }} onClick={() => setBig(!big)} /> : <span className="muted">{alt || 'image'}</span>
+}
+
+function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX.Element {
+  const s = typeof src === 'string' ? src : ''
+  if (/^\/docs\/assets\/[\w-]+\/[\w.-]+$/.test(s) && !s.includes('..')) return <DocAsset src={s} alt={alt ?? ''} />
+  if (s.startsWith('data:image/')) return <img src={s} alt={alt ?? ''} />
+  return <ExternalLink href={s}>{alt || s || 'image'}</ExternalLink>
+}
+
+/** Renderers every markdown surface that shows model, fetched or user content must use. */
+export const SAFE_MD: Components = { a: ExternalLink, img: SafeImage }
+
+/** Flatten a highlighted code element back to its source text. rehype-highlight turns a known language (html, svg) into
+ *  nested <span>s, and String() of that would be "[object Object]". */
+function textOf(n: React.ReactNode): string {
+  if (n == null || typeof n === 'boolean') return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(textOf).join('')
+  return textOf((n as React.ReactElement<{ children?: React.ReactNode }>).props?.children)
+}
+
+/** Whether the block being rendered is still receiving text. It travels by context so the `pre` component
+ *  type stays one module-level function; a per-render closure would remount every fenced block per token. */
+const StreamingCtx = createContext(false)
+
+const ChartBlockM = memo(ChartBlock)
+const InteractiveBlockM = memo(InteractiveBlock)
+const MermaidBlockM = memo(MermaidBlock)
+const HtmlBlockM = memo(HtmlBlock)
+const SvgBlockM = memo(SvgBlock)
+
+function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }): JSX.Element {
+  void node // react-markdown's AST node must not reach the DOM
+  const streaming = useContext(StreamingCtx)
+  const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
+  const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
+  const code = textOf(child?.props?.children)
+  // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
+  if (lang === 'chart') return <ChartBlockM source={code} streaming={!!streaming} />
+  if (lang === 'interactive') return <InteractiveBlockM source={code} streaming={!!streaming} />
+  if (lang === 'mermaid') return <MermaidBlockM source={code} streaming={!!streaming} />
+  // Model HTML/SVG never runs in the app's origin: both render in a sandboxed srcdoc iframe (HtmlBlock).
+  if (fenceKind(lang) === 'html') return <HtmlBlockM source={code} streaming={!!streaming} />
+  if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
+  return (
+    <div className="code-block">
+      <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>
+      <pre {...props} />
+    </div>
+  )
+}
+
+/** A table scrolls sideways inside its own wrapper instead of widening the message column. */
+function Table({ node, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { node?: unknown }): JSX.Element {
+  void node
+  return <div className="md-table-scroll"><table {...props} /></div>
+}
+
+/** The one component map every plain render shares; its identity never changes. */
+export const MD_COMPONENTS: Components = { ...SAFE_MD, pre: Pre as Components['pre'], table: Table as Components['table'] }
+
+const REMARK = [remarkGfm, remarkMath, remarkAi]
+// `strict: false` keeps an unknown macro as red source text instead of throwing the whole render away,
+// which matters while someone is mid-formula and the markup is briefly invalid.
+const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never[]
+
+/** Which line *within its block* a rendered task checkbox belongs to (set by its `li`, read by its `input`).
+ *  Block-local on purpose: a memoised block skips re-render when text elsewhere changes, so an absolute
+ *  line stored here would go stale. The absolute line is resolved at click time from the current source. */
+const TaskLine = createContext<number | null>(null)
+/** Index of the block being rendered, provided above each memoised block so it never forces a re-parse. */
+const BlockIdx = createContext(0)
+const TaskToggle = createContext<((blockIdx: number, localLine: number) => void) | null>(null)
+
+function TaskInput({ node, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { node?: unknown }): JSX.Element {
+  void node
+  const line = useContext(TaskLine)
+  const block = useContext(BlockIdx)
+  const toggle = useContext(TaskToggle)
+  if (props.type !== 'checkbox' || line === null || !toggle) return <input {...props} />
+  return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(block, line)} />
+}
+
+/** The default transform blanks unknown schemes; recording blocks are the one extra it must keep. */
+const recUrl = (u: string): string => (recordingIdFromHref(u) ? u : defaultUrlTransform(u))
+
+const wikiTarget = (href?: string): string | null => {
+  if (!href?.startsWith(WIKI_HREF)) return null
+  try { return decodeURIComponent(href.slice(WIKI_HREF.length)) } catch { return null }
+}
+
+export interface MarkdownPreviewProps {
+  source: string
+  streaming?: boolean
+  /** Opt in to `[[Title]]` / `[[Title|alias]]` as internal links; called with the target title. */
+  onWikilink?: (title: string) => void
+  /** Titles that exist. A link to anything else gets the "create" look. Omit to treat every link as known. */
+  knownTitles?: ReadonlySet<string>
+  /** Opt in to clickable task checkboxes; called with the 1-based line in `source`. */
+  onToggleTask?: (line: number) => void
+  /** Opt in to recording blocks (`grain-recording:ID` links) as live chips; called with the recording id. */
+  onRecording?: (id: string) => void
+  /** Excerpt numbers this reply may cite: `[n]` for one of them becomes a chip that calls onCite. */
+  cites?: ReadonlyMap<number, CiteInfo>
+  onCite?: (n: number) => void
+}
+
+/** One top-level block of the source. Memoised on its text, so finished blocks cost nothing per token. */
+const MdBlock = memo(function MdBlock({ source, streaming, remark, components, urlTransform }: {
+  source: string
+  streaming: boolean
+  remark: PluggableList
+  components: Components
+  urlTransform?: (url: string) => string
+}): JSX.Element {
+  return (
+    <StreamingCtx.Provider value={streaming}>
+      <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components} urlTransform={urlTransform}>
+        {source}
+      </ReactMarkdown>
+    </StreamingCtx.Provider>
+  )
+})
+
+const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording, cites, onCite }: MarkdownPreviewProps): JSX.Element {
+  // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
+  // A streaming message first has its half-written tail closed (streamRepair.ts); a finished one is parsed as stored.
+  const md = useMemo(() => normalizeMathBlocks(streaming ? repairStreamingMarkdown(source) : source), [source, streaming])
+  // Callers pass fresh lambdas every render; reading them through refs keeps `components` (and so every
+  // chart and frame under it) from remounting each time.
+  const wikiRef = useRef(onWikilink)
+  wikiRef.current = onWikilink
+  const taskRef = useRef(onToggleTask)
+  taskRef.current = onToggleTask
+  const recRef = useRef(onRecording)
+  recRef.current = onRecording
+  const citeRef = useRef(onCite)
+  citeRef.current = onCite
+  const rec = !!onRecording
+  const wiki = !!onWikilink
+  const cite = !!onCite && !!cites?.size
+  const tasks = !!onToggleTask
+  const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
+  const blocks = useMemo(() => splitMarkdown(md), [md])
+  // A toggle resolves its absolute line against the *current* text, read through a ref: the checkbox
+  // only carries (block index, block-local line), which stays valid while its own block is unchanged.
+  const textRef = useRef({ source, md, blocks })
+  textRef.current = { source, md, blocks }
+  const toggle = useCallback((blockIdx: number, localLine: number) => {
+    const t = textRef.current
+    const line = blockStartLine(t.blocks, blockIdx) + localLine - 1
+    const src = taskLineMap(t.source, t.md).get(line)
+    if (src !== undefined) taskRef.current?.(src)
+  }, [])
+
+  const remark = useMemo((): PluggableList => [...REMARK, ...(wiki ? [remarkWikilinks] : []),
+    ...(cite ? [[remarkCites, { known: new Set(cites!.keys()) }] as never] : [])], [wiki, cite, cites])
+  const components = useMemo((): Components => {
+    if (!wiki && !tasks && !rec && !cite) return MD_COMPONENTS
+    const c: Components = { ...MD_COMPONENTS }
+    if (wiki || rec || cite) {
+      c.a = (p) => {
+        const n = cite ? citeNumber(p.href) : null
+        if (n !== null) {
+          return (
+            <button type="button" className={`cite-chip${cites?.get(n)?.weak ? ' weak' : ''}`} title={citeTitle(cites?.get(n))} aria-label={`Source ${n}: ${citeTitle(cites?.get(n))}`}
+              onClick={() => citeRef.current?.(n)}>{n}</button>
+          )
+        }
+        const recId = rec ? recordingIdFromHref(p.href) : null
+        if (recId) return <RecordingChip id={recId} label={textOf(p.children)} onOpen={(i) => recRef.current?.(i)} />
+        const target = wikiTarget(p.href)
+        if (target === null) return <ExternalLink {...p} />
+        const unknown = !!known && !known.has(titleKey(target))
+        return (
+          <a className={`wikilink${unknown ? ' unknown' : ''}`} href="#" title={unknown ? `Create "${target}"` : target}
+            onClick={(e) => { e.preventDefault(); wikiRef.current?.(target) }}>{p.children}</a>
+        )
+      }
+    }
+    if (tasks) {
+      c.input = TaskInput as Components['input']
+      c.li = ({ node, children, ...rest }) => {
+        const isTask = typeof rest.className === 'string' && rest.className.includes('task-list-item')
+        const li = <li {...rest}>{children}</li>
+        if (!isTask) return li
+        return <TaskLine.Provider value={node?.position?.start.line ?? null}>{li}</TaskLine.Provider>
+      }
+    }
+    return c
+  }, [wiki, rec, tasks, cite, cites, known])
+
+  const body = (
+    <>
+      {blocks.map((b, i) => (
+        <BlockIdx.Provider key={i} value={i}>
+          <MdBlock source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components}
+            urlTransform={rec ? recUrl : undefined} />
+        </BlockIdx.Provider>
+      ))}
+    </>
+  )
+  return tasks ? <TaskToggle.Provider value={toggle}>{body}</TaskToggle.Provider> : body
+})
+
+const MarkdownPreview = memo(function MarkdownPreview(props: MarkdownPreviewProps): JSX.Element {
+  return (
+    <RenderBoundary label="markdown" resetKey={props.source} fallback={() => <pre className="render-fallback">{props.source}</pre>}>
+      <MarkdownInner {...props} />
+    </RenderBoundary>
+  )
+})
+
+export default MarkdownPreview
+export { CopyButton }

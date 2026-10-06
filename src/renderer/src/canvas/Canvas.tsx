@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { CanvasWindow, Rect, WidgetKind } from '@shared/types'
-import { api } from '../lib/api'
+import {
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
+  type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent
+} from 'react'
+import type { CanvasWindow, Rect } from '@shared/types'
 import { useStore } from '../store'
+import { addWidgetEntries } from './AddWidgetMenu'
 import Dock from './Dock'
+import { openPayload } from './drops'
+import ContextMenu, { type MenuEntry } from './Menu'
 import Overview from './Overview'
 import SpacesBar from './SpacesBar'
 import StatusRing from './StatusRing'
@@ -10,9 +15,11 @@ import WindowFrame from './WindowFrame'
 import { hasDrag, hasFiles, readDrag } from './dnd'
 import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
-import { setLiveViewport, setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
+import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
+import { MessageSquarePlus, Plus } from 'lucide-react'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 2
@@ -32,9 +39,54 @@ const EAGER = true
 const HEAVY_CAP = 6
 const GHOST = { w: 420, h: 360 }
 const IDLE_MS = 180
+/** Set once the first-run Spaces explainer is dismissed; after that an empty space shows the one-line hint. */
+const INTRO_KEY = 'grain.spacesIntroSeen'
+const introSeen = (): boolean => {
+  try { return localStorage.getItem(INTRO_KEY) === '1' } catch { return false /* private window */ }
+}
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
+/**
+ * The order the frames MOUNT in, which is deliberately not the order the store keeps them in. The
+ * store sorts `windows` by z (`byZ`) and a click raises the window it hit, so rendering in store
+ * order made the clicked window the last keyed child -- and React moves a reordered child by
+ * re-inserting its DOM node. Re-insertion restarts the `win-open` animation and reloads every iframe
+ * and `<webview>` inside the window, which is why clicking a widget looked like it reloaded it.
+ * Creation order never changes, so a raise now rewrites nothing but `zIndex` -- and stacking has
+ * always come from that, never from DOM order.
+ */
+export const renderOrder = (windows: CanvasWindow[]): CanvasWindow[] =>
+  windows
+    .filter((w) => w.state !== 'minimized')
+    .sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
 const hits = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+/** Can this element itself consume the wheel delta, i.e. it scrolls and is not already at the end? */
+const scrolls = (el: HTMLElement, dx: number, dy: number): boolean => {
+  const cs = getComputedStyle(el)
+  if (dy && /auto|scroll|overlay/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) {
+    if (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true
+  }
+  if (dx && /auto|scroll|overlay/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1) {
+    if (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true
+  }
+  return false
+}
+
+/**
+ * What a two-finger scroll lands on: 'scroll' when something between the target and its window frame
+ * can consume it (the wheel is the widget's, left to scroll natively), 'win' when it is over a window
+ * with nothing left to scroll, null over bare canvas. Walks the DOM because widget bodies are
+ * arbitrary; anything scrollable inside `.win` counts.
+ */
+const wheelHit = (e: WheelEvent): 'scroll' | 'win' | null => {
+  for (let el = e.target instanceof HTMLElement ? e.target : null; el; el = el.parentElement) {
+    if (el.classList.contains('win')) return 'win'
+    if (scrolls(el, e.deltaX, e.deltaY)) return 'scroll'
+  }
+  return null
+}
 
 /**
  * Which windows may keep polling, mount iframes and run a simulation. Pure so it is testable: this
@@ -104,6 +156,22 @@ function Guides({ view }: { view: Viewport }): JSX.Element | null {
   )
 }
 
+/**
+ * The plane's transform, with the pan snapped to whole device pixels.
+ *
+ * Pan is a float the backend stores verbatim, so a settled pan of 311.4px put every window -- and so
+ * every glyph in it -- on a fractional device pixel, which the rasteriser resolves by smearing the
+ * stems across two. Rounding shifts the plane by under half a pixel and nobody can see it; the text it
+ * sharpens is the whole point. Zoom is left alone: text is laid out in CSS pixels and rastered at the
+ * composited scale, so a fractional zoom is crisp as long as nothing in the window is its own render
+ * surface (see the TEXT SHARPNESS note in canvas.css).
+ */
+const planeTransform = (panX: number, panY: number, zoom: number): string => {
+  const dpr = window.devicePixelRatio || 1
+  const snap = (v: number): number => Math.round(v * dpr) / dpr
+  return `translate(${snap(panX)}px, ${snap(panY)}px) scale(${zoom})`
+}
+
 export default function Canvas(): JSX.Element {
   const el = useRef<HTMLDivElement | null>(null)
   const plane = useRef<HTMLDivElement | null>(null)
@@ -118,7 +186,28 @@ export default function Canvas(): JSX.Element {
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [ghost, setGhost] = useState<Rect | null>(null)
+  // `at` is the grid cell a right-click landed on; the explainer's button opens the menu without one.
+  const [menu, setMenu] = useState<{ screen: Point; at?: Point } | null>(null)
+  const [intro, setIntro] = useState(() => !introSeen())
+  const dismissIntro = (): void => {
+    setIntro(false)
+    try { localStorage.setItem(INTRO_KEY, '1') } catch { /* private window */ }
+  }
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // A locked space keeps the pan, the zoom and every rect it had: the plane stops taking gestures,
+  // while the widgets on it stay as interactive as ever.
+  const locked = !!canvas?.locked
+
+  usePageContext(() => ({
+    view: 'canvas',
+    label: canvas ? `Space “${canvas.name}”` : 'Spaces',
+    detail: windows.length
+      ? `The space has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
+      : 'The space is empty.',
+    refs: windows.filter((w) => w.ref_id).slice(0, 40).map((w) => ({ kind: w.kind, id: w.ref_id as string, name: w.title })),
+    hints: ['What is on this space?', 'What should I look at first?']
+  }), [canvas?.id, canvas?.name, windows])
 
   const zoom = canvas?.zoom ?? 1
   const panX = canvas?.pan_x ?? 0
@@ -137,7 +226,7 @@ export default function Canvas(): JSX.Element {
 
   const paint = useCallback((): void => {
     const v = gesture.current ?? viewport()
-    if (plane.current) plane.current.style.transform = `translate(${v.panX}px, ${v.panY}px) scale(${v.zoom})`
+    if (plane.current) plane.current.style.transform = planeTransform(v.panX, v.panY, v.zoom)
     const g = dots.current
     if (!g) return
     const pitch = pitchRef.current * v.zoom
@@ -188,6 +277,7 @@ export default function Canvas(): JSX.Element {
   // canvas, so a stale one deletes windows nobody can see. An uncommitted gesture is stale too.
   useEffect(() => {
     setSelected([])
+    setMenu(null)
     gesture.current = null
     setLiveViewport(null)
     paint()
@@ -213,19 +303,38 @@ export default function Canvas(): JSX.Element {
   useEffect(() => {
     const node = el.current
     if (!node) return
+    // A momentum tail keeps delivering wheel events after a widget's content hits its end; without
+    // the latch those spill into a canvas pan mid-fling. Over-window events inside the window stay
+    // swallowed until the gesture pauses.
+    let latchUntil = 0
     const onWheel = (e: WheelEvent): void => {
       const id = useCanvas.getState().activeCanvasId
       if (!id) return
-      e.preventDefault()
+      if (spaceLocked(id)) {
+        // Swallow a pinch so the renderer itself does not zoom instead; a plain scroll is left to
+        // whatever is under the pointer, which is how a widget keeps scrolling on a frozen space.
+        if (e.ctrlKey || e.metaKey) e.preventDefault()
+        return
+      }
       const v = viewport()
       if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
         const p = viewportPoint(e)
         const before = canvasFromScreen(p, v)
         const zoom = clamp(v.zoom * Math.exp(-e.deltaY / 240), MIN_ZOOM, MAX_ZOOM)
         nudge(id, { zoom, panX: p.x - before.x * zoom, panY: p.y - before.y * zoom })
-      } else {
-        nudge(id, { zoom: v.zoom, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY })
+        return
       }
+      // A two-finger scroll over a window belongs to that window's content while it has room to
+      // move; the canvas only pans from bare canvas or a window with nothing left to scroll.
+      const hit = wheelHit(e)
+      if (hit === 'scroll') {
+        latchUntil = e.timeStamp + 250
+        return
+      }
+      if (hit === 'win' && e.timeStamp < latchUntil) return
+      e.preventDefault()
+      nudge(id, { zoom: v.zoom, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY })
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
@@ -241,7 +350,7 @@ export default function Canvas(): JSX.Element {
         setSelected([])
         return
       }
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selected.length) {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selected.length && !spaceLocked()) {
         e.preventDefault()
         const here = new Set((st.activeCanvasId ? st.canvases[st.activeCanvasId]?.windows ?? [] : []).map((w) => w.id))
         for (const id of selected) if (here.has(id)) void st.closeWindow(id)
@@ -256,19 +365,27 @@ export default function Canvas(): JSX.Element {
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget) return
+    // Right-click (and ⌃-click, macOS's secondary click) opens the add-widget menu via onContextMenu;
+    // it must not also start a marquee that clears the selection and holds pointer capture under it.
+    if (e.button === 2 || (e.button === 0 && e.ctrlKey)) return
     const st = useCanvas.getState()
     const id = st.activeCanvasId
     if (!id) return
     useCanvas.setState({ focusedWindowId: null })
-    // Middle button or ⌥ pans; plain drags marquee-select and ⇧ adds to the selection.
-    const pan = e.button === 1 || e.altKey
+    // Neither gesture the plane owns survives a lock: panning moves the view, a marquee only leads
+    // to moving or deleting what it caught.
+    if (spaceLocked(id)) return setSelected([])
+    // A plain drag pans (so do middle button and ⌥); ⇧ drags marquee-select, adding to the selection.
     const additive = e.shiftKey
+    const pan = !additive
     const from = { x: e.clientX, y: e.clientY }
     const v0 = viewport()
     const origin = canvasPointFromEvent(e)
-    e.currentTarget.setPointerCapture(e.pointerId)
+    const node = e.currentTarget
+    node.setPointerCapture(e.pointerId)
+    if (pan) node.style.cursor = 'grabbing'
     bump()
-    if (!pan && !additive) setSelected([])
+    if (!additive) setSelected([])
 
     const move = (ev: PointerEvent): void => {
       if (pan) {
@@ -281,6 +398,7 @@ export default function Canvas(): JSX.Element {
     const up = (ev: PointerEvent): void => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      node.style.cursor = ''
       if (idle.current) {
         clearTimeout(idle.current)
         idle.current = null
@@ -307,6 +425,7 @@ export default function Canvas(): JSX.Element {
 
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
     const dt = e.dataTransfer
+    if (locked) return
     if (!hasDrag(dt) && !hasFiles(dt)) return
     e.preventDefault()
     dt.dropEffect = 'copy'
@@ -323,58 +442,51 @@ export default function Canvas(): JSX.Element {
 
   const onDrop = async (e: ReactDragEvent<HTMLDivElement>): Promise<void> => {
     const dt = e.dataTransfer
+    if (locked) return
     if (!hasDrag(dt) && !dt.files.length) return
     e.preventDefault()
     setGhost(null)
-    const at = landing(e)
-    const st = useCanvas.getState()
-    const app = useStore.getState()
-    const projectId = canvas?.project_id ?? null
-    const p = readDrag(dt)
-    if (!p) {
-      if (!dt.files.length) return
-      await app.uploadDocuments(dt.files, projectId)
-      await st.openWindow('documents', null, at)
-      return
-    }
-    switch (p.kind) {
-      case 'conversation': await st.openWindow('chat', p.id, at); break
-      case 'nav': await st.openWindow(p.id as WidgetKind, null, at); break
-      case 'todo': await st.openWindow('todos', null, at); break
-      case 'document': await st.openWindow('documents', null, at); break
-      case 'memory': await st.openWindow('memory', null, at); break
-      case 'project': await st.openWindow('project', p.id, at); break
-      case 'note': await st.openWindow('note', p.id, at); break
-      case 'widget': await st.openWindow('dashboard-widget', p.id, at, { dashboard_id: p.dashboardId }); break
-      case 'board-card': {
-        const note = await api.notes.create({ body: p.label, project_id: projectId }).catch(() => null)
-        if (note) await st.openWindow('note', note.id, at)
-        break
-      }
-      case 'file': {
-        if (!dt.files.length) break
-        await app.uploadDocuments(dt.files, projectId)
-        await st.openWindow('documents', null, at)
-        break
-      }
-    }
+    await openPayload(readDrag(dt), { at: landing(e), files: dt.files })
   }
+
+  /** Right-click on the bare plane: the add-widget menu, landing at the clicked grid cell. */
+  const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    // The same own-target rule as onPointerDown: a window's own menu never double-opens this one.
+    if (e.target !== e.currentTarget || e.defaultPrevented || overview) return
+    e.preventDefault()
+    const p = canvasPointFromEvent(e)
+    setMenu({ screen: { x: e.clientX, y: e.clientY }, at: { x: snapValue(p.x, grid), y: snapValue(p.y, grid) } })
+  }
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const canvasId = canvas?.id
+  const menuItems = useMemo<MenuEntry[]>(
+    () => {
+      if (!menu || !canvasId) return []
+      // Nothing can be added to a frozen space, so the menu offers the one thing that can be done.
+      if (locked) return [{ label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }]
+      return [{ kind: 'header', label: 'Add widget' }, ...addWidgetEntries({ canvasId, at: menu.at })]
+    },
+    [menu, canvasId, locked]
+  )
 
   const pitch = grid * zoom
   // Mounted for the whole space, hidden below the threshold, so an imperative zoom can reveal it.
   const gridOn = canvas?.snap_mode === 'grid' || canvas?.snap_mode === 'both'
-  const shown = windows.filter((w) => w.state !== 'minimized')
+  const shown = useMemo(() => renderOrder(windows), [windows])
+  // Putting anything on a space is the explainer's point, so the first window retires it for good.
+  useEffect(() => { if (intro && shown.length) dismissIntro() }, [intro, shown.length])
 
   return (
     <div className="canvas-root">
       <SpacesBar />
       <div
         ref={mount}
-        className={interacting ? 'canvas interacting' : 'canvas'}
+        className={['canvas', interacting && 'interacting', locked && 'locked'].filter(Boolean).join(' ')}
         onPointerDown={onPointerDown}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={(e) => void onDrop(e)}
+        onContextMenu={onContextMenu}
       >
         {!sidebarOpen && <div className="canvas-drag-strip drag" />}
         {gridOn && (
@@ -384,7 +496,7 @@ export default function Canvas(): JSX.Element {
             style={{ backgroundSize: `${pitch}px ${pitch}px`, backgroundPosition: `${panX}px ${panY}px`, display: zoom >= GRID_ZOOM ? undefined : 'none' }}
           />
         )}
-        <div ref={plane} className="canvas-plane" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}>
+        <div ref={plane} className="canvas-plane" style={{ transform: planeTransform(panX, panY, zoom) }}>
           {shown.map((w) => (
             <WindowFrame
               key={w.id}
@@ -400,15 +512,27 @@ export default function Canvas(): JSX.Element {
           {ghost && <div className="drop-ghost" style={screenRect(ghost, view)} />}
         </div>
         {marquee && <div className="canvas-marquee" style={screenRect(marquee, view)} />}
-        {loaded && !shown.length && (
+        {loaded && !shown.length && intro && !locked && canvas && (
+          <div className="canvas-empty canvas-intro" role="note" aria-label="About spaces">
+            <strong>This is a space</strong>
+            <span>Lay out chats, notes, docs and your apps side by side, then pop any window out on top of other apps. Drag anything here from the sidebar.</span>
+            <div className="canvas-intro-actions">
+              <button className="primary-btn" onClick={() => void useCanvas.getState().newChatWindow()}><MessageSquarePlus size={14} /> New chat</button>
+              <button className="ghost-btn" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ screen: { x: r.left, y: r.bottom + 4 } }) }}><Plus size={14} /> Add a widget</button>
+              <button className="ghost-btn" onClick={dismissIntro}>Got it</button>
+            </div>
+          </div>
+        )}
+        {loaded && !shown.length && !(intro && !locked && canvas) && (
           <div className="canvas-empty">
             <strong>Empty space</strong>
-            <span>Drag anything from the sidebar.</span>
+            <span>{locked ? 'This space is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>
           </div>
         )}
         <Dock />
       </div>
       {overview && <Overview />}
+      {menu && canvas && <ContextMenu at={menu.screen} items={menuItems} onClose={closeMenu} />}
     </div>
   )
 }

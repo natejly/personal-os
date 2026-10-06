@@ -3,25 +3,10 @@ import { AlertCircle, Gauge, RefreshCw } from 'lucide-react'
 import type { UsageReport } from '@shared/types'
 import { api } from '../../lib/api'
 import ChartBlock from '../../components/ChartBlock'
+import { Tile, compact, money, ms, shortDay, spec } from '../../components/UsageView'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const RANGES = [7, 30, 90] as const
-
-const money = (n: number): string => (n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`)
-const compact = (n: number): string => new Intl.NumberFormat(undefined, { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
-const ms = (n: number): string => (n < 1000 ? `${n} ms` : `${(n / 1000).toFixed(1)} s`)
-const shortDay = (iso: string): string => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
-
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
-  return (
-    <div className="usage-tile">
-      <span className="usage-tile-label">{label}</span>
-      <b className="usage-tile-value">{value}</b>
-      {sub && <small className="usage-tile-sub">{sub}</small>}
-    </div>
-  )
-}
 
 export default function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const days = typeof win.config.days === 'number' ? win.config.days : 30

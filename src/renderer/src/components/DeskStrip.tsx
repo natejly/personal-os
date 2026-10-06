@@ -1,0 +1,96 @@
+import { CircleHelp, PanelRight, Pause, Play, ShieldQuestion, Square, TriangleAlert } from 'lucide-react'
+import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
+import { useStore } from '../store'
+import { STATUS_LABEL, deskElapsed, fmtDur, useTick } from '../lib/deskStatus'
+import { queuePositions } from '../lib/deskFiles'
+import DeskPlan from './DeskPlan'
+import DeskApprovalCard from './DeskApprovalCard'
+import Face from './Face'
+
+const ENDED: DeskStatus[] = ['done', 'failed', 'stopped']
+
+/** The desk a chat works in: the open (full) row when it is this one, else the list row. */
+export const useChatDesk = (deskId?: string): Desk | FullDesk | null =>
+  useStore((s) => (!deskId ? null : s.activeDesk?.id === deskId ? s.activeDesk : s.desks.find((d) => d.id === deskId) ?? null))
+
+/**
+ * The slim line above the composer while a chat works autonomously: what it is doing, how far it has got, what is
+ * waiting on you, and the run controls. Buttons are gated on `desk.actions`, which the backend reads off the same
+ * transition tables its routes enforce, so a button is never offered for a route that 409s.
+ */
+export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: string; panelOpen?: boolean; onPanel?: () => void }): JSX.Element | null {
+  const desk = useChatDesk(deskId)
+  const approvals = useStore((s) => (desk ? s.sessions[desk.conversation_id]?.pendingApprovals ?? 0 : 0))
+  const position = useStore((s) => (desk?.status === 'queued' ? queuePositions(s.desks).get(deskId) : undefined))
+  const maxTurns = useStore((s) => s.settings.deskMaxTurns ?? 12)
+  const { startDesk, pauseDesk, resumeDesk, stopDesk } = useStore()
+  useTick(Boolean(desk?.live))
+  if (!desk) return null
+  const detail = position ? `#${position} in line` : desk.headline || desk.status_reason
+  return (
+    <div className={`desk-strip desk-ring-${desk.status}`} role="status" aria-label="Working autonomously">
+      <Face name={desk.id} status={desk.status} size={18} title={STATUS_LABEL[desk.status]} />
+      <b className="desk-strip-status">{STATUS_LABEL[desk.status]}</b>
+      {detail && <span className="desk-strip-detail">{detail}</span>}
+      <span className="desk-strip-meta">turn {desk.turn}/{desk.budget.maxTurns ?? maxTurns} · {fmtDur(deskElapsed(desk))}</span>
+      {approvals > 0 && <span className="desk-badge ask" title={`${approvals} waiting on your approval`}>{approvals}</span>}
+      {desk.unseen > 0 && <span className="desk-badge" title={`${desk.unseen} need${desk.unseen === 1 ? 's' : ''} you`}>{desk.unseen}</span>}
+      <span className="spacer" />
+      {desk.actions.includes('start') && <button className="ghost-btn xs" onClick={() => void startDesk(desk.id)}><Play size={11} /> Start</button>}
+      {desk.actions.includes('pause') && <button className="ghost-btn xs" onClick={() => void pauseDesk(desk.id)}><Pause size={11} /> Pause</button>}
+      {/* Review and a waiting plan have their own answers (Accept / the plan card), so no bare Resume beside them. */}
+      {desk.actions.includes('resume') && desk.status !== 'review' && desk.status !== 'awaiting_plan' && (
+        <button className="ghost-btn xs" onClick={() => void resumeDesk(desk.id)}><Play size={11} /> Resume</button>
+      )}
+      {desk.actions.includes('stop') && <button className="ghost-btn xs danger" onClick={() => void stopDesk(desk.id)}><Square size={11} /> Stop</button>}
+      {onPanel && (
+        <button className={`icon-btn ghost ${panelOpen ? 'on' : ''}`} aria-pressed={!!panelOpen} title="Files, changes and review" aria-label="Files, changes and review" onClick={onPanel}>
+          <PanelRight size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the desk is waiting on, at the foot of the transcript: a question (answered from the composer), the cards a
+ * parked turn let go of, the plan (the approval card while pending, then the live checklist), and why it stopped.
+ */
+export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent[] }): JSX.Element | null {
+  // A card whose call is still pending in the transcript is answered there; these are the ones a parked turn let go of.
+  const approvals = (desk.approvals ?? []).filter((a) => !events.some((e) => e.id === a.call_id && e.pending && e.needs_approval))
+  const asking = desk.question && !ENDED.includes(desk.status) && !approvals.some((a) => a.tool === 'desk_ask')
+  return (
+    <div className="desk-inline">
+      {asking && (
+        <div className="desk-banner ask">
+          <CircleHelp size={14} />
+          <div><b>It needs an answer</b><p>{desk.question}</p><p className="muted small">Reply below.</p></div>
+        </div>
+      )}
+      {approvals.length > 0 && (
+        <div className="desk-banner ask">
+          <ShieldQuestion size={14} />
+          <div className="desk-cards">
+            <b>{approvals.length === 1 ? 'It is waiting on you' : `It is waiting on ${approvals.length} things`}</b>
+            {approvals.map((a) => (
+              <div key={a.call_id} className="desk-card">
+                <DeskApprovalCard approval={a} conversationId={desk.conversation_id} event={events.find((e) => e.id === a.call_id && e.needs_approval)} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {desk.plan && <DeskPlan desk={desk} />}
+      {desk.status === 'interrupted' && (
+        <div className="desk-banner warn">
+          <TriangleAlert size={14} />
+          <div><b>Interrupted by a restart</b><p>Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}</p></div>
+        </div>
+      )}
+      {desk.last_error && desk.status !== 'interrupted' && (
+        <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
+      )}
+    </div>
+  )
+}

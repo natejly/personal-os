@@ -17,11 +17,16 @@ def now_ms() -> int:
 
 
 class Tracer:
-    def __init__(self) -> None:
-        self.spans: list[dict[str, Any]] = []
+    def __init__(self, spans: list[dict[str, Any]] | None = None) -> None:
+        # `spans` continues a trace the reply already wrote: auto-learn appends its span to the
+        # finished message's trace from a worker, long after the run's own tracer is gone.
+        self.spans: list[dict[str, Any]] = list(spans or [])
 
-    def start(self, kind: str, name: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start(self, kind: str, name: str, meta: dict[str, Any] | None = None, parent: dict[str, Any] | None = None) -> dict[str, Any]:
+        """`parent` nests the span (a tool under the model round that issued it). Old traces have no parent_id and render flat."""
         span = {"id": new_id(), "kind": kind, "name": name, "start": now_ms(), "end": None, "meta": dict(meta or {}), "error": None}
+        if parent is not None:
+            span["parent_id"] = parent["id"]
         self.spans.append(span)
         return span
 
@@ -40,15 +45,20 @@ class Tracer:
 
     def summary(self) -> dict[str, Any]:
         if not self.spans:
-            return {"total_ms": 0, "llm_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+            return {"total_ms": 0, "llm_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0}
         t0 = min(s["start"] for s in self.spans)
         t1 = max(s["end"] or now_ms() for s in self.spans)
         pt = sum(int((s["meta"].get("usage") or {}).get("prompt_tokens") or 0) for s in self.spans if s["kind"] == "llm")
         ct = sum(int((s["meta"].get("usage") or {}).get("completion_tokens") or 0) for s in self.spans if s["kind"] == "llm")
+        def usum(key: str) -> int:
+            return sum(int((s["meta"].get("usage") or {}).get(key) or 0) for s in self.spans if s["kind"] == "llm")
+
         return {
             "total_ms": t1 - t0,
             "llm_calls": sum(1 for s in self.spans if s["kind"] == "llm"),
             "tool_calls": sum(1 for s in self.spans if s["kind"] == "tool"),
             "prompt_tokens": pt,
             "completion_tokens": ct,
+            "cached_tokens": usum("cached_tokens"),
+            "reasoning_tokens": usum("reasoning_tokens"),
         }

@@ -1,15 +1,26 @@
-import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail } from 'lucide-react'
+import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse, Telescope } from 'lucide-react'
+import { useState } from 'react'
 import { useStore } from '../store'
-import type { ToolMode, ToolOverride } from '@shared/types'
+import { askLocked, type ToolInfo, type ToolMode, type ToolOverride } from '@shared/types'
+import { describeCall, humanizeName } from '../lib/toolDisplay'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
   knowledge: <FileSearch size={13} />, memory: <Brain size={13} />, graph: <Share2 size={13} />, web: <Globe size={13} />, code: <Terminal size={13} />,
-  utility: <Clock size={13} />, todos: <CheckSquare size={13} />, boards: <KanbanSquare size={13} />, google: <Mail size={13} />
+  utility: <Clock size={13} />, todos: <CheckSquare size={13} />, google: <Mail size={13} />,
+  mac: <Laptop size={13} />, files: <FolderOpen size={13} />,
+  plan: <ListChecks size={13} />, context: <Layers size={13} />, skills: <GraduationCap size={13} />,
+  style: <PenLine size={13} />, health: <HeartPulse size={13} />, research: <Telescope size={13} />
 }
-export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes: 'writes in-app data', network: 'reads the internet', executes: 'runs sandboxed code', external: 'acts outside the app' }
-const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
+export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes: 'writes in-app data', network: 'reads the internet', executes: 'runs sandboxed code', external: 'acts outside the app', plan: 'always asks: the call is the approval card', schedules: 'books work for later' }
+export const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }
 
-const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
+/** The name a person reads: "Search documents", never the identifier the model calls. */
+const toolLabel = (name: string): string => describeCall(name, null).verb
+
+export const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
+const LOCKED_TIP = 'Listed under Always ask'
+/** A legacy stored 'on' for an ask-locked tool reads as what the backend runs: ask. */
+const capped = (t: ToolInfo, m: ToolMode): ToolMode => (m === 'on' && askLocked(t) ? 'ask' : m)
 
 /** Tri-state overrides (inherit / on / ask / off) for a project or a chat. `effectiveBase` is what "inherit" resolves to. */
 export function ToolOverrides({ value, onChange, effectiveBase, compact = false }: {
@@ -22,17 +33,19 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   return (
     <div className={`tool-perms ${compact ? 'compact' : ''}`}>
       {tools.map((t) => {
-        const ov = value[t.name] ?? 'inherit'
-        const base = effectiveBase[t.name] ?? t.default_mode
+        const locked = askLocked(t)
+        const raw = value[t.name] ?? 'inherit'
+        const ov: ToolOverride = raw === 'on' && locked ? 'ask' : raw
+        const base = capped(t, effectiveBase[t.name] ?? t.default_mode)
         const eff: ToolMode = ov === 'inherit' ? base : ov
         return (
           <div key={t.name} className={`tool-perm ${eff === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`} title={t.description + (t.available ? '' : ' (integration not connected)')}>
             <span className="tool-icon">{GROUP_ICON[t.group] ?? <Wrench size={13} />}</span>
-            <span className="tool-perm-name">{t.name.replace(/_/g, ' ')}<small>{DANGER_LABEL[t.danger]}</small></span>
+            <span className="tool-perm-name">{toolLabel(t.name)}<small>{DANGER_LABEL[t.danger]}</small></span>
             {eff === 'ask' && <span className="tag ask">asks</span>}
-            <select value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
+            <select title={locked ? LOCKED_TIP : undefined} aria-label={`Permission for ${toolLabel(t.name)}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
               <option value="inherit">inherit ({MODE_LABEL[base]})</option>
-              <option value="on">always on</option>
+              {!locked && <option value="on">always on</option>}
               <option value="ask">ask each time</option>
               <option value="off">off</option>
             </select>
@@ -43,30 +56,63 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   )
 }
 
-/** Global modes (Settings). Missing = the tool's default (external actions ask; everything else on). */
-export function ToolGlobalToggles({ value, onChange }: { value: Record<string, ToolMode | boolean>; onChange: (next: Record<string, ToolMode>) => void }): JSX.Element {
+/** The tools that always show a card: no mode switches one on, no card grants it whole-tool, and untrusted content
+ *  in the reply forces its card. Only tools that act outside the app or book unattended work can be listed. */
+export function AlwaysAsk({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const tools = useStore((s) => s.tools)
-  const groups = [...new Set(tools.map((t) => t.group))]
-  const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
-  const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
+  // calendar_propose is itself the review card, so it is locked whatever this list says.
+  const lockable = tools.filter((t) => (t.danger === 'external' || t.danger === 'schedules') && t.name !== 'calendar_propose')
+  const toggle = (name: string, on: boolean): void => onChange(on ? [...value.filter((n) => n !== name), name] : value.filter((n) => n !== name))
   return (
     <div className="tool-perms">
-      {groups.map((g) => (
-        <div key={g} className="tool-group">
-          <h5>{GROUP_ICON[g]} {g}</h5>
-          {tools.filter((t) => t.group === g).map((t) => {
-            const mode = current(t.name, t.default_mode)
-            return (
-              <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
-                <span className="toggle-text"><b>{t.name.replace(/_/g, ' ')} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small>{t.description}</small></span>
-                <div className="seg">
-                  {(['on', 'ask', 'off'] as ToolMode[]).map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => set(t.name, m)}>{m}</button>)}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+      {lockable.map((t) => (
+        <label key={t.name} className={`toggle-row plain ${!t.available ? 'unavailable' : ''}`}>
+          <span className="toggle-text"><b>{toolLabel(t.name)} <small className="muted">{humanizeName(t.group)}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+          <input type="checkbox" checked={value.includes(t.name)} onChange={(e) => toggle(t.name, e.target.checked)} /><span className="switch" />
+        </label>
       ))}
+      {lockable.length === 0 && <p className="muted small">No tool here acts outside the app yet.</p>}
     </div>
   )
 }
+
+/** Global modes (Settings). Missing = the tool's default (Always ask tools ask; everything else on). */
+export function ToolGlobalToggles({ value, onChange }: { value: Record<string, ToolMode | boolean>; onChange: (next: Record<string, ToolMode>) => void }): JSX.Element {
+  const tools = useStore((s) => s.tools)
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLowerCase()
+  const shown = needle ? tools.filter((t) => `${toolLabel(t.name)} ${t.name.replace(/_/g, ' ')} ${t.group} ${t.description}`.toLowerCase().includes(needle)) : tools
+  const groups = [...new Set(shown.map((t) => t.group))]
+  const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
+  const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
+  // Groups start collapsed and open while filtering; the full model-facing description is the row's tooltip.
+  return (
+    <div className="tool-perms">
+      <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter tools" aria-label="Filter tools" spellCheck={false} />
+      {groups.map((g) => {
+        const rows = shown.filter((t) => t.group === g)
+        return (
+          <details key={g} className="tool-group" open={needle ? true : undefined}>
+            <summary><h5>{GROUP_ICON[g] ?? <Wrench size={13} />} {humanizeName(g)} <small className="muted">{rows.length}</small></h5></summary>
+            {rows.map((t) => {
+              const locked = askLocked(t)
+              const mode = capped(t, current(t.name, t.default_mode))
+              const label = toolLabel(t.name)
+              return (
+                <div key={t.name} className={`tool-perm row ${mode === 'off' ? 'off' : ''} ${!t.available ? 'unavailable' : ''}`}>
+                  {/* The description is written for the model and runs long: two lines here, all of it on hover. */}
+                  <span className="toggle-text"><b>{label} <small className="muted">{DANGER_LABEL[t.danger]}</small></b><small className="clamp-2" title={t.description}>{t.description}</small></span>
+                  <div className="seg" role="group" aria-label={`Permission for ${label}`} title={locked ? LOCKED_TIP : undefined}>
+                    {((locked ? ['ask', 'off'] : ['on', 'ask', 'off']) as ToolMode[]).map((m) => <button key={m} type="button" className={mode === m ? 'on' : ''} aria-pressed={mode === m} onClick={() => set(t.name, m)}>{m}</button>)}
+                  </div>
+                </div>
+              )
+            })}
+          </details>
+        )
+      })}
+      {needle && groups.length === 0 && <p className="muted small">No tool matches “{q.trim()}”.</p>}
+    </div>
+  )
+}
+

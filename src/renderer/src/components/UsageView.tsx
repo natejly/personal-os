@@ -8,17 +8,19 @@ import ChartBlock from './ChartBlock'
 
 const RANGES = [7, 30, 90] as const
 
-const money = (n: number): string =>
+export const money = (n: number): string =>
   n === 0 ? '$0' : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`
-const compact = (n: number): string => new Intl.NumberFormat(undefined, { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
-const ms = (n: number): string => (n < 1000 ? `${n} ms` : `${(n / 1000).toFixed(1)} s`)
+export const compact = (n: number): string => new Intl.NumberFormat(undefined, { notation: n >= 100000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n)
+export const ms = (n: number): string => (n < 1000 ? `${n} ms` : `${(n / 1000).toFixed(1)} s`)
 /** "2026-09-29" → "Sep 29" */
-const shortDay = (iso: string): string => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+export const shortDay = (iso: string): string => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 const hourLabel = (h: number): string => `${((h + 11) % 12) + 1}${h < 12 ? 'am' : 'pm'}`
 
-const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
+export const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
 
-function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
+const pct = (f: number): string => `${Math.round(f * 100)}%`
+
+export function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
     <div className="usage-tile">
       <span className="usage-tile-label">{label}</span>
@@ -68,13 +70,13 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
   return (
     <div className="usage-prices">
       <table>
-        <thead><tr><th>Model</th><th>Input $/M</th><th>Output $/M</th><th /></tr></thead>
+        <thead><tr><th scope="col">Model</th><th scope="col">Input $/M</th><th scope="col">Output $/M</th><th scope="col" aria-label="Price source" /></tr></thead>
         <tbody>
           {models.map((m) => (
             <tr key={m}>
-              <td className="mono">{m}</td>
-              <td><input type="number" min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
-              <td><input type="number" min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
+              <th scope="row" className="mono">{m}</th>
+              <td><input type="number" aria-label={`${m} input price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
+              <td><input type="number" aria-label={`${m} output price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
               <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : report.prices[m] ? 'proxy' : 'unpriced'}</td>
             </tr>
           ))}
@@ -135,10 +137,11 @@ export default function UsageView(): JSX.Element {
   return (
     <div className="usage">
       <div className="usage-head">
-        <div className="usage-ranges">
-          {RANGES.map((d) => <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>{d}d</button>)}
+        <div className="seg" role="group" aria-label="Range">
+          {RANGES.map((d) => <button key={d} type="button" className={days === d ? 'active' : ''} aria-pressed={days === d} title={`Last ${d} days`} onClick={() => setDays(d)}>{d}d</button>)}
         </div>
-        <button className="icon-btn ghost" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
+        <span className="spacer" />
+        <button className="icon-btn" aria-label="Refresh usage" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
       </div>
 
       {empty ? (
@@ -148,8 +151,10 @@ export default function UsageView(): JSX.Element {
           <div className="usage-tiles">
             <Tile label="Spend" value={money(t.cost)} sub={t.unpriced ? `${t.unpriced} call${t.unpriced === 1 ? '' : 's'} unpriced` : `over ${report.days} days`} />
             <Tile label="Tokens" value={compact(t.tokens)} sub={`${compact(t.prompt_tokens)} in · ${compact(t.completion_tokens)} out`} />
-            <Tile label="Model calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} auto-learn`} />
+            <Tile label="Model calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} auto-learn${t.other_calls ? ` · ${t.other_calls} other` : ''}`} />
             <Tile label="Avg latency" value={ms(t.avg_ms)} sub="per model call" />
+            <Tile label="Cache hit rate" value={pct(t.cache_hit_rate ?? 0)} sub={`${compact(t.cached_tokens ?? 0)} input tokens served from the provider cache`} />
+            <Tile label="Reasoning tokens" value={compact(t.reasoning_tokens ?? 0)} sub={`${pct(t.reasoning_share ?? 0)} of output tokens`} />
           </div>
 
           <div className="markdown usage-charts">
@@ -162,10 +167,22 @@ export default function UsageView(): JSX.Element {
             <ChartBlock source={charts.weekday} streaming={false} />
             {report.by_project.length > 1 && <ChartBlock source={charts.byProject} streaming={false} />}
           </div>
+          {report.by_tag?.length > 0 && (
+            <>
+              <h4 className="usage-sub">By source</h4>
+              <table className="usage-table">
+                <tbody>
+                  {report.by_tag.slice(0, 12).map((t) => (
+                    <tr key={t.tag}><td>{t.tag}</td><td>{t.calls} calls</td><td>{t.tokens.toLocaleString()} tokens</td><td>${t.cost.toFixed(4)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
 
-      <h4 className="usage-sub">Prices</h4>
+      <h4>Prices</h4>
       <p className="muted small">Read from your LiteLLM proxy. Saving re-prices the whole history.</p>
       <PriceEditor report={report} onSaved={(prices) => setReport((r) => (r ? { ...r, prices } : r))} />
     </div>

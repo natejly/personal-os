@@ -1,128 +1,152 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Layers, Video, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
+import { PIM_SETTINGS_TAB, pimLabel, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
-import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
+import SendToSpace from './SendToSpace'
+import CalendarWeek, { addDays, fmtTime, slotIso, startOfWeek, withoutTodoEvents, type Slot } from './CalendarWeek'
+import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import CalendarMonth, { monthGridStart } from './CalendarMonth'
+import { useVisibleCalendars } from './useVisibleCalendars'
+import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
+import { oneLine } from '../lib/emailAsk'
+import { lines, usePageContext } from '../lib/pageContext'
+import { calendarViewKey, readView, writeView } from '../lib/viewCache'
+import { rangeLabel } from '../lib/dates'
+import AppSwitcher from './AppSwitcher'
+import PlannerPanel from './PlannerPanel'
+import SidebarToggle from './SidebarToggle'
 
-const VIEWS = ['day', 'week', 'month'] as const
-type CalView = (typeof VIEWS)[number]
-
-const storedView = (): CalView => {
-  try {
-    const v = localStorage.getItem('calendar.view')
-    return VIEWS.includes(v as CalView) ? (v as CalView) : 'week'
-  } catch {
-    return 'week'
-  }
+function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
+  const color = c.color ?? 'var(--accent-solid)'
+  return (
+    <button type="button" className={on ? 'cal-cal on' : 'cal-cal'} aria-pressed={on}
+      title={on ? `Hide ${c.summary}` : `Show ${c.summary}`} onClick={onToggle}>
+      <span className="cal-cal-box" style={{ borderColor: color, background: on ? color : 'transparent' }}>
+        {on && <Check size={11} strokeWidth={3} />}
+      </span>
+      <span className="cal-cal-name">{c.summary}</span>
+    </button>
+  )
 }
-// null means "no local override yet": mirror which calendars are checked in Google's own UI.
-const storedShown = (): Set<string> | null => {
-  try {
-    const raw = localStorage.getItem('calendar.shown')
-    return raw ? new Set(JSON.parse(raw) as string[]) : null
-  } catch {
-    return null
-  }
+
+function CalendarRail({ calendars, ready, shown, toggle }: {
+  calendars: GoogleCalendar[]
+  ready: boolean
+  shown: (c: GoogleCalendar) => boolean
+  toggle: (c: GoogleCalendar) => void
+}): JSX.Element {
+  const mine = calendars.filter((c) => c.primary || c.access_role === 'owner' || c.access_role === 'writer')
+  const mineIds = new Set(mine.map((c) => c.id))
+  const other = calendars.filter((c) => !mineIds.has(c.id))
+  const group = (title: string, list: GoogleCalendar[]): JSX.Element | null => list.length === 0 ? null : (
+    <>
+      <h3>{title}</h3>
+      {list.map((c) => <CalToggle key={c.id} c={c} on={shown(c)} onToggle={() => toggle(c)} />)}
+    </>
+  )
+  return (
+    <aside className="cal-cals" aria-label="Calendars">
+      {!ready && <p className="muted small">Loading calendars…</p>}
+      {ready && calendars.length === 0 && <p className="muted small">No calendars yet.</p>}
+      {group('My calendars', mine)}
+      {group('Other calendars', other)}
+    </aside>
+  )
 }
 
 export default function CalendarView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const google = useStore((s) => s.google)
+  // The active calendar account (Google or Microsoft).
+  const google = useStore(pimStatus)
+  const label = useStore(pimLabel)
   const todos = useStore((s) => s.todos)
-  const toggleSidebar = useStore((s) => s.toggleSidebar)
-  const refreshTodos = useStore((s) => s.refreshTodos)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const toast = useStore((s) => s.toast)
-  const newChat = useStore((s) => s.newChat)
-  const send = useStore((s) => s.send)
-
-  const [view, setViewState] = useState<CalView>(storedView)
-  const [anchor, setAnchor] = useState(() => new Date())
+  const { refreshTodos, toast, updateTodo, setView } = useStore()
+  const [week, setWeek] = useState(() => startOfWeek(new Date()))
+  // Week or month grid. `week` stays the anchor for both: the month shown is the one holding that week's Thursday.
+  const [mode, setModeState] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('calendar.mode') === 'month' ? 'month' : 'week' } catch { return 'week' } })
+  const setMode = (m: 'week' | 'month'): void => { setModeState(m); try { localStorage.setItem('calendar.mode', m) } catch { /* private mode: the choice just does not persist */ } }
+  const monthDate = useMemo(() => addDays(week, 3), [week])
+  const rangeStart = mode === 'month' ? monthGridStart(monthDate) : week
+  const rangeDays = mode === 'month' ? 42 : 7
+  // The week holding the 4th always has its Thursday inside the month, so stepping never lands on a neighbour.
+  const step = (dir: number): void => setWeek(mode === 'month' ? startOfWeek(new Date(monthDate.getFullYear(), monthDate.getMonth() + dir, 4)) : addDays(week, dir * 7))
   const [events, setEvents] = useState<CalendarEvent[]>([])
-  const [cals, setCals] = useState<GoogleCalendar[]>([])
-  const [override, setOverride] = useState<Set<string> | null>(storedShown)
-  const [railOpen, setRailOpen] = useState(true)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [open, setOpen] = useState<CalendarEvent | null>(null)
-  const [reload, setReload] = useState(0)
-  const seq = useRef(0)
+  const [editing, setEditing] = useState<{ event: CalendarEvent | null; draft?: EventDraft } | null>(null)
+  // Bumped when the calendar/color cache resolves, so the grid picks up event colors.
+  const [, setMetaTick] = useState(0)
+  const { calendars, visibleIds, query, ready, shown: calendarOn, toggle } = useVisibleCalendars()
 
-  const setView = (v: CalView): void => {
-    setViewState(v)
-    try { localStorage.setItem('calendar.view', v) } catch { /* private-mode etc: view just won't persist */ }
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
+  const cacheKey = google?.connected && query ? calendarViewKey(rangeStart.toISOString(), rangeDays, query) : ''
+  // Paint the saved week in this render, before the sync request returns, so stepping
+  // back to a week already opened does not flash "Loading…".
+  const [painted, setPainted] = useState(cacheKey)
+  if (cacheKey !== painted) {
+    setPainted(cacheKey)
+    if (!query) { setEvents([]); setLoading(false) }
+    else {
+      const cached = readView<CalendarEvent[]>(cacheKey)
+      setEvents(cached ?? [])
+      setLoading(cached == null)
+      setError(null)
+    }
   }
+  const shown = useMemo(() => {
+    const base = withoutTodoEvents(events, todos)
+    if (!ready || calendars.length === 0) return base
+    const ids = new Set(visibleIds)
+    return base.filter((e) => !e.calendar_id || ids.has(e.calendar_id))
+  }, [events, todos, ready, calendars.length, visibleIds])
 
-  const shown = useMemo(
-    () => override ?? new Set(cals.filter((c) => c.selected).map((c) => c.id)),
-    [override, cals]
-  )
-
-  const range = useMemo(() => {
-    if (view === 'day') { const d = new Date(anchor); d.setHours(0, 0, 0, 0); return { start: d, span: 1 } }
-    if (view === 'week') return { start: startOfWeek(anchor), span: 7 }
-    return { start: monthGridStart(anchor), span: 42 }
-  }, [view, anchor])
-
-  const days = useMemo(
-    () => (view === 'day' ? [range.start] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(anchor), i))),
-    [view, range, anchor]
-  )
-
+  // The week on screen is the saved copy until this returns. `refresh` is the Refresh
+  // button: it still only asks Google for what changed, and the grid stays up meanwhile.
+  // Every fetch takes a number and only the newest may paint, so a slow Refresh that lands after
+  // "Next week" cannot put the previous week's events over the current one.
+  const seq = useRef(0)
+  const load = async (refresh = false): Promise<void> => {
+    if (!google?.connected || query == null) return
+    if (!query) { setEvents([]); return }
+    const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
+    const mine = ++seq.current
+    if (refresh) setLoading(true)
+    setError(null)
+    try {
+      const list = await api.google.calendarRange(rangeStart.toISOString(), rangeDays, query, refresh)
+      writeView(key, list)
+      if (seq.current !== mine) return
+      setEvents(list)
+      setError(null)
+    } catch (e) {
+      if (seq.current === mine) setError((e as Error).message)
+    } finally {
+      if (seq.current === mine) setLoading(false)
+    }
+  }
   useEffect(() => {
-    if (!google?.connected) { setCals([]); return }
+    const mine = ++seq.current
+    if (!google?.connected || query == null) return
+    if (!query) return
+    const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
     let alive = true
-    api.google.calendars().then((l) => { if (alive) setCals(l) }).catch(() => undefined)
+    api.google.calendarRange(rangeStart.toISOString(), rangeDays, query)
+      .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setEvents(list); setError(null) } })
+      .catch((e) => { if (alive && seq.current === mine) setError((e as Error).message) })
+      .finally(() => { if (alive && seq.current === mine) setLoading(false) })
     return () => { alive = false }
+  }, [week, mode, google?.connected, query])
+  useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
+  useEffect(() => {
+    if (google?.connected) void primeCalendarMeta().then(() => setMetaTick((t) => t + 1))
   }, [google?.connected])
 
-  useEffect(() => {
-    if (!google?.connected) { setEvents([]); return }
-    const id = ++seq.current
-    setLoading(true); setError(null)
-    // The default set is one merged fetch; a customized set fans out per calendar, so even
-    // calendars unchecked in Google's UI (which the merged fetch skips) can be shown here.
-    const selected = cals.filter((c) => c.selected).map((c) => c.id)
-    const isDefault = cals.length === 0 || (shown.size === selected.length && selected.every((cid) => shown.has(cid)))
-    const startIso = range.start.toISOString()
-    const pull = async (): Promise<void> => {
-      try {
-        const lists = isDefault
-          ? [await api.google.calendarRange(startIso, range.span, undefined, 250)]
-          : await Promise.all([...shown].map((cid) => api.google.calendarRange(startIso, range.span, cid, 250)))
-        if (id !== seq.current) return
-        setEvents(lists.flat().sort((a, b) => ((a.start || '') < (b.start || '') ? -1 : 1)))
-      } catch (e) {
-        if (id === seq.current) setError((e as Error).message)
-      } finally {
-        if (id === seq.current) setLoading(false)
-      }
-    }
-    void pull()
-  }, [google?.connected, range, cals, shown, reload])
-
-  useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
-
-  const toggleCal = (cid: string): void => {
-    const next = new Set(shown)
-    if (next.has(cid)) next.delete(cid); else next.add(cid)
-    setOverride(next)
-    try { localStorage.setItem('calendar.shown', JSON.stringify([...next])) } catch { /* fine */ }
-  }
-
-  const shiftAnchor = (dir: number): void => {
-    setAnchor(view === 'day' ? addDays(anchor, dir)
-      : view === 'week' ? addDays(anchor, dir * 7)
-        : new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1))
-  }
-
-  const create = async (day: string, hour: number, title: string): Promise<boolean> => {
+  const create = async (slot: Slot, title: string): Promise<boolean> => {
     try {
-      await api.google.createEvent({ summary: title, start: `${day}T${String(hour).padStart(2, '0')}:00:00` })
+      await api.google.createEvent({ summary: title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) })
       toast(`Added "${title}"`)
-      setReload((n) => n + 1)
+      await load()
       return true
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -130,78 +154,121 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
-  const title = view === 'month'
-    ? anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-    : view === 'day'
-      ? anchor.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
-      : `${days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+  // Dragging a block only writes its start and end; every other field is left alone, and the grid
+  // shows the new position straight away so it does not snap back while Google is answering.
+  const move = async (e: CalendarEvent, start: string, end: string): Promise<void> => {
+    // A new time for a meeting is news to its guests, so ask before mailing them, as Google does.
+    const send_updates = e.attendees.length > 0 && window.confirm(`Email the ${e.attendees.length} guest${e.attendees.length > 1 ? 's' : ''} about the new time?`) ? 'all' : 'none'
+    const before = events
+    setEvents((list) => list.map((x) => (x.id === e.id ? { ...x, start: new Date(start).toISOString(), end: new Date(end).toISOString() } : x)))
+    try {
+      await api.google.updateEvent(e.id, { start, end, calendar_id: e.calendar_id ?? 'primary', send_updates })
+      toast(`Moved "${e.summary || 'event'}" to ${new Date(start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}${e.recurring_event_id ? ' (this occurrence)' : ''}`)
+      await load()
+    } catch (err) {
+      setEvents(before)
+      toast((err as Error).message, 'error')
+    }
+  }
+
+  const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
+    const todo = useStore.getState().todos.find((t) => t.id === todoId)
+    if (!todo) return
+    try {
+      // scheduleTodo writes the due date with the event link, so the mirror never sees one without the other.
+      if (!google?.connected) await updateTodo(todoId, { due: day })
+      else {
+        const start = hour === null ? day : `${day}T${String(hour).padStart(2, '0')}:00:00`
+        await scheduleTodo(todo, start)
+        if (hour !== null) await load()
+      }
+      toast(hour === null ? `Due ${day}` : `Scheduled ${hour}:00`)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
+  const focus = editing?.event ?? null
+  const fmtEvent = (e: CalendarEvent): string => {
+    const when = e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+    const title = oneLine(e.summary || '') || '(no title)'
+    const loc = e.location ? ` at ${oneLine(e.location, 80)}` : ''
+    return `${when} — ${title} (\`${oneLine(e.id, 80)}\`)${loc}`
+  }
+  const span = mode === 'month' ? monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `${days[0].toDateString()} – ${days[6].toDateString()}`
+  usePageContext(() => ({
+    view: 'calendar',
+    label: focus ? `Event “${oneLine(focus.summary || '') || 'untitled'}”` : `Calendar · ${span}`,
+    detail: [
+      `The ${mode} of ${span} is on screen.`,
+      focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${oneLine(focus.description, 400)}` : ''}` : '',
+      events.length ? `Events that ${mode}:\n${lines(events, fmtEvent)}` : `No events that ${mode}.`,
+      todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: (focus ? [{ kind: 'event', id: focus.id, name: focus.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
+    hints: focus ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
+  }), [events, focus, todos, span, mode])
 
   return (
     <main className="page cal-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><CalIcon size={16} /> Calendar <span className="muted">· {title}</span></h2>
-        <div className="no-drag header-right">
-          <div className="seg">
-            {VIEWS.map((v) => <button key={v} className={v === view ? 'active' : ''} onClick={() => setView(v)}>{v[0].toUpperCase() + v.slice(1)}</button>)}
+        <SidebarToggle />
+        <h2><CalIcon size={16} /> Calendar</h2>
+        {/* Navigation reads left to right as one phrase: where "now" is, step, and what is on screen. */}
+        <div className="no-drag cal-nav">
+          <button className="ghost-btn" onClick={() => { const n = new Date(); setWeek(startOfWeek(mode === 'month' ? new Date(n.getFullYear(), n.getMonth(), 4) : n)) }}>Today</button>
+          <button className="icon-btn" title={`Previous ${mode}`} aria-label={`Previous ${mode}`} onClick={() => step(-1)}><ChevronLeft size={16} /></button>
+          <button className="icon-btn" title={`Next ${mode}`} aria-label={`Next ${mode}`} onClick={() => step(1)}><ChevronRight size={16} /></button>
+          <div className="seg" role="group" aria-label="Calendar view">
+            <button type="button" aria-pressed={mode === 'week'} onClick={() => setMode('week')}>Week</button>
+            <button type="button" aria-pressed={mode === 'month'} onClick={() => setMode('month')}>Month</button>
           </div>
-          {google?.connected && (
-            <button className={`icon-btn ${railOpen ? 'on' : ''}`} title="Show or hide calendars" onClick={() => setRailOpen(!railOpen)}><Layers size={16} /></button>
-          )}
-          <button className="ghost-btn" onClick={() => setAnchor(new Date())}>Today</button>
-          <button className="icon-btn" onClick={() => shiftAnchor(-1)}><ChevronLeft size={16} /></button>
-          <button className="icon-btn" onClick={() => shiftAnchor(1)}><ChevronRight size={16} /></button>
-          <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
         </div>
+        <span className="cal-range">{mode === 'month' ? span : rangeLabel(days[0], days[6])}</span>
+        <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'calendar' }]} />
+          {google?.connected && <button className="icon-btn" title="Refresh" aria-label="Refresh calendar" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
+          <div className="cal-plan"><PlannerPanel days={7} onApplied={() => void load(true)} /></div>
+          {google?.connected && <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>}
+        </div>
+        <AppSwitcher />
       </header>
 
       {!google?.connected && (
-        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button></div>
+        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => useStore.getState().openSettings(PIM_SETTINGS_TAB)}>Connect {label}</button></div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
       <div className="cal-body">
-        {google?.connected && railOpen && (
-          <aside className="cal-rail">
-            <h4>My calendars</h4>
-            {cals.map((c) => (
-              <label key={c.id} className={`cal-rail-item ${shown.has(c.id) ? '' : 'off'}`} title={c.name}>
-                <input type="checkbox" checked={shown.has(c.id)} style={c.color ? { accentColor: c.color } : undefined} onChange={() => toggleCal(c.id)} />
-                <span className="name">{c.name}</span>
-              </label>
-            ))}
-            {cals.length === 0 && <span className="muted small">No calendars found.</span>}
-          </aside>
-        )}
-        {view === 'month' ? (
-          <CalendarMonth month={anchor} events={events} todos={todos} onOpen={setOpen} onPickDay={(d) => { setAnchor(d); setView('day') }} />
-        ) : (
-          <div className="cal-scroll">
-            <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected} onOpen={setOpen} onCreate={create} />
+        {google?.connected && <CalendarRail calendars={calendars} ready={ready} shown={calendarOn} toggle={toggle} />}
+        <div className="cal-scroll">
+          {mode === 'month' ? (
+            <CalendarMonth month={monthDate} events={shown} todos={todos} onOpen={(e) => setEditing({ event: e })}
+              onPickDay={(d) => { setWeek(startOfWeek(d)); setMode('week') }} colorOf={eventColor} />
+          ) : (
+          <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
+            onOpen={(e) => setEditing({ event: e })} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+            onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
+            onCreateAllDay={(day) => setEditing({ event: null, draft: { day, allDay: true } })}
+            onMove={google?.connected ? (e, start, end) => void move(e, start, end) : undefined}
+            colorOf={eventColor} />
+          )}
+        </div>
+        {/* Over the grid, not instead of it: clicking a slot is still how an event gets made. */}
+        {google?.connected && query && !loading && !error && shown.length === 0 && (
+          <div className="empty-state cal-empty">
+            <CalIcon size={28} />
+            <h2>No events this {mode}</h2>
+            <p>Click any slot to add one, or plan your todos into the free time.</p>
+            <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>
           </div>
         )}
       </div>
-      {loading && <div className="cal-loading">Loading…</div>}
+      {loading && events.length === 0 && <div className="cal-loading">Loading…</div>}
 
-      {open && (
-        <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
-          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.summary}</h2><button className="icon-btn" onClick={() => setOpen(null)}><X size={16} /></button></header>
-            <section>
-              <p>{open.all_day ? 'All day' : `${new Date(open.start).toLocaleString()} – ${fmtTime(new Date(open.end))}`}</p>
-              {open.calendar && <p className="muted small"><span className="cal-dot" style={open.color ? { background: open.color } : undefined} /> {open.calendar}</p>}
-              {open.location && <p className="muted">{open.location}</p>}
-              {open.attendees.length > 0 && <p className="muted small">With {open.attendees.join(', ')}</p>}
-              {open.description && <p className="muted small" style={{ whiteSpace: 'pre-wrap' }}>{open.description}</p>}
-            </section>
-            <footer>
-              {open.meet && <a className="ghost-btn" href={open.meet} target="_blank" rel="noreferrer"><Video size={13} /> Join Meet</a>}
-              {open.link && <a className="ghost-btn" href={open.link} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open in Google Calendar</a>}
-              <span style={{ flex: 1 }} />
-              <button className="primary-btn" onClick={() => { setOpen(null); newChat(null); void send(`Prep me for "${open.summary}" (${new Date(open.start).toLocaleString()}). Check my memory, documents and recent email for context on the attendees and topic, then give me a one-page brief.`) }}>Prep me</button>
-            </footer>
-          </div>
-        </div>
+      {editing && (
+        <EventEditor key={editing.event?.id ?? `new:${editing.draft?.day ?? ''}:${editing.draft?.hour ?? ''}:${editing.draft?.start ?? ''}:${editing.draft?.end ?? ''}:${editing.draft?.allDay ? 'day' : ''}`}
+          event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void load()} />
       )}
     </main>
   )

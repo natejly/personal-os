@@ -1,6 +1,8 @@
 /**
- * Launches the Python backend as a sidecar and waits for it to be healthy.
- * Set PERSONAL_OS_BACKEND_URL to use an already-running backend (handy in dev).
+ * Launches the Python backend as a sidecar, waits for it to be healthy, and supervises it: an unexpected
+ * exit is restarted (same port and token when possible) with backoff, up to a limit, and every state
+ * change is announced so the renderer can react. Set PERSONAL_OS_BACKEND_URL to use an already-running
+ * backend (handy in dev); that one is not supervised.
  */
 import { app } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
@@ -8,11 +10,52 @@ import { randomBytes } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { createServer } from 'net'
 import { join } from 'path'
+import type { BackendInfo, BackendRestart, BackendState } from '../shared/types'
+import { logBackendOutput, logDir, logMain, registerSecret } from './logging'
+import { RestartPolicy } from './restartPolicy'
 
 let child: ChildProcess | null = null
 let url = ''
 let token = ''
+let port = 0
 let lastError: string | null = null
+let state: BackendState = 'starting'
+const history: BackendRestart[] = []
+const policy = new RestartPolicy()
+const listeners = new Set<(info: BackendInfo) => void>()
+/** Bumped by every manual restart and by stopBackend, so a supervision loop that was sleeping knows it is stale. */
+let epoch = 0
+let stopping = false
+let supervising = false
+/** True while launch() is waiting for /health: it sees an early exit itself, so the exit handler must not also restart. */
+let launching = false
+
+export function backendInfo(): BackendInfo {
+  return { state, url, error: lastError, restarts: history.slice(-20), logDir: logDir(), appVersion: app.getVersion(), electron: process.versions.electron ?? '' }
+}
+
+export function onBackendState(cb: (info: BackendInfo) => void): () => void {
+  listeners.add(cb)
+  return () => listeners.delete(cb)
+}
+
+function setState(next: BackendState): void {
+  state = next
+  logMain('info', `[backend] state -> ${next}${lastError && next === 'failed' ? `: ${lastError}` : ''}`)
+  const info = backendInfo()
+  for (const cb of listeners) {
+    try {
+      cb(info)
+    } catch {
+      /* a closed window must not stop the others hearing it */
+    }
+  }
+}
+
+function record(reason: string, outcome: BackendRestart['outcome']): void {
+  history.push({ at: new Date().toISOString(), reason: reason.slice(0, 300), outcome })
+  if (history.length > 50) history.shift()
+}
 
 export function backendUrl(): string {
   return url
@@ -38,6 +81,14 @@ function readTokenFile(): string {
 
 export function backendStatus(): { running: boolean; url: string; error: string | null } {
   return { running: !!url && (!!process.env.PERSONAL_OS_BACKEND_URL || (!!child && child.exitCode === null)), url, error: lastError }
+}
+
+function canBind(p: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const srv = createServer()
+    srv.once('error', () => resolve(false))
+    srv.listen(p, '127.0.0.1', () => srv.close(() => resolve(true)))
+  })
 }
 
 function freePort(): Promise<number> {
@@ -71,6 +122,13 @@ function loadDotEnv(): Record<string, string> {
     break
   }
   return out
+}
+
+/** Packaged: the python-build-standalone interpreter scripts/bundle-backend.sh laid under <Resources>/backend. */
+function bundledPython(): string | null {
+  if (!app.isPackaged) return null
+  const py = join(process.resourcesPath, 'backend', 'python', 'bin', 'python3')
+  return existsSync(py) ? py : null
 }
 
 function backendDir(): string {
@@ -111,6 +169,7 @@ export async function startBackend(): Promise<string> {
     url = process.env.PERSONAL_OS_BACKEND_URL.replace(/\/+$/, '')
     lastError = null
     await waitHealthy(url, 10_000)
+    setState('ready')
     // Read the token only once the backend is up: it mints <data-dir>/.auth_token on startup.
     token = (process.env.PERSONAL_OS_AUTH_TOKEN ?? '').trim() || readTokenFile()
     if (!token) {
@@ -119,38 +178,174 @@ export async function startBackend(): Promise<string> {
     }
     return url
   }
-  const port = await freePort()
-  const dir = backendDir()
-  const py = pythonBin(dir)
-  const dataDir = join(app.getPath('userData'), 'data')
-  url = `http://127.0.0.1:${port}`
-  token = randomBytes(32).toString('base64url')
+  token = token || randomBytes(32).toString('base64url')
+  registerSecret(token)
   lastError = null
-
-  child = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], {
-    cwd: dir,
-    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1', PERSONAL_OS_AUTH_TOKEN: token },
-    stdio: ['ignore', 'pipe', 'pipe']
-  })
-  child.stdout?.on('data', (d) => process.stdout.write(`[backend] ${d}`))
-  child.stderr?.on('data', (d) => {
-    const s = String(d)
-    process.stderr.write(`[backend] ${s}`)
-    if (/error|traceback|No module named/i.test(s)) lastError = s.trim().split('\n').slice(-3).join('\n')
-  })
-  child.on('error', (e) => {
-    lastError = `Failed to start python (${py}): ${e.message}`
-  })
-  child.on('exit', (code) => {
-    if (code !== 0 && code !== null) lastError = lastError ?? `Backend exited with code ${code}`
-  })
-
-  await waitHealthy(url, 30_000)
+  setState('starting')
+  try {
+    await launch(false)
+  } catch (e) {
+    // The first start failing is reported as before (the renderer shows the error page); a child that is
+    // still running is stopped so a later manual restart starts clean.
+    lastError = lastError ?? (e as Error).message
+    killChild()
+    setState('failed')
+    throw e
+  }
+  setState('ready')
   return url
 }
 
-export function stopBackend(): void {
-  if (child && child.exitCode === null) child.kill()
+/** Spawn the backend on `port` (the previous one when it is still free) and wait until it answers /health. */
+async function launch(reuse: boolean): Promise<void> {
+  launching = true
+  try {
+    await spawnAndWait(reuse)
+  } finally {
+    launching = false
+  }
+}
+
+async function spawnAndWait(reuse: boolean): Promise<void> {
+  port = reuse && port && (await canBind(port)) ? port : await freePort()
+  // Packaged builds run the bundled interpreter, with personal_os installed in its site-packages, so
+  // no PYTHONPATH is needed and the cwd is just a stable directory. Dev uses backend/.venv.
+  const bundled = bundledPython()
+  const dir = bundled ? join(process.resourcesPath, 'backend') : backendDir()
+  const py = bundled ?? pythonBin(dir)
+  const dataDir = join(app.getPath('userData'), 'data')
+  url = `http://127.0.0.1:${port}`
+  // A packaged app must not inherit the developer's .env: users onboard through Settings instead.
+  const env = {
+    ...(app.isPackaged ? {} : loadDotEnv()),
+    ...process.env,
+    PYTHONUNBUFFERED: '1',
+    ...(bundled ? { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' } : {}),
+    PERSONAL_OS_AUTH_TOKEN: token,
+    // The backend exits when this process goes away, even if it was killed without a chance to stop it.
+    PERSONAL_OS_PARENT_WATCH: '1',
+    PERSONAL_OS_APP_VERSION: app.getVersion(),
+    ...(app.isPackaged ? { PERSONAL_OS_PACKAGED: '1' } : {}),
+    ...(logDir() ? { PERSONAL_OS_LOG_DIR: logDir() } : {})
+  }
+  const me = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], {
+    cwd: dir,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  child = me
+  logMain('info', `[backend] spawned pid ${me.pid} on ${url}`)
+  me.stdout?.on('data', (d) => {
+    process.stdout.write(`[backend] ${d}`)
+    logBackendOutput(String(d))
+  })
+  me.stderr?.on('data', (d) => {
+    const s = String(d)
+    process.stderr.write(`[backend] ${s}`)
+    logBackendOutput(s)
+    if (/error|traceback|No module named/i.test(s)) lastError = s.trim().split('\n').slice(-3).join('\n')
+  })
+  me.on('error', (e) => {
+    lastError = `Failed to start python (${py}): ${e.message}`
+  })
+  me.on('exit', (code, signal) => {
+    if (code !== 0 && code !== null) lastError = lastError ?? `Backend exited with code ${code}`
+    logMain('warn', `[backend] pid ${me.pid} exited code=${code} signal=${signal}`)
+    // Only the live child's death is news; a child we replaced or stopped is not.
+    if (child === me && !stopping && !launching) void superviseAfterExit(`exited with ${signal ? `signal ${signal}` : `code ${code}`}`)
+  })
+  await waitHealthy(url, 30_000)
+}
+
+/** `sync` is for process exit, where no timer will ever fire: kill outright instead of a grace period. */
+/** Resolves once the child has exited, or a second after the SIGKILL if even that did not take. */
+function killChild(sync = false): Promise<void> {
+  const c = child
   child = null
+  if (!c || c.exitCode !== null || c.signalCode !== null) return Promise.resolve()
+  if (sync) {
+    c.kill('SIGKILL')
+    return Promise.resolve()
+  }
+  c.kill()
+  return new Promise((resolve) => {
+    // A backend stuck in shutdown would keep its port and the database; escalate after a grace period.
+    const t = setTimeout(() => {
+      if (c.exitCode === null) c.kill('SIGKILL')
+      setTimeout(resolve, 1000)
+    }, 3000)
+    t.unref?.()
+    c.once('exit', () => {
+      clearTimeout(t)
+      resolve()
+    })
+  })
+}
+
+/** The backend died on its own: restart it with backoff, or give up after too many exits in a short time. */
+async function superviseAfterExit(reason: string): Promise<void> {
+  if (supervising || process.env.PERSONAL_OS_BACKEND_URL) return
+  supervising = true
+  const mine = ++epoch
+  try {
+    for (;;) {
+      const delay = policy.next(Date.now())
+      if (delay === null) {
+        record(reason, 'gave-up')
+        lastError = `The backend stopped ${policy.recent} times in a few minutes and was not restarted again. Last: ${reason}${lastError ? `\n${lastError}` : ''}`
+        killChild()
+        setState('failed')
+        return
+      }
+      record(reason, 'restarted')
+      setState('restarting')
+      await new Promise((r) => setTimeout(r, delay))
+      if (mine !== epoch || stopping) return
+      try {
+        lastError = null
+        await launch(true)
+        if (mine !== epoch || stopping) return
+        setState('ready')
+        return
+      } catch (e) {
+        reason = (e as Error).message
+        killChild()
+      }
+    }
+  } finally {
+    if (mine === epoch) supervising = false
+  }
+}
+
+/** Restart on the user's request: from `failed`, or to recover a backend that is alive but wedged. */
+export async function restartBackend(): Promise<BackendInfo> {
+  if (process.env.PERSONAL_OS_BACKEND_URL) return backendInfo()
+  epoch++
+  supervising = false
+  policy.reset()
+  record('restart requested', 'manual')
+  lastError = null
+  setState('restarting')
+  const mine = epoch
+  // The old process must be gone before `launch(true)` checks its port, or the restart moves to a new one.
+  await killChild()
+  if (mine !== epoch || stopping) return backendInfo()
+  try {
+    await launch(true)
+    if (mine === epoch && !stopping) setState('ready')
+  } catch (e) {
+    if (mine === epoch) {
+      lastError = lastError ?? (e as Error).message
+      killChild()
+      setState('failed')
+    }
+  }
+  return backendInfo()
+}
+
+export function stopBackend(sync = false): void {
+  stopping = true
+  epoch++
+  killChild(sync)
   token = ''
 }

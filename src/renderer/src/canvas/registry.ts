@@ -1,18 +1,21 @@
-import type { FC } from 'react'
+import type { FC, PointerEvent as ReactPointerEvent } from 'react'
 import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
+import type { MenuEntry } from './Menu'
 import { setDefaultConfigs, setDefaultSizes } from './store'
-import { def as board } from './widgets/board'
+import { def as activity } from './widgets/activity'
 import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
-import { def as dashboardWidget } from './widgets/dashboardWidget'
+import { def as crew } from './widgets/crew'
+import { def as doc } from './widgets/doc'
 import { def as documents } from './widgets/documents'
+import { def as face } from './widgets/face'
 import { def as graph } from './widgets/graph'
 import { def as memory } from './widgets/memory'
 import { def as note } from './widgets/note'
 import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
-import { def as todos } from './widgets/todos'
 import { def as usage } from './widgets/usage'
+import { MODULES } from '../shell/registry'
 import '../styles/widgets.css'
 
 /** One entry of the catalog: everything the canvas needs to open, size, chrome and drop onto a kind. */
@@ -29,11 +32,13 @@ export interface WidgetDef {
   statusful?: boolean
   /** counts against the 6-slot concurrent-live cap: iframes, d3, pollers */
   heavy?: boolean
-  /** cannot open without a ref_id: chat, board, note, dashboard-widget, project */
+  /** cannot open without a ref_id: chat, note, project */
   needsRef?: boolean
   defaultConfig?: Record<string, unknown>
   /** drag payload kinds this widget accepts as a drop target */
   accepts?: DragKind[]
+  /** Entries the frame adds to this window's right-click menu, under 'Bring to front'. */
+  menu?: (win: CanvasWindow, onConfig: (patch: Record<string, unknown>) => void) => MenuEntry[]
   Component: FC<WidgetProps>
 }
 
@@ -44,7 +49,17 @@ export interface WidgetProps {
   live: boolean
   onConfig: (patch: Record<string, unknown>) => void
   onTitle: (t: string) => void
+  /** The frame's move gesture, for a body that has shed its chrome and wants to be dragged by its face. Absent on a locked space. */
+  onMove?: (e: ReactPointerEvent) => void
 }
+
+/** A kind a module owns; absent means the module list and the catalog disagree, which cannot render. */
+function moduleWidget(kind: WidgetKind): WidgetDef {
+  const w = MODULES.find((m) => m.widget?.kind === kind)?.widget
+  if (!w) throw new Error(`canvas registry: no module provides the "${kind}" widget`)
+  return w
+}
+const todos = moduleWidget('todos')
 
 /**
  * The catalog, in the order of contract §6. The annotation is the guard: `Record<WidgetKind, WidgetDef>`
@@ -54,15 +69,17 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   chat,
   todos,
   calendar,
-  board,
   note,
-  'dashboard-widget': dashboardWidget,
   memory,
   graph,
   documents,
   recap,
   project,
-  usage
+  usage,
+  activity,
+  doc,
+  face,
+  crew
 }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.

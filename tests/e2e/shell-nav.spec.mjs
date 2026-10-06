@@ -42,8 +42,13 @@ test('app switcher icons open Lists, Calendar, Mail and the page agent; one is p
 })
 
 test('hidden views are not in the sidebar; More modules opens Settings → Modules', async ({ grain }) => {
-  const { page } = grain
-  // defaults hide Meetings and Activity
+  const { page, api } = grain
+  // Meetings and Activity ship on; hiding them takes them out of the sidebar
+  await expect(sidebarItem(page, 'Meetings')).toHaveCount(1)
+  await expect(sidebarItem(page, 'Activity')).toHaveCount(1)
+  await api('/settings', { method: 'PUT', body: { hiddenViews: ['meetings', 'activity'] } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
   await expect(sidebarItem(page, 'Meetings')).toHaveCount(0)
   await expect(sidebarItem(page, 'Activity')).toHaveCount(0)
   await page.getByRole('button', { name: /More modules/ }).click()
@@ -224,7 +229,10 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Files'); await heading(page, /Files/)
   await menu(grain, 'Mail'); await heading(page, /Mail/)
   await menu(grain, 'Library'); await heading(page, /Library/)
-  // Hidden by default: a toast offers to turn it on instead of silently doing nothing
+  // A hidden view: a toast offers to turn it on instead of silently doing nothing
+  await grain.api('/settings', { method: 'PUT', body: { hiddenViews: ['meetings', 'activity'] } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
   await menu(grain, 'Activity')
   await expect(page.getByText('Activity is turned off')).toBeVisible()
   await menu(grain, 'Meetings')

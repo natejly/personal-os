@@ -87,6 +87,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await expect(field(p2, 'Context window')).toHaveValue('64000')
   await dialog(p2).getByRole('tab', { name: 'Autonomy' }).click()
   await expect(field(p2, 'Max tool rounds per reply')).toHaveValue('17')
+  await dialog(p2).getByRole('tab', { name: 'Permissions' }).click()
   await expect(dialog(p2).getByRole('button', { name: 'Accept all', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await dialog(p2).getByRole('tab', { name: 'Provider & cost' }).click()
   await expect(field(p2, 'Default chat model')).toHaveValue('mock-chat-2')

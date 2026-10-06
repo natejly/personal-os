@@ -58,7 +58,7 @@ test('desk mid-run when the backend dies: it is Interrupted, never silently resu
   await openChat(page, 'Crashy')
   await expect(page.getByText('Interrupted by a restart')).toBeVisible({ timeout: 60_000 })
   await expect(strip(page)).toContainText('Interrupted')
-  await expect(chatRow(page, 'Crashy').locator('.convo-desk')).toHaveAttribute('aria-label', 'Interrupted')
+  await expect(chatRow(page, 'Crashy').locator('.attn-dot')).toHaveAttribute('aria-label', /Interrupted/)
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
   await strip(page).getByRole('button', { name: /Resume/ }).dblclick()
   await waitStatus(grain, desk.id, 'review', 120_000)

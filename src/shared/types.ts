@@ -1400,6 +1400,10 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
+  /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
+  provider?: string | null
+  /** Which providers have a key saved. Never the keys. Missing on an older backend. */
+  providerKeysSet?: Record<string, boolean>
   firecrawlApiKeySet?: boolean
   /** FIRECRAWL_API_KEY is set in the backend's environment; used when the field is empty. Never the value. */
   firecrawlEnvKey?: boolean
@@ -1652,12 +1656,19 @@ export interface UsageReport {
   daily: (UsageBucket & { day: string })[]
   hourly: { hour: number; calls: number }[]
   weekday: { weekday: string; calls: number }[]
-  by_model: (UsageBucket & { model: string })[]
+  /** Today, this week (from Monday) and this month, local time, whatever `days` is. `since` is the first day. */
+  periods?: Record<UsagePeriod, UsageBucket & { since: string }>
+  /** One row per model: the proxy alias and the provider's full id (`ids`) are merged under the short name. */
+  by_model: (UsageBucket & { model: string; ids?: string[] })[]
+  /** What the calls were for (chat, jobs, memory, embeddings...), in display order. */
+  by_feature?: (UsageBucket & { feature: string; label: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
   by_tag: (UsageBucket & { tag: string })[]
   prices: Record<string, ModelPrice>
 }
+
+export type UsagePeriod = 'today' | 'week' | 'month'
 
 export interface ModelInfo {
   id: string

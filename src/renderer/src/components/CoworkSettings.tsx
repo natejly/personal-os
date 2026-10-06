@@ -235,7 +235,6 @@ export function DeskGates({ draft, patch }: { draft: Settings; patch: (p: Partia
 
 export default function CoworkSettings({ draft, patch }: { draft: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
   const saved = useStore((s) => s.settings)
-  const models = useStore((s) => s.models)
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
@@ -245,15 +244,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
         checked={draft.deskNotify !== false} onChange={(deskNotify) => patch({ deskNotify })} />
-
-      <h4>Vision</h4>
-      <label>
-        <span>Model that reads pictures</span>
-        <input list="cowork-vision-models" value={draft.visionModel ?? ''} placeholder="Same as the chat model" spellCheck={false}
-          onChange={(e) => patch({ visionModel: e.target.value })} />
-        <datalist id="cowork-vision-models">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
-        <small className="muted">Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.</small>
-      </label>
 
       <h4>Work environment</h4>
       <WorkEnv draft={draft} saved={saved} patch={patch} />

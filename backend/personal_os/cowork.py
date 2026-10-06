@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from .attention import for_desk
 from .db import Database, new_id, now, row_to_dict
 from .workspace import Workspace
 from . import redact
@@ -431,6 +432,7 @@ class Desks:
         d = row_to_dict(r, DESK_JSON) or {}
         d["archived"] = bool(d["archived"])
         d["live"] = d["status"] in LIVE
+        d["attention"] = for_desk(d)
         d["unseen"] = unseen
         d["actions"] = desk_actions(d["status"])
         return d

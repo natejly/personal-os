@@ -26,6 +26,8 @@ import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
+import type { Attention, RunInfo, ShipChecklist } from '@shared/types'
+import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
@@ -183,6 +185,9 @@ export interface State {
   /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
   agentInbox: AgentInbox | null
   jobs: Job[]
+  /** Ship checklists by id, kept live by the `ship_checklist` event (job rows and ship_checklist tool cards read it). */
+  shipChecklists: Record<string, ShipChecklist>
+  upsertShip: (c: ShipChecklist) => void
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
@@ -1275,13 +1280,35 @@ export const useStore = create<State>((set, get) => {
     if (get().sessions[id]) patchConversation(id, (c) => (c.title === title ? c : { ...c, title }))
     set((st) => ({ conversations: st.conversations.map((c) => (c.id === id && c.title !== title ? { ...c, title } : c)) }))
   }
+  /**
+   * A chat with no stream in this window flipping into needs-you or blocked (a run started elsewhere, a reply
+   * left running off screen) rings like one it streams. Desk and job runs have their own notifiers.
+   * ponytail: the first connection replays the topic's ring, so frames in its first seconds are treated as
+   * history; a real flip in that window shows on the sidebar dot without a banner.
+   */
+  const runNoticed = new Set<string>()
+  let quietUntil = 0
+  let jobsTimer: ReturnType<typeof setTimeout> | null = null
+  const ringRunState = (prevStatus: string | undefined, info: RunInfo): void => {
+    if (info.kind === 'job') {
+      // A job's dot follows its runs: re-read the list once a burst of frames settles.
+      if (jobsTimer === null) jobsTimer = setTimeout(() => { jobsTimer = null; void get().refreshJobs() }, 500)
+      return
+    }
+    if (Date.now() < quietUntil || info.kind === 'desk') return
+    const next: Attention = info.attention ?? attention('run', info.status)
+    if (!wantsYou(next) || attention('run', prevStatus) === next) return
+    if (get().sessions[info.conversation_id]?.streaming?.runId === info.run_id) return  // its own stream announces it
+    const visible = onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained })
+    announce(info.conversation_id, info.run_id, next === 'needs_you' ? 'approval' : 'failed', visible, runNoticed)
+  }
   const watchBackgroundEvents = async (): Promise<void> => {
     let backoff = 1000
     await seedLiveRuns()
     for (;;) {
       try {
         // Reset on open, not on an event: a quiet stream that drops after an hour is not a failing backend.
-        for await (const ev of backgroundStream(eventsSince, undefined, () => { backoff = 1000 })) {
+        for await (const ev of backgroundStream(eventsSince, undefined, () => { backoff = 1000; if (eventsSince === 0) quietUntil = Date.now() + 2000 })) {
           if (ev.seq !== null) eventsSince = ev.seq
           if (ev.event === 'learned') {
             get().onLearned(ev.data)
@@ -1303,6 +1330,8 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'todos_changed') {
             if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
+          } else if (ev.event === 'ship_checklist') {
+            get().upsertShip(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
@@ -1318,7 +1347,9 @@ export const useStore = create<State>((set, get) => {
             void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))
           } else if (ev.event === 'run_state') {
             const info = ev.data
+            const prevStatus = get().liveRuns[info.conversation_id]?.status
             set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
+            ringRunState(prevStatus, info)
             const sess = get().sessions[info.conversation_id]
             // A reply this window did not start: follow it if it is on screen, or, once it ends, read what it persisted.
             const next = sess && followRun(sess.streaming, info, onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained }))
@@ -1837,6 +1868,8 @@ export const useStore = create<State>((set, get) => {
     recapLoading: false,
     agentInbox: null,
     jobs: [],
+    shipChecklists: {},
+    upsertShip: (c) => set((st) => ({ shipChecklists: { ...st.shipChecklists, [c.id]: c } })),
     routineDraft: null,
     scheduleAsRoutine: (conversationId, messageId) => {
       const msgs = get().sessions[conversationId]?.conversation.messages ?? []
@@ -4458,6 +4491,12 @@ export const useSessionStatus = (convId?: string): SessionStatus => useStore((s)
 /** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */
 export const useChatPulse = (convId?: string): SessionStatus =>
   useStore((s) => pulseStatus(pick(s, convId)?.status ?? 'idle', convId ? s.liveRuns[convId] : undefined))
+/** A sidebar row's attention state (lib/attention.ts): its desk's when it has one, otherwise its pulse. */
+export const chatAttentionOf = (s: State, conv: Pick<Conversation, 'id' | 'settings'>): Attention => {
+  const deskId = conv.settings?.deskId
+  return chatAttention(pulseStatus(pick(s, conv.id)?.status ?? 'idle', s.liveRuns[conv.id]), deskId ? s.desks.find((d) => d.id === deskId) : undefined)
+}
+export const useChatAttention = (conv: Pick<Conversation, 'id' | 'settings'>): Attention => useStore((s) => chatAttentionOf(s, conv))
 /** Sends the run has not confirmed yet, for the dimmed bubbles under the transcript. */
 export const usePendingSends = (convId?: string): readonly PendingSend[] => useStore((s) => pick(s, convId)?.pendingSends ?? EMPTY_PENDING)
 

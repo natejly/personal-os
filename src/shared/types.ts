@@ -135,6 +135,34 @@ export interface Skill {
   rationale?: string
 }
 
+/** Teach a task: the step draft extracted from a screen recording (teach.py normalize). */
+export interface TeachStep {
+  n: number
+  app: string
+  action: string
+  detail: string
+  /** The recording frame that shows this step, when the model named one. */
+  frame: number | null
+}
+export interface TeachDraft {
+  title: string
+  goal: string
+  inputs: { name: string; example: string }[]
+  steps: TeachStep[]
+}
+export interface TeachRecording {
+  id: string
+  created_at: number
+  status: 'recording' | 'ready' | 'extracted' | 'saved'
+  source: 'screen' | 'import'
+  frame_count: number
+  steps: TeachDraft | null
+  skill_id: string | null
+  job_id: string | null
+  /** Seconds since Start, only while recording. */
+  elapsed?: number
+}
+
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
 export interface ToolResultHandle {
   id: string
@@ -325,6 +353,31 @@ export interface McpGrant {
 }
 
 /** GET /permissions/grants: every standing grant, so one view shows what runs without asking. */
+/** One row of GET /approvals/history (approval_log.py): an answer to a card, a call a standing grant or plan let
+ *  through, or a reviewer's verdict. */
+export interface ApprovalLogEntry {
+  id: number
+  ts: number
+  conversation_id: string | null
+  conversation_title?: string
+  run_id: string | null
+  desk_id: string | null
+  agent: string | null
+  tool: string
+  args_summary: string
+  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) */
+  decision: string
+  /** once | conversation | global | rule | plan */
+  scope: string | null
+  rule: unknown
+  note: string | null
+  reviewer_verdict: string | null
+  reviewer_reason: string | null
+  reviewer_model: string | null
+  reviewer_ms: number | null
+  call_id: string | null
+}
+
 export interface PermissionGrants {
   /** 'Allow for this chat session' keys, in memory until restart. */
   session: { conversation_id: string; title: string; keys: string[] }[]
@@ -1597,6 +1650,21 @@ export type BackgroundEvent =
   | { event: 'todos_changed'; data: Record<string, never> }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }
+  /** A ship checklist moved (ship.py): the whole row, so the card and the job row update without a refetch. */
+  | { event: 'ship_checklist'; data: ShipChecklist }
+
+/** One step of a ship checklist. awaiting_confirm is only ever the merge step. */
+export type ShipStepStatus = 'pending' | 'running' | 'green' | 'red' | 'skipped' | 'awaiting_confirm'
+export interface ShipStep {
+  name: 'tests' | 'push' | 'pr' | 'merge'; status: ShipStepStatus
+  started_at: number | null; ended_at: number | null; log_tail: string; link: string | null
+}
+/** GET /ship/{id}: tests -> push -> PR -> merge for one branch; the merge runs only after the user confirms. */
+export interface ShipChecklist {
+  id: string; job_id: string | null; run_id: string | null; repo_path: string; branch: string; base: string
+  test_command: string | null; status: 'running' | 'awaiting_confirm' | 'done' | 'failed' | 'cancelled'
+  steps: ShipStep[]; pr_url: string | null; merged_sha: string | null; created_at: number; updated_at: number
+}
 
 /** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
 export interface ShellJobInfo {
@@ -1779,6 +1847,7 @@ export type DeskAction = 'start' | 'pause' | 'resume' | 'stop' | 'message' | 'de
 
 export interface Desk {
   id: string
+  attention?: Attention
   conversation_id: string
   project_id: string | null
   title: string
@@ -2118,6 +2187,9 @@ export interface DragPayload {
 /** Run state of one chat session. Travels the cross-window bus, so it is a shared type, not a store-local one. */
 export type SessionStatus = 'idle' | 'working' | 'done' | 'error' | 'needs-approval'
 
+/** What a chat, desk or job asks of the user right now. Derived in one table (backend attention.py, mirrored by lib/attention.ts). */
+export type Attention = 'idle' | 'working' | 'needs_you' | 'blocked'
+
 /** 200 body of POST /conversations/{id}/chat once the run is a background task. */
 export interface ChatRunStarted {
   run_id: string
@@ -2165,6 +2237,7 @@ export interface RunInfo {
   status?: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   ended_at?: number | null
   error?: string | null
+  attention?: Attention
 }
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
@@ -2176,6 +2249,8 @@ export type RunKind = JobKind | 'digest'
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
   id: string
+  /** From GET /jobs only: rows returned by create/update leave it out. */
+  attention?: Attention
   name: string
   /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off; 'watch' fires when
    *  files appear or change in `watch_dir` (and on `cron` too, when it has one); 'mail' fires when a thread

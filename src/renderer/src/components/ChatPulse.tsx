@@ -1,6 +1,7 @@
 import { useChatPulse, useUnread } from '../store'
 import Face from './Face'
-import type { SessionStatus } from '@shared/types'
+import type { Attention, SessionStatus } from '@shared/types'
+import { ATTENTION_LABEL } from '../lib/attention'
 
 const TITLE: Partial<Record<SessionStatus, string>> = {
   working: 'Working…',
@@ -24,4 +25,13 @@ export default function ChatPulse({ conversationId, size = 14, face }: { convers
       {status === 'idle' && unread > 0 && <span className="pulse unread" title="Unread reply" />}
     </>
   )
+}
+
+/**
+ * The one attention mark for sidebar rows (chats, desks, jobs): four colours from the app's --st-* vocabulary,
+ * the state in words on hover and for screen readers. `detail` says what the state is about (a desk's status).
+ */
+export function AttentionDot({ state, detail }: { state: Attention; detail?: string }): JSX.Element {
+  const label = detail ? `${ATTENTION_LABEL[state]}: ${detail}` : ATTENTION_LABEL[state]
+  return <span className={`attn-dot attn-${state}`} role="img" title={label} aria-label={label} />
 }

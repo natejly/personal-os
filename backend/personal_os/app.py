@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -81,11 +81,13 @@ from . import resume
 from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
+from . import ship as ship_mod
 from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
+from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
@@ -483,6 +485,8 @@ async def _reliability_shutdown() -> None:
 work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
+from . import teach  # noqa: E402
+teach_svc = teach.Teach(db)  # teach-a-task recordings (screen frames -> a candidate skill)
 guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text refreshed when the bundle changes
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
@@ -2880,6 +2884,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
                 forced = forced or taint_only
                 perm = permrules.Resolution(mode, forced)
+                pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
@@ -2993,6 +2998,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # The user already said yes to exactly this call on a card an earlier turn let go
                     # of (see parked_report). Spent here, once; any other arguments still ask.
                     asks = False
+                # History: a call that runs without a card because something already stood behind it — an approved plan
+                # step, an allow rule or session grant, or the review gate's look (approval_log.py). Card answers log in decide().
+                if not asks and pre is None and not proposing and mode != "off":
+                    granted_by = (("conversation" if permrules.SESSION.covers(conv_id, perm.keys) else "rule")
+                                  if pre_mode == "ask" and perm.mode == "on" else None)
+                    if claimed is not None or review or granted_by:
+                        approval_log.record(db, tool=c["name"], args=args, conversation_id=conv_id, call_id=uid,
+                                            run_id=run.run_id if run else None, desk_id=desk_id or None, agent=run.kind if run else None,
+                                            decision="plan" if claimed else ("always" if granted_by else "auto"),
+                                            scope="plan" if claimed else granted_by,
+                                            rule=perm.rule if granted_by == "rule" else None, review=review)
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
@@ -3019,7 +3035,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
                         opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                     forced=forced, desk_id=run.desk_id, danger=danger)
+                                                     forced=forced, desk_id=run.desk_id, danger=danger, review=review)
                         mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
                                     and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
                         if not mine:
@@ -4539,6 +4555,17 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
             for a in rows]
 
 
+@app.get("/approvals/history")
+def approval_history(limit: int = 50, offset: int = 0, tool: str | None = None, decision: str | None = None,
+                     q: str | None = None) -> dict[str, Any]:
+    """The approval log (approval_log.py), newest first: {items, more}. Each item names its chat when it had one."""
+    page = approval_log.history(db, limit=limit, offset=offset, tool=tool, decision=decision, q=q)
+    titles = _conversation_titles({r["conversation_id"] for r in page["items"] if r.get("conversation_id")})
+    for r in page["items"]:
+        r["conversation_title"] = titles.get(r.get("conversation_id") or "")
+    return page
+
+
 def _conversation_titles(ids: set[str]) -> dict[str, str]:
     if not ids:
         return {}
@@ -4632,7 +4659,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
-    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited)
+    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited, rules=body.rules)
     live = bool(fut and not fut.done())
     # Read off the row as it was BEFORE this decision: decide() overwrites `decided_by` with 'user'.
     was_parked = bool(pending and pending.get("parked_at"))
@@ -5116,7 +5143,19 @@ def _check_job_budget(budget: dict[str, Any] | None) -> None:
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
-    return jobs.list()
+    return _with_attention(jobs.list())
+
+
+def _with_attention(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each job's attention state (attention.py), from its last run and its pending proposals."""
+    waiting: dict[str, int] = {}
+    for p in proposals.list("pending", limit=500):
+        if p.get("job_id"):
+            waiting[p["job_id"]] = waiting.get(p["job_id"], 0) + 1
+    for jb in rows:
+        last = run_store.get(jb["last_run_id"]) if jb.get("last_run_id") else None
+        jb["attention"] = for_job(jb, (last or {}).get("status"), waiting.get(jb["id"], 0))
+    return rows
 
 
 @app.get("/jobs/preview")
@@ -5288,6 +5327,88 @@ async def dry_run_job(id: str) -> dict[str, Any]:
     run_id = await _launch_job(job, fire)
     row = run_store.get(run_id) if run_id else None
     return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+
+
+# ---------------- ship checklist (ship.py): tests -> push -> PR -> merge, the merge only on the user's confirm ----------------
+async def _ship_run(argv: list[str], cwd: str, sandboxed: bool, timeout: float) -> tuple[bool, str]:
+    return await shell_tool.run_fixed(toolbox.shell, argv, cwd, settings(), sandboxed=sandboxed, timeout=timeout)
+
+
+def _conv_job(cid: str | None) -> str | None:
+    conv = convos.get(cid, with_messages=False) if cid else None
+    return (conv or {}).get("settings", {}).get("job_id") if conv else None
+
+
+ship_runner = ship_mod.Ship(db, _ship_run, events.publish, roots=lambda: shell_tool.granted_roots(settings(), None), job_of=_conv_job)
+ship_mod.register(toolbox, ship_runner)
+
+
+class ShipIn(BaseModel):
+    repo_path: str | None = None
+    branch: str | None = None
+    base: str | None = None
+    test_command: str | None = None
+
+
+def _ship_row(id: str) -> dict[str, Any]:
+    row = ship_runner.get(id)
+    if not row:
+        raise HTTPException(404, "No such ship checklist")
+    return row
+
+
+async def _ship_do(fn: Any, id: str) -> dict[str, Any]:
+    _ship_row(id)
+    try:
+        out = fn(id)
+        return await out if asyncio.iscoroutine(out) else out
+    except ship_mod.ShipError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/jobs/{id}/ship")
+async def start_job_ship(id: str, body: ShipIn) -> dict[str, Any]:
+    """Start a ship checklist for this job by hand. Fields left out come from the job's latest checklist."""
+    _known_job(id)
+    prev = ship_runner.latest(id) or {}
+    want = {k: getattr(body, k) or prev.get(k) for k in ("repo_path", "branch", "base", "test_command")}
+    if not want["repo_path"] or not want["branch"]:
+        raise HTTPException(400, "repo_path and branch are required for this job's first checklist")
+    try:
+        row = ship_runner.create(repo_path=want["repo_path"], branch=want["branch"], base=want["base"] or "main",
+                                 test_command=want["test_command"], job_id=id)
+    except ship_mod.ShipError as e:
+        raise HTTPException(400, str(e)) from e
+    ship_runner.start(row["id"])
+    return row
+
+
+@app.get("/jobs/{id}/ship")
+def latest_job_ship(id: str) -> dict[str, Any] | None:
+    _known_job(id)
+    return ship_runner.latest(id)
+
+
+@app.get("/ship/{id}")
+def get_ship(id: str) -> dict[str, Any]:
+    return _ship_row(id)
+
+
+@app.post("/ship/{id}/confirm")
+async def confirm_ship(id: str) -> dict[str, Any]:
+    """The user's go for the merge step. The only way a merge ever runs."""
+    return await _ship_do(ship_runner.confirm, id)
+
+
+@app.post("/ship/{id}/cancel")
+async def cancel_ship(id: str) -> dict[str, Any]:
+    return await _ship_do(ship_runner.cancel, id)
+
+
+@app.post("/ship/{id}/retry")
+async def retry_ship(id: str) -> dict[str, Any]:
+    """Re-run from the first step that is not green; a merge asks for confirmation again."""
+    return await _ship_do(ship_runner.retry, id)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:
@@ -5499,11 +5620,12 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0), "seen": r["run_id"] in seen,
+            "attention": for_run(r),
             "links": fire.get("links") or [],  # the daily digest's fix-it links; job runs have none
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
-                    "consecutive_failures": jb["consecutive_failures"]}
+                    "consecutive_failures": jb["consecutive_failures"], "attention": "blocked"}
                    for jb in jobs.list() if not jb["enabled"] and jb.get("paused_reason")]
     # One row per desk waiting on the user, unless one of its approvals is already listed above (same thing, twice).
     asked = {a.get("desk_id") for a in pending_approvals if a.get("desk_id")}
@@ -8498,6 +8620,144 @@ def preview_skills(project_id: str | None = None) -> dict[str, Any]:
     return {"block": block, "tokens_estimate": estimate_tokens(block),
             "included": [{"id": s["id"], "name": s["name"]} for s in rows[:MAX_INJECTED_SKILLS]],
             "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
+
+
+# ---------------- teach a task: a screen recording becomes a candidate skill (teach.py) ----------------
+class TeachStepsIn(BaseModel):
+    title: str = ""
+    goal: str = ""
+    inputs: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+
+
+class TeachScheduleIn(BaseModel):
+    kind: Literal["cron", "once"] = "cron"
+    cron: str = ""
+    run_at: float | None = None
+    timezone: str | None = None
+    test: bool = False  # kick a dry run of the new job as the test run
+
+
+def _teach_row(rid: str) -> dict[str, Any]:
+    row = teach_svc.get(rid)
+    if not row:
+        raise HTTPException(404, "No such recording")
+    return row
+
+
+@app.get("/teach")
+def teach_list() -> list[dict[str, Any]]:
+    return teach_svc.list()
+
+
+@app.post("/teach/start")
+def teach_start() -> dict[str, Any]:
+    """Start a screen recording. {needs_permission: true} when macOS has not granted Screen Recording: the panel
+    then offers the same Grant / Open System Settings as the Activity panel (/activity/permissions/*)."""
+    try:
+        return teach_svc.start()
+    except teach.TeachError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/teach/stop")
+async def teach_stop() -> dict[str, Any]:
+    row = await asyncio.to_thread(teach_svc.stop)
+    if not row:
+        raise HTTPException(409, "Nothing is recording")
+    return row
+
+
+@app.post("/teach/import")
+async def teach_import(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Cut an existing screen recording into frames (needs ffmpeg). The video is deleted once its frames are out."""
+    tmp = db.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    dest = tmp / f"teach-{new_id()}{teach.safe_suffix(file.filename or '')}"
+    size = 0
+    try:
+        with dest.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > teach.MAX_IMPORT_BYTES:
+                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
+                out.write(chunk)
+        return await asyncio.to_thread(teach_svc.import_video, dest)
+    except teach.TeachError as e:
+        raise HTTPException(422, str(e)) from e
+    finally:
+        dest.unlink(missing_ok=True)
+
+
+@app.get("/teach/{rid}")
+def teach_get(rid: str) -> dict[str, Any]:
+    return _teach_row(rid)
+
+
+@app.get("/teach/{rid}/frames/{n}")
+def teach_frame(rid: str, n: int) -> FileResponse:
+    _teach_row(rid)
+    p = teach_svc.frame_path(rid, n)
+    if not p:
+        raise HTTPException(404, "No such frame")
+    return FileResponse(p, media_type="image/jpeg", headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/teach/{rid}/extract")
+async def teach_extract(rid: str) -> dict[str, Any]:
+    """One model call over a spread of frames and the app timeline. The result is a draft the user edits."""
+    _teach_row(rid)
+    try:
+        return await teach_svc.extract(rid, settings())
+    except teach.TeachError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.put("/teach/{rid}/steps")
+def teach_steps(rid: str, body: TeachStepsIn) -> dict[str, Any]:
+    _teach_row(rid)
+    return teach_svc.set_steps(rid, body.model_dump())
+
+
+@app.post("/teach/{rid}/save")
+def teach_save(rid: str) -> dict[str, Any]:
+    """The draft as a *candidate* skill (source 'teach'): lint and approval apply exactly as to any other skill."""
+    row = _teach_row(rid)
+    if not (row.get("steps") or {}).get("steps"):
+        raise HTTPException(422, "Extract or write the steps first")
+    name, desc, procedure = teach.to_skill(row["steps"])
+    s = skills.propose(name, desc, procedure, source="teach",
+                       rationale=f"Taught from a screen recording ({time.strftime('%Y-%m-%d', time.localtime(row['created_at']))})")
+    teach_svc.attach(rid, skill_id=s["id"], status="saved")
+    return {"skill": s, "findings": _lint_skill(s["name"], s["description"], s["procedure"], s["id"]), "recording": teach_svc.get(rid)}
+
+
+@app.post("/teach/{rid}/schedule")
+async def teach_schedule(rid: str, body: TeachScheduleIn) -> dict[str, Any]:
+    """A routine that follows the saved skill, created through POST /jobs so every job check applies. Only an
+    approved skill can be scheduled: a job run reads it with skill_view, which shows approved skills only."""
+    row = _teach_row(rid)
+    s = skills.get(row.get("skill_id") or "")
+    if not s:
+        raise HTTPException(409, "Save the steps to the library first")
+    if s["status"] != "approved":
+        raise HTTPException(409, "Approve the skill in the Library first: a routine can only follow an approved skill")
+    job = await create_job(JobIn(name=s["name"][:120], kind=body.kind, cron=body.cron, run_at=body.run_at,
+                                 timezone=body.timezone, enabled=True,
+                                 prompt=f'Follow the approved skill "{s["name"]}" (read it with skill_view {s["id"]}) and carry out the task.'))
+    teach_svc.attach(rid, job_id=job["id"])
+    out: dict[str, Any] = {"job": job, "recording": teach_svc.get(rid)}
+    if body.test:
+        out["test"] = await dry_run_job(job["id"])
+    return out
+
+
+@app.delete("/teach/{rid}")
+async def teach_delete(rid: str) -> dict[str, bool]:
+    """Discard a recording: its frames and timeline are deleted. A skill or routine made from it stays."""
+    _teach_row(rid)
+    await asyncio.to_thread(teach_svc.delete, rid)
+    return {"ok": True}
 
 
 class InduceIn(BaseModel):

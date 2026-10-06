@@ -425,5 +425,3 @@
 .desk-panel .desk-files { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 40%) minmax(0, 1fr); }
 .desk-panel .desk-tree { border-right: 0; border-bottom: 1px solid var(--border); }
 @media (max-width: 760px) { .desk-panel { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 8; } }
-/* The sidebar row of a chat working autonomously: its desk's state as a dot (words in the title and aria-label). */
-.convo-desk { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ring); margin-right: 2px; }

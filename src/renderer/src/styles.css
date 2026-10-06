@@ -371,6 +371,11 @@ kbd {
 /* The unread dot. A running chat is shown by its face (ChatPulse), which blinks instead of a dot. */
 .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
 @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+/* A sidebar row's attention state (AttentionDot): the --st-* vocabulary, words in its title and aria-label. */
+.attn-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--st-idle); margin-right: 2px; }
+.attn-working { background: var(--st-working); }
+.attn-needs_you { background: var(--st-needs-you); }
+.attn-blocked { background: var(--st-failed); }
 .empty-hint { color: var(--text-faint); font-size: 13px; padding: 6px 8px; }
 .sidebar-bottom { border-top: 1px solid var(--border); padding: 3px 0; flex-shrink: 0; }
 
@@ -1470,6 +1475,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-group-rows { display: flex; flex-direction: column; gap: 4px; padding: 0 0 6px 14px; }
 .tool-group-rows > .tool-event { border: 0; background: transparent; }
 .tool-err { padding: 0 10px 6px 30px; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-review { padding: 0 10px 6px 30px; font-size: 11px; }
+.approval-history-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.approval-history-filters input, .approval-history-filters select { flex: 1 1 120px; min-width: 0; }
 .tool-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Not while it waits for approval: that row already says "needs approval", and nothing is running. */
 .tool-event.pending:not(.awaiting) .tool-name::after { content: ' running…'; font-weight: 400; color: var(--text-faint); }
@@ -2807,6 +2815,13 @@ select:focus-visible {
 .skill-intent button { display: inline-flex; align-items: center; gap: 4px; }
 .skill-preview { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; font-family: var(--mono, ui-monospace, monospace); }
 .skill-body input:focus, .skill-body textarea:focus { border-color: var(--accent); }
+/* Teach a task (TeachTaskPanel) */
+.teach-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.teach-frame { flex: none; width: 120px; height: 75px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+.teach-steps { display: flex; flex-direction: column; gap: 6px; }
+.teach-step { display: grid; grid-template-columns: auto auto 2fr 1fr 2fr auto auto auto; gap: 6px; align-items: center; }
+.teach-step .teach-frame { width: 64px; height: 40px; }
+.teach-step:not(:has(.teach-frame)) { grid-template-columns: auto 2fr 1fr 2fr auto auto auto; }
 /* Buttons in these rows are the shared .primary-btn.sm / .ghost-btn.sm; there is no local size. */
 .row-actions { display: flex; align-items: center; gap: 8px; }
 

@@ -1,4 +1,4 @@
-import { Calendar, Mail, Library } from 'lucide-react'
+import { Brain, Calendar, Mail, Library } from 'lucide-react'
 import type { Settings, WidgetKind } from '@shared/types'
 import type { View } from '../store'
 import { MODULES } from './registry'
@@ -24,6 +24,7 @@ export interface NavEntry {
  * title-bar apps 110 and 120; a module slots by its `nav.order`, plus 100 when it asks for the title bar.
  */
 const SHELL: NavEntry[] = [
+  { view: 'memory', label: 'Memory', description: 'What Grain remembers about you: standing preferences, a dated log, notes, your voice and the knowledge graph', icon: <Brain size={15} />, kind: 'memory', place: 'sidebar', order: 30 },
   { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },
   { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, place: 'apps', order: 120 }

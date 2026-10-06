@@ -23,7 +23,6 @@ TOKEN_SECRET_FIELDS = {
     "googleToken": ("token", "refresh_token", "client_secret"),
     "microsoftToken": ("access_token", "refresh_token"),
 }
-GOOGLE_TOKEN_SECRET_FIELDS = TOKEN_SECRET_FIELDS["googleToken"]
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;

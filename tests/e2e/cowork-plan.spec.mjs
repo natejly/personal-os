@@ -26,7 +26,7 @@ test('plan-first chat: awaiting plan, approve the plan card in the chat, steps r
   const { llm, desk } = await planDesk(grain, 'Planner')
   await expect(strip(page)).toContainText('Plan to approve')
   // one plan card in the chat, not the transcript's and the desk's both
-  await expect(page.getByRole('button', { name: /^Approve (all|\d)/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Approve/ })).toHaveCount(1)
   await expect(page.locator('.aplan')).toContainText('Write plan.md')
   await expect(page.locator('.aplan')).toContainText('waiting on you')
   llm.push({ calls: [{ name: 'desk_write_file', args: { path: 'outputs/plan.md', content: '# Plan\n\nplanned\n' } }] }, { calls: [DELIVER_PLAN] }, { calls: [DONE] }, { text: 'ok' })
@@ -46,7 +46,9 @@ test('plan-first chat: edited arguments are what runs ("Approve with changes")',
   await page.getByRole('button', { name: /Edit arguments/ }).click()
   const edited = { path: 'outputs/plan.md', content: '# Edited\n\nby the user\n' }
   await page.locator('.aplan-edit textarea').fill(JSON.stringify(edited, null, 2))
-  await expect(page.getByRole('button', { name: 'Approve & run' })).toBeDisabled()
+  // the edit relabels the button and keeps it enabled
+  await expect(page.getByRole('button', { name: 'Approve & run' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Approve with changes' })).toBeEnabled()
   llm.push({ calls: [{ name: 'desk_write_file', args: edited }] }, { calls: [DELIVER_PLAN] }, { calls: [DONE] }, { text: 'ok' })
   await page.getByRole('button', { name: 'Approve with changes' }).click()
   await waitStatus(grain, desk.id, 'review')
@@ -71,7 +73,8 @@ test('dropping a step from a plan leaves it unauthorised', async ({ grain }) => 
   const { page } = grain
   const { desk } = await planDesk(grain, 'Dropper')
   await page.locator('.aplan-drop input').check()
-  // every step dropped: backend-side nothing is pre-approved, UI still offers Approve with changes
-  await expect(page.getByRole('button', { name: 'Approve with changes' })).toBeVisible()
+  // every step dropped: nothing is left to approve, so the button reads "Approve 0 of 1" and is disabled
+  await expect(page.getByRole('button', { name: /^Approve 0 of \d+$/ })).toBeDisabled()
+  await expect(page.getByText('Nothing left to approve')).toBeVisible()
   expect(realErrors(grain)).toEqual([])
 })

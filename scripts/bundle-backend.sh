@@ -39,9 +39,9 @@ mkdir -p "$OUT"
 tar -xzf "$CACHE/$NAME" -C "$OUT"   # -> $OUT/python
 PY="$OUT/python/bin/python3"
 
-# Non-editable install of the backend plus the macOS activity extras. The backend never imports
+# Non-editable install of the backend plus the macOS activity, whistle and charts extras. The backend never imports
 # LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled.
-uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[activity,whistle]"
+uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[activity,whistle,charts]"
 
 # The standalone build's console scripts carry absolute shebangs into this build dir; nothing uses
 # them (the app runs `python -m personal_os`), so drop them.

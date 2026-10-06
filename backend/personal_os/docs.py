@@ -815,13 +815,6 @@ class Docs:
                           (sc, up + r["path"][len(src) + 1:], r["created_at"]))
         return self.folders()
 
-    def forget_scope(self, project_id: str) -> None:
-        """Drop a deleted project's folder rows. Its docs are demoted to personal by the schema's
-        ON DELETE SET NULL, so the folders they still name resurface in the personal tree — which is
-        the point: the project is gone, the writing is not."""
-        with self.db.tx() as c:
-            c.execute("DELETE FROM doc_folders WHERE scope=?", (scope_key(project_id),))
-
     # ---- revisions ----
     @staticmethod
     def append_after(content: str, section: str) -> str:

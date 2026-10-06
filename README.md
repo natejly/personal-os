@@ -71,8 +71,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    delete one after asking; Settings → Trash restores it.
 4. **Lists, Calendar, Mail.** These are apps at the top right of the title bar
    (⌘2, ⌘3, ⌘5). Lists holds your todos in a rail of lists, with a one-line add
-   row. With Google connected, todos sync both ways with Google Tasks, and todos
-   that have a due date also appear on a "Grain Todos" calendar. Double-click the
+   row. With Google connected, todos sync both ways with Google Tasks. Double-click the
    calendar to add an event; Mail drafts and sends with a 90 s undo.
 5. **Projects and memory.** In the sidebar, **+** next to Projects makes a
    project: instructions, knowledge files, and memories that apply only inside
@@ -378,8 +377,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Awaiting approval, Open questions), each claim with its evidence, and the inbox
   shows them as sections.
 - **Google Workspace.** Sign in once with your own OAuth client; Calendar,
-  Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos and creates a
-  "Grain Todos" calendar that mirrors todos with a due date.
+  Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos. The planner puts its
+  Focus blocks on a calendar named "Grain Todos".
 
 ## Architecture
 
@@ -465,9 +464,9 @@ signed in. Tokens and the client secret are kept in the macOS Keychain (a 0600
 file in the data folder if the Keychain is unavailable). `gmail_send` is a
 separate tool you can keep off; `gmail_draft` never sends.
 
-Connecting turns on two-way sync between your todos and Google Tasks, and
-creates a calendar named "Grain Todos" that mirrors every todo with a due date.
-Both can be switched off under Integrations.
+Connecting turns on two-way sync between your todos and Google Tasks, which can
+be switched off under Integrations. Todos are not copied onto your calendar; the
+planner puts its Focus blocks on a calendar named "Grain Todos".
 
 When a token is revoked, expires (a "Testing" consent screen kills refresh
 tokens after 7 days) or is missing a permission that was unticked on the consent

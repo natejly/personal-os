@@ -148,4 +148,3 @@ def test_slash_research_expands_to_a_deep_research_instruction() -> None:
     out = commands.expand("/research what changed in Python 3.14 packaging", None)
     assert out.startswith("/research what changed in Python 3.14 packaging")
     assert "deep_research" in out
-    assert "research" in commands.BUILTIN

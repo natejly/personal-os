@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { PlanRecordStep } from '@shared/types'
-import { argRows, canon, edited, editPayload, invalid, sameArgs } from './planDigest'
+import { argRows, broken, canon, edited, editPayload, invalid, planOfCall } from './planDigest'
 
 /** [arguments, the exact canonical string backend/tests/test_runlog.py asserts for them]. */
 const CANON_FIXTURES: [Record<string, unknown>, string][] = [
@@ -67,12 +67,6 @@ test('an undefined value is dropped, because that is what the request body would
   assert.equal(canon({ l: [1, undefined, 2] }), '{"l":[1,null,2]}')
 })
 
-test('sameArgs sees past reformatting', () => {
-  assert.ok(sameArgs({ a: 1, b: 2 }, { b: 2, a: 1 }))
-  assert.ok(sameArgs({ n: 1 }, { n: 1.0 }))
-  assert.ok(!sameArgs({ n: 1 }, { n: '1' }))
-})
-
 test('edited() ignores a reformat and catches one changed character', () => {
   const s = step()
   assert.ok(!edited(s, JSON.stringify(s.arguments, null, 2)), 'reindenting is not an edit')
@@ -89,28 +83,69 @@ test('an absent or unparseable draft is not an edit', () => {
   assert.ok(!edited(s, '[1,2]'), 'an array is not an arguments object')
 })
 
-test('editPayload sends only real changes, with 1-based indexes', () => {
-  const steps = [step({ idx: 1 }), step({ idx: 2, step_id: 's2' }), step({ idx: 3, step_id: 's3' })]
+// The chat payload: what POST /approvals binds a propose_plan approval to. Kept steps by 0-based idx; an edited
+// step carries its new arguments (the backend re-derives its digest), an untouched one is bound to the proposed ones.
+const steps3 = [step({ idx: 0 }), step({ idx: 1, step_id: 's2' }), step({ idx: 2, step_id: 's3' })]
+const changedArgs = '{"to":["a@b.c"],"subject":"Hi there","body":"x"}'
+
+test('editPayload is null when nothing was touched, and a reformat is not a touch', () => {
+  assert.equal(editPayload(steps3, {}, []), null)
   const drafts = {
-    1: JSON.stringify(steps[0].arguments, null, 4),              // a reformat: nothing to send
-    2: '{"to":["a@b.c"],"subject":"Hi there","body":"x"}'        // a real edit
+    0: JSON.stringify(steps3[0].arguments, null, 4),
+    1: '{"subject":"Hi","body":"x","to":["a@b.c"]}'
   }
-  assert.deepEqual(editPayload(steps, drafts, []), [
-    { idx: 2, arguments: { to: ['a@b.c'], subject: 'Hi there', body: 'x' } }
+  assert.equal(editPayload(steps3, drafts, []), null, 'indentation and key order are not edits')
+})
+
+test('one changed value is sent as {idx, arguments}; the untouched siblings are sent as {idx}', () => {
+  assert.deepEqual(editPayload(steps3, { 1: changedArgs }, []), [
+    { idx: 0 },
+    { idx: 1, arguments: { to: ['a@b.c'], subject: 'Hi there', body: 'x' } },
+    { idx: 2 }
   ])
 })
 
-test('a dropped step outranks an edit to the same step', () => {
-  const steps = [step({ idx: 1 }), step({ idx: 2, step_id: 's2' })]
-  const drafts = { 2: '{"to":["x@y.z"],"subject":"Hi","body":"x"}' }
-  assert.deepEqual(editPayload(steps, drafts, [2]), [{ idx: 2, drop: true }])
+test('a dropped step is absent from the payload, and a drop outranks an edit to the same step', () => {
+  assert.deepEqual(editPayload(steps3, {}, [1]), [{ idx: 0 }, { idx: 2 }])
+  assert.deepEqual(editPayload(steps3, { 1: changedArgs }, [1]), [{ idx: 0 }, { idx: 2 }])
+  assert.deepEqual(editPayload(steps3, {}, [0, 1, 2]), [], 'every step dropped: an empty list, not null')
 })
 
-test('editPayload keeps the card order and is empty when nothing was touched', () => {
-  const steps = [step({ idx: 1 }), step({ idx: 2, step_id: 's2' }), step({ idx: 3, step_id: 's3' })]
-  const drafts = { 3: '{"to":["c@d.e"],"subject":"Hi","body":"x"}' }
-  assert.deepEqual(editPayload(steps, drafts, [1]).map((e) => e.idx), [1, 3])
-  assert.deepEqual(editPayload(steps, {}, []), [])
+test('invalid JSON in a kept step blocks, is never sent as a guess, and is ignored once the step is dropped', () => {
+  const drafts = { 1: '{"to": [' }
+  assert.ok(broken(steps3, drafts, []))
+  assert.deepEqual(editPayload(steps3, drafts, []), null, 'the broken draft is not an edit')
+  assert.ok(!broken(steps3, drafts, [1]))
+  assert.ok(broken(steps3, { 0: '' }, []), 'an emptied textarea blocks too')
+  assert.ok(!broken(steps3, { 0: changedArgs }, []))
+})
+
+test('a propose_plan call reads as a pending plan record, step idx being its 0-based position', () => {
+  const plan = planOfCall('c1', {
+    title: 'Reply to both', intent: 'accept',
+    steps: [{ tool: 'gmail_send', arguments: { to: 'a@b.c' }, why: 'accept' }, { tool: 'calendar_create' }]
+  }, true)
+  assert.equal(plan.call_id, 'c1')
+  assert.equal(plan.status, 'pending')
+  assert.ok(plan.tainted)
+  assert.deepEqual(plan.steps.map((s) => [s.idx, s.tool, s.why]), [[0, 'gmail_send', 'accept'], [1, 'calendar_create', '']])
+  assert.deepEqual(plan.steps[1].arguments, {})
+  assert.deepEqual(plan.steps.map((s) => s.step_id), ['c1:0', 'c1:1'], 'step ids are unique for React keys')
+})
+
+test('a malformed propose_plan call degrades to an empty plan rather than throwing', () => {
+  assert.deepEqual(planOfCall('c', undefined, false).steps, [])
+  assert.deepEqual(planOfCall('c', { steps: 'nope' }, false).steps, [])
+  const odd = planOfCall('c', { steps: [null, { tool: 'x', arguments: [1] }] }, false)
+  assert.deepEqual(odd.steps.map((s) => [s.tool, s.arguments]), [['unknown', {}], ['x', {}]])
+})
+
+test('the chat payload is bound to the new digest only for the edited step', () => {
+  // The security property end to end: whatever the card sends is what the backend digests.
+  const plan = planOfCall('c', { steps: [{ tool: 'gmail_send', arguments: { to: 'a@b.c', body: 'x' } }, { tool: 'gmail_send', arguments: { to: 'd@e.f' } }] }, false)
+  const sent = editPayload(plan.steps, { 0: '{"body":"x","to":"evil@b.c"}' }, [])
+  assert.deepEqual(sent, [{ idx: 0, arguments: { body: 'x', to: 'evil@b.c' } }, { idx: 1 }])
+  assert.notEqual(canon(sent?.[0].arguments), canon(plan.steps[0].arguments))
 })
 
 test('argRows renders in canonical key order and leaves strings alone', () => {

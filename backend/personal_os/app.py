@@ -169,8 +169,8 @@ async def _validation_error(request: Request, exc: Exception) -> JSONResponse:  
 
 @app.exception_handler(sqlite3.IntegrityError)
 async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone, a widget whose dashboard is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
+    """Safety net for the writers wsid() cannot cover (a row whose parent project, conversation, doc or run was deleted
+    since the window last refreshed). A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
     409 and a usable message rather than a bare 500."""
     detail = ("Something this refers to no longer exists - reload and try again."
               if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
@@ -315,7 +315,7 @@ modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=pim,
     sid=lambda p: sid(p), wsid=lambda p: wsid(p), mcp=lambda: mcp))
 _todos_module = module_get(modules, "todos", TodosModule)
-todos, tasks_sync, todo_calendar = _todos_module.store, _todos_module.tasks_sync, _todos_module.calendar_mirror
+todos, tasks_sync = _todos_module.store, _todos_module.tasks_sync
 for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
@@ -750,7 +750,7 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar", "meetings"}
+SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "meetings"}
 
 
 def public_settings() -> dict[str, Any]:
@@ -8956,12 +8956,6 @@ class RejectIn(BaseModel):
     note: str | None = None
 
 
-class PlanDecisionIn(BaseModel):
-    decision: str                          # approve | edit | reject
-    steps: Any = None                      # [{idx, arguments} | {idx, drop: true}]
-    note: str | None = None
-
-
 UNDECIDED = ("proposed", "stale", "promote_failed")
 
 
@@ -9452,12 +9446,6 @@ async def stop_desk(id: str, detach: bool = False) -> dict[str, Any]:
     if detach:
         convos.update(desk["conversation_id"], {"settings": {"deskId": ""}})
     return out or desk
-
-
-@app.get("/cowork/desks/{id}/events")
-def desk_event_list(id: str, limit: int = 200) -> list[dict[str, Any]]:
-    _desk_or_404(id, False)
-    return desks.events(id, _clamp(limit))
 
 
 @app.post("/cowork/desks/{id}/seen")

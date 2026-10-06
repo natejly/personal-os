@@ -122,5 +122,3 @@ export const def: WidgetDef = {
   defaultConfig: { tab: 'chats' },
   Component: ProjectWidget
 }
-
-export default ProjectWidget

@@ -403,7 +403,7 @@ class Google:
     def calendar_ensure(self, summary: str) -> dict[str, Any]:
         """Find, or create, a secondary calendar of this name that we can write to.
 
-        Used for the todo mirror: its own calendar keeps generated events out of the
+        Used by the planner: its own calendar keeps generated events out of the
         primary one and lets the user hide them all with one checkbox in Google Calendar.
         """
         want = summary.strip().lower()
@@ -711,7 +711,7 @@ class Google:
     def _event_body(self, f: dict[str, Any], patch: bool = False) -> dict[str, Any]:
         """Translate our flat event fields into a Calendar API body (insert or patch)."""
         body: dict[str, Any] = {}
-        # id and status: only the todo calendar mirror sets them (a deterministic id, and undeleting it).
+        # id and status pass through when a caller sets them (a chosen event id, or undeleting one).
         for src, dst in (("id", "id"), ("status", "status"),
                          ("summary", "summary"), ("description", "description"), ("location", "location"),
                          ("visibility", "visibility"), ("transparency", "transparency"),

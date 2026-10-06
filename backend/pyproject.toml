@@ -18,7 +18,9 @@ dependencies = [
   # Platform readers (reach.py): YouTube transcripts/search, RSS/Atom
   "yt-dlp>=2025.1",
   "feedparser>=6.0",
-  "matplotlib>=3.8",
+  # Imported directly (embeddings, retrieval, image resizing); they used to arrive only through matplotlib.
+  "numpy>=2.0",
+  "pillow>=10.0",
   "google-api-python-client>=2.140",
   "google-auth-oauthlib>=1.2",
   "google-auth-httplib2>=0.2",
@@ -41,6 +43,11 @@ activity = [
 # (meetings.sttBackend = whistle). Its weights download from Hugging Face on first use.
 whistle = [
   "cactus-needle>=3.1",
+]
+# run_python charts before the shared work environment (envs.py) has installed its own copy. No backend module
+# imports it; the packaged build installs it so the first chart works offline.
+charts = [
+  "matplotlib>=3.8",
 ]
 
 [project.scripts]

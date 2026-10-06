@@ -13,7 +13,7 @@ const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_typ
  * browser_*: one line for what was done, the page it left the browser on, any notes, and the page text behind a
  * disclosure. The transcript's last browser card can also show the chat's browser live, with Take over and Hide.
  */
-export default function BrowserCard(props: ToolCardProps): JSX.Element {
+function BrowserCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const d = p.data

@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -64,12 +64,10 @@ export const readDocMode = (): DocMode => {
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
+/** Settings sections, one per rail entry in SettingsModal.
  *  'memory' holds the Memory panel above the learning and search-index controls.
- *  'modules' is the tab labelled Views; the id is kept so existing callers keep working.
- *  'permissions' is the one place every permission is set (it was 'tools'); 'cowork' is the Autonomy tab. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'cowork' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'appearance' | 'advanced' | 'data' | 'trash'
-export type KnowledgeTab = 'memory' | 'documents'
+ *  'permissions' is the one place every permission is set; 'cowork' is the Autonomy tab. */
+export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'meetings' | 'permissions' | 'cowork' | 'modules' | 'behavior' | 'data'
 export type { Scope, SessionStatus }
 
 /**
@@ -173,7 +171,6 @@ export interface State {
   google: GoogleStatus | null
   microsoft: MicrosoftStatus | null
   tasksSync: TasksSyncStatus | null
-  todoCalendar: TodoCalendarStatus | null
   /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
   mailWatchKind: 'to_reply' | 'awaiting_reply' | null
   dashboard: TodayDashboard | null
@@ -595,9 +592,6 @@ export interface State {
   connectMicrosoft: () => Promise<void>
   disconnectMicrosoft: () => Promise<void>
   refreshTasksSync: () => Promise<void>
-  refreshTodoCalendar: () => Promise<void>
-  setTodoCalendar: (patch: { enabled?: boolean; calendarId?: string; keepCompleted?: boolean }) => Promise<void>
-  runTodoCalendar: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
   refreshTodos: (scope?: Scope, includeDone?: boolean, sort?: 'due' | 'urgency') => Promise<void>
@@ -1867,7 +1861,6 @@ export const useStore = create<State>((set, get) => {
     google: null,
     microsoft: null,
     tasksSync: null,
-    todoCalendar: null,
     mailWatchKind: null,
     dashboard: null,
     todos: [],
@@ -4285,37 +4278,12 @@ export const useStore = create<State>((set, get) => {
         set({ google: await api.google.status() })
         void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
         void get().refreshTasksSync()
-        void get().refreshTodoCalendar()
       } catch { /* ignore */ }
     },
     refreshTasksSync: async () => {
       try {
         set({ tasksSync: await api.google.tasksSync() })
       } catch { /* ignore */ }
-    },
-    refreshTodoCalendar: async () => {
-      try {
-        set({ todoCalendar: await api.google.todoCalendar() })
-      } catch { /* ignore */ }
-    },
-    setTodoCalendar: async (patch) => {
-      try {
-        set({ todoCalendar: await api.google.todoCalendarConfig(patch) })
-        // Turning it on mirrors in the background; show the result as soon as it lands.
-        if (patch.enabled) void get().runTodoCalendar()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
-    runTodoCalendar: async () => {
-      set((s) => ({ todoCalendar: s.todoCalendar && { ...s.todoCalendar, syncing: true } }))
-      try {
-        set({ todoCalendar: await api.google.todoCalendarRun() })
-        await get().refreshTodos()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-        void get().refreshTodoCalendar()
-      }
     },
     setTasksSync: async (patch) => {
       try {
@@ -4503,10 +4471,7 @@ export const useProject = (id: string | null | undefined): Project | undefined =
 
 const pick = (s: State, convId?: string): ChatSession | undefined => s.sessions[convId ?? s.focusedConversationId ?? '']
 
-/** The focused conversation: what `active` used to be. Every selector below returns state as-is. */
-export const selectActive = (s: State): Conversation | null => pick(s)?.conversation ?? null
-
-export const useSession = (convId?: string): ChatSession | undefined => useStore((s) => pick(s, convId))
+/** Every selector below returns state as-is. */
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
 /** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */

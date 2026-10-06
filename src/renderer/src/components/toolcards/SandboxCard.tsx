@@ -9,7 +9,7 @@ import { registerToolCard, type ToolCardProps } from './registry'
  * sandbox_*: a run shows its command, exit state and output tails; a file call shows the path and what it read,
  * wrote or listed; checkpoint, restore and reset are one status line. A networked sandbox's results are untrusted.
  */
-export default function SandboxCard(props: ToolCardProps): JSX.Element {
+function SandboxCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
   const d = p.data

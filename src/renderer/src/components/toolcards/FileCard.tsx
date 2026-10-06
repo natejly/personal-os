@@ -9,7 +9,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 const MODES: Record<string, string> = { create: 'Create new (refuses to replace)', overwrite: 'Replace if it exists', append: 'Add to the end' }
 
 /** Write file: the path, how it is written, and a preview of the content, all editable until you approve. */
-export default function FileCard(props: ToolCardProps): JSX.Element {
+function FileCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const a = event.arguments
   const [path, setPath] = useState(str(a.path))

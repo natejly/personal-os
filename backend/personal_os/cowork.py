@@ -149,10 +149,6 @@ AUTONOMY = ("plan", "ask", "propose")
 OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "mail_draft")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
 
-# The `kind` column's vocabulary. `status` is the fallback; the others let the timeline and the
-# Needs-you queue be styled without re-deriving meaning from the body text.
-EVENT_KINDS = ("status", "plan", "step", "output", "question", "blocked", "review", "failed",
-               "promoted", "interrupted", "note")
 TERMINAL = ("done", "failed", "stopped")
 # The statuses that hand work back: the chat a desk was started from is told when one is reached (see origin_report).
 REPORT_ON = ("review", "done", "failed")

@@ -80,9 +80,6 @@ READ_TOOLS = (
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
-# The browser stays with the parent: a desk has one browser session, and its consequential actions ask the user.
-WRITE_TOOLS = (*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_fetch_file",
-               "convert_document", "render_preview", "agent_spawn", "agent_wait", "agent_stop")
 
 def _one_line(text: Any, limit: int = 200) -> str:
     """One line. Pinned notes and folder paths sit in the system prompt, so a newline cannot open a section."""

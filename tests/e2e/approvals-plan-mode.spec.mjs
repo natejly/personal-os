@@ -11,7 +11,7 @@ const PLAN = (ws, ...names) => ({
   args: { title: 'Touch files', steps: names.map((n) => ({ tool: 'shell_run', title: `Touch ${n}`, arguments: touch(ws, n).args })) }
 })
 const card = (page) => page.getByRole('group', { name: 'Run command' })
-const planCard = (page) => page.locator('.plan-approval, .aplan').first()
+const planCard = (page) => page.locator('.aplan').first()
 
 async function setup(grain, planMode = 'always') {
   const ws = homeScratch()
@@ -53,7 +53,7 @@ test('plan mode always: a plan card appears, nothing runs before approval, an ap
     expect(existsSync(join(ws, 'planned.txt'))).toBe(false)
     // after approval the model makes the planned call, then repeats it
     llm.push({ calls: [touch(ws, 'planned.txt')] }, { calls: [touch(ws, 'planned.txt')] }, { text: 'plan done' })
-    await page.getByRole('button', { name: /Approve (all|\d+ of)/ }).or(page.getByRole('button', { name: 'Approve & run' })).first().click()
+    await page.getByRole('button', { name: 'Approve & run' }).click()
     // the first call is the approved step (no card); the identical second one is not covered any more
     await expect(card(page)).toBeVisible({ timeout: 90_000 })
     expect(existsSync(join(ws, 'planned.txt'))).toBe(true)
@@ -76,7 +76,7 @@ test('plan mode always: a call that is not in the approved plan still asks', asy
     await say(page, 'touch a file')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     llm.push({ calls: [touch(ws, 'not-in-plan.txt')] }, { text: 'finished' })
-    await page.getByRole('button', { name: /Approve (all|\d+ of)/ }).first().click()
+    await page.getByRole('button', { name: 'Approve & run' }).click()
     await expect(card(page)).toContainText('touch not-in-plan.txt', { timeout: 90_000 })
     expect(existsSync(join(ws, 'not-in-plan.txt'))).toBe(false)
     await card(page).getByRole('button', { name: 'Deny', exact: true }).click()
@@ -108,11 +108,13 @@ test('plan card: edited arguments are what the approval binds; the unedited call
     await newChat(page)
     await say(page, 'touch something')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
-    await planCard(page).getByRole('button', { name: /edit/i }).first().click()
+    await planCard(page).getByRole('button', { name: /Edit arguments/ }).first().click()
     const ta = planCard(page).locator('textarea').first()
     await ta.fill(JSON.stringify({ command: 'touch edited.txt', cwd: ws }))
     llm.push({ calls: [touch(ws, 'edited.txt')] }, { calls: [touch(ws, 'proposed.txt')] }, { text: 'done' })
-    await page.getByRole('button', { name: /Approve (all|\d+ of)/ }).first().click()
+    // an edited argument turns the untouched "Approve & run" into "Approve with changes"
+    await expect(page.getByRole('button', { name: 'Approve & run' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Approve with changes' }).click()
     await expect(card(page)).toContainText('touch proposed.txt', { timeout: 90_000 }) // the original args are no longer approved
     expect(existsSync(join(ws, 'edited.txt'))).toBe(true)
     expect(existsSync(join(ws, 'proposed.txt'))).toBe(false)
@@ -121,7 +123,7 @@ test('plan card: edited arguments are what the approval binds; the unedited call
   } finally { rmScratch(ws) }
 })
 
-test('plan card: Deny runs nothing and the model is told the plan was rejected', async ({ grain }) => {
+test('plan card: Reject runs nothing and the model is told the plan was rejected', async ({ grain }) => {
   const { page } = grain
   const { ws, llm } = await setup(grain)
   try {
@@ -130,7 +132,7 @@ test('plan card: Deny runs nothing and the model is told the plan was rejected',
     await say(page, 'touch never')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
     llm.push({ text: 'understood, plan dropped' })
-    await planCard(page).getByRole('button', { name: 'Deny' }).click()
+    await planCard(page).getByRole('button', { name: 'Reject', exact: true }).click()
     await expect(page.locator('.msg.assistant').last()).toContainText('plan dropped', { timeout: 90_000 })
     expect(existsSync(join(ws, 'never.txt'))).toBe(false)
     expect(JSON.stringify(llm.requests.at(-1))).toMatch(/rejected this plan/i)
@@ -163,7 +165,7 @@ test('plan card and approval card fit at 820x520', async ({ grain }) => {
     await newChat(page)
     await say(page, 'many files')
     await expect(planCard(page)).toBeVisible({ timeout: 90_000 })
-    const approve = page.getByRole('button', { name: /Approve (all|\d+ of)/ }).first()
+    const approve = page.getByRole('button', { name: 'Approve & run' })
     await approve.scrollIntoViewIfNeeded()
     await expect(approve).toBeVisible()
     const box = await approve.boundingBox()

@@ -26,8 +26,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-import httpx
-
 from . import insights as insights_mod
 from . import stt
 from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, device_input, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401

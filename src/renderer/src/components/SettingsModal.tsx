@@ -7,7 +7,7 @@ import { stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
 import { HOME_MODULES } from '../modules'
-import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
+import { homeModuleOn } from '../moduleToggles'
 import { navEntries, placeOf, type NavPlace } from '../shell/nav'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
@@ -298,14 +298,14 @@ export default function SettingsModal(): JSX.Element {
       }
       base.current = { ...base.current, ...changed }
       // The active view can be turned off; don't leave the app parked on an unreachable one.
-      if ((draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)) setView('home')
+      if ((draft.hiddenViews ?? []).includes(view)) setView('home')
       setSettingsOpen(false)
     } finally {
       setSaving(false)
     }
   }
 
-  const hidden = draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]
+  const hidden = draft.hiddenViews ?? []
   const setPlace = (v: string, p: NavPlace | 'hidden'): void => {
     const shown = hidden.filter((x) => x !== v)
     if (p === 'hidden') patch({ hiddenViews: [...shown, v] })

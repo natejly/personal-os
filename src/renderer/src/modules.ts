@@ -46,4 +46,4 @@ export const HOME_MODULES: HomeModule[] = [
  */
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = navEntries().map(({ view, label }) => ({ view, label }))
 
-export { homeModuleOn, viewHidden } from './moduleToggles'
+export { homeModuleOn } from './moduleToggles'

@@ -860,8 +860,10 @@ dependencies = [
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
     { name = "httpx" },
-    { name = "matplotlib" },
     { name = "mcp" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "pypdf" },
     { name = "python-docx" },
@@ -880,6 +882,9 @@ activity = [
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin'" },
 ]
+charts = [
+    { name = "matplotlib" },
+]
 whistle = [
     { name = "cactus-needle" },
 ]
@@ -895,8 +900,10 @@ requires-dist = [
     { name = "google-auth-httplib2", specifier = ">=0.2" },
     { name = "google-auth-oauthlib", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "matplotlib", specifier = ">=3.8" },
+    { name = "matplotlib", marker = "extra == 'charts'", specifier = ">=3.8" },
     { name = "mcp", specifier = ">=2.2" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pillow", specifier = ">=10.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
     { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
@@ -911,7 +918,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "yt-dlp", specifier = ">=2025.1" },
 ]
-provides-extras = ["activity", "whistle"]
+provides-extras = ["activity", "whistle", "charts"]
 
 [[package]]
 name = "h11"

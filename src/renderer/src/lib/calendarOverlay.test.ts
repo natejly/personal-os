@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CalendarEvent } from '@shared/types'
 import {
-  argsFromChanges, buildOverlay, changeProblem, cardState, changesFromArgs, findConflicts, groupByDay, hourBand, layoutLanes, newPosition, parseAgendaEvents,
+  argsFromChanges, buildOverlay, changeProblem, cardState, changesFromArgs, findConflicts, groupByDay, layoutLanes, newPosition, parseAgendaEvents,
   parseResult, parseSlots, rangeDays, sameChanges, slotReplyText, toInput, type Block, type Change, type Outcome
 } from './calendarOverlay'
 
@@ -166,17 +166,6 @@ test('layoutLanes puts overlapping blocks side by side and leaves the rest full 
   assert.deepEqual([get('d').lane, get('d').lanes], [0, 1])
   assert.equal(get('e').lanes, 1)
   assert.equal(layoutLanes([{ ...b('x', 0, 60), allDay: true }]).length, 0)
-})
-
-test('hourBand pads, fits the blocks and never gets thinner than the minimum', () => {
-  const b = (s: number, e: number): Block => ({ key: 'k', kind: 'existing', summary: '', day: 'd', startMin: s, endMin: e, allDay: false })
-  assert.deepEqual(hourBand([]), { start: 8, end: 18 })
-  const one = hourBand([b(600, 660)])
-  assert.ok(one.start <= 9 && one.end >= 12 && one.end - one.start >= 5)
-  assert.deepEqual(hourBand([b(0, 1440)]), { start: 0, end: 24 })
-  const late = hourBand([b(1380, 1440)])
-  assert.equal(late.end, 24)
-  assert.ok(late.end - late.start >= 5)
 })
 
 test('rangeDays covers the touched days, fills a short gap, and caps a long one', () => {

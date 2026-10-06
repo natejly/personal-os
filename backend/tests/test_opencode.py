@@ -1,4 +1,4 @@
-"""opencode_run (opencode.py) and the chat's working folder (app._working_folder, PATCH /conversations settings).
+"""opencode_run (opencode.py): any folder but the protected ones, an agent's own folder as a prompt hint (app._persona_folder).
 
 The coding agent itself is replaced by a small script that prints the JSON events `opencode run --format json`
 prints and writes one file, so the test pins the plumbing (sandbox, state dirs, config, summary) and not a model.
@@ -43,7 +43,7 @@ class Box:
     def __init__(self, tmp: Path, **settings: Any):
         self.root = (tmp / "home" / "work").resolve()
         self.root.mkdir(parents=True)
-        self.settings: dict[str, Any] = {"workspaceRoots": [str(self.root)], "baseUrl": "http://localhost:4000",
+        self.settings: dict[str, Any] = {"baseUrl": "http://localhost:4000",
                                          "defaultModel": "glm-5.3", "apiKey": "", **settings}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:
@@ -124,7 +124,7 @@ def test_runs_the_agent_sandboxed_in_the_working_folder_with_its_own_state(box: 
     fake.write_text(FAKE)
     fake.chmod(0o755)
     monkeypatch.setattr(opencode, "binary", lambda: str(fake))
-    r = box.run("opencode_run", prompt="write hello")
+    r = box.run("opencode_run", prompt="write hello", cwd=str(box.root))
     assert r.get("exit_code") == 0, r
     assert (box.root / "hello.txt").read_text() == "hello from fake opencode\n"
     assert r["session_id"] == "ses_fake" and r["model"] == "grain/glm-5.3" and r["sandboxed"] is True
@@ -158,33 +158,60 @@ def test_launch_caches_packages_inside_the_per_launch_tmp_dir(box: Box, monkeypa
         shutil.rmtree(got["tmp"], ignore_errors=True)
 
 
-def test_outside_every_root_is_refused(box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cwd_is_anywhere_but_the_protected_places(box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    got: dict[str, Any] = {}
+
+    async def fake_start(argv: list[str], **kw: Any) -> Any:
+        got.update(kw)
+        raise shell.ShellError("stop here")
+
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
-    r = box.run("opencode_run", prompt="x", cwd=str(tmp_path))
-    assert "outside the folders" in r["error"]
+    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    monkeypatch.setattr(box.tb.shell, "start", fake_start)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    assert "stop here" in box.run("opencode_run", prompt="x", cwd=str(elsewhere))["error"] and got["cwd"] == str(elsewhere)
+    got.clear()
+    box.run("opencode_run", prompt="x")  # no cwd: the home folder
+    assert got["cwd"] == str(tmp_path / "home")
+    data = Path(os.environ["PERSONAL_OS_DATA_DIR"])
+    r = box.run("opencode_run", prompt="x", cwd=str(data))
+    assert "off limits" in r["error"]
+    r = box.run("opencode_run", prompt="x", cwd="/Applications/Grain.app")
+    assert "off limits" in r["error"]
 
 
-# ---- the chat's working folder ----
-def test_working_folder_is_granted_only_when_it_qualifies(fake_home: Path) -> None:
-    from personal_os.app import _working_folder
+@needs_seatbelt
+def test_profile_for_opencode_is_open_for_writes_and_keeps_the_state_dir_and_protected_places(box: Box, tmp_path: Path) -> None:
+    data = Path(os.environ["PERSONAL_OS_DATA_DIR"]).resolve()
+    state = data / "opencode" / "k"
+    p = sandbox.shell_profile(["/tmp/t", str(state)], network=False, allow_hosts=["*:443"], loopback=True)
+    assert "(allow file-write*)\n" in p and f'(subpath "{state}")' in p
+    deny = p.index("(deny file-write* (subpath")
+    assert f'(subpath "{data}")' in p[deny:deny + 400] and deny < p.index(f'(allow file-read* file-write* (subpath "{state}")')
+    assert '(subpath "/Applications/Grain.app")' in p and "LaunchAgents" in p and "(allow network-bind" in p
+
+
+# ---- an agent's own folder, and the retired per-chat working folder ----
+def test_persona_folder_is_a_hint_only_for_a_folder_the_tools_may_reach(fake_home: Path) -> None:
+    from types import SimpleNamespace
+    from personal_os.app import _persona_folder
     good = fake_home / "repo"
     good.mkdir()
-    assert _working_folder({"workingFolder": str(good)}) == str(good.resolve())
-    assert _working_folder({"workingFolder": str(fake_home)}) is None       # the whole home folder is never granted
-    assert _working_folder({"workingFolder": str(good / "missing")}) is None
-    assert _working_folder({}) is None and _working_folder({"workingFolder": ""}) is None
+    assert _persona_folder(SimpleNamespace(workspace=str(good))) == str(good.resolve())
+    assert _persona_folder(SimpleNamespace(workspace=str(good / "missing"))) is None
+    assert _persona_folder(SimpleNamespace(workspace="")) is None and _persona_folder(SimpleNamespace(workspace=None)) is None
+    assert _persona_folder(SimpleNamespace(workspace=os.environ["PERSONAL_OS_DATA_DIR"])) is None  # Grain's own folder
+    assert _persona_folder(SimpleNamespace(workspace="/tmp")) == os.path.realpath("/tmp")           # outside home is fine
 
 
-def test_patch_validates_and_resolves_the_working_folder(fake_home: Path) -> None:
+def test_patch_ignores_the_retired_working_folder(fake_home: Path) -> None:
     from fastapi.testclient import TestClient
     from personal_os.app import AUTH_TOKEN, app
     with TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}) as client:
         cid = client.post("/conversations", json={}).json()["id"]
         repo = fake_home / "proj"
         repo.mkdir()
-        r = client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": str(repo) + "/"}})
-        assert r.status_code == 200 and r.json()["settings"]["workingFolder"] == str(repo.resolve())
-        assert client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": str(fake_home)}}).status_code == 422
-        assert client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": str(repo / "nope")}}).status_code == 422
-        r = client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": ""}})
-        assert r.status_code == 200 and r.json()["settings"]["workingFolder"] == ""
+        for value in (str(repo), str(fake_home), str(repo / "nope"), ""):  # nothing to validate any more: no 422
+            r = client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": value}})
+            assert r.status_code == 200 and "workingFolder" not in r.json()["settings"]

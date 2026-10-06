@@ -358,6 +358,12 @@ def _drop_budget_settings(c: sqlite3.Connection) -> None:
     c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in BUDGET_SETTING_KEYS])
 
 
+def _autonomous_by_default(c: sqlite3.Connection) -> None:
+    """Every existing install gets `autonomousByDefault` true: a new chat starts as a task (a desk) that works through its
+    steps, and a plain question is simply answered. A value already stored (impossible before this step) is kept."""
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('autonomousByDefault', ?)", (json.dumps(True),))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -380,6 +386,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (18, "graph_canonical_types", _graph_canonical_types),
     (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
     (20, "drop_budget_settings", _drop_budget_settings),
+    (21, "autonomous_by_default", _autonomous_by_default),
 ]
 
 

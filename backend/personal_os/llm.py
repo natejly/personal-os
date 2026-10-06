@@ -167,6 +167,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.
     "deskAutoResume": False,
+    # A new chat's first message starts it as a task (a desk) that works through its steps; a plain question is answered
+    # and the desk settles done. The composer's Autonomous switch starts from this value.
+    "autonomousByDefault": True,
     # Subagents (subagents.py): how many may run at once across the app and how deep they may nest. Hang
     # detection: a child with no model or tool activity for subagentStaleSeconds, or stuck inside one tool for
     # subagentToolSeconds, is stopped and returns what it had.
@@ -219,7 +222,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sandboxMountDesk": True,
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
-    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
+    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox: any folder, minus Grain's own data and the credential stores.
     "shellTimeoutSec": SHELL_TIMEOUT_SECONDS,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": SHELL_MAX_BACKGROUND,     # live background jobs at once
     "codingSessionMaxConcurrent": CODING_SESSION_MAX_CONCURRENT,    # live coding sessions at once (own pool)

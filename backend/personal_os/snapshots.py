@@ -1,10 +1,13 @@
-"""Whole-folder snapshots, so a reply's effect on a granted folder can be taken back, shell side effects included.
+"""Whole-folder snapshots, so a reply's effect on a folder can be taken back, shell side effects included.
 
 Per-file pre-images (filesnap.py) cannot undo what a command did to a tree. Here one private object store
-(`<data>/snapshots/store`, a bare repo the user never sees) holds a snapshot of each granted root, always
+(`<data>/snapshots/store`, a bare repo the user never sees) holds a snapshot of each root, always
 driven as `git --git-dir=<store> --work-tree=<root>` with its own index file per root, so the user's own
-`.git` in a folder is never read as ours and never written. Only the folders the user granted (the setting
-`workspaceRoots`) and desk workspaces are ever snapshotted, never all of home.
+`.git` in a folder is never read as ours and never written. A root is the desk workspace (in a desk), or, outside a desk,
+the folder a shell, opencode or coding-session call runs in when that is a plain project folder: never the home folder,
+`/`, a folder that holds the home folder or Grain's own data folder or app, or a credential store. The file tools
+(write_local_file, fs_edit...) snapshot only a desk workspace they write in: outside one each keeps a pre-image of just
+the file it changes (filesnap.py).
 
 A run snapshots a root at most once, before its first mutating call (`before`), and once more when the run
 ends (`finish`). Both tree hashes and a ledger of what changed (path, blob before, blob after) go on a
@@ -33,6 +36,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from . import mac
 from .db import Database
 
 log = logging.getLogger(__name__)
@@ -45,12 +49,13 @@ GC_PRUNE = "7.days"
 SKIP_DIRS = frozenset({"node_modules", ".venv", ".git"})
 SKIP_ITEMS_REPORTED = 20
 
-# Tools that can change files in a granted root. shell_run is judged by its command (see read_only_shell).
+# The file tools: outside a desk filesnap.py undoes them file by file, so they only snapshot the desk workspace they write in.
 FILE_TOOLS = frozenset({"write_local_file", "move_local_file", "trash_local_file", "fs_edit", "fs_copy", "fs_mkdir"})
+PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 # run_python and desk_fetch_file can write the workspace too (run_python only inside a desk: roots_for_call needs a desk id).
+# shell_run is judged by its command (see read_only_shell).
 DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "desk_import_sandbox", "run_python", "desk_fetch_file", "sandbox_export_file"})
 SHELL_TOOLS = frozenset({"shell_run", "opencode_run", "coding_session_start", "coding_session_send"})
-PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 
 READ_ONLY_COMMANDS = frozenset({
     "ls", "cat", "head", "tail", "pwd", "echo", "grep", "egrep", "fgrep", "rg", "wc", "stat", "file", "which",
@@ -157,60 +162,54 @@ class Snapshots:
         return bool(self.settings().get("snapshotsEnabled", True)) and available()
 
     def roots(self, desk_id: str | None = None, settings: dict[str, Any] | None = None) -> list[Path]:
-        """Granted roots that exist, plus the desk's workspace. Nothing else is ever snapshotted. `settings` is the
-        run's own when it has one (a chat bound to a working folder lists it there)."""
-        out: list[Path] = []
-        for r in (settings or self.settings()).get("workspaceRoots", []) or []:
-            try:
-                p = Path(str(r)).expanduser().resolve()
-            except (OSError, RuntimeError):
-                continue
-            if p.is_dir() and p != Path.home().resolve() and p != Path(p.anchor) and p not in out:
-                out.append(p)
+        """The desk's workspace, when the call belongs to a desk. `settings` is accepted and ignored: no setting names a folder to snapshot."""
         if desk_id and self.desk_root_fn is not None:
             try:
                 d = self.desk_root_fn(desk_id).resolve()
-                if d.is_dir() and d not in out:
-                    out.append(d)
+                if d.is_dir():
+                    return [d]
             except Exception:  # noqa: BLE001 - a bad desk id just means no desk root
                 pass
-        return out
-
-    def roots_for_call(self, name: str, args: dict[str, Any], desk_id: str | None,
-                       settings: dict[str, Any] | None = None) -> list[Path]:
-        """Which roots a call can touch. File tools: the roots containing their path arguments. Desk tools:
-        the desk workspace. A shell command that is not read-only: its cwd's root, else every root."""
-        if name in DESK_TOOLS:
-            return self.roots(desk_id, settings)[-1:] if desk_id and self.desk_root_fn else []
-        if name in SHELL_TOOLS:
-            if read_only_shell(str(args.get("command") or args.get("cmd") or "")):
-                return []
-            allr = self.roots(desk_id, settings)
-            cwd = args.get("cwd") or args.get("repo_path")
-            if cwd:
-                hit = self._containing(allr, str(cwd))
-                if hit:
-                    return hit
-            return allr
-        if name in FILE_TOOLS:
-            allr = self.roots(desk_id, settings)
-            hits: list[Path] = []
-            for k in PATH_KEYS:
-                v = args.get(k)
-                if isinstance(v, str) and v:
-                    for r in self._containing(allr, v):
-                        if r not in hits:
-                            hits.append(r)
-            return hits
         return []
 
     @staticmethod
-    def _containing(roots: list[Path], path: str) -> list[Path]:
+    def snapshottable(p: Path) -> bool:
+        """A folder worth snapshotting whole: not the home folder, `/` or anything that holds either, not Grain's own
+        data folder or app (or a parent of them) and not a credential store."""
+        home = Path.home().resolve()
+        if not p.is_dir() or p == Path(p.anchor) or p == home or p in home.parents:
+            return False
+        return not (mac.protected_reason(p) or mac.sensitive_reason(p) or mac._holds_protected(p))
+
+    def roots_for_call(self, name: str, args: dict[str, Any], desk_id: str | None,
+                       settings: dict[str, Any] | None = None) -> list[Path]:
+        """Which roots a call can touch. Desk tools: the desk workspace. A shell command that is not read-only: the desk
+        workspace in a desk, else the folder it runs in when `snapshottable`. The file tools: the desk workspace they write in (elsewhere filesnap.py)."""
+        if name in DESK_TOOLS:
+            return self.roots(desk_id)[-1:] if desk_id and self.desk_root_fn else []
+        if name in SHELL_TOOLS:
+            if read_only_shell(str(args.get("command") or args.get("cmd") or "")):
+                return []
+            if desk := self.roots(desk_id):
+                return desk
+            cwd = args.get("cwd") or args.get("repo_path")
+            if isinstance(cwd, str) and os.path.isabs(os.path.expanduser(cwd.strip())):  # a relative one starts at home or the desk
+                try:
+                    p = Path(cwd).expanduser().resolve()
+                except (OSError, RuntimeError):
+                    return []
+                return [p] if self.snapshottable(p) else []
+        if name in FILE_TOOLS:
+            return [r for r in self.roots(desk_id) if any(isinstance(v := args.get(k), str) and v and self._within(r, v) for k in PATH_KEYS)]
+        return []
+
+    @staticmethod
+    def _within(root: Path, path: str) -> bool:
         try:
-            p = Path(path).expanduser().resolve()
+            p = (root / Path(path).expanduser()).resolve()  # an absolute path wins over `root`; a relative one starts in the desk
         except (OSError, RuntimeError):
-            return []
-        return [r for r in roots if p == r or r in p.parents]
+            return False
+        return p == root or root in p.parents
 
     def wants(self, name: str, args: dict[str, Any], desk_id: str | None, settings: dict[str, Any] | None = None) -> bool:
         return (name in FILE_TOOLS or name in DESK_TOOLS or name in SHELL_TOOLS) and self.enabled() \

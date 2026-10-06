@@ -1,10 +1,13 @@
 """Reach into the rest of the Mac the boring way: Spotlight, the file system, Shortcuts, and an offscreen page loader.
 
-Every path, read or written, goes through `allowed_path`: inside the home folder, outside ~/Library and
-dot-folders, symlinks resolved first. `Library` is matched case-insensitively, because the home volume
-is case-insensitive and `Path.resolve()` keeps the spelling the caller used. Writes never clobber
-silently (`mode="create"` is the default) and nothing is deleted outright — `trash` moves items to
-~/.Trash, where the user can put them back.
+This module is the one place for path policy. Every path, read or written, goes through `allowed_path`: anywhere on
+this Mac, symlinks resolved first, except what `protected_reason` names (Grain's own data folder, which holds the
+database, the auth token and the secrets, and the Grain app itself): that is refused in every permission mode. The
+credential stores (`sensitive_reason`: ssh and cloud keys, keychains, browser cookies and saved passwords, .env files)
+are reachable but need the user's explicit approval, which fsx.py and the reply loops ask for. Both checks judge the
+path as spelled AND as resolved, case-insensitively, so a symlink cannot walk around them. Writes never clobber
+silently (`mode="create"` is the default) and nothing is deleted outright: `trash` moves items to ~/.Trash, where the
+user can put them back.
 
 Nothing here drives the screen. `mdfind` and `shortcuts` are plain subprocesses (argv, never a shell);
 the page loader is an offscreen Electron window the main process owns, reached over a loopback bridge
@@ -16,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -29,8 +33,7 @@ import httpx
 from .extract_text import extract_text
 
 DEFAULT_ROOTS = ("~/Desktop", "~/Documents")
-BLOCKED_UNDER_HOME = ("Library",)  # app data, mail, keychains, browser profiles
-_BLOCKED_TOP = frozenset(name.casefold() for name in BLOCKED_UNDER_HOME)
+APP_BUNDLE = "/Applications/Grain.app"
 MAX_READ_BYTES = 20 * 1024 * 1024
 MAX_WRITE_CHARS = 400_000
 # Suffixes macOS will run when the user double-clicks the file. The agent writes documents, not launchers.
@@ -90,59 +93,176 @@ def _under(path: Path, root: Path) -> bool:
     return all(a.casefold() == b.casefold() for a, b in zip(rp, pp))
 
 
-def allowed_path(raw: str) -> Path:
-    """Resolve `raw` (symlinks included) and require it to sit under the home folder, outside dot-folders, ~/Library and the app's own data folder."""
-    if not raw or not str(raw).strip():
-        raise LocalPathError("empty path")
+# ---- protected: refused outright, in every permission mode ----
+def _bundle_of(p: Path) -> Path | None:
+    """The `*.app` folder `p` sits in, or None."""
+    for q in (p, *p.parents):
+        if q.suffix.lower() == ".app":
+            return q
+    return None
+
+
+def protected_paths() -> list[Path]:
+    """The folders no file tool may touch: the app data folder (as configured and as resolved), /Applications/Grain.app
+    and the app bundle this backend is running from, when that is a different one."""
+    out: list[Path] = []
+
+    def add(p: Path | None) -> None:
+        if p is None:
+            return
+        for q in (p, p.resolve()):
+            if q not in out:
+                out.append(q)
+
+    data = _app_data_dir()
+    if data is not None:
+        raw = Path(os.environ.get("PERSONAL_OS_DATA_DIR", "./data")).expanduser()
+        add(raw if raw.is_absolute() else raw.absolute())
+        add(data)
+    add(Path(APP_BUNDLE))
+    for here in (Path(sys.executable), Path(__file__)):
+        add(_bundle_of(here.resolve()))
+    return out
+
+
+def _spelled(raw: str | Path) -> Path:
+    """The path as given: `~` expanded, relative to home, `..` folded, symlinks not followed."""
     p = Path(os.path.expanduser(str(raw).strip()))
     if not p.is_absolute():
         p = home() / p
-    p = p.resolve()
-    h = home()
-    try:
-        rel = p.relative_to(h)
-    except ValueError:
-        raise LocalPathError(f"{p} is outside your home folder") from None
-    parts = rel.parts
-    if parts and parts[0].casefold() in _BLOCKED_TOP:
-        raise LocalPathError(f"~/{parts[0]} is off limits")
-    if any(x.startswith(".") for x in parts):
-        raise LocalPathError("hidden files and folders are off limits")
+    return Path(os.path.normpath(p))
+
+
+def protected_reason(*paths: str | Path) -> str | None:
+    """Why a path is off limits to every agent file tool, or None. Judged on the spelled path and the resolved one."""
+    prot = protected_paths()
+    for raw in paths:
+        if not str(raw).strip():
+            continue
+        spelled = _spelled(raw)
+        try:
+            resolved = spelled.resolve()
+        except (OSError, RuntimeError):
+            resolved = spelled
+        for p in (spelled, resolved):
+            for root in prot:
+                if _under(p, root):
+                    return "Grain's own data folder and app are off limits" if root.suffix.lower() != ".app" \
+                        else "the Grain app is off limits"
+    return None
+
+
+# ---- sensitive: reachable, but only with the user's approval ----
+SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".azure", "gcloud", ".docker"})
+SENSITIVE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".ppk"})
+SENSITIVE_NAMES = frozenset({".netrc", ".npmrc", ".pgpass", ".git-credentials", ".pypirc", "credentials", "credentials.json",
+                             "application_default_credentials.json"})
+SENSITIVE_PREFIXES = ("/dev/", "/proc/")
+KEY_FILE_RE = re.compile(r"^id_(rsa|dsa|ecdsa|ed25519)(?!.*\.pub$)")
+# Keychains and cookie jars: whole folders under the home folder (or /Library) the user has to approve.
+KEYCHAIN_DIRS = ("Library/Keychains", "Library/Cookies", "Library/Containers/com.apple.Safari/Data/Library/Cookies")
+SYSTEM_KEYCHAINS = ("/Library/Keychains",)
+# Where the browsers keep a profile, relative to ~/Library/Application Support, and the files in it that hold sessions
+# and saved passwords.
+BROWSER_DIRS = ("Google/Chrome", "Arc", "BraveSoftware", "Microsoft Edge", "Chromium", "Vivaldi", "Firefox")
+BROWSER_FILE_NAMES = ("Cookies", "Cookies-journal", "Login Data", "Login Data-journal", "Login Data For Account", "Web Data",
+                      "Web Data-journal", "cookies.sqlite", "cookies.sqlite-wal", "key4.db", "logins.json")
+BROWSER_FILES = frozenset(n.lower() for n in BROWSER_FILE_NAMES)
+SENSITIVE_HOME_FILES = (".config/gh/hosts.yml",)
+# What the shell sandbox denies for read and write: the same stores as `sensitive_reason`, as paths a profile can name.
+CRED_HOME_DIRS = tuple(sorted(SENSITIVE_DIRS - {"gcloud"})) + (".config/gcloud",) + KEYCHAIN_DIRS
+CRED_HOME_FILES = tuple(sorted(n for n in SENSITIVE_NAMES if n.startswith("."))) + SENSITIVE_HOME_FILES
+# What the System access panel shows.
+PROTECTED_LABELS = ("Grain's data folder", APP_BUNDLE)
+SENSITIVE_LABELS = ("~/.ssh", "Keychains", "Browser cookies and saved passwords", "~/.aws, ~/.gnupg, ~/.netrc, gh tokens", ".env files")
+
+
+def _holds_protected(p: Path) -> str | None:
+    """A folder that contains a protected one: moving or trashing it would carry the data folder or the app along."""
+    for root in protected_paths():
+        if p != root and _under(root, p):
+            return "that folder holds Grain's own data folder or app, which are off limits"
+    return None
+
+
+def _homes() -> list[Path]:
+    out = [Path(os.path.expanduser("~")), home()]
+    return list(dict.fromkeys(out))
+
+
+def is_device(path: str | Path) -> bool:
+    s = str(path)
+    return s.startswith(SENSITIVE_PREFIXES) or s in ("/dev", "/proc")
+
+
+def sensitive_reason(*paths: str | Path) -> str | None:
+    """Why a path needs the user's explicit approval (or is a device file, which never does), or None. Judge the
+    spelled path AND the resolved one: a symlink named notes.txt that points at ~/.aws/credentials is caught by the
+    second. Folders are judged by their own spelling too, so listing ~/.ssh is as sensitive as reading a key in it."""
+    for raw in paths:
+        s = str(raw)
+        if is_device(s):
+            return "device and process files are off limits"
+        parts = Path(s).parts
+        name = parts[-1] if parts else ""
+        low = name.lower()
+        if low == ".env" or low.startswith(".env.") or low == ".envrc":
+            return "environment files hold secrets"
+        if KEY_FILE_RE.match(low) or Path(low).suffix in SENSITIVE_SUFFIXES:
+            return "key files hold secrets"
+        if low in SENSITIVE_NAMES:
+            return "credential files hold secrets"
+        if any(x.lower() in SENSITIVE_DIRS for x in parts[:-1]) or low in SENSITIVE_DIRS:
+            return "credential folders hold secrets"
+        p = Path(os.path.normpath(s))
+        if any(_under(p, Path(k)) for k in SYSTEM_KEYCHAINS):
+            return "keychains hold secrets"
+        for h in _homes():
+            if any(_under(p, h / k) for k in KEYCHAIN_DIRS):
+                return "keychains and cookie jars hold secrets"
+            if any(_under(p, h / f) for f in SENSITIVE_HOME_FILES):
+                return "access tokens hold secrets"
+            support = h / "Library" / "Application Support"
+            if low in BROWSER_FILES and any(_under(p, support / d) for d in BROWSER_DIRS):
+                return "browser cookies and saved passwords hold secrets"
+    return None
+
+
+def system_area(path: Path) -> bool:
+    """True for a resolved path outside the home folder, the temp folders and /Volumes (/etc, /Library, /usr/local,
+    /opt, /Applications...): a write there changes the machine, not the user's files, so it is a risky one."""
+    temps = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders", tempfile.gettempdir(), os.environ.get("TMPDIR") or ""]
+    safe = [*_homes(), Path("/Volumes")] + [Path(t).resolve() for t in temps if t] + [Path(t) for t in temps if t]
+    return not any(_under(path, r) for r in safe)
+
+
+def scope_summary() -> dict[str, list[str]]:
+    """Display strings for the System access panel: what is off limits, and what asks first."""
     data = _app_data_dir()
-    if data is not None and _under(p, data):
-        raise LocalPathError("the app's own data folder is off limits")
-    return p
+    h = str(home())
+    shown = str(data).replace(h, "~", 1) if data is not None else None
+    return {"protected": [f"{PROTECTED_LABELS[0]} ({shown})" if shown else PROTECTED_LABELS[0], *PROTECTED_LABELS[1:]],
+            "sensitive": list(SENSITIVE_LABELS)}
 
 
-def default_workspace() -> str:
-    """~/Grain, created on first use: the workspace folder used while no workspaceRoots are set."""
-    d = home() / "Grain"
-    d.mkdir(parents=True, exist_ok=True)
-    return str(d)
+def allowed_path(raw: str) -> Path:
+    """Resolve `raw` (symlinks included) and refuse only what `protected_reason` names: Grain's own data folder and app."""
+    if not raw or not str(raw).strip():
+        raise LocalPathError("empty path")
+    p = _spelled(raw)
+    r = p.resolve()
+    if why := protected_reason(p, r):
+        raise LocalPathError(why)
+    return r
 
 
-def allowed_root(raw: str) -> Path:
-    """`allowed_path`, minus the home folder itself and any folder holding the app's data: a granted root is writable
-    by the shell and the file tools, and is snapshotted for undo. The home folder holds the rc files, ~/Library and
-    ~/.ssh, and is never snapshotted; a root around the data folder would snapshot the live database and auth token,
-    so an undo could roll them back."""
+def readable_path(raw: str) -> Path:
+    """`allowed_path` for a caller that shows a file's content with no approval card to lean on (the side panel, the
+    chat's file list): a credential store is refused too."""
     p = allowed_path(raw)
-    if p == home():
-        raise LocalPathError("the whole home folder cannot be granted; pick a folder inside it")
-    data = _app_data_dir()
-    if data is not None and _under(data, p):
-        raise LocalPathError(f"{p} contains the app's own data folder; pick a folder that does not")
+    if why := sensitive_reason(_spelled(raw), p):
+        raise LocalPathError(f"{p.name}: {why}")
     return p
-
-
-def in_roots(path: str | Path, roots: list[Path]) -> bool:
-    """True when `path` (symlinks resolved) sits inside one of the granted folders. A symlink in a root that
-    points outside it is therefore not inside."""
-    try:
-        p = Path(path).resolve()
-    except OSError:
-        return False
-    return any(p == r or p.is_relative_to(r) for r in roots)
 
 
 def _meta(path: str) -> dict[str, Any]:
@@ -190,6 +310,8 @@ async def mdfind(query: str, *, folders: list[str] | None = None, name_only: boo
                 try:
                     allowed_path(p)  # mdfind's -onlyin is a hint; the result still has to pass the file policy
                 except LocalPathError:
+                    continue
+                if sensitive_reason(p):  # a credential store is not something to list in a search result
                     continue
                 if len(paths) >= lim:
                     truncated = True
@@ -256,6 +378,8 @@ def _refuse_leaf_symlink(raw: str, verb: str) -> None:
 def _writable_path(raw: str) -> Path:
     """`allowed_path` plus the rules that only matter when we are about to create or replace a file."""
     p = allowed_path(raw)
+    if is_device(p):
+        raise LocalPathError("device and process files are off limits")
     if suf := _launcher_suffix(p):
         raise LocalPathError(f"{suf} files are off limits; write a document instead")
     return p
@@ -318,7 +442,7 @@ def _replace_at(dirfd: int, name: str, data: bytes, nofollow: int) -> None:
 
 
 def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]:
-    """Write a text file under the home folder. 'create' refuses to replace a file that is already there."""
+    """Write a text file. 'create' refuses to replace a file that is already there."""
     if mode not in WRITE_MODES:
         raise ValueError(f"mode must be one of {', '.join(WRITE_MODES)}")
     if not isinstance(content, str):  # str(None) would silently overwrite the file with the word "None"
@@ -339,12 +463,14 @@ def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]
 
 
 def move_local(path: str, to: str) -> dict[str, Any]:
-    """Move or rename a file or folder inside the home folder. Never replaces something that already exists."""
+    """Move or rename a file or folder. Never replaces something that already exists."""
     _refuse_leaf_symlink(path, "move")
     _refuse_leaf_symlink(to, "move")
     src = allowed_path(path)
     if not src.exists():
         raise LocalPathError(f"{src} does not exist")
+    if why := _holds_protected(src):
+        raise LocalPathError(why)
     dst = _writable_path(to)
     into_folder = to.rstrip().endswith(("/", os.sep))  # Path drops the slash; it still means "this folder"
     if into_folder and not dst.exists():
@@ -367,7 +493,7 @@ def move_local(path: str, to: str) -> dict[str, Any]:
 def _open_trash() -> tuple[int, Path]:
     """A directory fd for ~/.Trash.
 
-    `shutil.move` follows a directory symlink, so a `~/.Trash` that points outside the home folder
+    `shutil.move` follows a directory symlink, so a `~/.Trash` that points elsewhere
     would drop the file there while the returned path still said `~/.Trash/...`. Open the directory
     itself (`O_NOFOLLOW`) and rename into that fd.
     """
@@ -409,8 +535,10 @@ def trash_local(path: str) -> dict[str, Any]:
     p = allowed_path(path)
     if not p.exists():
         raise LocalPathError(f"{p} does not exist")
-    if p == home():
+    if p == home() or p.parent == p:
         raise LocalPathError("the home folder itself cannot be trashed")
+    if why := _holds_protected(p):
+        raise LocalPathError(why)
     fd, trash = _open_trash()
     try:
         name = _free_trash_name(fd, p)

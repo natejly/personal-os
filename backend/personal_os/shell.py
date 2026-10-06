@@ -846,3 +846,39 @@ def register(tb: Any) -> None:
     R("shell_kill", ToolSpec("shell_kill", "Stop a background shell job: SIGTERM to its whole process group, SIGKILL if it "
                              "has not exited after 3 seconds.", _obj({"job_id": {"type": "string"}}, ["job_id"]),
                              shell_kill, "shell", "writes", examples=[{"job_id": "a1b2c3"}]))
+
+
+# ---- fixed commands with no model in the loop (ship.py) ----
+async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[str, Any], *, sandboxed: bool,
+                    timeout: float) -> tuple[bool, str]:
+    """Run one argv through the shell job registry and wait for it: (exit code 0, scrubbed output).
+
+    sandboxed=True is shell_run's sandbox: writes only in `cwd` and a private tmp dir, network only when shellNetwork is
+    on (no allowlist proxy here). sandboxed=False is for the caller's own fixed git/gh argv: they need the user's network
+    and credentials. The scrubbed environment still applies, plus the ssh agent socket and no interactive prompts. The
+    repo's git hooks and config cannot have been planted by the agent: the sandbox denies writes to .git/hooks,
+    .git/config and .husky."""
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-ship-"))
+    env = scrubbed_env(tmp)
+    if sandboxed:
+        if not sandbox_available():
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise ShellError("The OS sandbox is not available here (it needs macOS sandbox-exec), so nothing was run.")
+        net = bool(permissions.get(settings, "shellNetwork"))
+        argv = ["sandbox-exec", "-p", sandbox.shell_profile([cwd, tmp], network=net), *argv]
+    else:
+        env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
+        if os.environ.get("SSH_AUTH_SOCK"):
+            env["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+    job = await jobs.start(argv, command=shlex.join(argv[-3:] if sandboxed else argv), cwd=cwd, env=env, tmp=tmp,
+                           conversation_id="ship", run_id=None, background=False, notify=False, timeout=timeout,
+                           max_background=int(settings.get("shellMaxBackground") or 4), on_timeout="kill")
+    try:
+        await jobs.wait(job)
+    except asyncio.CancelledError:  # the checklist was cancelled: do not leave the command running behind it
+        await jobs.kill(job)
+        raise
+    out = _scrub(jobs.finished_output(job))
+    if job.status == "timed_out":
+        out += f"\n[killed after {int(timeout)}s]"
+    return job.status == "exited" and job.exit_code == 0, out

@@ -475,6 +475,7 @@ def test_routes_a_refused_start_leaves_no_row_and_the_doc_routes_work() -> None:
     audiocap._dev_cache = (time.time(), [{"index": "0", "name": "Test mic"}])
     real_mac = app_mod.activity.IS_MAC
     app_mod.activity.IS_MAC = True
+    meeting_svc.set_config({"enabled": False})      # the recorder ships on; switch it off so the start is refused
     d = docs.create("Route plan", "# Route plan")
     made: list[str] = []
     try:
@@ -539,6 +540,7 @@ def test_routes_a_refused_start_leaves_no_row_and_the_doc_routes_work() -> None:
         meetings.stt.selftest = real                              # type: ignore[assignment]
         audiocap._dev_cache = real_dev
         app_mod.activity.IS_MAC = real_mac
+        meeting_svc.set_config({"enabled": True})
         for mid in made:
             meeting_store.delete(mid)
         docs.delete(d["id"])                                      # also deletes anything still linked to it

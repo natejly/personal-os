@@ -37,7 +37,7 @@ from .context import build_context, cite_slim, context_taints, estimate_tokens, 
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn, memory_limits
+from . import learn, memory_limits, provider_keys
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
@@ -269,6 +269,7 @@ def _seed_settings_from_env() -> None:
 
 
 _seed_settings_from_env()
+provider_keys.migrate(db)
 
 _MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
@@ -302,6 +303,11 @@ def _seed_hidden_modules() -> None:
 _seed_hidden_modules()
 
 
+def set_settings_via_provider(patch: dict[str, Any]) -> None:
+    """db.set_settings for a patch that may switch provider or change the API key (see provider_keys.apply)."""
+    db.set_settings(provider_keys.apply(db, patch))
+
+
 def settings() -> dict[str, Any]:
     """Defaults < stored rows, with the permissions store (permissions.py) both nested under `permissions` and flattened
     to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
@@ -318,7 +324,7 @@ google = Google(settings, db.set_settings, cache_dir=db.data_dir)
 microsoft = Microsoft(settings, db.set_settings, cache_dir=db.data_dir)
 # Mail + calendar follow settings.pimProvider; Tasks/Drive/Docs stay on Google (see pim.py).
 pim = Pim(google, microsoft, settings)
-app.include_router(setup_router(settings, db.set_settings, lambda: pim.status()["connected"]))
+app.include_router(setup_router(settings, set_settings_via_provider, lambda: pim.status()["connected"], db.secrets))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=pim,
@@ -762,6 +768,7 @@ def public_settings() -> dict[str, Any]:
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
     out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
     return out
@@ -838,7 +845,7 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a string or null")
     if perm:
         permissions.save(db, perm)
-    db.set_settings(clean)
+    set_settings_via_provider(clean)
     if "sandboxRuntime" in perm:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():

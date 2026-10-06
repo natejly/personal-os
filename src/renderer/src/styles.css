@@ -878,6 +878,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
 .test-msg.fail { color: var(--danger); }
+.model-prompt { color: var(--warn); font-size: 12px; }
 /* Pinned to the bottom of the scroller, so Save/Cancel is always reachable. */
 .modal footer {
   display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;

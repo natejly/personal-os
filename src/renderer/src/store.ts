@@ -2109,7 +2109,7 @@ export const useStore = create<State>((set, get) => {
       set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
       // Which tools are capped at ask follows this list, and the tool rows read it from the tools listing.
       if ('alwaysAsk' in patch) void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
-      if ('baseUrl' in patch || 'apiKey' in patch) void get().loadModels()
+      if ('baseUrl' in patch || 'apiKey' in patch || 'provider' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
       if ('microsoftClientId' in patch || 'microsoftTenant' in patch) void get().refreshMicrosoft()
       // Mail and Calendar now read from the other account: drop what the first one cached.

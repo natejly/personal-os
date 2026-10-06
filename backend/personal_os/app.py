@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import html
 import json
@@ -14,6 +15,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import subprocess
 import time
 import urllib.parse
 from datetime import datetime, timedelta
@@ -27,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import system_access, telegram
+from . import blobs, system_access, telegram
 from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
@@ -6365,12 +6367,11 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
         return {**dup, "duplicate": True, "extracted": has_readable_text(dup.get("text") or "")}
     text, blocks = extract_both(safe, data, mime)
     text = for_index(text)
-    dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
-    dest.write_bytes(data)
+    dest, _ = blobs.store(db.data_dir, safe, data)
     try:
         row = documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
     except BaseException:
-        dest.unlink(missing_ok=True)
+        blobs.release(db, str(dest))
         raise
     return {**row, "extracted": has_readable_text(text)}
 
@@ -6421,6 +6422,109 @@ async def embed_backfill() -> dict[str, Any]:
 def delete_document(id: str) -> dict[str, bool]:
     trash.trash("document", id)  # the uploaded file stays on disk until the trash is purged
     return {"ok": True}
+
+
+# ---- the stored original behind an uploaded document (blobs.py) ----
+def _original(id: str) -> tuple[dict[str, Any], Path]:
+    d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    p = blobs.inside_uploads(db.data_dir, d.get("path"))
+    if p is None:
+        raise HTTPException(404, "The original file is not stored")
+    return d, p
+
+
+@app.get("/documents/{id}/raw")
+def document_raw(id: str) -> FileResponse:
+    d, p = _original(id)
+    mime = (d.get("mime") or "").split(";")[0].strip().lower()
+    if not mime or mime == "application/octet-stream":
+        mime = mimetypes.guess_type(d["name"])[0] or "application/octet-stream"
+    if mime in _RAW_AS_TEXT:
+        mime = "text/plain"
+    ascii_name = re.sub(r'[^\x20-\x7e]|["\\]', "_", d["name"])
+    return FileResponse(p, media_type=mime, headers={
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{urllib.parse.quote(d['name'], safe='')}"})
+
+
+_OFFICE_EXT = {".docx", ".doc", ".rtf", ".odt"}
+_OFFICE_MIME = {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword",
+                "application/rtf", "text/rtf", "application/vnd.oasis.opendocument.text"}
+
+
+def _sanitize_html(h: str) -> str:
+    """Belt and braces: the preview is shown in a sandboxed srcdoc frame that cannot run script anyway."""
+    h = re.sub(r"<script\b.*?</script\s*>", "", h, flags=re.I | re.S)
+    h = re.sub(r"""\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", "", h, flags=re.I)
+    return re.sub(r"javascript:", "", h, flags=re.I)
+
+
+@functools.lru_cache(maxsize=16)
+def _office_html(path: str, mtime_ns: int) -> str | None:
+    try:
+        r = subprocess.run(["textutil", "-convert", "html", "-stdout", path], capture_output=True, timeout=20, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _sanitize_html(r.stdout.decode("utf-8", "replace"))
+
+
+@app.get("/documents/{id}/preview")
+def document_preview(id: str) -> dict[str, str]:
+    """Word-processor files render as HTML through macOS textutil; everything else (and any failure) shows the
+    extracted text, which for sheets and slides is already markdown tables and sections."""
+    d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    p = blobs.inside_uploads(db.data_dir, d.get("path"))
+    if p is not None and (Path(d["name"]).suffix.lower() in _OFFICE_EXT or (d.get("mime") or "").split(";")[0].strip().lower() in _OFFICE_MIME):
+        if h := _office_html(str(p), p.stat().st_mtime_ns):
+            return {"kind": "html", "html": h}
+    return {"kind": "markdown", "text": d.get("text") or ""}
+
+
+# Files that run when opened. Checked on the row's name and the stored file's name, plus any exec bit.
+_RUNS_CODE = {".app", ".command", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".fish", ".tool", ".pkg", ".mpkg", ".terminal",
+              ".workflow", ".action", ".scpt", ".scptd", ".applescript", ".jar", ".py", ".rb", ".pl", ".php", ".fileloc",
+              ".inetloc", ".webloc", ".prefpane", ".kext", ".plugin", ".bundle", ".osax", ".saver", ".dylib", ".so", ".dmg",
+              ".exe", ".msi", ".bat", ".cmd", ".ps1"}
+
+
+def _mac_open(*args: str) -> None:
+    subprocess.run(["open", *args], check=True, timeout=10, capture_output=True)
+
+
+def _run_open(*args: str) -> dict[str, bool]:
+    try:
+        _mac_open(*args)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise HTTPException(400, "macOS could not open this file.") from e
+    return {"ok": True}
+
+
+@app.post("/documents/{id}/reveal")
+def document_reveal(id: str) -> dict[str, bool]:
+    return _run_open("-R", str(_original(id)[1]))
+
+
+@app.post("/documents/{id}/open")
+def document_open(id: str) -> dict[str, bool]:
+    d, p = _original(id)
+    if any(Path(n).suffix.lower() in _RUNS_CODE for n in (d["name"], p.name)) or p.stat().st_mode & 0o111:
+        raise HTTPException(400, f"{d['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
+    return _run_open(str(p))
+
+
+@app.on_event("startup")
+async def _blobs_startup() -> None:
+    """Uploads from before content-addressed storage move once, off the loop and off the boot path."""
+    def run() -> None:
+        try:
+            blobs.migrate(db)
+        except Exception:  # noqa: BLE001 - a failed move leaves the old paths working; it must never stop the app
+            log.warning("upload migration failed", exc_info=True)
+    asyncio.get_running_loop().run_in_executor(None, run)
 
 
 @app.on_event("shutdown")
@@ -7456,12 +7560,11 @@ async def describe_doc_image(id: str, body: DescribeImageIn) -> dict[str, Any]:
         digest = hashlib.sha256(data).hexdigest()
         if documents.find_by_hash(pid, digest):
             return documents.find_by_hash(pid, digest)  # type: ignore[return-value]
-        dest = db.data_dir / "uploads" / f"{new_id()}-{name}"
-        dest.write_bytes(data)
+        dest, _ = blobs.store(db.data_dir, name, data)
         try:
             return documents.create(pid, name, mime, len(data), str(dest), f"[Image pasted into a note]\n{text}", content_hash=digest)
         except BaseException:
-            dest.unlink(missing_ok=True)
+            blobs.release(db, str(dest))
             raise
 
     out["document_id"] = (await asyncio.to_thread(store))["id"]
@@ -9805,13 +9908,11 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
         text = for_index(await asyncio.to_thread(extract_text, safe, data, ""))
     except Exception as e:  # noqa: BLE001 - an unreadable file is a failed promotion, not a 500
         return {"ref": None, "verified": False, "error": str(e)}
-    stored = db.data_dir / "uploads" / f"{new_id()}-{safe}"
-    stored.parent.mkdir(parents=True, exist_ok=True)
-    stored.write_bytes(data)
+    stored, digest = blobs.store(db.data_dir, safe, data)
     try:
-        doc = documents.create(pid, title, "", len(data), str(stored), text)
+        doc = documents.create(pid, title, "", len(data), str(stored), text, content_hash=digest)
     except BaseException:
-        stored.unlink(missing_ok=True)
+        blobs.release(db, str(stored))
         raise
     # Compared against the STORED UPLOAD FILE, not the chunk text: the chunks are a derived,
     # normalised representation, and comparing to them would report a failure on every upload.

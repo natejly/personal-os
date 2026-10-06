@@ -35,7 +35,7 @@ from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
 from . import plans, router
-from . import reach
+from . import firecrawl, reach
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block
 from . import redact
@@ -1251,16 +1251,33 @@ class Toolbox:
             cache = self.web_cache
             ttl = 0 if fresh else float(cfg.get("fetchCacheSeconds", 3600) or 0)
             hit: dict[str, Any] | None = None
+            fc, fc_page = firecrawl.key(cfg), None  # fc_page: a page Firecrawl just read (a cache hit is not)
 
             async def _follow(c: httpx.AsyncClient) -> Any:
                 """The response, a cache hit (None, with `hit` set), or the redirect-limit error dict."""
-                nonlocal cur, hops, hit
+                nonlocal cur, hops, hit, fc_page
                 while True:
                     cur, host = _check_url(cur, ctx, cfg, redirect=hops > 0)
                     # The cache is read only here, after the taint and SSRF checks for this very URL.
                     if cache is not None and ttl > 0 and (key := _norm_url(cur)):
                         hit = cache.get(key, ttl)
                         if hit:
+                            return None
+                    # Primary reader; any failure falls through to the plain fetch below. Not for links=true: Firecrawl's
+                    # markdown is not run through numberize_links, so link references come from the plain fetch.
+                    if fc and hops == 0 and not links:
+                        await _resolve(host)  # a private or unresolvable name is refused before the URL goes to a third party
+                        try:
+                            fc_page = await firecrawl.scrape(cur, fc)
+                        except (reach.ReachError, httpx.HTTPError) as e:
+                            log.info("firecrawl scrape failed for %s: %s", cur, _first_line(e))
+                        else:
+                            hit = {"status": 200, "content_type": "text/markdown; charset=utf-8", "body": fc_page["text"].encode(), "final_url": cur}
+                            if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and (key := _norm_url(cur)):
+                                try:
+                                    cache.put(key, 200, hit["content_type"], hit["body"], cur)
+                                except Exception as e:  # noqa: BLE001 -- the cache is an optimisation, never a failure
+                                    log.info("fetch cache write failed: %s", _first_line(e))
                             return None
                     r = await _open_pinned(c, "GET", cur, host)  # connects to the address just checked, never a fresh lookup
                     if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
@@ -1297,7 +1314,7 @@ class Toolbox:
             except webread.Unreadable as e:
                 return tool_error(redact.scrub_command_output(f"fetch_url: {final_url} is {ctype or 'of unknown type'}: {e}"), field="url", alternative=ALTERNATIVE["fetch_url"])
             text = rendered.text
-            via = None
+            via = "firecrawl" if fc_page else None
             # Reader-service fallback: when our plain client is turned away, or the page is a JavaScript shell, read it
             # through Jina Reader, which renders it on Jina's side. Only ever a URL that already passed _check_url.
             if kind == "html" and cfg.get("readerFallback", True) and (status in (401, 403, 429, 503) or len(text) < 300):
@@ -1319,11 +1336,15 @@ class Toolbox:
             # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
             tm = re.search(r"<title[^>]*>(.*?)</title>", webread.decode(ctype, raw[:65536]), re.S | re.I) if kind == "html" else None
             title = " ".join(html.unescape(tm.group(1)).split())[:200] if tm else ""
+            if not title and fc_page:
+                title = fc_page["title"][:200]
+            elif not title and kind == "text" and (hm := re.match(r"\s*# (.+)", full_text)):  # a cached markdown page has no <title>
+                title = hm.group(1).strip()[:200]
             excerpt = " ".join(full_text.split())[:300]
             # One number per page, shared with web_search: a page found and then read is still one source.
             n = _cite(ctx, web_ref(final_url, title, excerpt))
             out = {"url": final_url, "title": title, "cite": n, "cite_as": f"Cite this page as [{n}]", "excerpt": excerpt, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
-                   "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
+                   "total_chars": total, "next_offset": nxt, "cached": bool(hit) and not fc_page, "redirects": hops}
             if focused:
                 out["focused"] = True
             if links:
@@ -1335,7 +1356,7 @@ class Toolbox:
                                 "Pass focus='what you are looking for' to keep only the matching parts of a long page, offset=next_offset to read on "
                                 "when truncated, links=true for link references (written [label](^L3), listed as '^L3: url'), fresh=true to skip the 1-hour cache. "
                                 "The result's cite number is this page's: end a sentence that relies on it with that number in brackets. "
-                                "Pages that block plain fetches or need JavaScript are retried through a reader service.",
+                                "Pages that block plain fetches or need JavaScript are retried through a reader service. With a Firecrawl key set, pages are read through Firecrawl first.",
             _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 12000}, "focus": {"type": "string"},
                   "offset": {"type": "integer", "default": 0}, "fresh": {"type": "boolean", "default": False}, "links": {"type": "boolean", "default": False}}, ["url"]), fetch_url, "web", "network",
             examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000},

@@ -1299,6 +1299,9 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
+  firecrawlApiKeySet?: boolean
+  /** FIRECRAWL_API_KEY is set in the backend's environment; used when the field is empty. Never the value. */
+  firecrawlEnvKey?: boolean
   braveApiKeySet?: boolean
   tavilyApiKeySet?: boolean
   exaApiKeySet?: boolean
@@ -1456,6 +1459,8 @@ export interface Settings {
   workEnvPackages?: string[]
   /** fs_edit and an overwriting write refuse a file this chat has not read. Missing means on. */
   requireReadBeforeWrite?: boolean
+  /** When set, Firecrawl answers web search and page reads first; the other engines are the fallback. Empty = the FIRECRAWL_API_KEY environment variable, if any. */
+  firecrawlApiKey?: string
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */

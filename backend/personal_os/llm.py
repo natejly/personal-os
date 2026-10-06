@@ -298,6 +298,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "imessageConversationId": None,  # None: a "Texts" conversation Grain makes on first use
     "imessageNotifyLongRuns": False,  # also text approvals and finish notices for runs that were not started by text
     "imessageLongRunMinutes": 3,
+    "imessageSelfChatGuid": None,  # the confirmed note-to-self chat (from /imessage/self-chats); None: no chat is treated as self
+    "imessageReplyMarker": "🌾 ",  # prefixed to every text Grain sends; the self chat skips rows that start with it
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},

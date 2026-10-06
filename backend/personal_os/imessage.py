@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
@@ -41,6 +42,11 @@ BATCH = 200
 ECHO_SECONDS = 180  # our own sends coming back as inbound text
 STALE_SECONDS = 600  # on a restart, anything older than this is history, not an instruction
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
+DEFAULT_MARKER = "🌾 "  # prefixed to everything Grain sends, so the self chat can tell its own voice from the user's
+LEDGER_KEEP = 86400  # sent-ledger entries older than this are dropped
+LEDGER_CAP = 500
+LEDGER_HASH_WINDOW = 600  # a row whose text matches something we sent this recently is ours
+MIRROR_WINDOW = 60  # the same phone text can land twice in the self chat (sent copy + received copy)
 
 # The sources never change; only argv does. Item 1 is the target, item 2 the text.
 SCRIPT_CHAT = """on run argv
@@ -159,7 +165,7 @@ def max_rowid(path: str) -> int:
 
 
 _FETCH = """
-SELECT m.ROWID AS rowid, m.text AS text, m.attributedBody AS body, m.is_from_me AS from_me,
+SELECT m.ROWID AS rowid, m.guid AS msg_guid, m.text AS text, m.attributedBody AS body, m.is_from_me AS from_me,
        COALESCE(m.associated_message_type, 0) AS assoc, COALESCE(m.cache_has_attachments, 0) AS attachments,
        m.date AS date, m.service AS service, c.service_name AS chat_service, h.id AS handle, c.guid AS chat_guid, c.style AS style, c.chat_identifier AS chat_ident,
        (SELECT COUNT(*) FROM chat_handle_join j WHERE j.chat_id = c.ROWID) AS participants
@@ -186,7 +192,7 @@ def fetch_since(path: str, rowid: int, limit: int = 200) -> list[dict[str, Any]]
     finally:
         c.close()
     return [{
-        "rowid": r["rowid"], "text": r["text"] or "", "body": r["body"], "from_me": bool(r["from_me"]),
+        "rowid": r["rowid"], "msg_guid": r["msg_guid"], "text": r["text"] or "", "body": r["body"], "from_me": bool(r["from_me"]),
         "assoc": int(r["assoc"] or 0), "attachments": bool(r["attachments"]), "date": r["date"],
         "service": r["service"] or r["chat_service"], "handle": r["handle"],
         "chat_guid": r["chat_guid"], "chat_ident": r["chat_ident"],
@@ -198,6 +204,77 @@ def row_text(row: dict[str, Any]) -> str:
     """The message text, decoded from attributedBody only when the text column is empty. Called once a row is trusted."""
     text = row["text"] or decode_attributed_body(row["body"]) or ""
     return text.replace("\ufffc", "").strip()
+
+
+_INVISIBLE = dict.fromkeys(map(ord, "\ufeff\u200b\u200c\u200d\u2060\ufffc"))  # BOM, zero-width, word joiner, object replacement
+
+
+def clean_text(text: str) -> str:
+    """NFC, invisibles gone, trimmed: one spelling of what a bubble says."""
+    return unicodedata.normalize("NFC", text or "").translate(_INVISIBLE).strip()
+
+
+def text_hash(text: str, marker: str = DEFAULT_MARKER) -> str:
+    """Marker-insensitive: Grain's "🌾 hello" and a row that lost its marker both hash like "hello"."""
+    t = clean_text(text)
+    for m in sorted({marker.strip(), DEFAULT_MARKER.strip()} - {""}, key=len, reverse=True):
+        if t.startswith(m):
+            t = t[len(m):]
+            break
+    return hashlib.sha256(t.strip().encode()).hexdigest()[:32]
+
+
+def find_own_rows(path: str, guid: str, limit: int = 30) -> list[dict[str, Any]]:
+    """The newest `limit` messages we sent (is_from_me) in one chat, oldest first. Our own rows, so decoding is fine."""
+    c = _open_ro(path)
+    try:
+        rows = c.execute(
+            "SELECT m.ROWID AS rowid, m.guid AS guid, m.text AS text, m.attributedBody AS body, m.date AS date FROM message m "
+            "JOIN chat_message_join cm ON cm.message_id = m.ROWID JOIN chat ch ON ch.ROWID = cm.chat_id "
+            "WHERE ch.guid = ? AND m.is_from_me = 1 ORDER BY m.ROWID DESC LIMIT ?", (guid, limit)).fetchall()
+    finally:
+        c.close()
+    return [{"rowid": r["rowid"], "guid": r["guid"], "text": r["text"] or "", "body": r["body"], "date": r["date"]}
+            for r in reversed(rows)]
+
+
+_ACCOUNT_PREFIX = re.compile(r"^[EePp]:")
+
+
+def self_chat_candidates(path: str, own: set[str]) -> list[dict[str, Any]]:
+    """1:1 iMessage chats whose other party is one of our own addresses (the allowlist, or an account address found in
+    the database): the note-to-self thread. Never reads a message body. Best first; exactly one is flagged `best`."""
+    c = _open_ro(path)
+    try:
+        def cols(t: str) -> set[str]:
+            return {r["name"] for r in c.execute(f"PRAGMA table_info({t})")}  # older macOS lacks some columns
+
+        acct: set[str] = set()
+        for table, col in (("chat", "account_login"), ("message", "account"), ("message", "destination_caller_id")):
+            if col in cols(table):
+                for r in c.execute(f"SELECT DISTINCT v FROM (SELECT {col} AS v FROM {table} WHERE {col} IS NOT NULL "
+                                   "ORDER BY ROWID DESC LIMIT 2000)"):
+                    if isinstance(r["v"], str) and (h := normalize_handle(_ACCOUNT_PREFIX.sub("", r["v"].strip()))):
+                        acct.add(h)
+        mine = set(own) | acct
+        out: list[dict[str, Any]] = []
+        for ch in c.execute("SELECT ROWID AS id, guid, chat_identifier AS ident, style, service_name AS svc, "
+                            "(SELECT COUNT(*) FROM chat_handle_join j WHERE j.chat_id = chat.ROWID) AS n FROM chat").fetchall():
+            h = normalize_handle(ch["ident"])
+            if not h or h not in mine or ch["style"] == 43 or int(ch["n"] or 0) > 1 or str(ch["svc"] or "").lower() != "imessage":
+                continue
+            last = c.execute("SELECT MAX(m.date) FROM chat_message_join cm JOIN message m ON m.ROWID = cm.message_id "
+                             "WHERE cm.chat_id = ?", (ch["id"],)).fetchone()[0]
+            ts = apple_to_unix(last)
+            out.append({"guid": ch["guid"], "handle": mask_handle(h), "last_activity": int(ts) if ts else None,
+                        "source": "account" if h in acct else "allowlist", "best": False, "_rank": (h in acct, h in own)})
+    finally:
+        c.close()
+    # The account's own address (and listed too) beats another listed person's 1:1 chat; then the most recent.
+    out.sort(key=lambda d: (*d.pop("_rank"), d["last_activity"] or 0), reverse=True)
+    if out:
+        out[0]["best"] = True
+    return out
 
 
 def apple_to_unix(date: Any) -> float | None:
@@ -437,6 +514,11 @@ RUN_ERROR = "The run ended with an error — details are in Grain."
 
 
 class IMessageBridge:
+    LOOP_STREAK = 5  # more than this many accepted self-chat texts in a row (gaps under LOOP_GAP) within LOOP_WINDOW: pause
+    LOOP_GAP = 10.0
+    LOOP_WINDOW = 60.0
+    record_delays: tuple[float, ...] = (1.0, 2.0, 4.0)  # when to look for our own sent row, to learn its ROWID/guid
+
     def __init__(self, deps: Deps, *, poll_seconds: float = POLL_SECONDS, send_gap: float = 1.0,
                  rate_limit: int = 10) -> None:
         self.deps = deps
@@ -467,6 +549,8 @@ class IMessageBridge:
         self._told = _Memo()  # call ids of plans and questions we pointed at the app
         self._codes: dict[int, str] = {}
         self._code_seq = random.randint(10, 80)  # a stale "yes 3" from before a restart must not hit a new card
+        self._streak: deque[float] = deque()  # monotonic times of accepted self-chat texts: the loop guard
+        self._self_seen: deque[tuple[float, str, bool]] = deque(maxlen=20)  # (monotonic, hash, from_me) of accepted self-chat rows
 
     # ---- lifecycle
     def _settings(self) -> dict[str, Any]:
@@ -481,6 +565,11 @@ class IMessageBridge:
             return
         self._loop = asyncio.get_running_loop()
         self._fresh = fresh
+        if fresh:  # toggling texting off and on is how a loop-guard pause is cleared
+            if self._paused():
+                self._save(loopPaused=None)
+            self._streak.clear()
+            self._self_seen.clear()
         self._stale_before = time.time() - STALE_SECONDS
         self.status_code = "running"
         self._task = asyncio.create_task(self._run(), name="imessage-poller")
@@ -579,6 +668,95 @@ class IMessageBridge:
             (people.add(h) if h else groups.add(str(e).strip()))
         return people, groups
 
+    def _marker(self) -> str:
+        m = self._settings().get("imessageReplyMarker")
+        return m if isinstance(m, str) and m.strip() else DEFAULT_MARKER
+
+    def _paused(self) -> bool:
+        return bool((self.deps.load_state() or {}).get("loopPaused"))
+
+    def _self_guid(self) -> str | None:
+        g = self._settings().get("imessageSelfChatGuid")
+        return g.strip() if isinstance(g, str) and g.strip() else None
+
+    def _is_self(self, row: dict[str, Any]) -> bool:
+        sg = self._self_guid()
+        return bool(sg) and row["chat_guid"] == sg and not row["group"]
+
+    def _self_ident(self, ident: Any = None) -> str | None:
+        """Our own address in the self chat: its identifier, else the guid's tail, else the first allowlisted handle."""
+        sg = self._self_guid()
+        h = normalize_handle(ident) or (normalize_handle(sg.rsplit(";", 1)[-1]) if sg else None)
+        return h or next(iter(self._people()), None)
+
+    def self_chats(self) -> dict[str, Any]:
+        """Blocking (reads the Messages database): the route runs it in a thread."""
+        try:
+            return {"chats": self_chat_candidates(self.deps.chat_db_path, set(self._people()))}
+        except NeedsFullDiskAccess:
+            return {"error": "needs_full_disk_access"}
+
+    def _ledger_add(self, h: str, chat: str | None, at: float) -> None:
+        sent = [e for e in (self.deps.load_state() or {}).get("sent") or [] if isinstance(e, dict) and e.get("at", 0) >= at - LEDGER_KEEP]
+        sent.append({"h": h, "chat": chat, "at": at, "rowid": None, "guid": None})
+        self._save(sent=sent[-LEDGER_CAP:])
+
+    def _link_rows(self, rows: list[dict[str, Any]], guid: str, since: float) -> int:
+        """Attach the ROWID/guid of rows we sent to their ledger entries (newest unrecorded entry with the same hash)."""
+        sent = [dict(e) for e in (self.deps.load_state() or {}).get("sent") or [] if isinstance(e, dict)]
+        known = {e.get("rowid") for e in sent if e.get("rowid") is not None}
+        marker, n = self._marker(), 0
+        for r in rows:
+            ts = apple_to_unix(r["date"])
+            if r["rowid"] in known or (ts is not None and ts < since - 5):
+                continue
+            h = text_hash(row_text(r), marker)
+            e = next((e for e in reversed(sent) if e.get("h") == h and e.get("rowid") is None and e.get("chat") == guid), None)
+            if e:
+                e["rowid"], e["guid"] = r["rowid"], r["guid"]
+                known.add(r["rowid"])
+                n += 1
+        if n:
+            self._save(sent=sent)
+        return n
+
+    async def _record_rows(self, guid: str, since: float) -> None:
+        """Best effort, off the send lock: Messages writes the row a moment after osascript returns."""
+        for d in self.record_delays:
+            await asyncio.sleep(d)
+            try:
+                rows = await asyncio.to_thread(find_own_rows, self.deps.chat_db_path, guid)
+                if self._link_rows(rows, guid, since):
+                    return
+            except Exception:  # noqa: BLE001 - the hash match still covers an unrecorded row
+                log.debug("imessage ledger lookup failed", exc_info=True)
+
+    def _self_skip(self, row: dict[str, Any], text: str, sg: str) -> str | None:
+        """Why a self-chat row is not the user speaking: Grain's own marker, a ledger hit, or the mirrored copy of a text."""
+        if clean_text(text).startswith(self._marker().strip()):
+            return "marker"
+        st = self.deps.load_state() or {}
+        sent = [e for e in st.get("sent") or [] if isinstance(e, dict)]
+        if (row.get("msg_guid") and any(e.get("guid") == row["msg_guid"] for e in sent)) or any(e.get("rowid") == row["rowid"] for e in sent):
+            return "ledger"
+        h = text_hash(text, self._marker())
+        now = time.time()
+        if text and any(e.get("h") == h and now - float(e.get("at") or 0) <= LEDGER_HASH_WINDOW and e.get("chat") in (None, sg) for e in sent):
+            return "ledger"
+        mono = time.monotonic()
+        if text and any(mono - t <= MIRROR_WINDOW and hh == h and fm != row["from_me"] for t, hh, fm in self._self_seen):
+            return "mirror"
+        return None
+
+    def _loop_trips(self) -> bool:
+        now = time.monotonic()
+        if self._streak and now - self._streak[-1] >= self.LOOP_GAP:
+            self._streak.clear()
+        self._streak.append(now)
+        while now - self._streak[0] > self.LOOP_WINDOW:
+            self._streak.popleft()
+        return len(self._streak) > self.LOOP_STREAK
+
     def _peek_target(self) -> str | None:
         explicit = self._settings().get("imessageConversationId")
         if explicit and self.deps.conversation_exists(explicit):
@@ -611,7 +789,7 @@ class IMessageBridge:
             self._stale_before = None  # caught up: from here on, everything is live
         try:
             for row in rows:
-                if row["chat_guid"] is None and not row["from_me"]:
+                if row["chat_guid"] is None and (not row["from_me"] or self._self_guid()):  # self chat: ours can be input too
                     ts = apple_to_unix(row["date"])
                     if ts is not None and -60 <= time.time() - ts < 30:  # the chat join may land a beat after the message
                         break
@@ -628,8 +806,9 @@ class IMessageBridge:
         finally:
             self._flush_ignored()
 
-    def _ignore(self, rid: int, sender: str | None, why: str) -> None:
-        self._ignored += 1
+    def _ignore(self, rid: int, sender: str | None, why: str, count: bool = True) -> None:
+        """`count`: an unknown sender's text, the number Settings shows. Our own replies and paused rows are only logged."""
+        self._ignored += count
         log.info("imessage rowid=%s from=%s ignored (%s)", rid, mask_handle(sender), why)
 
     def _flush_ignored(self) -> None:
@@ -641,38 +820,70 @@ class IMessageBridge:
     async def _apologize(self, row: dict[str, Any]) -> None:
         """Best effort: tell an allowlisted sender their message was not taken."""
         try:
-            sender = normalize_handle(row["handle"])
-            if row["from_me"] or sender not in self._people():
-                return
+            if self._is_self(row):
+                sender = self._self_ident(row["chat_ident"])
+                if not row["from_me"] and normalize_handle(row["handle"]) not in self._people():
+                    return
+                if clean_text(row_text(row)).startswith(self._marker().strip()):  # never apologize to our own text
+                    return
+            else:
+                sender = normalize_handle(row["handle"])
+                if row["from_me"] or sender not in self._people():
+                    return
             await self._send(Target(row["chat_guid"], None if row["group"] else sender),
                              "Grain couldn't take that message — try again.")
         except Exception:  # noqa: BLE001
             log.debug("imessage apology failed", exc_info=True)
 
     def _is_echo(self, text: str) -> bool:
-        now = time.time()
-        return any(now - at < ECHO_SECONDS and text == sent for at, sent in self._echo)
+        now, m = time.time(), self._marker().strip()
+        bare = text[len(m):].strip() if text.startswith(m) else text  # the copy that comes back carries the marker
+        return any(now - at < ECHO_SECONDS and sent in (text, bare) for at, sent in self._echo)
 
     async def _handle(self, row: dict[str, Any], stale_before: float | None) -> None:
         rid = row["rowid"]
-        if row["from_me"]:  # our own sends and the user's other devices: never an instruction
+        if self._paused():  # loop guard: nothing is heard until texting is switched off and on; the cursor still moves
+            self._ignore(rid, None, "paused", count=False)
+            return
+        mine = self._is_self(row)  # the confirmed note-to-self chat: the one place our own sends can be instructions
+        if row["from_me"] and not mine:  # our own sends and the user's other devices: never an instruction
             return
         if row["assoc"] != 0:  # tapbacks and reactions
             return
         if stale_before is not None and (ts := apple_to_unix(row["date"])) is not None and ts < stale_before:
             return
-        sender = normalize_handle(row["handle"])
+        sender = self._self_ident(row["chat_ident"]) if mine else normalize_handle(row["handle"])
         if str(row["service"] or "").lower() != "imessage":  # an SMS sender id can be spoofed
             self._ignore(rid, sender, "not iMessage")
             return
         people, groups = self._allow()
-        if sender not in people or (row["group"] and not {row["chat_guid"], row["chat_ident"]} & groups):
-            self._ignore(rid, sender, "not allowlisted")
-            return
-        text = row_text(row)
-        if text and self._is_echo(text):
-            self._ignore(rid, sender, "echo")
-            return
+        if mine:
+            if not row["from_me"] and (h := normalize_handle(row["handle"])) not in people:
+                self._ignore(rid, sender, "not allowlisted", count=h != sender)  # our own address unlisted: not a stranger
+                return
+            text = row_text(row)  # past the allowlist: the blob is ours or an allowlisted sender's
+            try:
+                why = self._self_skip(row, text, row["chat_guid"])
+            except Exception:  # noqa: BLE001 - when in doubt it is not the user: an apology here could feed itself
+                why = "skip check failed"
+            if why:
+                self._ignore(rid, sender, why, count=False)
+                return
+            if self._loop_trips():
+                self._save(loopPaused=time.time())
+                log.warning("imessage loop guard tripped: paused (rowid=%s from=%s)", rid, mask_handle(sender))
+                self._ignore(rid, sender, "paused", count=False)
+                return
+            if text:
+                self._self_seen.append((time.monotonic(), text_hash(text, self._marker()), bool(row["from_me"])))
+        else:
+            if sender not in people or (row["group"] and not {row["chat_guid"], row["chat_ident"]} & groups):
+                self._ignore(rid, sender, "not allowlisted")
+                return
+            text = row_text(row)
+            if text and self._is_echo(text):
+                self._ignore(rid, sender, "echo")
+                return
         where = Target(row["chat_guid"], None if row["group"] else sender)
         sent_at = apple_to_unix(row["date"])
         cmd = parse_command(text) if text else None
@@ -793,6 +1004,8 @@ class IMessageBridge:
     # ---- sending
     def _home(self) -> Target | None:
         """The 1:1 chat we last heard from, while that handle is still allowed; otherwise the first allowed handle."""
+        if sg := self._self_guid():
+            return Target(sg, self._self_ident())
         people = self._people()
         h = (self.deps.load_state() or {}).get("homeChat")
         if isinstance(h, dict) and h.get("handle") in people:
@@ -800,6 +1013,11 @@ class IMessageBridge:
         return Target(None, people[0]) if people else None
 
     async def _send(self, to: Target, text: str) -> bool:
+        if self._paused():
+            log.info("imessage send to=%s dropped (loop guard) len=%s", mask_handle(to.handle), len(text))
+            return False
+        marker = self._marker()
+        out = marker + text
         async with self._send_lock:
             now = time.monotonic()
             while self._sent and now - self._sent[0] >= 60:
@@ -811,14 +1029,18 @@ class IMessageBridge:
             if wait > 0:
                 await asyncio.sleep(wait)
             ok = False
+            at = time.time()
+            self._ledger_add(text_hash(text, marker), to.guid, at)  # before the send: the row can land before osascript returns
             if to.guid:
-                ok = await self._osascript(_argv(SCRIPT_CHAT, to.guid, text))
+                ok = await self._osascript(_argv(SCRIPT_CHAT, to.guid, out))
             if not ok and to.handle:
-                ok = await self._osascript(_argv(SCRIPT_PARTICIPANT, to.handle, text))
+                ok = await self._osascript(_argv(SCRIPT_PARTICIPANT, to.handle, out))
             self._last_send = time.monotonic()
             self._sent.append(self._last_send)
             self._echo.append((time.time(), text.strip()))
             log.info("imessage send to=%s len=%s ok=%s", mask_handle(to.handle), len(text), ok)
+            if ok and to.guid:
+                self._spawn(self._record_rows(to.guid, at))
             return ok
 
     async def _osascript(self, argv: list[str]) -> bool:
@@ -928,20 +1150,30 @@ class IMessageBridge:
     def status(self) -> dict[str, Any]:
         st = self.deps.load_state() or {}
         conv = self._peek_target()
+        sg = self._self_guid()
+        paused = bool(st.get("loopPaused")) and self.status_code != "off"
         return {
             "enabled": self._enabled(), "running": bool(self._task and not self._task.done()),
-            "status": self.status_code, "fda_ok": self._fda_ok, "last_poll_at": self.last_poll_at,
+            "status": "paused_loop_guard" if paused else self.status_code, "fda_ok": self._fda_ok, "last_poll_at": self.last_poll_at,
             "last_error": self.last_error, "ignored_count": int(st.get("ignoredCount") or 0),
             "last_ignored_at": st.get("lastIgnoredAt"),
             "target_conversation": {"id": conv, "title": self.deps.conversation_title(conv)} if conv else None,
+            "self_chat": {"guid": sg, "handle": mask_handle(self._self_ident()) if sg else None},
         }
 
     async def send_test(self, handle: str | None = None) -> dict[str, Any]:
+        if self._paused():
+            return {"ok": False, "error": "paused_loop_guard"}
+        if sg := self._self_guid():  # the confirmed self chat wins: that is where Grain talks
+            ok = await self._send(Target(sg, self._self_ident()), "Grain is connected ✅")
+            return {"ok": True, "to": "self_chat"} if ok else {"ok": False, "to": "self_chat", "error": "send_failed"}
         people = self._people()
-        h = normalize_handle(handle) if handle else (people[0] if people else None)
+        if not handle and not people:
+            return {"ok": False, "error": "no_self_chat"}
+        h = normalize_handle(handle) if handle else people[0]
         if not h or h not in people:
             return {"ok": False, "error": "not_allowlisted"}
         home = (self.deps.load_state() or {}).get("homeChat") or {}
         to = Target(home.get("guid") if home.get("handle") == h else None, h)
         ok = await self._send(to, "Grain is connected ✅")
-        return {"ok": True} if ok else {"ok": False, "error": "send_failed"}
+        return {"ok": True, "to": "handle"} if ok else {"ok": False, "to": "handle", "error": "send_failed"}

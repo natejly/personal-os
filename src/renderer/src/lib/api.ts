@@ -16,7 +16,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, IMessageStatus, SandboxStatus, ShellJobInfo, ShellJobTail,
+  BackupInfo, DataOverview, IMessageSelfChat, IMessageStatus, SandboxStatus, ShellJobInfo, ShellJobTail,
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
@@ -195,7 +195,8 @@ export const api = {
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
   sandboxes: () => req<SandboxStatus>('/sandboxes'),
   imessageStatus: () => req<IMessageStatus>('/imessage/status'),
-  imessageTest: (handle?: string) => req<{ ok: boolean; error?: string }>('/imessage/test', { method: 'POST', body: json(handle ? { handle } : {}) }),
+  imessageTest: (handle?: string) => req<{ ok: boolean; error?: string; to?: 'self_chat' | 'handle' }>('/imessage/test', { method: 'POST', body: json(handle ? { handle } : {}) }),
+  imessageSelfChats: () => req<{ chats: IMessageSelfChat[] }>('/imessage/self-chats'),
   imessageOpenFda: () => req<{ ok: boolean }>('/imessage/open-fda', { method: 'POST' }),
   resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),

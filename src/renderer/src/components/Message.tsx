@@ -57,7 +57,7 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
         void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
       }}
     >
-      <GraduationCap size={11} /> {busy ? 'Saving…' : 'Save as skill…'}
+      <GraduationCap size={11} />
     </button>
   )
 }

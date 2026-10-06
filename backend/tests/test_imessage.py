@@ -23,6 +23,8 @@ from personal_os import imessage as im  # noqa: E402
 ME = "+15551234567"
 STRANGER = "+15559998888"
 BODY = "ZEBRA-SECRET-BODY please keep this out of the logs"
+SELF_GUID = f"iMessage;-;{ME}"  # the note-to-self chat: the user's own number (also on the allowlist)
+MARK = im.DEFAULT_MARKER
 HEAD = (b"\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84\x12NSAttributedString\x00\x84\x84\x08NSObject\x00"
         b"\x85\x92\x84\x84\x84\x08NSString\x01\x94\x84\x01+")
 
@@ -34,7 +36,7 @@ def run(coro: Any) -> Any:
 class ChatDB:
     """The subset of the Messages schema the poller reads, with the real column names."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, accounts: bool = False) -> None:
         self.path = str(path)
         c = sqlite3.connect(self.path)
         c.executescript("""
@@ -46,6 +48,15 @@ class ChatDB:
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
         """)
+        if accounts:  # newer macOS: which of our own addresses a chat/message belongs to
+            c.executescript("ALTER TABLE chat ADD COLUMN account_login TEXT; ALTER TABLE message ADD COLUMN account TEXT; "
+                            "ALTER TABLE message ADD COLUMN destination_caller_id TEXT;")
+        c.commit()
+        c.close()
+
+    def sql(self, q: str, *args: Any) -> None:
+        c = sqlite3.connect(self.path)
+        c.execute(q, args)
         c.commit()
         c.close()
 
@@ -55,21 +66,25 @@ class ChatDB:
 
     def add(self, handle: str, text: str | None, *, from_me: int = 0, assoc: int | None = 0, att: int = 0,
             body: bytes | None = None, group: str | None = None, age: float = 0, join: bool = True,
-            service: str | None = "iMessage", date: Any = "auto") -> int:
+            service: str | None = "iMessage", date: Any = "auto", chat: str | None = None, guid: str | None = None) -> int:
         c = sqlite3.connect(self.path)
         hid = self._one(c, "SELECT ROWID FROM handle WHERE id=?", (handle,), "INSERT INTO handle(id, service) VALUES(?, 'iMessage')", (handle,))
-        guid, style, ident = (f"iMessage;+;{group}", 43, group) if group else (f"iMessage;-;{handle}", 45, handle)
-        row = c.execute("SELECT ROWID FROM chat WHERE guid=?", (guid,)).fetchone()
+        cguid, style, ident = (f"iMessage;+;{group}", 43, group) if group else (f"iMessage;-;{handle}", 45, handle)
+        if chat:  # a 1:1 chat that is not named after the sender, e.g. a row from_me placed in a given chat
+            cguid, style, ident = chat, 45, chat.rsplit(";", 1)[-1]
+        row = c.execute("SELECT ROWID FROM chat WHERE guid=?", (cguid,)).fetchone()
         if row:
             cid = row[0]
         else:
-            cid = c.execute("INSERT INTO chat(guid, style, chat_identifier, service_name) VALUES(?,?,?,'iMessage')", (guid, style, ident)).lastrowid
+            cid = c.execute("INSERT INTO chat(guid, style, chat_identifier, service_name) VALUES(?,?,?,'iMessage')", (cguid, style, ident)).lastrowid
             for h in ((hid, hid + 100) if group else (hid,)):
                 c.execute("INSERT INTO chat_handle_join VALUES(?,?)", (cid, h))
         if date == "auto":
             date = int((time.time() - age - im.APPLE_EPOCH) * 1e9)
         mid = c.execute("INSERT INTO message(guid, text, attributedBody, handle_id, date, is_from_me, associated_message_type, cache_has_attachments, service) "
-                        "VALUES(?,?,?,?,?,?,?,?,?)", ("g", text, body, hid, date, from_me, assoc, att, service)).lastrowid
+                        "VALUES(?,?,?,?,?,?,?,?,?)", (guid, text, body, hid, date, from_me, assoc, att, service)).lastrowid
+        if guid is None:
+            c.execute("UPDATE message SET guid=? WHERE ROWID=?", (f"msg-{mid}", mid))
         if join:
             c.execute("INSERT INTO chat_message_join VALUES(?,?)", (cid, mid))
         c.commit()
@@ -107,6 +122,7 @@ class Env:
         self.stop_result = True
         self.created = 0
         self.bridge = im.IMessageBridge(self.deps(), poll_seconds=0.02, send_gap=0)
+        self.bridge.record_delays = (0.0,)
         self.bridge._code_seq = 0  # codes are random per process; the tests want 1, 2, ...
 
     def deps(self) -> im.Deps:
@@ -159,7 +175,8 @@ class Env:
         await self.bridge.poll_once()
 
     def texts(self) -> list[str]:
-        return [a[4] for a in self.sent]
+        """What was sent, minus the marker every outbound text carries."""
+        return [a[4].removeprefix(MARK) for a in self.sent]
 
     def pend(self, call_id: str, forced: bool = False, tool: str = "send_email", args: Any = None, conv: str = "conv-1",
              run_id: str = "run-1") -> None:
@@ -580,7 +597,7 @@ def test_message_text_cannot_inject_into_the_script(env: Env) -> None:
         await env.settle()
         argv = env.sent[-1]
         assert argv[:2] == ["osascript", "-e"] and argv[2] in (im.SCRIPT_CHAT, im.SCRIPT_PARTICIPANT)
-        assert argv[4] == nasty and "rm -rf" not in argv[2]
+        assert argv[4] == MARK + nasty and "rm -rf" not in argv[2]
         assert "rm -rf" not in im.SCRIPT_CHAT and "rm -rf" not in im.SCRIPT_PARTICIPANT
         assert "on run argv" in argv[2] and "item 2 of argv" in argv[2]
         run_dash = im._argv(im.SCRIPT_CHAT, "t", "-5 degrees")
@@ -746,11 +763,12 @@ def test_send_test_only_reaches_allowlisted_handles(env: Env) -> None:
     async def go() -> None:
         assert (await env.bridge.send_test(STRANGER)) == {"ok": False, "error": "not_allowlisted"}
         assert env.sent == []
-        assert (await env.bridge.send_test()) == {"ok": True}
-        assert env.sent[-1][2] == im.SCRIPT_PARTICIPANT and env.sent[-1][3] == ME and env.sent[-1][4] == "Grain is connected ✅"
-        assert (await env.bridge.send_test("(555) 123-4567")) == {"ok": True}
+        assert (await env.bridge.send_test()) == {"ok": True, "to": "handle"}
+        assert env.sent[-1][2] == im.SCRIPT_PARTICIPANT and env.sent[-1][3] == ME and env.sent[-1][4] == MARK + "Grain is connected ✅"
+        assert (await env.bridge.send_test("(555) 123-4567")) == {"ok": True, "to": "handle"}
         env.settings["imessageHandles"] = []
-        assert (await env.bridge.send_test()) == {"ok": False, "error": "not_allowlisted"}
+        assert (await env.bridge.send_test()) == {"ok": False, "error": "no_self_chat"}
+        assert (await env.bridge.send_test(ME)) == {"ok": False, "error": "not_allowlisted"}
 
     run(go())
 
@@ -1138,3 +1156,459 @@ def test_open_full_disk_access_never_raises(monkeypatch: pytest.MonkeyPatch) -> 
     assert im.open_full_disk_access() is False
     monkeypatch.setattr(im.subprocess, "run", missing)
     assert im.open_full_disk_access() is False
+
+
+# ---------------------------------------------------------------- the note-to-self chat
+
+@pytest.fixture
+def senv(tmp_path: Path) -> Env:
+    """An allowlisted user whose own number is the confirmed self chat."""
+    return Env(tmp_path, imessageSelfChatGuid=SELF_GUID)
+
+
+def test_a_self_chat_text_from_me_is_a_turn_and_the_reply_goes_back_to_that_chat_with_the_marker(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, "plan my week", from_me=1)
+        await senv.poll()
+        assert senv.turns == [("conv-1", "plan my week")]
+        assert senv.state["homeChat"] == {"guid": SELF_GUID, "handle": ME}
+        senv.messages["m1"] = "Here you go"
+        senv.bridge.on_run_change(FakeRun("run-1", replied=True, message_id="m1"))
+        await senv.settle()
+        assert senv.sent[-1][2] == im.SCRIPT_CHAT and senv.sent[-1][3] == SELF_GUID
+        assert senv.sent[-1][4] == MARK + "Here you go"
+
+    run(go())
+
+
+def test_from_me_rows_in_any_other_chat_are_still_ignored(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(STRANGER, "do the thing", from_me=1)  # the user texting a friend
+        senv.chat.add(ME, "status", from_me=1, group="chat123")  # a group is never the self chat
+        await senv.poll()
+        assert senv.turns == [] and senv.sent == [] and senv.state.get("ignoredCount", 0) == 0
+
+    run(go())
+
+
+@pytest.mark.parametrize("guid", [None, "iMessage;-;+19998887777"])
+def test_a_self_looking_chat_that_is_not_confirmed_is_not_self(tmp_path: Path, guid: str | None) -> None:
+    e = Env(tmp_path, imessageSelfChatGuid=guid)
+
+    async def go() -> None:
+        await e.arm()
+        e.chat.add(ME, "do the thing", from_me=1)
+        await e.poll()
+        assert e.turns == [] and e.sent == []
+        e.chat.add(ME, "from a received copy")  # the normal allowlisted rules still apply
+        await e.poll()
+        assert [t[1] for t in e.turns] == ["from a received copy"]
+
+    run(go())
+
+
+def test_a_received_row_in_the_self_chat_needs_an_allowlisted_handle(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, "from my own handle", from_me=0)
+        senv.chat.add(STRANGER, "from someone else", chat=SELF_GUID)
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["from my own handle"]
+        assert senv.state["ignoredCount"] == 1
+
+    run(go())
+
+
+def test_sms_in_the_self_chat_is_still_ignored(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, "spoofed", from_me=1, service="SMS")
+        await senv.poll()
+        assert senv.turns == []
+
+    run(go())
+
+
+def test_self_chat_rows_that_start_with_the_marker_are_skipped_even_behind_invisible_characters(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        for t in (MARK + "hello", "﻿🌾hello", "​⁠ 🌾 hello", "￼🌾"):
+            senv.chat.add(ME, t, from_me=1)
+        senv.chat.add(ME, "hello 🌾 there", from_me=1)  # the marker mid-text is just a message
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["hello 🌾 there"]
+
+    run(go())
+
+
+def test_a_changed_marker_is_what_the_self_chat_listens_for(senv: Env) -> None:
+    senv.settings["imessageReplyMarker"] = "🤖 "
+
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, "🤖 from grain", from_me=1)
+        senv.chat.add(ME, "plain", from_me=1)
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["plain"]
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "hi")
+        assert senv.sent[-1][4] == "🤖 hi"
+
+    run(go())
+
+
+@pytest.mark.parametrize("marker", ["", "   ", None])
+def test_an_empty_marker_falls_back_to_the_default(senv: Env, marker: Any) -> None:
+    senv.settings["imessageReplyMarker"] = marker
+
+    async def go() -> None:
+        await senv.arm()
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "hi")
+        assert senv.sent[-1][4] == MARK + "hi"
+        senv.chat.add(ME, MARK + "hi", from_me=1)
+        await senv.poll()
+        assert senv.turns == []
+
+    run(go())
+
+
+def test_the_ledger_is_written_before_the_runner_is_called(senv: Env) -> None:
+    seen: list[list[dict[str, Any]]] = []
+    inner = senv.bridge.deps.runner
+
+    async def spy(argv: list[str]) -> tuple[int, str]:
+        seen.append(list(senv.state.get("sent") or []))
+        return await inner(argv)
+
+    senv.bridge.deps.runner = spy
+
+    async def go() -> None:
+        await senv.arm()
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "the answer")
+        assert [e["h"] for e in seen[0]] == [im.text_hash("the answer")]
+        assert seen[0][0]["chat"] == SELF_GUID and seen[0][0]["rowid"] is None and seen[0][0]["at"] > 0
+
+    run(go())
+
+
+def test_a_row_matching_the_ledger_by_guid_or_rowid_is_skipped(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        by_guid = senv.chat.add(ME, "no marker, never hashed", from_me=1, guid="G-ours")
+        by_rowid = senv.chat.add(ME, "another one", from_me=1)
+        senv.state["sent"] = [{"h": "x", "chat": SELF_GUID, "at": time.time(), "rowid": None, "guid": "G-ours"},
+                              {"h": "y", "chat": SELF_GUID, "at": time.time() - 90000, "rowid": by_rowid, "guid": None}]
+        senv.chat.add(ME, "mine, really", from_me=1)
+        await senv.poll()
+        assert by_guid and [t[1] for t in senv.turns] == ["mine, really"]
+
+    run(go())
+
+
+def test_the_hash_catches_our_row_before_the_guid_lookup_has_run(senv: Env) -> None:
+    senv.bridge.record_delays = ()  # the lookup never runs: only the hash can tell this row is ours
+
+    async def go() -> None:
+        await senv.arm()
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "Here is the answer")
+        assert senv.state["sent"][-1]["rowid"] is None
+        senv.chat.add(ME, "﻿Here is the answer  ", from_me=1)  # the marker was dropped on the way
+        senv.chat.add(ME, MARK + "Here is the answer", from_me=0)  # and the received copy
+        await senv.poll()
+        assert senv.turns == []
+
+    run(go())
+
+
+def test_an_old_ledger_hit_no_longer_hides_a_message(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.state["sent"] = [{"h": im.text_hash("Approved."), "chat": SELF_GUID, "at": time.time() - 700, "rowid": None, "guid": None}]
+        senv.chat.add(ME, "Approved.", from_me=1)
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["Approved."]
+
+    run(go())
+
+
+def test_a_split_reply_is_never_ingested_even_when_a_part_loses_its_marker(senv: Env) -> None:
+    senv.bridge.record_delays = ()
+
+    async def go() -> None:
+        await senv.arm()
+        await senv.bridge._send_all(im.Target(SELF_GUID, ME), "A sentence goes here. " * 200)
+        parts = [a[4] for a in senv.sent]
+        assert len(parts) == 3 and all(p.startswith(MARK) for p in parts)
+        senv.chat.add(ME, parts[0].removeprefix(MARK), from_me=1)  # Messages dropped this one's marker
+        senv.chat.add(ME, parts[1], from_me=1)
+        senv.chat.add(ME, parts[2], from_me=0)
+        await senv.poll()
+        assert senv.turns == []
+
+    run(go())
+
+
+def test_our_sent_rows_get_their_rowid_and_guid_in_the_ledger(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "first")
+        await senv.bridge._send(im.Target(SELF_GUID, ME), "second")
+        await senv.settle()  # nothing in the database yet: the lookups find nothing and give up
+        assert [e["rowid"] for e in senv.state["sent"]] == [None, None]
+        a = senv.chat.add(ME, MARK + "second", from_me=1)
+        senv.chat.add(STRANGER, MARK + "first", from_me=1)  # another chat's row is not ours
+        await senv.bridge._record_rows(SELF_GUID, time.time() - 1)
+        assert [(e["rowid"], e["guid"]) for e in senv.state["sent"]] == [(None, None), (a, f"msg-{a}")]
+
+    run(go())
+
+
+def test_the_ledger_is_pruned_by_age_and_capped(senv: Env) -> None:
+    old = [{"h": "o", "chat": None, "at": time.time() - 90000, "rowid": None, "guid": None}]
+    senv.state["sent"] = old + [{"h": f"{i}", "chat": None, "at": time.time(), "rowid": None, "guid": None} for i in range(520)]
+    senv.bridge._ledger_add("new", None, time.time())
+    sent = senv.state["sent"]
+    assert len(sent) == im.LEDGER_CAP and sent[-1]["h"] == "new" and all(e["h"] != "o" for e in sent)
+
+
+def test_the_same_phone_text_arriving_twice_is_one_turn(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, "remind me tomorrow", from_me=1)
+        senv.chat.add(ME, "remind me tomorrow", from_me=0)  # the received copy
+        senv.chat.add(ME, "again", from_me=0)
+        senv.chat.add(ME, "again", from_me=1)
+        senv.chat.add(ME, "twice", from_me=1)  # a real repeat in the same direction is not a mirror
+        senv.chat.add(ME, "twice", from_me=1)
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["remind me tomorrow", "again", "twice", "twice"]
+
+    run(go())
+
+
+def test_the_loop_guard_pauses_the_bridge_and_a_toggle_clears_it(senv: Env) -> None:
+    async def go() -> None:
+        await senv.arm()
+        for i in range(7):
+            senv.chat.add(ME, f"ping {i}", from_me=1)
+        last = senv.chat.add(ME, "after", from_me=1)
+        await senv.poll()
+        assert len(senv.turns) == im.IMessageBridge.LOOP_STREAK == 5
+        assert senv.state["loopPaused"] > 0 and senv.state["cursor"] == last  # the cursor still moved
+        assert senv.bridge.status()["status"] == "paused_loop_guard"
+        assert await senv.bridge._send(im.Target(SELF_GUID, ME), "hi") is False
+        assert await senv.bridge.send_test() == {"ok": False, "error": "paused_loop_guard"}
+        assert senv.sent == []
+        senv.chat.add(ME, "still paused", from_me=1)
+        await senv.poll()
+        assert len(senv.turns) == 5
+        await senv.bridge.start(fresh=True)  # texting switched off and on
+        await senv.bridge.stop()
+        assert senv.state["loopPaused"] is None and senv.bridge.status()["status"] == "off"
+        assert await senv.bridge._send(im.Target(SELF_GUID, ME), "hi") is True
+
+    run(go())
+
+
+def test_a_slow_back_and_forth_never_trips_the_loop_guard(senv: Env) -> None:
+    senv.bridge.LOOP_GAP = 0.0  # every message starts a new streak
+
+    async def go() -> None:
+        await senv.arm()
+        for i in range(8):
+            senv.chat.add(ME, f"ping {i}", from_me=1)
+        await senv.poll()
+        assert len(senv.turns) == 8 and "loopPaused" not in senv.state
+
+    run(go())
+
+
+def test_send_test_goes_to_the_self_chat_and_falls_back_when_none_is_set(senv: Env) -> None:
+    async def go() -> None:
+        assert await senv.bridge.send_test() == {"ok": True, "to": "self_chat"}
+        assert senv.sent[-1][2] == im.SCRIPT_CHAT and senv.sent[-1][3] == SELF_GUID
+        assert senv.sent[-1][4] == MARK + "Grain is connected ✅"
+        senv.settings["imessageSelfChatGuid"] = None
+        assert await senv.bridge.send_test() == {"ok": True, "to": "handle"}
+        assert senv.sent[-1][2] == im.SCRIPT_PARTICIPANT and senv.sent[-1][3] == ME
+        senv.settings["imessageSelfChatGuid"] = SELF_GUID
+        senv.rc["chat"] = 1
+        senv.rc["participant"] = 1
+        assert await senv.bridge.send_test() == {"ok": False, "to": "self_chat", "error": "send_failed"}
+
+    run(go())
+
+
+def test_proactive_texts_go_to_the_self_chat(senv: Env) -> None:
+    senv.settings["imessageNotifyLongRuns"] = True
+    senv.state["homeChat"] = {"guid": "iMessage;-;+15550001111", "handle": ME}  # an older 1:1 chat is overridden
+
+    async def go() -> None:
+        await senv.arm()
+        now = time.time()
+        senv.bridge.on_run_change(FakeRun("ui-1", started_at=now - 500, ended_at=now, live=False, status="done"))
+        await senv.settle()
+        assert senv.sent[-1][2] == im.SCRIPT_CHAT and senv.sent[-1][3] == SELF_GUID and senv.sent[-1][4].startswith(MARK + "Grain finished")
+
+    run(go())
+
+
+def test_status_reports_the_self_chat_masked(senv: Env, tmp_path: Path) -> None:
+    assert senv.bridge.status()["self_chat"] == {"guid": SELF_GUID, "handle": im.mask_handle(ME)}
+    (tmp_path / "plain").mkdir()
+    assert Env(tmp_path / "plain").bridge.status()["self_chat"] == {"guid": None, "handle": None}
+
+
+def test_the_marker_is_on_every_part_of_a_split_reply_and_on_approval_prompts(env: Env) -> None:
+    async def go() -> None:
+        await env.arm()
+        await env.ask("go")
+        env.pend("c1")
+        await env.awaiting()
+        assert env.sent[-1][4].startswith(MARK + "Approval needed")
+        env.messages["m1"] = "A sentence goes here. " * 90
+        before = len(env.sent)
+        env.bridge.on_run_change(FakeRun("run-1", replied=True, message_id="m1"))
+        await env.settle()
+        assert len(env.sent) - before == 2 and all(a[4].startswith(MARK + "(") for a in env.sent[before:])
+        await env.ask("help")
+        assert env.sent[-1][4] == MARK + im.HELP
+
+    run(go())
+
+
+def test_no_bodies_or_full_handles_in_the_logs_of_a_self_chat_flow(senv: Env, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(ME, BODY, from_me=1)
+        senv.chat.add(ME, BODY, from_me=0)  # mirror
+        senv.chat.add(ME, MARK + BODY, from_me=1)
+        senv.messages["m1"] = BODY
+        await senv.poll()
+        senv.bridge.on_run_change(FakeRun("run-1", replied=True, message_id="m1"))
+        await senv.settle()
+        senv.chat.add(ME, BODY, from_me=1)  # its own reply coming back, bodies and all
+        senv.chat.add(ME, BODY + " more", from_me=1)
+        senv.chat.add(ME, "x", from_me=1)
+        await senv.poll()
+        for _ in range(6):
+            senv.chat.add(ME, f"{BODY} {_}", from_me=1)
+        await senv.poll()  # trips the loop guard
+        assert senv.bridge.status()["status"] == "paused_loop_guard"
+
+    run(go())
+    assert caplog.records
+    for r in caplog.records:
+        blob = r.getMessage() + repr(r.args)
+        assert "ZEBRA" not in blob and ME not in blob and "5551234567" not in blob
+
+
+def test_marker_check_never_decodes_untrusted_blobs_in_other_chats(senv: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    decoded: list[int] = []
+    real = im.decode_attributed_body
+    monkeypatch.setattr(im, "decode_attributed_body", lambda b: decoded.append(1) or real(b))
+
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(STRANGER, None, body=HEAD + bytes([5]) + b"hello")
+        await senv.poll()
+        assert decoded == []
+        senv.chat.add(ME, None, from_me=1, body=HEAD + bytes([5]) + b"hello")
+        await senv.poll()
+        assert decoded == [1] and [t[1] for t in senv.turns] == ["hello"]
+
+    run(go())
+
+
+def test_a_self_chat_blob_from_an_unlisted_sender_is_never_decoded(senv: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    decoded: list[int] = []
+    real = im.decode_attributed_body
+    monkeypatch.setattr(im, "decode_attributed_body", lambda b: decoded.append(1) or real(b))
+
+    async def go() -> None:
+        await senv.arm()
+        senv.chat.add(STRANGER, None, body=HEAD + bytes([5]) + b"hello", chat=SELF_GUID)
+        await senv.poll()
+        assert decoded == [] and senv.turns == []
+
+    run(go())
+
+
+def test_a_self_chat_row_seen_before_its_chat_join_waits_for_it(senv: Env) -> None:
+    async def go() -> None:
+        senv.chat.add(ME, "earlier", from_me=1)  # makes the self chat; history once armed
+        await senv.arm()
+        rid = senv.chat.add(ME, "late join", from_me=1, join=False)
+        await senv.poll()
+        assert senv.turns == [] and senv.state["cursor"] == rid - 1  # held, not skipped
+        senv.chat.sql(f"INSERT INTO chat_message_join SELECT ROWID, {rid} FROM chat WHERE guid='{SELF_GUID}'")
+        await senv.poll()
+        assert [t[1] for t in senv.turns] == ["late join"]
+
+    run(go())
+
+
+def test_our_reply_coming_back_from_an_unlisted_own_address_is_not_counted_as_a_stranger(tmp_path: Path) -> None:
+    own = "nate@icloud.com"  # the self chat's address, never added to the list
+    e = Env(tmp_path, imessageSelfChatGuid=f"iMessage;-;{own}")
+
+    async def go() -> None:
+        await e.arm()
+        e.chat.add(own, MARK + "a reply", from_me=0)
+        await e.poll()
+        assert e.turns == [] and e.state.get("ignoredCount", 0) == 0
+        e.chat.add(STRANGER, "hi", chat=f"iMessage;-;{own}")
+        await e.poll()
+        assert e.state["ignoredCount"] == 1
+
+    run(go())
+
+
+# ---------------------------------------------------------------- finding the self chat
+
+def _own_chat_db(tmp_path: Path, accounts: bool = False) -> ChatDB:
+    return ChatDB(tmp_path / "chat.db", accounts=accounts)
+
+
+def test_candidates_from_the_allowlist_without_account_columns(tmp_path: Path) -> None:
+    db = _own_chat_db(tmp_path)
+    db.add(ME, BODY, from_me=1, age=100)
+    db.add(STRANGER, BODY, age=10)  # a friend: not ours
+    db.add("+15550001111", BODY, group="chat9")  # a group: never
+    got = im.self_chat_candidates(db.path, {ME})
+    assert got == [{"guid": SELF_GUID, "handle": im.mask_handle(ME), "last_activity": got[0]["last_activity"],
+                    "source": "allowlist", "best": True}]
+    assert abs(got[0]["last_activity"] - (time.time() - 100)) < 5
+    assert "ZEBRA" not in repr(got) and got[0]["handle"] == "…4567"
+
+
+def test_candidates_from_account_addresses_with_one_flagged_best(tmp_path: Path) -> None:
+    db = _own_chat_db(tmp_path, accounts=True)
+    other = "+15557776666"
+    db.add(ME, "a", from_me=1, age=500)
+    db.add(other, BODY, from_me=1, age=5)  # more recent, but only known from the account columns
+    db.add("nate@icloud.com", BODY, from_me=1, age=50)
+    db.add(STRANGER, BODY, age=1)
+    db.sql("UPDATE message SET destination_caller_id='P:+15557776666' WHERE ROWID=2")
+    db.sql("UPDATE chat SET account_login='E:Nate@iCloud.com' WHERE guid='iMessage;-;nate@icloud.com'")
+    db.sql("INSERT INTO chat(guid, style, chat_identifier, service_name) VALUES('SMS;-;+15557776666', 45, '+15557776666', 'SMS')")
+    got = im.self_chat_candidates(db.path, {ME, other})
+    assert sum(c["best"] for c in got) == 1 and got[0]["best"] and got[0]["guid"] == "iMessage;-;+15557776666"  # an account address that is also listed wins
+    got = im.self_chat_candidates(db.path, {ME})
+    assert got[0]["guid"] == "iMessage;-;+15557776666" and got[0]["source"] == "account"  # a listed non-account chat (maybe a friend) ranks below
+    assert {c["guid"] for c in got} == {SELF_GUID, "iMessage;-;+15557776666", "iMessage;-;nate@icloud.com"}  # no SMS twin, no friend
+    assert all(set(c) == {"guid", "handle", "last_activity", "source", "best"} for c in got) and "ZEBRA" not in repr(got)
+    # with no allowlist hit, the most recent account chat is best
+    got = im.self_chat_candidates(db.path, set())
+    assert [c["guid"] for c in got if c["best"]] == ["iMessage;-;+15557776666"] and all(c["source"] == "account" for c in got)
+
+
+def test_candidates_need_full_disk_access_when_the_database_cannot_be_opened(tmp_path: Path) -> None:
+    with pytest.raises(im.NeedsFullDiskAccess):
+        im.self_chat_candidates(str(tmp_path / "missing" / "chat.db"), {ME})
+    env = Env(tmp_path)
+    env.bridge.deps.chat_db_path = str(tmp_path / "missing" / "chat.db")
+    assert env.bridge.self_chats() == {"error": "needs_full_disk_access"}

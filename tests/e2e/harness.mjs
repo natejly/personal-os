@@ -93,6 +93,8 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
  * launchApp(): { app, page, api, backend, llm, dataDir, close }.
  *  - api(path, {method, body}) calls the backend with the bearer token and returns parsed JSON (throws on >= 400).
  *  - llm.calls is every chat-completions request body the mock saw (undefined with E2E_LLM=real).
+ *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual'} so the classic chat stays testable;
+ *    pass autonomousByDefault:true / permissionMode:'auto' to test the shipped defaults.
  *  - page is the main window; waits until the shell (sidebar) has rendered.
  */
 export async function launchApp({ settings = {}, name = 'grain', beforeApp, backendEnv = {}, backendEntry } = {}) {
@@ -142,7 +144,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   }
   // Skip the first-run wizard and seed anything the test wants before the renderer loads.
   try {
-    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), ...settings } })
+    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', ...settings } })
     if (beforeApp) await beforeApp({ api, backend, dataDir })
   } catch (e) { await abandon(e) }
 

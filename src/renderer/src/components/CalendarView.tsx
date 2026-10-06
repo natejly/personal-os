@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, slotIso, startOfWeek, withoutTodoEvents, type Slot } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
+import CalendarMonth, { monthGridStart } from './CalendarMonth'
 import { useVisibleCalendars } from './useVisibleCalendars'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
@@ -62,6 +63,14 @@ export default function CalendarView(): JSX.Element {
   const todos = useStore((s) => s.todos)
   const { refreshTodos, toast, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
+  // Week or month grid. `week` stays the anchor for both: the month shown is the one holding that week's Thursday.
+  const [mode, setModeState] = useState<'week' | 'month'>(() => { try { return localStorage.getItem('calendar.mode') === 'month' ? 'month' : 'week' } catch { return 'week' } })
+  const setMode = (m: 'week' | 'month'): void => { setModeState(m); try { localStorage.setItem('calendar.mode', m) } catch { /* private mode: the choice just does not persist */ } }
+  const monthDate = useMemo(() => addDays(week, 3), [week])
+  const rangeStart = mode === 'month' ? monthGridStart(monthDate) : week
+  const rangeDays = mode === 'month' ? 42 : 7
+  // The week holding the 4th always has its Thursday inside the month, so stepping never lands on a neighbour.
+  const step = (dir: number): void => setWeek(mode === 'month' ? startOfWeek(new Date(monthDate.getFullYear(), monthDate.getMonth() + dir, 4)) : addDays(week, dir * 7))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -71,7 +80,7 @@ export default function CalendarView(): JSX.Element {
   const { calendars, visibleIds, query, ready, shown: calendarOn, toggle } = useVisibleCalendars()
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
-  const cacheKey = google?.connected && query ? calendarViewKey(week.toISOString(), 7, query) : ''
+  const cacheKey = google?.connected && query ? calendarViewKey(rangeStart.toISOString(), rangeDays, query) : ''
   // Paint the saved week in this render, before the sync request returns, so stepping
   // back to a week already opened does not flash "Loading…".
   const [painted, setPainted] = useState(cacheKey)
@@ -100,12 +109,12 @@ export default function CalendarView(): JSX.Element {
   const load = async (refresh = false): Promise<void> => {
     if (!google?.connected || query == null) return
     if (!query) { setEvents([]); return }
-    const key = calendarViewKey(week.toISOString(), 7, query)
+    const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
     const mine = ++seq.current
     if (refresh) setLoading(true)
     setError(null)
     try {
-      const list = await api.google.calendarRange(week.toISOString(), 7, query, refresh)
+      const list = await api.google.calendarRange(rangeStart.toISOString(), rangeDays, query, refresh)
       writeView(key, list)
       if (seq.current !== mine) return
       setEvents(list)
@@ -120,14 +129,14 @@ export default function CalendarView(): JSX.Element {
     const mine = ++seq.current
     if (!google?.connected || query == null) return
     if (!query) return
-    const key = calendarViewKey(week.toISOString(), 7, query)
+    const key = calendarViewKey(rangeStart.toISOString(), rangeDays, query)
     let alive = true
-    api.google.calendarRange(week.toISOString(), 7, query)
+    api.google.calendarRange(rangeStart.toISOString(), rangeDays, query)
       .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setEvents(list); setError(null) } })
       .catch((e) => { if (alive && seq.current === mine) setError((e as Error).message) })
       .finally(() => { if (alive && seq.current === mine) setLoading(false) })
     return () => { alive = false }
-  }, [week, google?.connected, query])
+  }, [week, mode, google?.connected, query])
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
   useEffect(() => {
     if (google?.connected) void primeCalendarMeta().then(() => setMetaTick((t) => t + 1))
@@ -186,19 +195,19 @@ export default function CalendarView(): JSX.Element {
     const loc = e.location ? ` at ${oneLine(e.location, 80)}` : ''
     return `${when} — ${title} (\`${oneLine(e.id, 80)}\`)${loc}`
   }
-  const span = `${days[0].toDateString()} – ${days[6].toDateString()}`
+  const span = mode === 'month' ? monthDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : `${days[0].toDateString()} – ${days[6].toDateString()}`
   usePageContext(() => ({
     view: 'calendar',
     label: focus ? `Event “${oneLine(focus.summary || '') || 'untitled'}”` : `Calendar · ${span}`,
     detail: [
-      `The week of ${span} is on screen.`,
+      `The ${mode} of ${span} is on screen.`,
       focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${oneLine(focus.description, 400)}` : ''}` : '',
-      events.length ? `Events that week:\n${lines(events, fmtEvent)}` : 'No events that week.',
+      events.length ? `Events that ${mode}:\n${lines(events, fmtEvent)}` : `No events that ${mode}.`,
       todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
     ].filter(Boolean).join('\n\n'),
     refs: (focus ? [{ kind: 'event', id: focus.id, name: focus.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
     hints: focus ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
-  }), [events, focus, todos, span])
+  }), [events, focus, todos, span, mode])
 
   return (
     <main className="page cal-page">
@@ -207,11 +216,15 @@ export default function CalendarView(): JSX.Element {
         <h2><CalIcon size={16} /> Calendar</h2>
         {/* Navigation reads left to right as one phrase: where "now" is, step, and what is on screen. */}
         <div className="no-drag cal-nav">
-          <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
-          <button className="icon-btn" title="Previous week" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
-          <button className="icon-btn" title="Next week" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
+          <button className="ghost-btn" onClick={() => { const n = new Date(); setWeek(startOfWeek(mode === 'month' ? new Date(n.getFullYear(), n.getMonth(), 4) : n)) }}>Today</button>
+          <button className="icon-btn" title={`Previous ${mode}`} aria-label={`Previous ${mode}`} onClick={() => step(-1)}><ChevronLeft size={16} /></button>
+          <button className="icon-btn" title={`Next ${mode}`} aria-label={`Next ${mode}`} onClick={() => step(1)}><ChevronRight size={16} /></button>
+          <div className="seg" role="group" aria-label="Calendar view">
+            <button type="button" aria-pressed={mode === 'week'} onClick={() => setMode('week')}>Week</button>
+            <button type="button" aria-pressed={mode === 'month'} onClick={() => setMode('month')}>Month</button>
+          </div>
         </div>
-        <span className="cal-range">{rangeLabel(days[0], days[6])}</span>
+        <span className="cal-range">{mode === 'month' ? span : rangeLabel(days[0], days[6])}</span>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'calendar' }]} />
           {google?.connected && <button className="icon-btn" title="Refresh" aria-label="Refresh calendar" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
@@ -229,18 +242,23 @@ export default function CalendarView(): JSX.Element {
       <div className="cal-body">
         {google?.connected && <CalendarRail calendars={calendars} ready={ready} shown={calendarOn} toggle={toggle} />}
         <div className="cal-scroll">
+          {mode === 'month' ? (
+            <CalendarMonth month={monthDate} events={shown} todos={todos} onOpen={(e) => setEditing({ event: e })}
+              onPickDay={(d) => { setWeek(startOfWeek(d)); setMode('week') }} colorOf={eventColor} />
+          ) : (
           <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
             onOpen={(e) => setEditing({ event: e })} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
             onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
             onCreateAllDay={(day) => setEditing({ event: null, draft: { day, allDay: true } })}
             onMove={google?.connected ? (e, start, end) => void move(e, start, end) : undefined}
             colorOf={eventColor} />
+          )}
         </div>
         {/* Over the grid, not instead of it: clicking a slot is still how an event gets made. */}
         {google?.connected && query && !loading && !error && shown.length === 0 && (
           <div className="empty-state cal-empty">
             <CalIcon size={28} />
-            <h2>No events this week</h2>
+            <h2>No events this {mode}</h2>
             <p>Click any slot to add one, or plan your todos into the free time.</p>
             <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>
           </div>

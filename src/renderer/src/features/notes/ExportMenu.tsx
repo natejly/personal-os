@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { Check, Download } from 'lucide-react'
 import { normalizeMathBlocks } from '../../lib/mathBlocks'
 import { printFilename } from '../../lib/printDoc'
+import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { copyMarkdown, downloadMarkdown, printDoc, stripAiFences } from './exportDoc'
 import '../../styles/notes.css'
@@ -14,6 +15,7 @@ export default function ExportMenu({ title, content, projectId = null }: { title
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const root = useRef<HTMLDivElement>(null)
+  const googleOn = useStore((s) => !!s.google?.connected)
 
   useEffect(() => {
     if (!open) return
@@ -35,6 +37,18 @@ export default function ExportMenu({ title, content, projectId = null }: { title
       else await uploadDocuments([new File([new Uint8Array(r)], name, { type: 'application/pdf' })], projectId)
     } catch (e) {
       toast(`PDF export failed: ${(e as Error).message}`, 'error')
+    }
+  }
+
+  const toGoogleDoc = async (): Promise<void> => {
+    setOpen(false)
+    const { toast } = useStore.getState()
+    try {
+      const r = await api.google.createDoc({ title: title || 'Untitled', content: stripAiFences(content) })
+      toast(`Created "${r.title}" in Google Docs`)
+      window.open(r.link, '_blank', 'noopener')
+    } catch (e) {
+      toast(`Google Docs export failed: ${(e as Error).message}`, 'error')
     }
   }
 
@@ -60,6 +74,7 @@ export default function ExportMenu({ title, content, projectId = null }: { title
           <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('save')}>Export as PDF…</button>
           <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('bytes')}>Export PDF to Uploads</button>
           <button role="menuitem" className="notes-menu-row" onClick={print}>Print…</button>
+          {googleOn && <button role="menuitem" className="notes-menu-row" onClick={() => void toGoogleDoc()}>Send to Google Docs</button>}
         </div>
       )}
     </div>

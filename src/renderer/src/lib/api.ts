@@ -374,6 +374,8 @@ export const api = {
     calendarRange: (startIso: string, days = 7, calendars = 'primary', refresh = false) =>
       req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}&calendars=${encodeURIComponent(calendars)}${fresh(refresh)}`),
     calendars: (refresh = false) => req<GoogleCalendar[]>(`/integrations/google/calendars${refresh ? '?refresh=true' : ''}`),
+    /** Copy text into a new Google Doc (the Files editor's export). */
+    createDoc: (d: { title: string; content: string }) => req<{ id: string; title: string; link: string }>('/integrations/google/docs', { method: 'POST', body: json(d) }),
     calendarColors: () => req<CalendarColors>('/integrations/google/calendar/colors'),
     getEvent: (id: string, calendarId = 'primary') => req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}`),
     // The four calendar writes go through proven(): an unverified write rejects, so the callers'

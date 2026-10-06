@@ -2078,6 +2078,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-page .page-header h2 { flex: 0 1 auto; }
 .cal-nav { display: flex; align-items: center; gap: 2px; }
 .cal-nav .ghost-btn { margin-right: 4px; }
+.cal-nav .seg { margin-left: 6px; }
 .cal-range { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .cal-body { flex: 1; min-height: 0; display: flex; }
 .cal-cals {
@@ -2204,6 +2205,27 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 8px; outline: 0;
 }
 .cal-loading { position: absolute; top: 60px; right: 20px; font-size: 12px; color: var(--text-faint); }
+/* Month view: a 6x7 grid of day cells, each listing up to four chips then "+n more". --ev is the event's colour. */
+.cal-month { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: auto; }
+.cal-month-head { display: grid; grid-template-columns: repeat(7, 1fr); min-width: 700px; }
+.cal-month-head div { padding: 6px 8px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); }
+.cal-month-grid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(96px, 1fr); min-width: 700px; }
+.cal-month-cell { border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 4px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
+.cal-month-cell .dom { align-self: flex-start; font-size: 12px; padding: 1px 6px; border-radius: 9px; color: var(--text); }
+.cal-month-cell .dom:hover { background: var(--hover); }
+.cal-month-cell.dim .dom, .cal-month-cell.dim .cal-mchip { opacity: 0.55; }
+.cal-month-cell.today { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.cal-month-cell.today .dom { background: var(--accent); color: #fff; }
+.cal-mchip { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; font-size: 11px; padding: 1px 5px; border-radius: 4px; cursor: pointer; overflow: hidden; white-space: nowrap; color: var(--text); }
+.cal-mchip:hover { background: var(--hover); }
+.cal-mchip .t { color: var(--text-muted); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.cal-mchip .s { overflow: hidden; text-overflow: ellipsis; }
+.cal-mchip .cal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ev, var(--info)); flex-shrink: 0; }
+.cal-mchip.allday { background: color-mix(in srgb, var(--ev, var(--info)) 30%, transparent); }
+.cal-mchip.allday:hover { background: color-mix(in srgb, var(--ev, var(--info)) 42%, transparent); }
+.cal-mchip.todo { color: var(--text-muted); cursor: default; }
+.cal-month-more { align-self: flex-start; font-size: 10.5px; color: var(--text-faint); padding: 0 5px; }
+.cal-month-more:hover { color: var(--text); }
 
 /* ---------- Shared bits ---------- */
 .mono { font-family: var(--mono); }

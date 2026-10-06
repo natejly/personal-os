@@ -407,5 +407,8 @@
   100% { box-shadow: 0 0 0 8px transparent; }
 }
 
+/* The frame's 22px move strip lies over the bar and swallows clicks; stop it short of the bar's two chips (toggle, Open in Files), which sit at the bar's right end. */
+.win[data-kind='doc'] .win-move { right: 74px; }
+.win[data-kind='doc'] .widget-bar .grow { flex: 1; min-width: 0; }
 /* The doc window's rendered view: fills the body under the bar and scrolls on its own. */
 .widget .docs-render.widget-doc-render { flex: 1; min-height: 0; padding: 10px var(--widget-pad); }

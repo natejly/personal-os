@@ -14,12 +14,12 @@ export const ringPoints = (n: number, radius = 38): { x: number; y: number }[] =
  * its frame. With no children it is just the centre face.
  */
 export default function CrewRing({ center, kids, onPick, onCenter }: {
-  center: { name: string; hue?: number; status?: string; title: string }
+  center: { name: string; hue?: number; tone?: number; status?: string; title: string }
   kids: RingNode[]
   onPick: (id: string) => void
   onCenter?: () => void
 }): JSX.Element {
-  const face = <Face name={center.name} hue={center.hue} status={center.status} size="fill" title={center.title} />
+  const face = <Face name={center.name} hue={center.hue} tone={center.tone} status={center.status} size="fill" title={center.title} />
   if (kids.length === 0) return face
   const pts = ringPoints(kids.length)
   const stop = (e: { stopPropagation: () => void }): void => e.stopPropagation()

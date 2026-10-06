@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import MarkdownEditor from '../../components/MarkdownEditor'
 import MarkdownPreview from '../../components/MarkdownPreview'
+import DocFind from '../../components/DocFind'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const SAVE_MS = 700
@@ -18,6 +19,8 @@ const SAVE_MS = 700
 function DocWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element {
   const id = win.ref_id ?? ''
   const editing = win.config.edit === true
+  const renderRef = useRef<HTMLDivElement>(null)
+  const renderRoot = useCallback(() => renderRef.current, [])
   const [doc, setDoc] = useState<FullDoc | null>(null)
   const [body, setBody] = useState('')
   const [error, setError] = useState('')
@@ -118,7 +121,8 @@ function DocWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.E
         <button className="widget-chip" title="Open in Files" aria-label="Open in Files" onClick={openInFiles}><ExternalLink size={11} /></button>
       </div>
       {doc && !editing && (
-        <div className="docs-render markdown widget-doc-render">
+        <div className="docs-render markdown widget-doc-render" ref={renderRef}>
+          <DocFind scope={renderRef} textRoot={renderRoot} />
           {body.trim() ? <MarkdownPreview source={body} /> : <p className="muted">Empty</p>}
         </div>
       )}

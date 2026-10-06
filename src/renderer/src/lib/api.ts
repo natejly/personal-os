@@ -18,6 +18,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail
 } from '@shared/types'
+import type { ShipChecklist } from '@shared/types'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
@@ -243,6 +244,17 @@ export const api = {
     },
     /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
     runNow: (id: string, test = false) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run${test ? '?test=1' : ''}`, { method: 'POST' })
+  },
+  /** Ship checklist (tests -> push -> PR -> merge). Start fields left out reuse the job's latest checklist. */
+  ship: {
+    start: (jobId: string, b: { repo_path?: string; branch?: string; base?: string; test_command?: string }) =>
+      req<ShipChecklist>(`/jobs/${jobId}/ship`, { method: 'POST', body: json(b) }),
+    latest: (jobId: string) => req<ShipChecklist | null>(`/jobs/${jobId}/ship`),
+    get: (id: string) => req<ShipChecklist>(`/ship/${id}`),
+    /** The user's go for the merge: the only way a merge runs. */
+    confirm: (id: string) => req<ShipChecklist>(`/ship/${id}/confirm`, { method: 'POST' }),
+    cancel: (id: string) => req<ShipChecklist>(`/ship/${id}/cancel`, { method: 'POST' }),
+    retry: (id: string) => req<ShipChecklist>(`/ship/${id}/retry`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

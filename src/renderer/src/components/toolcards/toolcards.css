@@ -126,3 +126,9 @@
 .tc-full header .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-full pre { margin: 0; padding: 12px 14px; overflow: auto; flex: 1; min-height: 120px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .tc-full footer { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+
+/* Ship checklist (ShipChecklistCard.tsx): four steps, then the actions. */
+.ship-steps { list-style: none; margin: 4px 0 0; padding: 0; }
+.ship-step-name { min-width: 92px; }
+.ship-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.ship-actions:empty { display: none; }

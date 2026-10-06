@@ -13,6 +13,7 @@ import './ViewImageCard'
 import './DocumentCard'
 import './DeskCards'
 import './SandboxCard'
+import './ShipChecklistCard'
 
 export { TOOL_CARDS, registerToolCard } from './registry'
 export type { ToolCardProps } from './registry'

@@ -13,7 +13,6 @@ export const PANE_URLS = {
   contacts: P + 'Contacts',
   calendars: P + 'Calendars',
   reminders: P + 'Reminders',
-  inputMonitoring: P + 'ListenEvent',
   notifications: 'x-apple.systempreferences:com.apple.Notifications-Settings.extension'
 } as const satisfies Record<string, string>
 
@@ -80,7 +79,6 @@ export interface MainStatus {
 export interface Cli { path: string | null; version: string | null; hint: string }
 export interface BackendAccess {
   fullDisk: AccessState
-  inputMonitoring: AccessState
   automation: { messages: AccessState; finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
   browsers: { name: string; state: AccessState }[]
   roots: { roots: string[]; defaulted: boolean }
@@ -94,17 +92,16 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
     ({ id, label, reason, state: st(id, base), kind, ...(pane ? { pane } : {}) })
   const a = backend?.automation
   return [
-    row('microphone', 'Microphone', 'Voice input and meeting notes.', main.microphone, 'native', PANE_URLS.microphone),
+    row('microphone', 'Microphone', 'Voice input.', main.microphone, 'native', PANE_URLS.microphone),
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
-    row('screen', 'Screen Recording', 'The Activity monitor and teach-by-showing.', main.screen, 'pane', PANE_URLS.screen),
+    row('screen', 'Screen Recording', 'Teaching a task by showing it, and looking at your screen.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
     row('fullDisk', 'Full Disk Access', 'Reading Messages for iMessage texting and protected folders.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
-    row('inputMonitoring', 'Input Monitoring', 'Keystroke counts for the Activity monitor.', backend?.inputMonitoring, 'native', PANE_URLS.inputMonitoring),
     row('automation:messages', 'Automation: Messages', 'Sending iMessage replies.', a?.messages, 'native', PANE_URLS.automation),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),
     row('automation:systemEvents', 'Automation: System Events', 'Mac actions you ask for.', a?.systemEvents, 'native', PANE_URLS.automation),
     ...(backend?.browsers ?? []).map((b) =>
-      row(`browser:${b.name}`, `Automation: ${b.name}`, 'Reading the current tab for Activity and Ask.', b.state, 'native', PANE_URLS.automation)),
+      row(`browser:${b.name}`, `Automation: ${b.name}`, 'Reading the current tab when you ask about it.', b.state, 'native', PANE_URLS.automation)),
     row('automation:contacts', 'Contacts', 'Mac actions on Contacts that you ask for.', a?.contacts, 'native', PANE_URLS.contacts),
     row('automation:calendar', 'Calendars', 'Mac actions on Calendar that you ask for.', a?.calendar, 'native', PANE_URLS.calendars),
     row('automation:reminders', 'Reminders', 'Mac actions on Reminders that you ask for.', a?.reminders, 'native', PANE_URLS.reminders),

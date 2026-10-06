@@ -7,7 +7,7 @@ import {
 
 const main: MainStatus = { microphone: 'granted', camera: 'unasked', screen: 'denied', accessibility: 'granted', notifications: 'unknown' }
 const backend: BackendAccess = {
-  fullDisk: 'denied', inputMonitoring: 'unknown',
+  fullDisk: 'denied',
   automation: { messages: 'granted', finder: 'unasked', systemEvents: 'unknown', contacts: 'unknown', calendar: 'unknown', reminders: 'unknown' },
   browsers: [{ name: 'Safari', state: 'denied' }],
   roots: { roots: [], defaulted: true },
@@ -41,7 +41,7 @@ test('automation scripts come only from the allowlists', () => {
 
 test('rows keep order, probes override backend state, and the plan puts native first', () => {
   const rows = buildRows(main, backend, { 'automation:finder': 'granted' })
-  assert.deepEqual(rows.map((r) => r.id).slice(0, 8), ['microphone', 'camera', 'screen', 'accessibility', 'fullDisk', 'inputMonitoring', 'automation:messages', 'automation:finder'])
+  assert.deepEqual(rows.map((r) => r.id).slice(0, 7), ['microphone', 'camera', 'screen', 'accessibility', 'fullDisk', 'automation:messages', 'automation:finder'])
   assert.equal(rows.at(-1)?.id, 'notifications')
   assert.ok(rows.some((r) => r.id === 'browser:Safari' && r.state === 'denied'))
   assert.equal(rows.find((r) => r.id === 'automation:finder')?.state, 'granted')

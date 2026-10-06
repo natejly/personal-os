@@ -1,6 +1,6 @@
 /**
  * Hold-to-talk for dictation. A chord held longer than TAP_MS records only while held (push-to-talk);
- * a quick tap latches recording on, and the next press of the chord stops it. Pure: the Docs view
+ * a quick tap latches recording on, and the next press of the chord stops it. Pure: the mic button
  * feeds it key events and does what the returned action says.
  */
 

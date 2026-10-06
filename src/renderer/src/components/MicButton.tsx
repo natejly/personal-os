@@ -4,8 +4,7 @@ import { api } from '../lib/api'
 import { ApiError } from '../lib/apiError'
 import { startWavRecording, type WavRecording } from '../lib/wavRecorder'
 import { useStore } from '../store'
-import { chordDown, chordFsm, chordUp, DEFAULT_CHORD, initialChord, parseChord, type ChordState } from '../features/docrec/chord'
-import { dictationCommand } from '../features/docrec/dictation'
+import { chordDown, chordFsm, chordUp, DEFAULT_CHORD, initialChord, parseChord, type ChordState } from '../lib/chord'
 
 /** The backend refuses a longer clip (2 minutes); stop just short of it. */
 const MAX_MS = 119_000
@@ -42,7 +41,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
       const access = (await window.os?.micAccess?.()) ?? 'granted'
       if (id !== gen.current) return
       if (access !== 'granted') {
-        toast('Grain has no microphone access.', 'error', { label: 'Grant in System Settings', run: () => void api.activity.openPermissionSettings('microphone') })
+        toast('Grain has no microphone access.', 'error', { label: 'Grant in System Settings', run: () => void api.system.openPermissionSettings('microphone') })
         setPhase('idle')
         return
       }
@@ -77,13 +76,11 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
       const res = await api.assist.transcribe(await r.stop())
       if (res.error) toast(`Transcription failed: ${res.error}`, 'error')
       else if (res.text) {
-        // The same optional tidy-up pass as doc dictation; the server returns the text as is when it is off.
-        const text = dictationCommand(res.text) ? res.text : await api.assist.cleanDictation(res.text).then((c) => c.text || res.text, () => res.text)
-        onTextRef.current(text)
+        onTextRef.current(res.text)
       }
     } catch (e) {
       const fixable = e instanceof ApiError && e.status === 409
-      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('meetings') } : undefined)
+      toast((e as Error).message, 'error', fixable ? { label: 'Open settings', run: () => useStore.getState().openSettings('behavior') } : undefined)
     } finally {
       setPhase('idle')
     }
@@ -106,8 +103,7 @@ export default function MicButton({ scope, onText }: { scope: RefObject<HTMLElem
   // A recording never outlives the composer.
   useEffect(() => () => { gen.current++; rec.current?.cancel() }, [])
 
-  // Listened for on the composer itself, not the window, and stopped there: the Docs view's
-  // window-level chord would otherwise start a doc dictation from the same keys.
+  // Listened for on the composer itself, not the window.
   useEffect(() => {
     const el = scope.current
     const chord = parseChord(spec)

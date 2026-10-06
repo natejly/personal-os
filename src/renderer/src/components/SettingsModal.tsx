@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mic, ShieldCheck, Bot, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, KeyRound, FolderOpen, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, ShieldCheck, Bot, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, KeyRound, FolderOpen, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
@@ -25,7 +25,7 @@ import SandboxSettings from './SandboxSettings'
 import IMessageSettings from './IMessageSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
-import MeetingSettings from './MeetingSettings'
+import VoiceInputSettings from './VoiceInputSettings'
 import SupportSettings, { ReliabilitySettings } from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
@@ -57,8 +57,7 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
     tabs: [
       { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal },
       { id: 'modules', label: 'Modules', icon: PanelsTopLeft },
-      { id: 'integrations', label: 'Integrations', icon: Plug },
-      { id: 'meetings', label: 'Meetings', icon: Mic }
+      { id: 'integrations', label: 'Integrations', icon: Plug }
     ]
   },
   {
@@ -72,7 +71,7 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
 const TABS = GROUPS.flatMap((g) => g.tabs)
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['meetings', 'system', 'workspace'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'workspace'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -552,29 +551,6 @@ export default function SettingsModal(): JSX.Element {
               </details>
             </section>}
 
-            {tab === 'meetings' && <section>
-              <h3>Meetings</h3>
-              <MeetingSettings />
-              {(() => {
-                // Settings.digest is not in the shared type yet; the backend default is {enabled: true, hour: 8}.
-                const dg = { enabled: true, hour: 8, ...draft.digest }
-                const set = (p: { enabled?: boolean; hour?: number }): void => patch({ digest: { ...dg, ...p } } as Partial<Settings>)
-                return <>
-                  <h3>Daily digest</h3>
-                  <label className="toggle-row plain">
-                    <span className="toggle-text"><b>Daily digest in the Agent Inbox</b><small>Once a day: meetings recorded, notes waiting for review, where your time in apps went, and any permission that is keeping Meetings or Activity from working. No notification, no badge.</small></span>
-                    <input type="checkbox" checked={dg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span className="switch" />
-                  </label>
-                  <div className="setting-row">
-                    <label className="toggle-text" htmlFor="digest-hour"><b>Written at</b><small>Or at the first launch after this hour.</small></label>
-                    <select id="digest-hour" value={dg.hour} disabled={!dg.enabled} onChange={(e) => set({ hour: Number(e.target.value) })}>
-                      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>)}
-                    </select>
-                  </div>
-                </>
-              })()}
-            </section>}
-
             {tab === 'system' && <section className="system-tab">
               <h3>System access</h3>
               <PermissionsPanel onEditFolders={() => setTab('workspace')} />
@@ -725,6 +701,12 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <h4>Voice</h4>
               <VoiceSettings draft={draft} patch={patch} />
+              <h4>Voice input</h4>
+              <label><span className="toggle-text"><b>Dictation chord</b><small>In the chat box: hold to dictate, tap to latch.</small></span>
+                <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
+                  placeholder="Control+Alt+D" spellCheck={false} />
+              </label>
+              <VoiceInputSettings />
               <h4>Spaces</h4>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Compact chats</b><small>A chat window added to a space starts as a blob: just the chat's creature, no frame. Drag the creature to move it, click it to open the chat; the face button in an open chat's head shrinks it again.</small></span>
@@ -785,10 +767,6 @@ export default function SettingsModal(): JSX.Element {
               {askShortcut && !askShortcut.ok && (
                 <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`} Change it under Advanced below.</p>
               )}
-              <label><span className="toggle-text"><b>Dictation chord</b><small>In a file: hold to dictate, tap to latch.</small></span>
-                <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
-                  placeholder="Control+Alt+D" spellCheck={false} />
-              </label>
               <details className="modal-free">
                 <summary>Advanced</summary>
                 <label className="toggle-row plain">

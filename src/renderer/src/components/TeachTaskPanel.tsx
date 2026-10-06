@@ -62,7 +62,7 @@ export default function TeachTaskPanel({ onClose }: { onClose: () => void }): JS
     setNeedsPerm(false); setDraft(null); setTestConv(null); setRec(r)
   })
   const grant = (): Promise<void> => run('grant', async () => {
-    const { result } = await api.activity.requestPermission('screen_recording')
+    const { result } = await api.system.requestPermission('screen_recording')
     if (result.note) toast(result.note)
   })
   const importFile = (f: File): Promise<void> => run('import', async () => { setDraft(null); setTestConv(null); load(await api.teach.importVideo(f)) })
@@ -108,7 +108,7 @@ export default function TeachTaskPanel({ onClose }: { onClose: () => void }): JS
         <div className="row-actions">
           <span className="small">macOS has not given Grain Screen Recording.</span>
           <button className="primary-btn sm" disabled={!!busy} onClick={() => void grant()}>Grant</button>
-          <button className="ghost-btn sm" onClick={() => void api.activity.openPermissionSettings('screen_recording')}>Open System Settings</button>
+          <button className="ghost-btn sm" onClick={() => void api.system.openPermissionSettings('screen_recording')}>Open System Settings</button>
           <span className="muted small">After switching it on, quit and reopen Grain.</span>
         </div>
       )}

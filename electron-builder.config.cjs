@@ -29,15 +29,13 @@ module.exports = {
     notarize,
     extendInfo: {
       NSMicrophoneUsageDescription:
-        'Grain records audio for meeting notes and voice input. Audio is transcribed with the provider you configure.',
+        'Grain records audio for voice input. Audio is transcribed with the provider you configure.',
       NSSpeechRecognitionUsageDescription:
-        'Grain transcribes meeting and activity audio on this Mac so the recording never has to leave the machine.',
-      NSAudioCaptureUsageDescription:
-        'Grain captures system audio for meeting notes and the activity monitor when you enable that source.',
+        'Grain can transcribe voice input on this Mac so the audio never has to leave the machine.',
       NSAppleEventsUsageDescription:
         'Grain uses AppleScript and Shortcuts to read the frontmost app and to run actions you ask for.',
       NSScreenCaptureUsageDescription:
-        'Grain can read on-screen context for the Activity monitor, only when you turn it on.',
+        'Grain captures the screen when you teach it a task or ask it to look at your screen.',
       NSCameraUsageDescription: 'Grain uses the camera only for photos and video you choose to capture.',
       NSContactsUsageDescription: 'Grain reads and updates Contacts when you ask it to.',
       NSCalendarsUsageDescription: 'Grain reads and updates Calendar events when you ask it to.',

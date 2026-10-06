@@ -1,4 +1,4 @@
-"""useMemory off stops extraction; pinned memories ride on top of the hybrid top 40."""
+"""useMemory off stops extraction; pinned memories ride in the always-on profile, not the relevance-gated hits."""
 from __future__ import annotations
 
 import asyncio
@@ -56,7 +56,7 @@ def test_memory_off_skips_extraction_on_does_not(api) -> None:
     assert _chat({"useMemory": True}, api) == 1
 
 
-def test_pinned_row_survives_the_hybrid_cut(monkeypatch) -> None:
+def test_pinned_row_rides_in_the_profile_not_the_hits(monkeypatch) -> None:
     mem = appmod.memories
     pin = mem.create(None, "Zebra crossing allergy", kind="fact", pinned=True)
     for i in range(40):
@@ -68,16 +68,19 @@ def test_pinned_row_survives_the_hybrid_cut(monkeypatch) -> None:
     monkeypatch.setattr(appmod.memory_index, "schedule", lambda cfg: None)
     cfg = {"embeddingModel": "x", "hybridRetrieval": True}
     hits = asyncio.run(appmod._memory_hits(None, "tea preference", cfg, {"useMemory": True}))
-    assert pin["id"] in {m["id"] for m in hits}
+    assert hits and pin["id"] not in {m["id"] for m in hits}  # it matched nothing; hits are relevance-gated
     kw = dict(memories=mem, graph=appmod.graph, documents=Documents(appmod.db), project=None, project_id=None,
               query="tea preference", settings={}, conv_settings={}, global_system_prompt="sys")
-    text, _ = build_context(**kw, memory_hits=hits)
-    assert "Zebra crossing allergy" in text.split("## What you remember about the user")[1]
+    text, used = build_context(**kw, memory_hits=hits)
+    assert "Zebra crossing allergy" in text.split("## Your standing preferences")[1].split("\n\n##")[0]
+    assert [m["id"] for m in used["profile"]] == [pin["id"]]
 
     async def none(cfg, q):
         return None
     monkeypatch.setattr(appmod.memory_index, "query_vec", none)
-    assert asyncio.run(appmod._memory_hits(None, "tea", cfg, {"useMemory": True})) is None
+    # No query vector: the lexical rankers still gate, so there are hits and not a failure.
+    assert asyncio.run(appmod._memory_hits(None, "tea", cfg, {"useMemory": True}))
+    assert asyncio.run(appmod._memory_hits(None, "tea", cfg, {"useMemory": False})) is None
     text, _ = build_context(**kw, memory_hits=None)
     assert "Zebra crossing allergy" in text
 

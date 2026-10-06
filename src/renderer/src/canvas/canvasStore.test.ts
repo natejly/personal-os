@@ -76,7 +76,7 @@ test('the registry still marks exactly these kinds heavy, which is what the cap 
 test('every window on the space is live, heavy kinds included', () => {
   const heavy = Array.from({ length: 8 }, (_, i) => win({ id: `h${i}`, kind: 'graph', x: i * 10, y: 0, z: i }))
   assert.equal(liveWindows(heavy, view, false).size, 8)
-  const light = Array.from({ length: 8 }, (_, i) => win({ id: `l${i}`, kind: 'note', x: i * 10, y: 0, z: i }))
+  const light = Array.from({ length: 8 }, (_, i) => win({ id: `l${i}`, kind: 'recap', x: i * 10, y: 0, z: i }))
   assert.equal(liveWindows(light, view, false).size, 8)
 })
 
@@ -241,7 +241,7 @@ test('a locked space refuses every geometry change', async () => {
   await st.setWindowState('w1', 'minimized')
   assert.equal(rowOf('c1', 'w1').state, 'normal')
 
-  assert.equal(await st.openWindow('note'), null)
+  assert.equal(await st.openWindow('recap'), null)
   await st.closeWindow('w1')
   assert.equal(useCanvas.getState().canvases['c1'].windows.length, 1)
 

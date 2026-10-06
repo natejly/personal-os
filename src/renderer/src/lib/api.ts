@@ -3,7 +3,7 @@ import type {
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
-  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
@@ -876,13 +876,6 @@ export const api = {
       fd.append('file', file)
       return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd }, NO_TIMEOUT)
     }
-  },
-  notes: {
-    list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
-    get: (id: string) => req<Note>(`/notes/${id}`),
-    create: (n: { body?: string; color?: string; project_id?: string | null }) => req<Note>('/notes', { method: 'POST', body: json(n) }),
-    update: (id: string, patch: { body?: string; color?: string; project_id?: string | null; clear_project?: boolean }) => req<Note>(`/notes/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/notes/${id}`, { method: 'DELETE' })
   },
   /** Space presets (`/canvas-presets`): named templates of a canvas. */
   presets: {

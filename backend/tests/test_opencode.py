@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="opencodetest-"))
 os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 
-from personal_os import opencode, sandbox  # noqa: E402
+from personal_os import opencode, sandbox, shell  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.mcp_servers import RESERVED_TOOL_NAMES  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
@@ -139,6 +139,25 @@ def test_runs_the_agent_sandboxed_in_the_working_folder_with_its_own_state(box: 
 
 
 @needs_seatbelt
+def test_launch_caches_packages_inside_the_per_launch_tmp_dir(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    got: dict[str, Any] = {}
+
+    async def fake_start(argv: list[str], **kw: Any) -> Any:
+        got.update(kw)
+        return object()
+
+    monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
+    monkeypatch.setattr(shell, "sandbox_available", lambda: True)
+    monkeypatch.setattr(box.tb.shell, "start", fake_start)
+    asyncio.run(opencode.launch(box.tb, box.ctx, "x", cwd=str(box.root), state_key="k", pool="coding", max_background=2))
+    try:
+        for k in ("npm_config_cache", "PIP_CACHE_DIR"):
+            assert got["env"][k].startswith(got["tmp"] + os.sep), k
+        assert (got["pool"], got["max_background"]) == ("coding", 2)
+    finally:
+        shutil.rmtree(got["tmp"], ignore_errors=True)
+
+
 def test_outside_every_root_is_refused(box: Box, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(opencode, "binary", lambda: "/bin/echo")
     r = box.run("opencode_run", prompt="x", cwd=str(tmp_path))

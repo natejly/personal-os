@@ -205,6 +205,13 @@ def test_skip_permissions_runs_an_ask_without_a_card() -> None:
     check(permrules.lift_permission_ask("propose_plan", "ask", skip=True) == "ask", "a plan still asks")
     check(permrules.lift_permission_ask("desk_ask", "ask", skip=True) == "ask", "a question still asks")
     check(permrules.lift_permission_ask("shell_run", "off", skip=True) == "off", "off stays off")
+    for n in ("coding_session_start", "coding_session_send"):
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external") == "on", f"{n} lifts under skip")
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external", forced=True) == "ask", f"{n} forced still asks")
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external", fenced=True) == "ask", f"{n} fenced still asks")
+        check(permrules.lift_permission_ask(n, "ask", skip=False, danger="external") == "ask", f"{n} asks without skip")
+        check(permrules.lift_permission_ask(n, "off", skip=True, danger="external") == "off", f"{n} off stays off")
+    check(permrules.lift_permission_ask("gmail_send", "ask", skip=True, danger="external") == "ask", "other external tools still ask")
     check(permrules.skip_permissions_on({"skipPermissions": True}, {"permissionMode": "manual"}) is False, "a chat's own switch is legacy")
     check(permrules.skip_permissions_on({}, {"permissionMode": "allow_all"}) is True, "only the global mode skips")
     cid = setup(skipPermissions=True)

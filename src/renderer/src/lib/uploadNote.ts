@@ -1,5 +1,14 @@
 import type { Attachment } from '@shared/types'
 
+/** Largest file one upload may be. Mirrors MAX_UPLOAD_MB in backend/personal_os/limits.py, which enforces it (413). */
+export const MAX_UPLOAD_MB = 50
+export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+/** The refusal for a file over the cap, worded like the server's 413; null when it may be sent. */
+export function uploadTooBig(size: number | null | undefined): string | null {
+  return typeof size === 'number' && size > MAX_UPLOAD_BYTES ? `Files must be ${MAX_UPLOAD_MB} MB or smaller` : null
+}
+
 /** What one upload came back as: the server says whether it could read anything out of the file. */
 export interface UploadOutcome extends Attachment {
   /** False when the stored text is empty or only the no-text marker; a chat cannot read such a file. */

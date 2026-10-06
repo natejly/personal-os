@@ -245,7 +245,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   the procedures it can be asked to repeat; **Agents**, roles with their own
   face, instructions, tools and skills (describe one and the model drafts it; you
   edit and approve); **Automations**, which holds workflows (multi-step jobs you
-  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
+  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox. Install them
+  from a curated catalog, search the official MCP Registry, or import the servers you already set up in
+  Claude Desktop, Claude Code or Cursor. Every connector tool asks by default, grants are bound to the
+  tool's schema, and keys live in the Keychain. See [docs/connectors.md](docs/connectors.md).
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -372,6 +375,11 @@ is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
 wizard asks a few things about you and has you pick a model provider (Fireworks
 AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
 OpenAI-compatible endpoint). Google is connected from Settings → Integrations. With no workspace folder set, file and shell tools work in `~/Grain`.
+
+On your own Mac, `npm run install-app` puts the build at `/Applications/Grain.app` (keep only that
+copy). If a self-signed "Grain Local Signing" identity is in your keychain, `npm run package` signs
+with it, so macOS keeps Full Disk Access and other grants across rebuilds; otherwise builds are
+ad-hoc signed. See [docs/releasing.md](docs/releasing.md#signing).
 
 ## Development
 
@@ -765,6 +773,8 @@ docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/voice-input.md Voice input: backends, settings, permissions
+docs/connectors.md  Connectors: MCP catalog, import, security model, writing your own
+examples/mcp/       Two small example MCP servers (Python, TypeScript)
 docs/permissions.md Permissions: the one store, its migration, the one Settings tab
 docs/help.md        In-app help and the shortcut registry
 ```

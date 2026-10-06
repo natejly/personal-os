@@ -24,7 +24,8 @@ MESSAGE_WINDOW_FRACTION = 0.5      # one message may fill at most this share of 
 MCP_DEFER_ABOVE = 12               # offer connector tools through search once more than this many are ready (0 = send all)
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
 SKILLS_INLINE_BUDGET = 6000        # characters of approved skill text inlined in the system prompt
-CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "pinned": 3000}  # tokens per retrieval block
+CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "pinned": 3000,
+                  "profile": 1000}  # tokens per retrieval block; "profile" is the always-on standing preferences (memory_limits)
 
 # ---- Run budget ----
 RUN_TOKENS = 200_000               # per reply, prompt+completion summed over every model call (0 = none)
@@ -68,7 +69,7 @@ JOB_EXPIRE_DAYS = 0                # a recurring job pauses this many days after
 GMAIL_SEND_HOLD_SECONDS = 90       # undo window on outgoing mail (clamped to 60-120 on read)
 
 # ---- Storage ----
-MAX_UPLOAD_MB = 50                   # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/shared/uploads.ts
+MAX_UPLOAD_MB = 50                   # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_UNZIPPED_BYTES = MAX_UPLOAD_BYTES * 5 // 2  # a docx/xlsx's declared uncompressed size, summed; refused past this (zip bomb guard)
 FILE_SNAPSHOT_MAX_BYTES = 5_000_000  # largest file pre-image kept

@@ -6,7 +6,7 @@ import ProjectChip from './ProjectChip'
 import { api } from '../lib/api'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 
-const KINDS = ['fact', 'preference', 'goal', 'note']
+const KINDS = ['fact', 'preference', 'instruction', 'goal', 'note']
 
 function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX.Element {
   const { updateMemory, deleteMemory, selectChat, projects } = useStore()
@@ -39,6 +39,7 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           {m.project_id && !isolated && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
           {m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
           <span className="muted">{new Date(m.updated_at * 1000).toLocaleDateString()}</span>
+          {m.expires_at != null && <span className="muted">until {new Date((m.expires_at - 1) * 1000).toLocaleDateString()}</span>}
         </div>
         {versions && (versions.length < 2
           ? <p className="muted small">No earlier versions.</p>
@@ -83,8 +84,8 @@ function HistoryRow({ m, byId, onRestore }: { m: Memory; byId: Map<string, Memor
       <div className="mem-main">
         <p className="mem-before">{m.content}</p>
         <div className="mem-meta">
-          <span className="muted">{next ? `replaced by “${next.content}”` : 'forgotten'}</span>
-          <span className="muted">{m.invalid_at ? new Date(m.invalid_at * 1000).toLocaleDateString() : ''}</span>
+          <span className="muted">{next ? `replaced by “${next.content}”` : (m.invalid_at == null ? 'expired' : 'forgotten')}</span>
+          <span className="muted">{(m.invalid_at ?? m.expires_at) ? new Date((m.invalid_at ?? m.expires_at)! * 1000).toLocaleDateString() : ''}</span>
         </div>
       </div>
       <div className="mem-actions">
@@ -115,7 +116,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   useEffect(() => { void refreshMemories(query) }, [query, refreshMemories])
   const loadHistory = (): void => { void api.memories.listWithHistory(scope).then(setAll).catch(() => setAll([])) }
   useEffect(() => { if (showHistory) loadHistory() }, [showHistory, scope, memories]) // eslint-disable-line react-hooks/exhaustive-deps
-  const past = showHistory ? all.filter((m) => m.invalid_at != null && (!query || m.content.toLowerCase().includes(query.toLowerCase()))) : []
+  const past = showHistory ? all.filter((m) => (m.invalid_at != null || (m.expires_at != null && m.expires_at * 1000 <= Date.now())) && (!query || m.content.toLowerCase().includes(query.toLowerCase()))) : []
   const byId = new Map(all.map((m) => [m.id, m]))
   const [proposals, setProposals] = useState<MemoryProposal[]>([])
   const [tidying, setTidying] = useState(false)

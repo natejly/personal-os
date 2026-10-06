@@ -36,7 +36,7 @@ def check(cond: Any, label: str) -> None:
     passed += 1
 
 
-appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
+appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "permissionMode": "manual"})  # manual: the stub tool calls must not wait on an Auto review
 
 # ---- a scripted model: one entry per round, recording the context it was handed ----
 SEEN: list[list[dict[str, Any]]] = []

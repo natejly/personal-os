@@ -1868,6 +1868,42 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-foot { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
+/* Connectors: segmented view switch, catalog cards, install status, import, tool claims. */
+.mcp > .seg { align-self: flex-start; }
+.tag.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.req { color: var(--danger); }
+.catalog-browser, .import-panel { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.catalog-browser .add-row, .registry-search .add-row { display: flex; gap: 6px; }
+.catalog-cats { flex-wrap: wrap; align-self: flex-start; }
+.connector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.registry-search { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.registry-search h3 { margin: 0; font-size: 14px; }
+.registry-search p { margin: 0; }
+.connector-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); min-width: 0; }
+.connector-head { display: flex; align-items: center; gap: 8px; }
+.connector-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
+.connector-title { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.connector-title b { font-size: 13px; }
+.connector-title small { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.connector-desc { margin: 0; font-size: 12px; color: var(--text-muted); }
+.connector-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.connector-warn { display: flex; align-items: flex-start; gap: 5px; margin: 0; font-size: 11.5px; }
+.connector-warn svg { flex-shrink: 0; margin-top: 2px; }
+.connector-status.ok { border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.connector-status.bad { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.import-source { gap: 0; }
+.import-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; cursor: pointer; }
+.import-row.chip-check-row input:disabled + .toggle-text { opacity: 0.6; }
+.import-row .toggle-text { display: flex; flex-direction: column; min-width: 0; }
+.import-row .mono { word-break: break-all; font-size: 11px; }
+.import-key { display: inline-flex; align-items: center; gap: 2px; margin-right: 8px; font-family: var(--mono, monospace); font-size: 11px; }
+.mcp-limits-list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; }
+.mcp-extras { font-size: 12px; }
+.mcp-extras summary { cursor: pointer; }
+.mcp-extras p { margin: 4px 0 0; }
+.mcp-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 8px; border-radius: 8px; font-size: 12px; background: color-mix(in srgb, var(--danger) 8%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); }
+.mcp-confirm > span:first-child { flex-basis: 100%; }
+
 /* ---------- Sidebar project groups ---------- */
 /* A group reads as a header and its recent lines: the folder carries the project colour, so no dot
    or count competes with the name, and the rows under it are indented to the header's text, not to

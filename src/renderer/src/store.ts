@@ -45,6 +45,8 @@ const withoutLegacyMode = (s: Settings): Settings => {
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
+/** Which tab a project page shows; the sidebar's View all picks Chats or Files. */
+export type ProjectTab = 'chats' | 'files' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads'
@@ -199,6 +201,7 @@ export interface State {
   /** Layout of the Memory panel (list + graph live in one panel). */
   memoryMode: MemoryMode
   projectViewId: string | null
+  projectTab: ProjectTab
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
   /**
@@ -369,7 +372,7 @@ export interface State {
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
-  openProject: (id: string) => void
+  openProject: (id: string, tab?: ProjectTab) => void
   createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => Promise<void>
   updateProject: (id: string, patch: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
@@ -822,7 +825,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'reasoning':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
@@ -1658,6 +1661,7 @@ export const useStore = create<State>((set, get) => {
     lastClassicView: 'home',
     memoryMode: 'list',
     projectViewId: null,
+    projectTab: 'chats',
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
@@ -1945,7 +1949,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
+    openProject: (id, tab) => set((s) => ({ view: 'project', projectViewId: id, projectTab: tab ?? (s.projectViewId === id ? s.projectTab : 'chats'), draftProjectId: null, settingsOpen: false })),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()

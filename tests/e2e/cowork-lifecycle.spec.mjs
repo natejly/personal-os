@@ -60,12 +60,12 @@ test('stop a working chat from the strip, then message it to pick it back up', a
   await openChat(page, 'Slowpoke')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
   await expect(strip(page)).toContainText(/Working|Planning/)
-  await expect(chatRow(page, 'Slowpoke').locator('.convo-desk')).toHaveAttribute('aria-label', /Working|Planning/)
+  await expect(chatRow(page, 'Slowpoke').locator('.attn-dot')).toHaveAttribute('aria-label', /Working|Planning/)
   await strip(page).getByRole('button', { name: /Stop/ }).dblclick()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
   await expect(strip(page)).toContainText('Stopped')
   await expect(strip(page).getByRole('button', { name: /^Stop$/ })).toHaveCount(0)
-  await expect(chatRow(page, 'Slowpoke').locator('.convo-desk')).toHaveCount(0) // a stopped chat carries no mark
+  await expect(chatRow(page, 'Slowpoke').locator('.attn-dot')).toHaveCount(0) // a stopped chat carries no mark
   // a stopped desk picks work back up when messaged from the composer
   llm.queue.length = 0
   llm.push({ text: 'Resuming.' })

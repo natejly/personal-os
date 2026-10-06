@@ -40,6 +40,7 @@ test('Activity ships shown and on; the first view carries the access checklist a
 test('permission Grant buttons ask once per row, never crash, and Open System Settings is a plain call', async ({ grain }) => {
   const { page, api } = grain
   await openActivity(grain)
+  const before = await page.locator('.act-state').textContent() // granting a permission never flips the switch
   const status = await api('/activity/status')
   const requestable = status.capabilities.filter((c) => c.requestable && c.state !== 'granted' && c.id !== 'automation')
   expect(requestable.length).toBeGreaterThan(0)
@@ -57,7 +58,7 @@ test('permission Grant buttons ask once per row, never crash, and Open System Se
     await page.getByRole('button', { name: 'Ask for everything missing' }).click()
     await expect.poll(() => permLog(grain).filter((l) => l.startsWith('request ')).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(requestable.length)
   }
-  await expect(page.locator('.act-state')).toHaveText('Off')
+  await expect(page.locator('.act-state')).toHaveText(before)
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 

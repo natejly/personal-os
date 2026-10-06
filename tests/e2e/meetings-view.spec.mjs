@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { enableModules, reload, small, realErrors, seedSegments } from './helpers/mah.mjs'
+import { enableModules, hideModules, reload, small, realErrors, seedSegments } from './helpers/mah.mjs'
 
 test.beforeEach(() => test.setTimeout(240_000))
 
@@ -12,14 +12,17 @@ async function openMeetings(grain) {
   await expect(grain.page.getByRole('heading', { name: 'Meetings' }).first()).toBeVisible()
 }
 
-test('Meetings is hidden until modules are turned on, then shows its empty state', async ({ grain }) => {
+test('Meetings hidden and the recorder off: turning modules on shows its empty state', async ({ grain }) => {
   const { page, api } = grain
+  await hideModules(api)
+  await api('/meetings/config', { method: 'PUT', body: { enabled: false } })
+  await reload(page)
   await expect(page.locator('.nav-item', { hasText: 'Meetings' })).toHaveCount(0)
   await openMeetings(grain)
   await expect(page.getByText('No meeting open')).toBeVisible()
   await expect(page.getByText('No meetings yet.')).toBeVisible()
   // The recorder is off: Record is disabled with the reason, and the page says what needs setting up.
-  const rec = page.getByRole('button', { name: 'Record' }).first()
+  const rec = page.getByRole('button', { name: 'Record', exact: true }).first()
   await expect(rec).toBeDisabled()
   await expect(rec).toHaveAttribute('title', /Settings → Meetings/)
   await expect(page.getByRole('button', { name: /thing.* need.* setting up/ })).toBeVisible()
@@ -29,6 +32,7 @@ test('Meetings is hidden until modules are turned on, then shows its empty state
 
 test('settings: enabled, model path and diarization persist across relaunch', async ({ grain }) => {
   const { page, api } = grain
+  await api('/meetings/config', { method: 'PUT', body: { enabled: false } }) // the switch is on by default; the test flips it on
   await openMeetings(grain)
   await page.getByRole('button', { name: /thing.* need.* setting up/ }).click()
   const dlg = page.locator('.modal, .settings').first()
@@ -51,7 +55,7 @@ test('settings: enabled, model path and diarization persist across relaunch', as
   expect(cfg).toMatchObject({ enabled: true, whisperModelPath: '/tmp/e2e/ggml-test.bin', diarize: true })
   await nav(grain.page, 'Meetings')
   // Enabled now, so Record is no longer blocked by the switch (consent/self-test may still block it).
-  await expect(grain.page.getByRole('button', { name: 'Record' }).first()).toBeEnabled()
+  await expect(grain.page.getByRole('button', { name: 'Record', exact: true }).first()).toBeEnabled()
   expect(realErrors(grain.consoleErrors)).toEqual([])
 })
 
@@ -59,7 +63,7 @@ test('Record before consent opens the consent modal, which gates on the checkbox
   const { page, api } = grain
   await api('/meetings/config', { method: 'PUT', body: { enabled: true } })
   await openMeetings(grain)
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   const modal = page.getByRole('dialog').or(page.locator('.modal')).first()
   await expect(page.getByText('Before the first recording')).toBeVisible()
   const go = page.getByRole('button', { name: 'I understand, start recording' })
@@ -71,13 +75,13 @@ test('Record before consent opens the consent modal, which gates on the checkbox
   await expect(page.getByText('Before the first recording')).toHaveCount(0)
   expect((await api('/meetings/status')).consented).toBe(false)
   // Esc also closes it.
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(page.getByText('Before the first recording')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByText('Before the first recording')).toHaveCount(0)
   expect(modal).toBeTruthy()
 
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await page.getByLabel(/I will tell the other people/).check()
   await expect(go).toBeEnabled()
   await go.click()
@@ -89,7 +93,7 @@ test('Record before consent opens the consent modal, which gates on the checkbox
   await grain.relaunch()
   await nav(grain.page, 'Meetings')
   await grain.page.waitForTimeout(4000) // let the status poll land; the fast-click race has its own test
-  await grain.page.getByRole('button', { name: 'Record' }).first().click()
+  await grain.page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await grain.page.waitForTimeout(800)
   await expect(grain.page.getByText('Before the first recording')).toHaveCount(0)
 })
@@ -100,10 +104,10 @@ test('start with no usable transcription gives a readable error, not a spinner',
   await api('/meetings/consent', { method: 'POST' })
   await openMeetings(grain)
   const m = await api('/meetings', { method: 'POST', body: { title: 'Standup' } })
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   // Meeting is created, start is refused with blockers (mock proxy has no transcription route).
   await expect(page.locator('.toast, [role="status"], [role="alert"]').filter({ hasText: /self-test|transcription|Transcri/i }).first()).toBeVisible({ timeout: 30_000 }).catch(() => {})
-  await expect(page.getByRole('button', { name: 'Record' }).first()).toBeEnabled({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'Record', exact: true }).first()).toBeEnabled({ timeout: 30_000 })
   const st = await api('/meetings/status')
   expect(st.active).toBeNull()
   expect(m.id).toBeTruthy()

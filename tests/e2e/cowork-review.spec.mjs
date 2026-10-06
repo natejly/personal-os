@@ -29,7 +29,7 @@ test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwri
   await expect(cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first()).toBeVisible({ timeout: 60_000 })
   expect(await deskFile(grain, desk.id, 'outputs/report.md')).not.toBe(200)
   await expect(strip(page)).toContainText('Approval needed')
-  await expect(chatRow(page, 'Careful').locator('.convo-desk')).toHaveAttribute('aria-label', 'Approval needed')
+  await expect(chatRow(page, 'Careful').locator('.attn-dot')).toHaveAttribute('aria-label', /Approval needed/)
   llm.push({ text: 'ok, not writing it' })
   await cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first().click()
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).not.toBe('needs_approval')
@@ -63,7 +63,7 @@ test('review: accept into a new doc, verified, the desk closes out and the chat 
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toBe('done')
   await expect(strip(page)).toContainText('Done')
   await expect(chatRow(page, 'Reviewed')).toBeVisible()
-  await expect(chatRow(page, 'Reviewed').locator('.convo-desk')).toHaveCount(0) // done: nothing to flag
+  await expect(chatRow(page, 'Reviewed').locator('.attn-dot')).toHaveCount(0) // done: nothing to flag
   expect(realErrors(grain)).toEqual([])
 })
 

@@ -103,7 +103,7 @@ test('external backend killed mid-session: actions fail readably, a replacement 
       // earlier conversation survived the restart (same data dir)
       await expect(page.locator('.sidebar .convo-item').first()).toBeVisible()
     } finally {
-      second.stop()
+      await second.stop()
     }
   })
 })

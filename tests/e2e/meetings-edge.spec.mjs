@@ -16,7 +16,7 @@ test('double-clicking Record on a meeting or on a doc starts exactly one recordi
   await enableModules(api)
   await reload(page)
   await page.locator('.nav-item', { hasText: 'Meetings' }).first().click()
-  await page.getByRole('button', { name: 'Record' }).first().dblclick()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().dblclick()
   await expect(page.locator('.mtg-bar')).toBeVisible({ timeout: 60_000 })
   expect((await api('/meetings?include_docs=true')).length).toBe(1)
   await page.locator('.mtg-bar').getByRole('button', { name: 'Stop' }).click()
@@ -111,7 +111,7 @@ test('keep audio: a kept recording offers playback controls and its audio can be
   await enableModules(api)
   await reload(page)
   await page.locator('.nav-item', { hasText: 'Meetings' }).first().click()
-  await page.getByRole('button', { name: 'Record' }).first().click()
+  await page.getByRole('button', { name: 'Record', exact: true }).first().click()
   await expect(page.locator('.mtg-bar')).toBeVisible({ timeout: 60_000 })
   const id = (await api('/meetings/status')).active.meeting_id
   await expect.poll(async () => (await api(`/meetings/${id}/segments`)).filter((s) => s.state === 'done').length, { timeout: 60_000 }).toBeGreaterThan(0)

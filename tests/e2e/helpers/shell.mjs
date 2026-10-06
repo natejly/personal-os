@@ -1,7 +1,6 @@
 // Helpers for the shell / navigation / resilience specs. Additive: nothing here changes harness semantics.
-import { spawn } from 'node:child_process'
 import { join } from 'node:path'
-import { ROOT } from '../harness.mjs'
+import { ROOT, spawnBackend, waitHealthy } from '../harness.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -54,32 +53,8 @@ export const bodyOverflow = (page) =>
  * Resolves once /health answers.
  */
 export async function restartBackendOnSamePort(grain) {
-  const { port } = grain.backend
-  const env = {
-    ...process.env,
-    PYTHONPATH: join(ROOT, 'backend'),
-    PYTHONUNBUFFERED: '1',
-    GRAIN_SECRETS_BACKEND: 'file',
-    PERSONAL_OS_AUTH_TOKEN: grain.token,
-    PERSONAL_OS_DATA_DIR: grain.dataDir,
-    PERSONAL_OS_BASE_URL: grain.llm.url,
-    PERSONAL_OS_API_KEY: 'mock-key',
-    PERSONAL_OS_DEFAULT_MODEL: 'mock-chat',
-    PERSONAL_OS_EXTRACTION_MODEL: 'mock-chat',
-    PERSONAL_OS_LOG_DIR: join(grain.dataDir, '..', 'logs')
-  }
-  delete env.ELECTRON_RUN_AS_NODE
-  const child = spawn(join(ROOT, 'backend', '.venv', 'bin', 'python'), ['-m', 'personal_os', '--port', String(port), '--data-dir', grain.dataDir], { env, cwd: join(ROOT, 'backend'), stdio: ['ignore', 'pipe', 'pipe'] })
-  let log = ''
-  child.stdout.on('data', (d) => (log += d))
-  child.stderr.on('data', (d) => (log += d))
-  for (let i = 0; i < 240; i++) {
-    try {
-      if ((await fetch(grain.backend.url + '/health')).ok) return { child, log: () => log, stop: () => { try { child.kill('SIGTERM') } catch {} } }
-    } catch {}
-    await sleep(250)
-  }
-  throw new Error('second backend never became healthy:\n' + log.slice(-2000))
+  const second = spawnBackend({ port: grain.backend.port, dataDir: grain.dataDir, token: grain.token, llmUrl: grain.llm.url, llmKey: 'mock-key' })
+  return waitHealthy(second, { tries: 240, what: 'second backend' })
 }
 
 /** Kill the harness backend and wait until its port stops answering. */
@@ -121,8 +96,7 @@ export async function launchSupervised({ settings = {} } = {}) {
   const seedToken = 'seed-' + Math.random().toString(36).slice(2)
   const seed = await startBackend({ llmUrl: llm.url, llmKey: 'mock-key', dataDir, token: seedToken })
   await fetch(seed.url + '/settings', { method: 'PUT', headers: { Authorization: `Bearer ${seedToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ onboardedAt: new Date().toISOString(), ...settings }) })
-  seed.stop()
-  await sleep(800)
+  await seed.stop()
   const env = {
     ...process.env,
     GRAIN_USER_DATA: profile,

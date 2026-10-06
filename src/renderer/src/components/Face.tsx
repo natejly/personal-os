@@ -16,6 +16,9 @@ const MOOD: Record<string, Expression> = {
 
 const LIVE = new Set(['streaming', 'running', 'working', 'planning'])
 
+/** Every face is drawn this much larger than the size its caller asks for. */
+export const FACE_SCALE = 1.25
+
 /** Spaces all wear this one color; the space id then picks only the silhouette. */
 export const SPACE_HUE = { hue: 150, tone: 0.45 }
 
@@ -29,7 +32,7 @@ export default function Face({ name, status, size = 26, title, hue, tone }: { na
     <Blobatar
       className="face"
       name={name}
-      size={size === 'fill' ? undefined : size}
+      size={size === 'fill' ? undefined : Math.round(size * FACE_SCALE)}
       title={title}
       hue={hue}
       tone={tone}

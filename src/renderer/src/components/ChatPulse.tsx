@@ -1,6 +1,6 @@
-import { useChatPulse, useUnread } from '../store'
+import { useChatFace, useChatPulse, useUnread } from '../store'
 import Face from './Face'
-import type { Attention, SessionStatus } from '@shared/types'
+import type { Attention, Conversation, SessionStatus } from '@shared/types'
 import { ATTENTION_LABEL } from '../lib/attention'
 
 const TITLE: Partial<Record<SessionStatus, string>> = {
@@ -16,12 +16,13 @@ const TITLE: Partial<Record<SessionStatus, string>> = {
  * row subscribes to its own status string instead of the whole list re-rendering on every streamed token.
  * Idle with something to read: a still dot, because the reply finished while this chat was out of sight.
  */
-export default function ChatPulse({ conversationId, size = 14, face }: { conversationId: string; size?: number; face?: { name: string; hue?: number } }): JSX.Element {
-  const status = useChatPulse(conversationId)
-  const unread = useUnread(conversationId)
+export default function ChatPulse({ conv, size = 14 }: { conv: Pick<Conversation, 'id' | 'settings' | 'project_id'>; size?: number }): JSX.Element {
+  const status = useChatPulse(conv.id)
+  const unread = useUnread(conv.id)
+  const face = useChatFace(conv)
   return (
     <>
-      <Face name={face?.name ?? conversationId} hue={face?.hue} status={status} size={size} title={TITLE[status]} />
+      <Face {...face} status={status} size={size} title={TITLE[status]} />
       {status === 'idle' && unread > 0 && <span className="pulse unread" title="Unread reply" />}
     </>
   )

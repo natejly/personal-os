@@ -107,7 +107,7 @@ export default function ProjectView(): JSX.Element {
               <div key={c.id} className="chat-row" {...rowButton(() => void selectChat(c.id))}
                 {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                 <MessageSquare size={14} />
-                <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
+                <span className="chat-row-title"><ChatPulse conv={c} />{c.title}</span>
                 <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
                 <button className="icon-btn ghost danger" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
               </div>

@@ -7,6 +7,7 @@ import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '.
 import { api, type DocHit } from '../lib/api'
 import type { Doc, DocTypography } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
+import DocFind from './DocFind'
 import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
 import DocTree from './DocTree'
@@ -154,6 +155,7 @@ export default function DocsView(): JSX.Element {
   // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
   // window.prompt, so the picker turns into a text input in place rather than asking in a dialog.
   const previewRef = useRef<HTMLDivElement>(null)
+  const renderRoot = useCallback(() => previewRef.current, [])
 
   useEffect(() => { void refreshDocs() }, [refreshDocs])
   useEffect(() => { void restoreDocTabs() }, [])
@@ -453,12 +455,14 @@ export default function DocsView(): JSX.Element {
                   richStatus
                   onCaretLine={setCaretLine}
                   focusMode={writeFlags.focus}
+                  findFallback
                   typewriter={writeFlags.typewriter}
                 />
               )}
               {showRender && (
                 <div className={`docs-render markdown ${editing ? '' : 'reading'}`} ref={previewRef} title={editing ? undefined : 'Double-click to edit'}
                   onDoubleClick={() => { if (!editing) setEditing(true) }}>
+                  <DocFind scope={previewRef} textRoot={renderRoot} fallback={!showEditor} />
                   {body.trim()
                     ? (
                       <MarkdownPreview

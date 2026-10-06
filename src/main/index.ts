@@ -11,7 +11,7 @@ import { isAppUrl } from './appUrl'
 import { guardNavigation } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
-import { registerPrintIpc, renderNotePdf, uniquePath } from './printDoc'
+import { registerPrintIpc, renderNotePdf } from './printDoc'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { registerQuickAsk, toggleAsk } from './quickAsk'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -20,6 +20,7 @@ import { createTray } from './tray'
 import { startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
 import { background, goBackground, reveal } from './background'
+import { attachContextMenu } from './attachContextMenu'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -78,18 +79,15 @@ function createWindow(): void {
   })
   guardNavigation(win.webContents)
 
-  // Right-click on selected text offers the same four verbs as the floating toolbar.
-  win.webContents.on('context-menu', (_e, params) => {
-    if (!params.selectionText.trim() || !win || win.isDestroyed()) return
-    const verbs = ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
+  // Right-click: spelling fixes on a misspelled word, the edit items in a field, and on selected text
+  // the same four verbs as the floating toolbar.
+  attachContextMenu(
+    win,
+    ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
       label,
       click: () => sendMenu(`selection:${label.replace('…', '').toLowerCase()}`)
     }))
-    const edit: Electron.MenuItemConstructorOptions[] = params.isEditable
-      ? [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }]
-      : [{ role: 'copy' }]
-    Menu.buildFromTemplate([...edit, { type: 'separator' }, ...verbs]).popup({ window: win })
-  })
+  )
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -380,13 +378,16 @@ if (gotLock) app.whenReady().then(async () => {
     return r.canceled || !r.filePath ? null : r.filePath
   })
   registerPrintIpc()
-  handle('print:export-pdf', async (_e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
-    const pdf = await renderNotePdf(String(title), String(content))
-    if (mode !== 'save') return new Uint8Array(pdf)
-    // Straight into Downloads, no dialog. A name already taken gets " (2)", " (3)", … rather than being overwritten.
-    const dest = uniquePath(app.getPath('downloads'), basename(String(filename)))
-    writeFileSync(dest, pdf, { flag: 'wx' })
-    return dest
+  handle('print:export-pdf', async (e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
+    if (mode !== 'save') return new Uint8Array(await renderNotePdf(String(title), String(content)))
+    // The save sheet comes first so a cancel renders nothing; the sheet itself confirms an overwrite.
+    const name = basename(String(filename)).replace(/[/:]/g, ' ')
+    const opts = { title: 'Download PDF', defaultPath: join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] }
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    const r = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return null
+    writeFileSync(r.filePath, await renderNotePdf(String(title), String(content)))
+    return r.filePath
   })
   handle('data:choose-input-files', async () => {
     const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })

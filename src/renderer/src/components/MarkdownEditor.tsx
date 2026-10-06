@@ -1,5 +1,6 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CaretMenu from '../features/notes/CaretMenu'
+import DocFind from './DocFind'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
@@ -49,6 +50,8 @@ export interface EditorHandleProps {
   typewriter?: boolean
   /** Dim everything outside the current paragraph; hides the gutter and status bar. */
   focusMode?: boolean
+  /** ⌘F opens the find bar even before anything in the editor was clicked (the main Files editor). */
+  findFallback?: boolean
 }
 
 export type { MarkdownEditorHandle }
@@ -245,11 +248,20 @@ const Gutter = memo(forwardRef<HTMLDivElement, { lineCount: number; cur: number 
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, typewriter = false, focusMode = false
+  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, typewriter = false, focusMode = false, findFallback = false
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
   const surface = useRef<HTMLDivElement>(null)
+  const findRoot = useCallback(() => mirror.current, [])
+  // The mirror and the textarea share a box and a scroll offset, so a match's rect says where to scroll the textarea.
+  const findReveal = useCallback((r: Range) => {
+    const el = ta.current
+    if (!el) return
+    const top = r.getBoundingClientRect().top - el.getBoundingClientRect().top
+    if (top < 40 || top > el.clientHeight - 40) el.scrollTop += top - el.clientHeight / 2
+  }, [])
+  const findClose = useCallback(() => ta.current?.focus(), [])
   const gutter = useRef<HTMLDivElement>(null)
   const [caret, setCaret] = useState({ line: 1, col: 1 })
   const [sel, setSel] = useState({ start: 0, end: 0 })
@@ -612,6 +624,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           onBlur={() => setDismissed(menuKey)}
           onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
+        <DocFind scope={surface} textRoot={findRoot} reveal={findReveal} onClose={findClose} fallback={findFallback} />
         {menuOpen && anchor && trigger && (
           <CaretMenu
             items={menuItems}

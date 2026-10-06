@@ -9,6 +9,7 @@ import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
 import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
 import { background, reveal, stealFocus } from './background'
+import { attachContextMenu } from './attachContextMenu'
 
 const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
@@ -192,6 +193,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
 
   win.once('ready-to-show', () => reveal(win))
   guardNavigation(win.webContents)
+  attachContextMenu(win)
   const onBounds = (): void => scheduleSave(windowId, entry)
   win.on('move', onBounds)
   win.on('resize', onBounds)

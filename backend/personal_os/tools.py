@@ -748,6 +748,8 @@ class Toolbox:
             self._register_meetings()
         from . import subagents
         subagents.register(self)
+        from . import workers
+        workers.register(self)  # delegate / message_worker / check_worker / stop_worker / resume_worker
         from . import research
         research.register(self)  # deep_research: planned fan-out over read-only subagents
         from . import opencode, shell
@@ -950,7 +952,8 @@ class Toolbox:
         cid = ctx.get("conversation_id")
         if cid and self.conversations is not None:
             conv = self.conversations.get(cid) or {}
-            typed += [str(m.get("content") or "") for m in conv.get("messages") or [] if m.get("role") == "user"]
+            typed += [str(m.get("content") or "") for m in conv.get("messages") or []
+                      if m.get("role") == "user" and m.get("kind") != "wake"]  # a worker report never vouches for a save
         return max(len(mine & words(t)) for t in typed) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
 
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
@@ -3979,7 +3982,8 @@ Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined
 # so a plain question never costs a search round. Everything else waits for tool_search.
 CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
 CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
-                        "skill_list", "skill_view", "writing_style", "deep_research"})  # writing_style: the prompt's voice hint tells the model to call it
+                        "skill_list", "skill_view", "writing_style", "deep_research",  # writing_style: the prompt's voice hint tells the model to call it
+                        "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker"})  # the front agent always has its hand-off tools
 
 
 def is_core(spec: ToolSpec) -> bool:

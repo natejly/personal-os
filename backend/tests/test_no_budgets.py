@@ -74,7 +74,7 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
 def _portal():  # type: ignore[no-untyped-def]
     real = llm.stream_chat
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual"})
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual", "delegationForce": False})  # forced delegation would refuse the scripted tool calls after round 2
         yield
     llm.stream_chat = real
 
@@ -349,7 +349,7 @@ def test_migration_drops_the_budget_settings() -> None:
     con = sqlite3.connect(path)
     con.execute("PRAGMA user_version = 19")
     con.commit()
-    assert migrations.run(con) == [20]
+    assert migrations.run(con) == list(range(20, migrations.latest() + 1))
     left = {r[0] for r in con.execute("SELECT key FROM settings")}
     con.close()
     assert not left & set(OLD_KEYS) and "uiZoom" in left

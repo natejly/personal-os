@@ -54,6 +54,8 @@ CHILD_BLOCK = frozenset({
     "propose_plan", "desk_ask", "ask_user", "desk_done", "desk_deliver", "desk_start", "schedule_task", "cancel_scheduled_task",
     "workflow_run", "workflow_resume", "workflow_list", "skill_draft", "skill_revise", "mcp_tool_search", "tool_search",
     "run_shortcut", "open_page", "gmail_send", "gmail_draft", "gmail_modify", "deep_research",
+    # the front agent's hand-off tools (workers.py): a worker reports back, it never delegates sideways
+    "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
 })
 # Danger tiers a child never gets. External tools stay: a call that would ask raises the usual card on the parent's
 # stream, and the always-ask list is gated the same way as for the parent.
@@ -442,7 +444,7 @@ class Child:
     roots: tuple[Path, ...] = ()
     messages: list[dict[str, Any]] = field(default_factory=list)
     text: str = ""
-    state: str = "running"          # running | completed | partial | error
+    state: str = "running"          # queued | running | completed | partial | error
     pub_at: float = 0.0             # when a `subagent` event last went out, to throttle the "now" pings
     now: str = ""                   # the one-line "working on" shown while it runs: a tool call, or thinking
     exit_reason: str = ""
@@ -459,6 +461,10 @@ class Child:
     background: bool = False
     collected: bool = False
     transcript_id: str | None = None
+    kind: str = "subagent"          # 'worker' for a detached background worker (workers.py)
+    detached: bool = False          # not tied to a reply: it keeps going when the chat's run ends, and checkpoints its transcript each round
+    prompt: str = ""                # replaces COMMON_PROMPT at the head of its system prompt
+    locking: bool = False           # waiting for a writable folder another child holds: not idle
     started: float = field(default_factory=time.time)
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
     # Stuck detection, the same helpers the main reply loop uses.
@@ -545,7 +551,7 @@ class Subagents:
 
     # ---- registry ------------------------------------------------------------------------------
     def running(self) -> list[Child]:
-        return [c for c in self.children.values() if not c.finished.is_set() and not (c.task_obj is not None and c.task_obj.done())]
+        return [c for c in self.children.values() if c.state != "queued" and not c.finished.is_set() and not (c.task_obj is not None and c.task_obj.done())]
 
     def _ancestors(self, ch: Child) -> tuple[str, ...]:
         out: list[str] = []
@@ -576,7 +582,7 @@ class Subagents:
     def info(self, c: Child) -> dict[str, Any]:
         return {"id": c.id, "parent_run_id": c.parent_id, "role": c.role.name, "state": c.state, "exit_reason": c.exit_reason or None,
                 "task": c.task[:200], "rounds": c.rounds, "calls": c.calls, "cost": round(c.meter.cost, 6), "depth": c.depth,
-                "background": c.background, "now": c.now if c.state == "running" else ""}
+                "background": c.background, "now": c.now if c.state == "running" else "", "kind": c.kind}
 
     # ---- roles and tool sets ---------------------------------------------------------------------
     def role_for(self, name: str) -> RoleDef | None:
@@ -641,13 +647,17 @@ class Subagents:
         return any(r == p or r in p.parents for r in roots)
 
     # ---- spawning --------------------------------------------------------------------------------
-    def _start(self, ctx: dict[str, Any], a: dict[str, Any]) -> Child | dict[str, Any]:
-        """Validate and start one child. A refusal is a plain dict result, never an exception."""
+    def _start(self, ctx: dict[str, Any], a: dict[str, Any], *, kind: str = "subagent", defer: bool = False,
+               prompt: str = "", meta: dict[str, Any] | None = None) -> Child | dict[str, Any]:
+        """Validate and start one child. A refusal is a plain dict result, never an exception.
+
+        kind='worker' makes it a detached worker (workers.py): it has no concurrency cap here (the workers' own queue
+        decides), `meta` lands in its run row's input, and with `defer` it is created queued and begin() starts it."""
         task = str(a.get("task") or "").strip()
         if not task:
             return tool_error("agent_spawn needs a task.", field="task", example={"task": "Summarize what the docs say about X"})
         depth = int(ctx.get("depth") or 0)
-        if depth >= self._int("subagentMaxDepth"):
+        if kind == "subagent" and depth >= self._int("subagentMaxDepth"):  # a worker is depth 1 whatever the setting; its own children obey it
             return tool_error(f"Subagents may nest at most {self._int('subagentMaxDepth')} deep; do this task yourself.")
         parent_id = str(ctx.get("agent_run_id") or "")
         resume = str(a.get("resume_id") or "")
@@ -669,7 +679,7 @@ class Subagents:
         if role is None:
             names = ", ".join(sorted(BUILTIN_ROLES) + [d["name"] for d in (self.defs.list(True) if self.defs else []) if not d["hidden"]])
             return tool_error(redact.scrub_command_output(f"Unknown agent role {a.get('role')!r}."), field="role", expected=names)
-        if len(self.running()) >= limits.slots(self.settings(), "subagentMaxConcurrent"):
+        if kind == "subagent" and len([c for c in self.running() if not c.detached]) >= limits.slots(self.settings(), "subagentMaxConcurrent"):
             return {"started": False, "state": "not_started",
                     "note": "not started: concurrency cap, call agent_wait first (or finish this one yourself)."}
         narrow = a.get("tools")
@@ -697,30 +707,52 @@ class Subagents:
         cctx["meter"] = meter
         ch = Child(id=cid, parent_id=parent_id, role=role, task=task[:MAX_TASK_CHARS], model=model, depth=depth + 1,
                    conversation_id=ctx.get("conversation_id"), message_id=ctx.get("message_id"), desk_id=ctx.get("desk_id"),
-                   ctx=cctx, modes=modes, meter=meter, roots=roots, background=bool(a.get("background")))
+                   ctx=cctx, modes=modes, meter=meter, roots=roots, background=bool(a.get("background")),
+                   kind=kind, detached=kind == "worker", prompt=prompt, state="queued" if defer else "running")
         cctx["agent"] = ch.label
         ch.messages = self._seed(ch, cfg, prior_msgs)
         if self.store is not None:
             try:
-                self.store.create(cid, None, "subagent", {"task": ch.task, "role": role.name, "model": model, "depth": ch.depth,
-                                                          "conversation_id": ch.conversation_id, "message_id": ch.message_id,
-                                                          "tools": sorted(modes), "resume_of": resume or None},
+                self.store.create(cid, None, kind, {"task": ch.task, "role": role.name, "model": model, "depth": ch.depth,
+                                                    "conversation_id": ch.conversation_id, "message_id": ch.message_id,
+                                                    "tools": sorted(modes), "resume_of": resume or None, **(meta or {})},
                                   desk_id=ch.desk_id, parent_run_id=parent_id or None)
+                if defer:
+                    self.store.update(cid, status="queued")
             except Exception:  # noqa: BLE001 - no row, no tape: the child still runs from memory
                 log.warning("could not persist subagent %s", cid, exc_info=True)
         self.children[cid] = ch
         self._prune()
+        if ch.detached:
+            self._checkpoint(ch)  # a worker that never got to run (a restart while it queued) can still be resumed
+        if not defer:
+            self.begin(ch)
+        else:
+            self._publish(ch)
+        return ch
+
+    def begin(self, ch: Child) -> None:
+        """Start a child's task: straight from _start, or later for a queued worker."""
+        ch.state = "running"
+        ch.touch()
+        if self.store is not None:
+            self.store.update(ch.id, status="running")
         self.peak = max(self.peak, len(self.running()))
-        ch.task_obj = asyncio.create_task(self._drive(ch), name=f"subagent:{cid}")
+        ch.task_obj = asyncio.create_task(self._drive(ch), name=f"{ch.kind}:{ch.id}")
         self._ensure_watchdog()
         self._publish(ch)
-        return ch
+
+    def _checkpoint(self, ch: Child) -> None:
+        """The whole history to the tape, replacing the last one: a worker the backend lost is resumed from this."""
+        ch.seq += 1
+        if self.store is not None:
+            self.store.append_transcript(ch.id, ch.seq, {"messages": ch.messages})
 
     def _seed(self, ch: Child, cfg: dict[str, Any], prior: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if prior is not None:
             # The stored transcript stays as recorded. This copy is what the resumed child is shown.
             return [*_close_calls([_public_message(m) for m in prior]), {"role": "user", "content": ch.task}]
-        parts = [COMMON_PROMPT, persona_block(ch.role, self.skills)]
+        parts = [ch.prompt or COMMON_PROMPT, persona_block(ch.role, self.skills)]
         cx = ch.ctx
         project = None
         if self.projects is not None and cx.get("project_id"):
@@ -780,8 +812,12 @@ class Subagents:
     # ---- the loop --------------------------------------------------------------------------------
     async def _drive(self, ch: Child) -> None:
         try:
-            if ch.roots:
-                await self.locks.acquire(ch.roots, ch.id, self._ancestors(ch))
+            if ch.roots and not ch.detached:  # workers share folders like the user's own runs do; a lock would serialize the whole pool
+                ch.locking = True  # waiting on another child's folder is not idling (the watchdog skips it)
+                try:
+                    await self.locks.acquire(ch.roots, ch.id, self._ancestors(ch))
+                finally:
+                    ch.locking = False
             ch.touch()
             await self._loop(ch)
         except _Halt as h:
@@ -862,6 +898,8 @@ class Subagents:
                                                 "function": {"name": c["name"] or "invalid_tool",
                                                              "arguments": self._echo_args(c)}} for c in calls]})
             await self._run_calls(ch, calls)
+            if ch.detached:
+                self._checkpoint(ch)
             if ch.stuck_stop:
                 await self._summarize(ch, schemas)
                 return
@@ -1100,9 +1138,9 @@ class Subagents:
 
     async def _snapshot_before(self, ch: Child, name: str, args: dict[str, Any]) -> None:
         """A child's writes belong to the parent's reply, so they land in the parent run's folder snapshot and
-        the reply's Undo takes them back with everything else."""
+        the reply's Undo takes them back with everything else. A detached worker has no reply to undo."""
         run = ch.ctx.get("run")
-        if self.snaps is None or run is None or not self.snaps.wants(name, args, ch.desk_id):
+        if self.snaps is None or run is None or getattr(run, "kind", None) == "worker" or not self.snaps.wants(name, args, ch.desk_id):
             return
         await asyncio.to_thread(self.snaps.before, run.run_id, self.snaps.roots_for_call(name, args, ch.desk_id))
 
@@ -1184,7 +1222,9 @@ class Subagents:
             if self.results is not None and ch.conversation_id:
                 ch.transcript_id = self.results.store(ch.conversation_id, ch.message_id, "agent_transcript", blob,
                                                       {"type": "transcript", "agent": ch.id})["id"]
-            self._emit(ch, "transcript", {"messages": ch.messages})
+            ch.seq += 1
+            if self.store is not None:
+                self.store.append_transcript(ch.id, ch.seq, {"messages": ch.messages})
             status = "error" if ch.state == "error" else ("done" if ch.exit_reason in ("completed", "stuck") else "interrupted")
             self._emit(ch, "done", {"state": ch.state, "exit_reason": ch.exit_reason, "text": ch.text[:2000]})
             if self.store is not None:
@@ -1395,7 +1435,8 @@ def _close_calls(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _waiting(sub: Subagents, ch: Child) -> list[bool]:
     """A child blocked on the user's approval, or on a grandchild, is not idle."""
-    return [uid.startswith(ch.id + ":") for uid in sub.approvals] + [not c.finished.is_set() for c in sub.children.values() if c.parent_id == ch.id]
+    return ([uid.startswith(ch.id + ":") for uid in sub.approvals] + [ch.locking]
+            + [not c.finished.is_set() for c in sub.children.values() if c.parent_id == ch.id])
 
 
 def _short(args: dict[str, Any], limit: int = 300) -> dict[str, Any]:

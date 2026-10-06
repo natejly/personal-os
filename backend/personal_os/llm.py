@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -74,11 +74,11 @@ def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms
             pass
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # Empty until onboarding (or an upgrade from a stored baseUrl). Nothing here is a model alias that only
-    # one provider knows: a default that fails on every other provider is worse than none.
+    # baseUrl and apiKey stay empty until onboarding (or an upgrade from a stored baseUrl). defaultModel is Grain's own
+    # proxy model: onboarding overwrites it with the chosen provider's model, and a saved value always wins over this one.
     "baseUrl": "",
     "apiKey": "",
-    "defaultModel": "",
+    "defaultModel": "ember-1",
     # Preset id from providers.py, or None to infer it from baseUrl. onboardedAt is the ISO time setup finished.
     "provider": None,
     "onboardedAt": None,
@@ -174,6 +174,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "subagentMaxDepth": SUBAGENT_MAX_DEPTH,
     "subagentStaleSeconds": SUBAGENT_STALE_SECONDS,
     "subagentToolSeconds": SUBAGENT_TOOL_SECONDS,
+    # Workers (workers.py): the chat's front agent hands multi-step work to detached background workers on the chat's own
+    # model. delegationForce routes (never stops) work: after delegationAfterRounds rounds of tool calls in one reply the
+    # reply may only delegate and answer. workerMaxConcurrent workers run at once; the rest queue in order.
+    "delegationForce": True,
+    "delegationAfterRounds": DELEGATION_AFTER_ROUNDS,
+    "workerMaxConcurrent": WORKER_MAX_CONCURRENT,
     # Workflows (workflows.py): the most items one fan-out step may map over.
     "workflowMaxFanOut": WORKFLOW_MAX_FAN_OUT,
     # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
@@ -282,6 +288,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "telegramEnabled": False,
     "telegramNotifyLongRuns": False,  # also send approvals and finish notices for runs that were not started from Telegram
     "telegramLongRunMinutes": TELEGRAM_LONG_RUN_MINUTES,
+    "telegramPushWorkerResults": False,  # also text the owner the reply Grain writes when a background worker finishes
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},

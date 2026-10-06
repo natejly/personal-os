@@ -9,6 +9,7 @@ import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import PlanPanel from './PlanPanel'
+import WorkersPanel from './WorkersPanel'
 import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
 import ChatFilesButton from './ChatFilesPanel'
@@ -185,6 +186,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <PlanPanel conversationId={conversationId} />
+          <WorkersPanel conversationId={conversationId} />
           {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>

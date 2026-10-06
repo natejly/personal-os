@@ -31,7 +31,7 @@ PROVIDERS: list[dict[str, Any]] = [
      "keyUrl": None, "defaultModel": "llama3.2", "models": ["llama3.2", "qwen3", "gpt-oss:20b"],
      "note": "Runs on this Mac; pull the model first (ollama pull llama3.2)."},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "kimi-k3", "models": ["kimi-k3", "deepseek-v4-flash"],
+     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "kimi-k3", "deepseek-v4-flash"],
      "note": "Your own proxy; model names are whatever its config defines."},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
      "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API."},

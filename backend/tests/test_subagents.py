@@ -876,6 +876,8 @@ def test_reply_loop_fans_out_and_wraps() -> None:
         SCRIPTS[t] = [{"text": f"{t} findings", "delay": 0.3}]
     ROUNDS.extend([{"text": "", "calls": spawn_calls("alpha", "beta", "gamma")}, {"text": "Comparison written."}])
     conv = new_conv()
+    # a plain chat that can delegate has no agent_spawn (delegate replaces it); with delegate off the chat fans out as before
+    appmod.convos.update(conv, {"settings": {"tools": {"delegate": "off"}}})
 
     async def go() -> list[tuple[str, Any]]:
         out = []

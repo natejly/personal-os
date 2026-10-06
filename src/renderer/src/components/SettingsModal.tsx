@@ -32,8 +32,6 @@ import MeetingSettings from './MeetingSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
-import MemoryPanel from './MemoryPanel'
-import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
 import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
@@ -172,9 +170,6 @@ export default function SettingsModal(): JSX.Element {
   const toggleGroup = (id: string, open: boolean): void => setOpenGroups((g) => { const n = new Set(g); if (open) n.add(id); else n.delete(id); return n })
   const gp = { openGroups, toggle: toggleGroup }
   const mode = modeOf(settings)
-  const memoryProposals = useStore((s) => s.memoryProposals)
-  const libraryScope = useStore((s) => s.libraryScope)
-  const { setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
@@ -353,7 +348,6 @@ export default function SettingsModal(): JSX.Element {
               <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
                 aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(id)}>
                 <Icon size={15} /><span>{label}</span>
-                {id === 'advanced' && memoryProposals > 0 && <span className="count pending" title="Memory tidy-up suggestions to review">{memoryProposals}</span>}
               </button>
             ))}
           </nav>
@@ -581,16 +575,7 @@ export default function SettingsModal(): JSX.Element {
               </AdvGroup>
 
               <AdvGroup id="memory" title="Memory and search" {...gp}>
-                <div className="knowledge-head">
-                  <b>What Grain remembers</b>
-                  <div className="knowledge-controls modal-free">
-                    <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
-                  </div>
-                </div>
-                <p className="muted small">Memories and relations learned from chats. Changes here apply immediately.</p>
-                <div className="knowledge-body modal-free">
-                  <MemoryPanel embedded />
-                </div>
+                <p className="muted small">Your memories, voice and knowledge graph live on the Memory page. <button className="link" onClick={() => useStore.getState().openMemory()}>Open Memory</button></p>
                 <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
                 <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
                 <label><span className="toggle-text"><b>Search model</b><small>After changing it, Save, then press Rebuild search index.</small></span>

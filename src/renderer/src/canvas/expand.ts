@@ -7,7 +7,7 @@ import { useStore } from '../store'
 const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
 
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Views). Memory lives in
- * Settings → Memory and uploads in Files, neither of which can be hidden. */
+ * the Memory page and uploads in Files, neither of which can be hidden. */
 const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
   todos: 'todos', calendar: 'calendar'
 }
@@ -23,7 +23,7 @@ export const canExpand = (w: CanvasWindow): boolean => {
 }
 
 /** Navigate the main window to the classic equivalent. Leaves the canvas; the window stays. Memory and
- * graph open Settings → Memory over the canvas instead; uploads open Files -> Uploads. */
+ * graph open the Memory page over the canvas instead; uploads open Files -> Uploads. */
 export function expandWindow(w: CanvasWindow): void {
   if (!canExpand(w)) return
   const app = useStore.getState()

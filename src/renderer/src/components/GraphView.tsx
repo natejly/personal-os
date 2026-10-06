@@ -3,7 +3,7 @@ import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, f
 import { Plus, Trash2, Globe, X, Link2, Maximize2, History } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
-import type { GraphData, GraphEdge, GraphNode } from '@shared/types'
+import type { GraphBackfillStatus, GraphData, GraphEdge, GraphNode } from '@shared/types'
 
 interface SimNode extends SimulationNodeDatum { id: string; label: string; type: string; global: boolean; degree: number; literal: boolean }
 interface SimLink extends SimulationLinkDatum<SimNode> { id: string; relation: string; ended?: boolean }
@@ -13,6 +13,55 @@ const TYPE_COLORS: Record<string, string> = {
 }
 const colorFor = (t: string): string => TYPE_COLORS[t] ?? '#8b8b8b'
 const TYPES = Object.keys(TYPE_COLORS)
+const BACKFILL_POLL_MS = 2000
+
+/** Rebuild the graph from messages already sent. `projectId`: null = personal chats, 'all' = every chat. */
+function BackfillControl({ projectId }: { projectId: string | null }): JSX.Element {
+  const refreshGraph = useStore((s) => s.refreshGraph)
+  const [st, setSt] = useState<GraphBackfillStatus | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  // A finished status from an earlier session is old news: only a run seen in flight here reports its result.
+  const [watched, setWatched] = useState(false)
+  const running = !!st?.running
+
+  useEffect(() => { void api.graph.backfillStatus().then((s) => { setSt(s); setWatched(s.running) }).catch(() => undefined) }, [])
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(() => {
+      void api.graph.backfillStatus().then((s) => {
+        setSt(s)
+        if (!s.running) void refreshGraph()
+      }).catch(() => undefined)
+    }, BACKFILL_POLL_MS)
+    return () => clearInterval(t)
+  }, [running, refreshGraph])
+
+  const start = async (): Promise<void> => {
+    setErr(null)
+    try { setSt(await api.graph.backfill(projectId)); setWatched(true) } catch (e) { setErr((e as Error).message) }
+  }
+  const cancel = async (): Promise<void> => {
+    try { setSt(await api.graph.cancelBackfill()) } catch (e) { setErr((e as Error).message) }
+  }
+
+  return (
+    <div className="graph-backfill" onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+      {running ? (
+        <div className="row">
+          <span className="muted small">Reading your messages… {st!.done}/{st!.total}</span>
+          <button className="ghost-btn" onClick={() => void cancel()}>Cancel</button>
+        </div>
+      ) : (
+        <>
+          <button className="ghost-btn" onClick={() => void start()}>Rebuild graph from my messages</button>
+          {watched && st && <span className="muted small">{st.cancelled ? 'Cancelled' : `Done: ${st.done} messages read${st.errors ? `, ${st.errors} failed` : ''}`}</span>}
+        </>
+      )}
+      {err && <span className="muted small">{err}</span>}
+      <span className="muted small">Reads only your own messages in this scope, oldest first. Each message is one model call.</span>
+    </div>
+  )
+}
 
 function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }): JSX.Element {
   const graph = useStore((s) => s.graph)
@@ -77,6 +126,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
               <span className="dir">{out ? '→' : '←'}</span>
               <input className="rel" aria-label={`Relation ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} defaultValue={e.relation} onBlur={(ev) => ev.target.value !== e.relation && void api.graph.updateEdge(e.id, { relation: ev.target.value }).then(refreshGraph)} />
               <span className="other">{other?.label ?? '?'}</span>
+              <span className="muted small edge-meta">{new Date((e.valid_at ?? e.created_at) * 1000).toLocaleDateString()}{e.confidence != null && <span title="How sure the extraction was"> {Math.round(e.confidence * 100)}%</span>}</span>
               <button className="icon-btn ghost danger" aria-label={`Delete relation "${e.relation}" ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} onClick={() => void api.graph.deleteEdge(e.id).then(refreshGraph)}><Trash2 size={12} /></button>
             </li>
           )
@@ -245,6 +295,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
           <button className={`icon-btn ${history ? 'active' : ''}`} aria-label="Show ended relations" aria-pressed={history} title="History: show relations that no longer hold" onClick={() => setHistory((h) => !h)}><History size={15} /></button>
           <button className="icon-btn" aria-label="Reset graph view" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
         </div>
+        <BackfillControl projectId={projectId ?? (scope === 'all' ? 'all' : null)} />
         {graph.nodes.length === 0 && <p className="empty-hint big center">No entities yet. Chat with auto-learn on, or add one here.</p>}
         <svg width={size.w} height={size.h} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); onPointerDown(e) } }}>
           <defs><marker id="arrow" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--text-faint)" /></marker></defs>

@@ -46,7 +46,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'memory' | 'project' | 'canvas'
 /** Which tab a project page shows; the sidebar's View all picks Chats or Files. */
 export type ProjectTab = 'chats' | 'files' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
@@ -283,8 +283,12 @@ export interface State {
   memories: Memory[]
   /** What each reply's auto-learn pass saved, by message id (this session only; the chip's Undo works from it). */
   learnedByMessage: Record<string, Memory[]>
+  /** Rows per message the model suggested pinning to the profile (new or superseding versions). */
+  pinSuggestedByMessage: Record<string, Memory[]>
   /** Memory ids the Memory panel is narrowed to, set by a reply's memory chip. */
   memoryFocus: string[] | null
+  /** A message the next ChatView render should scroll to; cleared once it has. */
+  chatJump: { conversationId: string; messageId: string } | null
   graph: GraphData
   documents: Document[]
 
@@ -418,6 +422,8 @@ export interface State {
   /** Create a conversation without navigating to it, so a canvas can open a chat window on it. Toasts and resolves null on failure. */
   createConversation: (projectId: string | null) => Promise<Conversation | null>
   selectChat: (id: string | null) => Promise<void>
+  /** Open a chat and scroll to one message (ChatView consumes `chatJump`). */
+  openChatAt: (conversationId: string, messageId: string) => Promise<void>
   /** Load a conversation into `sessions` without focusing it. Concurrent calls share one fetch. */
   openSession: (conversationId: string) => Promise<void>
   /** `openSession`, plus attach to a reply already in flight elsewhere so the window paints amber. Idempotent. */
@@ -466,7 +472,7 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
-  /** Open Settings → Memory narrowed to these rows. */
+  /** Open the Memory page narrowed to these rows. */
   showMemories: (ids: string[]) => void
   /** Trash one memory a reply learned, and drop it from that reply's chip. */
   undoLearned: (messageId: string, memoryId: string) => Promise<void>
@@ -1969,7 +1975,9 @@ export const useStore = create<State>((set, get) => {
     focusedConversationId: null,
     memories: [],
     learnedByMessage: {},
+    pinSuggestedByMessage: {},
     memoryFocus: null,
+    chatJump: null,
     graph: { nodes: [], edges: [] },
     documents: [],
     plans: {},
@@ -2123,8 +2131,8 @@ export const useStore = create<State>((set, get) => {
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
-      set(memoryMode ? { memoryMode, memoryFocus: null } : { memoryFocus: null })
-      get().openSettings('memory')
+      set(memoryMode ? { memoryMode, memoryFocus: null, settingsOpen: false } : { memoryFocus: null, settingsOpen: false })
+      get().setView('memory')
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
@@ -2272,6 +2280,12 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
         return null
+      }
+    },
+    openChatAt: async (conversationId, messageId) => {
+      set({ chatJump: { conversationId, messageId } })
+      try { await get().selectChat(conversationId) } finally {
+        if (get().focusedConversationId !== conversationId) set({ chatJump: null })
       }
     },
     selectChat: async (id) => {
@@ -3437,6 +3451,10 @@ export const useStore = create<State>((set, get) => {
       // Updates and forgets count as changes: they edit open lists too.
       const text = learnedText(l)
       if (l.message_id && l.memories.length) set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [l.message_id!]: l.memories } }))
+      if (l.message_id && l.pin_suggested?.length) {
+        const rows = [...l.memories, ...(l.updated ?? [])].filter((m) => l.pin_suggested!.includes(m.id))
+        set((s) => ({ pinSuggestedByMessage: { ...s.pinSuggestedByMessage, [l.message_id!]: rows } }))
+      }
       // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
       // merge into existing entities, so removing them could take the user's own relations with them.
       const added = l.memories.map((m) => m.id)
@@ -3843,8 +3861,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     showMemories: (ids) => {
-      set({ memoryFocus: ids, memoryMode: 'list' })
-      get().openSettings('memory')
+      set({ memoryFocus: ids, memoryMode: 'list', settingsOpen: false })
+      get().setView('memory')
     },
     undoLearned: async (messageId, memoryId) => {
       await get().deleteMemory(memoryId)

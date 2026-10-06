@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from . import blobs
 from .db import Database, new_id, now, row_to_dict
 from .migrations import sync_memories_fts
 from .memory_limits import LEXICAL_HITS
@@ -799,11 +800,14 @@ class Memories:
             d = row_to_dict(r)
             if d:
                 out.setdefault(d["id"], d)
-        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a budget trim drops one.
+        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a window-share trim drops one.
         return sorted(out.values(), key=lambda d: not d.get("pinned"))[:limit]
 
 
 # ---------------- Knowledge graph ----------------
+SELF_LABEL = "User"
+
+
 class Graph:
     def __init__(self, db: Database):
         self.db = db
@@ -864,15 +868,65 @@ class Graph:
         with self.db.tx() as c:
             c.execute("DELETE FROM kg_nodes WHERE id=?", (id,))
 
+    def _self_scope(self, project_id: str | None) -> str | None:
+        """An isolated project keeps its own user node (nothing is written to personal scope); every other scope shares the global one."""
+        return project_id if project_id and project_id != ALL and is_isolated(self.db, project_id) else None
+
+    def find_self_node(self, project_id: str | None = None) -> dict[str, Any] | None:
+        """The node flagged properties.self in this scope; its label is free to change. Never creates."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT * FROM kg_nodes WHERE IFNULL(project_id,'')=? AND json_extract(properties,'$.self')=1 ORDER BY created_at LIMIT 1",
+                          (self._self_scope(project_id) or "",)).fetchone()
+        return row_to_dict(r, ("properties",))
+
+    def self_node(self, project_id: str | None = None) -> dict[str, Any]:
+        """The node standing for the user (facts about them are edges from it), created on first use."""
+        n = self.find_self_node(project_id)
+        if n:
+            return n
+        # An unflagged node labelled "User" is only flagged (a hand-made one); a renamed flagged node was found above.
+        return self.upsert_node(self._self_scope(project_id), SELF_LABEL, "person", {"self": True})
+
+    def value_node(self, project_id: str | None, value: str, create: bool = True) -> dict[str, Any] | None:
+        """The node for a status or deadline value, shared by every edge with that value in the scope. None when an
+        entity already has that name (it is never turned into a value) or, with create=False, when there is none."""
+        n = self.find_node(project_id, value)
+        if n:
+            return n if (n.get("properties") or {}).get("literal") else None
+        return self.upsert_node(project_id, value, "topic", {"literal": True}) if create else None
+
+    def supersede_siblings(self, project_id: str | None, edge: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+        """`edge` has a single-valued relation: a new employer, status or home replaces the old one. Live edges from the
+        same source with the same relation and another target end as of this edge's date. When one of them is NEWER
+        (an old message replayed), it stands and `edge` is the one marked as history instead.
+        Returns (the edges ended, whether `edge` itself was ended)."""
+        when = edge.get("valid_at") or edge["created_at"]
+        at = lambda e: e.get("valid_at") or e["created_at"]  # noqa: E731
+        others = [o for o in self.get(project_id)["edges"]
+                  if o["id"] != edge["id"] and o["source_id"] == edge["source_id"] and o["target_id"] != edge["target_id"]
+                  and o["relation"].lower() == edge["relation"].lower()]
+        newer = max((o for o in others if at(o) > when), key=at, default=None)
+        if newer:
+            self.invalidate_edge(edge["id"], at=at(newer), superseded_by=newer["id"])
+            return [], True
+        return [o for o in others if self.invalidate_edge(o["id"], at=when, superseded_by=edge["id"])], False
+
     def upsert_edge(self, project_id: str | None, source_id: str, target_id: str, relation: str, properties: dict[str, Any] | None = None,
-                    valid_at: float | None = None, source_message_id: str | None = None, fact: str = "") -> dict[str, Any]:
+                    valid_at: float | None = None, source_message_id: str | None = None, fact: str = "",
+                    confidence: float | None = None) -> dict[str, Any]:
         relation = relation.strip()
+        # ponytail: one edge per (source, target, relation), so a second related_to label for the same ordered pair
+        # replaces the first's qualifier; key the row on the label too if two labels must coexist.
         with self.db.tx() as c:
             r = c.execute(
                 "SELECT * FROM kg_edges WHERE source_id=? AND target_id=? AND lower(relation)=lower(?)",
                 (source_id, target_id, relation),
             ).fetchone()
             if r:
+                best = max((x for x in (r["confidence"], confidence) if x is not None), default=None)  # a re-assertion never lowers it
+                if best != r["confidence"] or (fact and fact != r["fact"]):  # a newer qualifier ("head of X" -> "COO") replaces the old
+                    c.execute("UPDATE kg_edges SET confidence=?, fact=? WHERE id=?", (best, fact or r["fact"], r["id"]))
+                    r = c.execute("SELECT * FROM kg_edges WHERE id=?", (r["id"],)).fetchone()
                 if r["invalid_at"] is not None:  # re-asserted: revive the old row rather than duplicate it
                     c.execute("UPDATE kg_edges SET invalid_at=NULL, superseded_by=NULL, valid_at=?, source_message_id=COALESCE(?, source_message_id) WHERE id=?",
                               (valid_at or now(), source_message_id, r["id"]))
@@ -881,8 +935,8 @@ class Graph:
             eid = new_id()
             t = now()
             c.execute(
-                "INSERT INTO kg_edges(id,project_id,source_id,target_id,relation,properties,created_at,valid_at,source_message_id,fact) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (eid, project_id, source_id, target_id, relation, json.dumps(properties or {}), t, valid_at or t, source_message_id, fact),
+                "INSERT INTO kg_edges(id,project_id,source_id,target_id,relation,properties,created_at,valid_at,source_message_id,fact,confidence) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (eid, project_id, source_id, target_id, relation, json.dumps(properties or {}), t, valid_at or t, source_message_id, fact, confidence),
             )
             r = c.execute("SELECT * FROM kg_edges WHERE id=?", (eid,)).fetchone()
         return row_to_dict(r, ("properties",))  # type: ignore[return-value]
@@ -893,6 +947,8 @@ class Graph:
                 c.execute("UPDATE kg_edges SET relation=? WHERE id=?", (patch["relation"].strip(), id))
             if isinstance(patch.get("properties"), dict):
                 c.execute("UPDATE kg_edges SET properties=? WHERE id=?", (json.dumps(patch["properties"]), id))
+            if isinstance(patch.get("fact"), str):
+                c.execute("UPDATE kg_edges SET fact=? WHERE id=?", (patch["fact"], id))
             r = c.execute("SELECT * FROM kg_edges WHERE id=?", (id,)).fetchone()
         return row_to_dict(r, ("properties",))
 
@@ -984,7 +1040,10 @@ class Documents:
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+            d = row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+        if d:
+            d["has_original"] = blobs.inside_uploads(self.db.data_dir, d.get("path")) is not None  # read-time, so no column to migrate
+        return d
 
     def set_pinned(self, id: str, pinned: bool) -> dict[str, Any] | None:
         with self.db.tx() as c:

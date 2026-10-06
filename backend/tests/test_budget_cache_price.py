@@ -1,4 +1,4 @@
-"""Cached-token pricing in the run budget, the date line outside the stable prefix, the context meter's spend figure."""
+"""Cached-token pricing in the run meter, the date line outside the stable prefix, the context meter's spend figure."""
 from __future__ import annotations
 
 import asyncio
@@ -29,13 +29,13 @@ PRICES = {"modelPrices": {"m": {"input": 10.0, "output": 0.0, "cache_read": 1.0}
 appmod.db.set_settings({"autoLearn": False, "baseUrl": "", **PRICES})
 cfg = appmod.settings()
 
-# 1. discounted cost, and Budget.add equals it
+# 1. discounted cost, and RunMeter.add equals it
 full = appmod.pricing.cost(cfg, "m", 100_000, 0)
 disc = appmod.pricing.cost(cfg, "m", 100_000, 0, 90_000, 0)
 check(disc < full and abs(full - 1.0) < 1e-9 and abs(disc - 0.19) < 1e-9, "cached tokens discount the cost")
-b = appmod.Budget(cfg)
+b = appmod.RunMeter()
 b.add(100_000, 0, disc)
-check(abs(b.cost - disc) < 1e-9, "Budget.add equals the discounted figure")
+check(abs(b.cost - disc) < 1e-9, "RunMeter.add equals the discounted figure")
 check(appmod.pricing.cost(cfg, "nope", 10, 10, 5, 0) is None, "unpriced model stays unpriced")
 
 # 2. run: undiscounted 1.0 > 0.5 cap, discounted 0.19 < cap => no partial=cost; and date line placement

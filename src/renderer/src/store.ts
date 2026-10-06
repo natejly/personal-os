@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import type { DraftAutonomy } from './lib/autonomyDefault'
@@ -47,7 +47,9 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'meetings' | 'activity' | 'library' | 'memory' | 'project' | 'canvas'
+/** Which tab a project page shows. */
+export type ProjectTab = 'chats' | 'artifacts' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads'
@@ -202,6 +204,7 @@ export interface State {
   /** Layout of the Memory panel (list + graph live in one panel). */
   memoryMode: MemoryMode
   projectViewId: string | null
+  projectTab: ProjectTab
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
   /**
@@ -266,6 +269,8 @@ export interface State {
   /** The Advanced group to open when Settings opens on the Advanced tab. */
   settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
+  /** The upload the standalone viewer shows (an upload opened with no chat to put it beside). */
+  uploadPreview: string | null
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
@@ -283,8 +288,12 @@ export interface State {
   memories: Memory[]
   /** What each reply's auto-learn pass saved, by message id (this session only; the chip's Undo works from it). */
   learnedByMessage: Record<string, Memory[]>
+  /** Rows per message the model suggested pinning to the profile (new or superseding versions). */
+  pinSuggestedByMessage: Record<string, Memory[]>
   /** Memory ids the Memory panel is narrowed to, set by a reply's memory chip. */
   memoryFocus: string[] | null
+  /** A message the next ChatView render should scroll to; cleared once it has. */
+  chatJump: { conversationId: string; messageId: string } | null
   graph: GraphData
   documents: Document[]
 
@@ -396,6 +405,7 @@ export interface State {
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
   openSettings: (tab: SettingsTab | LegacySettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
+  openUploadPreview: (id: string | null) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
@@ -405,7 +415,7 @@ export interface State {
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
-  openProject: (id: string) => void
+  openProject: (id: string, tab?: ProjectTab) => void
   createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => Promise<void>
   updateProject: (id: string, patch: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
@@ -418,6 +428,8 @@ export interface State {
   /** Create a conversation without navigating to it, so a canvas can open a chat window on it. Toasts and resolves null on failure. */
   createConversation: (projectId: string | null) => Promise<Conversation | null>
   selectChat: (id: string | null) => Promise<void>
+  /** Open a chat and scroll to one message (ChatView consumes `chatJump`). */
+  openChatAt: (conversationId: string, messageId: string) => Promise<void>
   /** Load a conversation into `sessions` without focusing it. Concurrent calls share one fetch. */
   openSession: (conversationId: string) => Promise<void>
   /** `openSession`, plus attach to a reply already in flight elsewhere so the window paints amber. Idempotent. */
@@ -468,7 +480,7 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
-  /** Open Settings → Memory narrowed to these rows. */
+  /** Open the Memory page narrowed to these rows. */
   showMemories: (ids: string[]) => void
   /** Trash one memory a reply learned, and drop it from that reply's chip. */
   undoLearned: (messageId: string, memoryId: string) => Promise<void>
@@ -515,7 +527,7 @@ export interface State {
   /** Open the chat a desk works in (every desk is a conversation). */
   goToDesk: (id: string) => Promise<void>
   /** Turn autonomy on for a chat: a desk binds to it and starts. Turning it off stops it and unbinds the chat. */
-  workAutonomously: (convId: string, autonomy: DeskAutonomy, budget?: DeskBudget) => Promise<void>
+  workAutonomously: (convId: string, autonomy: DeskAutonomy) => Promise<void>
   stopWorkingAutonomously: (convId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
@@ -1356,8 +1368,6 @@ export const useStore = create<State>((set, get) => {
             get().upsertCodingSession(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
-          } else if (ev.event === 'usage_alert') {
-            get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -1874,7 +1884,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
     models: [],
     modelsError: null,
     tools: [],
@@ -1913,6 +1923,7 @@ export const useStore = create<State>((set, get) => {
     lastClassicView: 'home',
     memoryMode: 'list',
     projectViewId: null,
+    projectTab: 'chats',
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
@@ -1975,6 +1986,7 @@ export const useStore = create<State>((set, get) => {
     settingsTab: 'model',
     settingsGroup: null,
     projectModal: null,
+    uploadPreview: null,
     toasts: [],
     paletteOpen: false,
     helpOpen: false,
@@ -1985,7 +1997,9 @@ export const useStore = create<State>((set, get) => {
     focusedConversationId: null,
     memories: [],
     learnedByMessage: {},
+    pinSuggestedByMessage: {},
     memoryFocus: null,
+    chatJump: null,
     graph: { nodes: [], edges: [] },
     documents: [],
     plans: {},
@@ -2139,8 +2153,8 @@ export const useStore = create<State>((set, get) => {
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
-      set(memoryMode ? { memoryMode, memoryFocus: null } : { memoryFocus: null })
-      get().openSettings('memory')
+      set(memoryMode ? { memoryMode, memoryFocus: null, settingsOpen: false } : { memoryFocus: null, settingsOpen: false })
+      get().setView('memory')
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
@@ -2187,6 +2201,7 @@ export const useStore = create<State>((set, get) => {
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (id) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
+    openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
@@ -2233,7 +2248,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
+    openProject: (id, tab) => set((s) => ({ view: 'project', projectViewId: id, projectTab: tab ?? (s.projectViewId === id ? s.projectTab : 'chats'), draftProjectId: null, settingsOpen: false })),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()
@@ -2288,6 +2303,12 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
         return null
+      }
+    },
+    openChatAt: async (conversationId, messageId) => {
+      set({ chatJump: { conversationId, messageId } })
+      try { await get().selectChat(conversationId) } finally {
+        if (get().focusedConversationId !== conversationId) set({ chatJump: null })
       }
     },
     selectChat: async (id) => {
@@ -3328,10 +3349,10 @@ export const useStore = create<State>((set, get) => {
       const convId = deskConv(id) ?? (await api.cowork.desks.get(id).catch(() => null))?.conversation_id
       if (convId) await get().selectChat(convId)
     },
-    workAutonomously: async (convId, autonomy, budget) => {
+    workAutonomously: async (convId, autonomy) => {
       set({ deskBusy: true })
       try {
-        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, budget, start: true })
+        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, start: true })
         if (position) get().toast(queuedNote(position))
         bindDesk(convId, desk.id)
         await get().refreshDesks()
@@ -3456,6 +3477,10 @@ export const useStore = create<State>((set, get) => {
       // Updates and forgets count as changes: they edit open lists too.
       const text = learnedText(l)
       if (l.message_id && l.memories.length) set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [l.message_id!]: l.memories } }))
+      if (l.message_id && l.pin_suggested?.length) {
+        const rows = [...l.memories, ...(l.updated ?? [])].filter((m) => l.pin_suggested!.includes(m.id))
+        set((s) => ({ pinSuggestedByMessage: { ...s.pinSuggestedByMessage, [l.message_id!]: rows } }))
+      }
       // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
       // merge into existing entities, so removing them could take the user's own relations with them.
       const added = l.memories.map((m) => m.id)
@@ -3862,8 +3887,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     showMemories: (ids) => {
-      set({ memoryFocus: ids, memoryMode: 'list' })
-      get().openSettings('memory')
+      set({ memoryFocus: ids, memoryMode: 'list', settingsOpen: false })
+      get().setView('memory')
     },
     undoLearned: async (messageId, memoryId) => {
       await get().deleteMemory(memoryId)

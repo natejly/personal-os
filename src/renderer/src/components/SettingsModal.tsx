@@ -24,15 +24,13 @@ import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork 
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
 import { PermissionModeCards } from './PermissionMode'
 import SandboxSettings from './SandboxSettings'
-import IMessageSettings from './IMessageSettings'
+import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
 import MeetingSettings from './MeetingSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
-import MemoryPanel from './MemoryPanel'
-import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
 import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
@@ -170,9 +168,6 @@ export default function SettingsModal(): JSX.Element {
   const toggleGroup = (id: string, open: boolean): void => setOpenGroups((g) => { const n = new Set(g); if (open) n.add(id); else n.delete(id); return n })
   const gp = { openGroups, toggle: toggleGroup }
   const mode = modeOf(settings)
-  const memoryProposals = useStore((s) => s.memoryProposals)
-  const libraryScope = useStore((s) => s.libraryScope)
-  const { setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
@@ -351,7 +346,6 @@ export default function SettingsModal(): JSX.Element {
               <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
                 aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(id)}>
                 <Icon size={15} /><span>{label}</span>
-                {id === 'advanced' && memoryProposals > 0 && <span className="count pending" title="Memory tidy-up suggestions to review">{memoryProposals}</span>}
               </button>
             ))}
           </nav>
@@ -441,7 +435,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'texting' && <section>
               <h3>Texting</h3>
-              <IMessageSettings draft={draft} saved={settings} patch={patch} />
+              <TelegramSettings draft={draft} patch={patch} />
             </section>}
 
             {tab === 'appearance' && <section>
@@ -577,16 +571,7 @@ export default function SettingsModal(): JSX.Element {
               </AdvGroup>
 
               <AdvGroup id="memory" title="Memory and search" {...gp}>
-                <div className="knowledge-head">
-                  <b>What Grain remembers</b>
-                  <div className="knowledge-controls modal-free">
-                    <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
-                  </div>
-                </div>
-                <p className="muted small">Memories and relations learned from chats. Changes here apply immediately.</p>
-                <div className="knowledge-body modal-free">
-                  <MemoryPanel embedded />
-                </div>
+                <p className="muted small">Your memories, voice and knowledge graph live on the Memory page. <button className="link" onClick={() => useStore.getState().openMemory()}>Open Memory</button></p>
                 <Switch title="Learn from chats" help="Save useful facts after replies." checked={draft.autoLearn} onChange={(autoLearn) => patch({ autoLearn })} />
                 <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
                 <label><span className="toggle-text"><b>Search model</b><small>After changing it, Save, then press Rebuild search index.</small></span>
@@ -598,24 +583,7 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup>
 
-              <AdvGroup id="spending" title="Spending" {...gp}>
-                <label className="setting-row"><span className="toggle-text"><b>Warn me when spend passes</b><small>Dollars per day or per month. 0 turns a warning off.</small></span>
-                  <span className="num-unit">
-                    <input type="number" min={0} step={0.5} aria-label="Daily spend alert, dollars" value={draft.usageAlerts?.dailyCost ?? 0} onChange={(e) => patch({ usageAlerts: { monthlyCost: 0, ...draft.usageAlerts, dailyCost: Math.max(0, Number(e.target.value) || 0) } })} />
-                    <em>$ a day</em>
-                    <input type="number" min={0} step={1} aria-label="Monthly spend alert, dollars" value={draft.usageAlerts?.monthlyCost ?? 0} onChange={(e) => patch({ usageAlerts: { dailyCost: 0, ...draft.usageAlerts, monthlyCost: Math.max(0, Number(e.target.value) || 0) } })} />
-                    <em>$ a month</em>
-                  </span>
-                </label>
-                <label className="setting-row"><span className="toggle-text"><b>Most tokens one reply may use</b><small>A size limit per reply. 0 means no limit.</small></span>
-                  <input type="number" min={0} step={10000} value={draft.maxRunTokens ?? 0} onChange={(e) => patch({ maxRunTokens: Math.max(0, Math.round(Number(e.target.value)) || 0) })} />
-                </label>
-                <label className="setting-row"><span className="toggle-text"><b>How long a reply may run</b><small>A time limit per reply. 0 means no limit.</small></span>
-                  <span className="num-unit">
-                    <input type="number" min={0} value={Math.round((draft.maxRunSeconds ?? 0) / 60)} onChange={(e) => patch({ maxRunSeconds: Math.max(0, Math.round(Number(e.target.value)) || 0) * 60 })} />
-                    <em>minutes</em>
-                  </span>
-                </label>
+              <AdvGroup id="usage" title="Usage" {...gp}>
                 <p className="muted">Every model call is logged locally with its token counts and cost.</p>
                 <UsageView />
               </AdvGroup>
@@ -624,12 +592,6 @@ export default function SettingsModal(): JSX.Element {
                 <CoworkSettings draft={draft} patch={patch} />
                 <CoworkAdvanced draft={draft} patch={patch} />
                 <h4>Coding sessions</h4>
-                <label className="setting-row"><span className="toggle-text"><b>How long a coding session may run</b><small>OpenCode sessions stop after this.</small></span>
-                  <span className="num-unit">
-                    <input type="number" min={1} max={1440} value={draft.codingSessionTimeoutMinutes ?? 30} onChange={(e) => patch({ codingSessionTimeoutMinutes: Math.min(1440, Math.max(1, Math.round(Number(e.target.value)) || 30)) })} />
-                    <em>minutes</em>
-                  </span>
-                </label>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
                   <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
                 </label>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { debounceLatest, LINT_DELAY_MS, skillDisclosure } from './skillLint'
+import { debounceLatest, LINT_DELAY_MS } from './skillLint'
 
 test('two keystrokes within the delay make one lint call, for the newest text', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
@@ -32,9 +32,4 @@ test('a reply for an older draft is dropped once newer text is typed', async (t)
   t.mock.timers.tick(10)
   await Promise.resolve()
   assert.deepEqual(results, ['new'])
-})
-
-test('disclosure flips to an index past the inline budget', () => {
-  assert.equal(skillDisclosure('x'.repeat(10), 10), 'inline')
-  assert.equal(skillDisclosure('x'.repeat(11), 10), 'index')
 })

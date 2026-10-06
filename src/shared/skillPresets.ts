@@ -4,7 +4,7 @@
  * repository (backend skillmd.raw_url turns the page URL into the raw file) and lands as a candidate the user
  * approves. Bundled scripts/ and assets/ are never imported, so a skill that leans on them is left out.
  *
- * `chars` is the body size when the list was checked (2026-10-05); past the inline budget a chat reads a skill on
+ * `chars` is the body size when the list was checked (2026-10-05); past what fits the model's window a chat reads a skill on
  * demand instead of carrying it in every prompt.
  */
 export interface SkillPreset {

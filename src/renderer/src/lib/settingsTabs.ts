@@ -1,6 +1,6 @@
 /** The Settings sections, and where the ids older code still passes to openSettings now live. Pure: no store import. */
 export type SettingsTab = 'model' | 'permissions' | 'integrations' | 'texting' | 'appearance' | 'system' | 'advanced'
-export type AdvancedGroup = 'assistant' | 'approvals' | 'files' | 'memory' | 'spending' | 'desks' | 'mail' | 'voice' | 'layout' | 'data' | 'developer'
+export type AdvancedGroup = 'assistant' | 'approvals' | 'files' | 'memory' | 'usage' | 'desks' | 'mail' | 'voice' | 'layout' | 'data' | 'developer'
 export type LegacySettingsTab = 'workspace' | 'provider' | 'memory' | 'meetings' | 'cowork' | 'modules' | 'behavior' | 'data'
 
 const LEGACY: Record<LegacySettingsTab, { tab: SettingsTab; group?: AdvancedGroup }> = {

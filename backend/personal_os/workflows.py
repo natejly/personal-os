@@ -438,8 +438,8 @@ def expand(defn: dict[str, Any], params: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
-class RunBudget:
-    """What the subagents of one workflow run are charged to: tokens and cost (reported, never a limit)."""
+class RunMeter:
+    """What the subagents of one workflow run add their usage to: tokens and cost, for display only."""
 
     def __init__(self) -> None:
         self.tokens, self.cost, self.paused = 0, 0.0, 0.0
@@ -448,9 +448,6 @@ class RunBudget:
     def add(self, pt: int, ct: int, cost: float | None) -> None:
         self.tokens += pt + ct
         self.cost += cost or 0.0
-
-    def exceeded(self) -> str | None:
-        return None
 
 
 # ---- storage ------------------------------------------------------------------------------------
@@ -763,7 +760,7 @@ class Engine:
         modes = self.toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), None)
         return {"project_id": run.get("project_id"), "conversation_id": run.get("conversation_id"), "message_id": None,
                 "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": cfg, "modes": modes, "depth": 0,
-                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "budget": RunBudget(),
+                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "meter": RunMeter(),
                 "workflow_run_id": run["id"], "proposal_only": False}
 
     # ---- the loop
@@ -1075,7 +1072,7 @@ class Engine:
                     break
                 await asyncio.sleep(0.05)
         finally:
-            b = ctx.get("budget")
+            b = ctx.get("meter")
             if b is not None:
                 b.paused += time.time() - t0
             self.store.set_step(run["id"], sid, status="running")

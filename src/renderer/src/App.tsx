@@ -16,6 +16,7 @@ import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
 import LibraryView from './components/LibraryView'
+import MemoryPage from './components/MemoryPage'
 import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
@@ -23,12 +24,12 @@ import SettingsModal from './components/SettingsModal'
 import CommandPalette from './components/CommandPalette'
 import HelpOverlay from './components/HelpOverlay'
 import ProjectModal from './components/ProjectModal'
+import UploadPreview from './components/UploadPreview'
 import SubagentPanel from './components/SubagentPanel'
 import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { BackendBanner } from './components/BackendStatus'
-import { AllowAllBanner } from './components/PermissionMode'
 import BackendFailed from './components/BackendFailed'
 import Onboarding from './components/onboarding/Onboarding'
 import { useOnboarding } from './components/onboarding/onboardingStore'
@@ -187,6 +188,7 @@ export default function App(): JSX.Element {
   const paletteOpen = useStore((s) => s.paletteOpen)
   const helpOpen = useStore((s) => s.helpOpen)
   const projectModal = useStore((s) => s.projectModal)
+  const uploadPreview = useStore((s) => s.uploadPreview)
   const openSubagentId = useStore((s) => s.openSubagentId)
   const view = useStore((s) => s.view)
   const ModView = moduleForView(view)?.view?.Component
@@ -270,6 +272,7 @@ export default function App(): JSX.Element {
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
           {view === 'library' && <LibraryView />}
+          {view === 'memory' && <MemoryPage />}
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}
@@ -278,9 +281,9 @@ export default function App(): JSX.Element {
       {paletteOpen && <CommandPalette />}
       {helpOpen && <HelpOverlay />}
       {projectModal && <ProjectModal />}
+      {uploadPreview && <UploadPreview id={uploadPreview} />}
       {openSubagentId && <SubagentPanel id={openSubagentId} />}
       <BackendBanner />
-      <AllowAllBanner />
       {wizardOpen && <Onboarding />}
       <DeskNotifier />
       <JobNotifier />

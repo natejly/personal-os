@@ -8,9 +8,9 @@ import { startAutonomy } from '../lib/autonomyDefault'
 
 /**
  * "Work autonomously": the chat hands its task to a desk that keeps working in this same conversation, in
- * bounded turns, until it is done or needs you. Off stops it and the chat answers as a plain chat again; the
+ * turns, until it is done or needs you. Off stops it and the chat answers as a plain chat again; the
  * desk's workspace is kept, and turning it back on picks the same one up. Autonomy changes take effect on the
- * next turn (the backend reads it off the desk row); limits can only be tighter than the Settings caps.
+ * next turn (the backend reads it off the desk row).
  *
  * On the main new-chat composer (`draft`) there is no chat yet, so the toggle is armed from Settings → Advanced →
  * Desks ("Start new chats working autonomously") and the menu picks the level, or turns it off, for this draft only.
@@ -20,7 +20,6 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   const deskId = useStore((s) => (convId ? s.sessions[convId]?.conversation.settings.deskId : undefined) || undefined)
   const desk = useChatDesk(deskId)
   const busy = useStore((s) => s.deskBusy)
-  const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
   // The global desk permissions every autonomous chat inherits (Settings → Permissions → Desks).
   const shellAuto = useStore((s) => s.settings.deskShellAuto !== false)
   const doneGate = useStore((s) => s.settings.deskDoneGate !== false)
@@ -29,7 +28,6 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   const draftLevel = useStore((s) => (draft && !convId ? startAutonomy({ autonomousByDefault: s.settings.autonomousByDefault, draft: s.draftAutonomy, mainComposer: true, agent: s.draftChatSettings.agent, private: s.draftPrivate }) : null))
   const [open, setOpen] = useState(false)
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('ask')
-  const [turns, setTurns] = useState('')
   const box = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     if (!open) return
@@ -47,7 +45,7 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   const start = async (): Promise<void> => {
     if (!convId) return
     setOpen(false)  // now, not after the desk starts: a click in between must find the menu closed
-    await workAutonomously(convId, autonomy, Number(turns) > 0 ? { maxTurns: Number(turns) } : undefined)
+    await workAutonomously(convId, autonomy)
   }
   return (
     <span className="autonomy-ctl" ref={box}>
@@ -73,9 +71,6 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
             From Settings: sandboxed commands in its folder {shellAuto ? 'run without asking' : 'ask first'}; finishing checks {doneGate ? 'on' : 'off'}.{' '}
             <button type="button" className="link small" onClick={() => { setOpen(false); openSettings('permissions') }}>Change</button>
           </p>
-          {!on && !draft && (
-            <label className="desk-limits">Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={turns} onChange={(e) => setTurns(e.target.value)} /></label>
-          )}
           <div className="approval-actions">
             {armed
               ? <button className="ghost-btn danger" onClick={() => { setOpen(false); setDraftAutonomy('off') }}>Turn off</button>

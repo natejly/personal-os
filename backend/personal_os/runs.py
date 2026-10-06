@@ -549,8 +549,10 @@ class Run:
         self.seq = 0
         self.status = "running"
         self.error: str | None = None
-        # Budget snapshot (Budget.snapshot() in app.py), persisted with each status change and at the end.
+        # Usage snapshot (RunMeter.snapshot() in app.py; the column keeps its old name), persisted with each status change and at the end.
         self.budget: dict[str, Any] | None = None
+        # time.monotonic() of the last event or status change: the idle watchdog of an unattended run reads it.
+        self.last_active = time.monotonic()
         # Cooperative stop, also registered as _active[message_id] so /messages/{mid}/stop still works.
         self.stop = asyncio.Event()
         # Set by stop and steer. stream_chat waits on it so a blocked provider read ends now, not at
@@ -604,6 +606,7 @@ class Run:
     def set_status(self, status: str) -> None:
         if status == self.status:
             return
+        self.last_active = time.monotonic()
         self.status = status
         if self.store is not None:
             self.store.update(self.run_id, status=status, budget=self.budget, last_seq=self.seq)
@@ -618,6 +621,7 @@ class Run:
 
     def publish(self, event: str, data: Any) -> None:
         self.seq += 1
+        self.last_active = time.monotonic()
         if event == "assistant_message":
             self.message_seq = self.seq
         item = (self.seq, event, data)

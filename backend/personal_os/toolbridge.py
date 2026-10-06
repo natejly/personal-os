@@ -24,7 +24,6 @@ from typing import Any, Awaitable, Callable
 from . import permrules
 
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
-MAX_CALLS = 50
 MAX_SECONDS = 300
 STDOUT_KEEP = 50_000
 STDOUT_HEAD = 0.4          # share of the kept stdout taken from the start; the rest is the tail, where a failure is
@@ -39,7 +38,7 @@ import socket
 
 
 class ToolError(Exception):
-    """The bridge refused the call (tool not offered, off, declined, call cap). A tool's own error comes back as data."""
+    """The bridge refused the call (tool not offered, off, declined). A tool's own error comes back as data."""
 
 
 def call(tool, **args):
@@ -87,10 +86,9 @@ def offered(tb: Any, ctx: dict[str, Any], wanted: list[str] | None, modes: dict[
 
 class Bridge:
     def __init__(self, tb: Any, ctx: dict[str, Any], names: list[str], modes: dict[str, str] | None = None,
-                 approve: Approve | None = None, max_calls: int = MAX_CALLS):
+                 approve: Approve | None = None):
         self.tb, self.ctx, self.names, self.modes = tb, ctx, set(names), modes
         self.approve = approve
-        self.max_calls = max_calls
         self.calls = 0
         self.log: list[dict[str, Any]] = []
         self.stderr_cap = STDERR_KEEP
@@ -164,8 +162,6 @@ class Bridge:
     async def handle(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name not in self.names:
             return self._refuse(name, f"{name} was not offered to this script. Offered: {', '.join(sorted(self.names)) or 'none'}.")
-        if self.calls >= self.max_calls:
-            return self._refuse(name, f"call cap reached ({self.max_calls} bridged calls per run_python). Do the rest in another run.")
         self.calls += 1
         raw = (self.modes or {}).get(name) if self.modes is not None else None
         spec = self.tb.specs[name]

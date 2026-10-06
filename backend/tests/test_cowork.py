@@ -7,7 +7,7 @@ one closes, and a promotion is only a promotion once the promoted copy has been 
 
 `llm.stream_chat` is replaced by a scripted generator whose signature tracks the real one, the way
 test_runs.py does it. One scripted entry is one round. The closing tool-free round (`tool_choice`
-"none") deliberately does NOT consume the script, so a budget stop cannot silently eat the next
+"none") deliberately does NOT consume the script, so a breaker stop cannot silently eat the next
 turn's first round.
 
 Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_cowork.py
@@ -67,7 +67,7 @@ async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[
     SCRIPT["messages"].append([dict(m) for m in messages])
     SCRIPT["systems"].append("\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system"))
     if tool_choice == "none":
-        # The closing round of a budget, park or breaker stop. It never calls a tool and never
+        # The closing round of a park or breaker stop. It never calls a tool and never
         # consumes a scripted turn: the next turn's first round is still waiting for its entry.
         yield {"type": "delta", "text": "Wrapping up."}
         yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
@@ -493,17 +493,17 @@ def test_a_watched_card_never_parks() -> None:
 
 
 def test_a_chained_turn_hands_off_before_it_ends() -> None:
-    """Long autonomy is bought by chaining bounded replies, never by raising maxToolRounds."""
+    """A reply that just ends (no desk_done, no desk_ask) is nudged once: a second run, announced before the first closes."""
     # The completion gate is off here: this script finishes without delivering its files, which the gate would
     # (rightly) refuse, and either the refusal and its nudge or the reviewer it would start adds a third run to a test about two.
-    settings_patch(maxToolRounds=2, deskDoneGate=False, deskSelfReview=False)
+    settings_patch(deskDoneGate=False, deskSelfReview=False)
     try:
         second = call("desk_write_file", path="outputs/second.md", content="# Second\n")
         script({"calls": [propose("Two files", step("desk_write_file", WRITE["arguments"]),
                                   step("desk_write_file", second["arguments"]))]},
                {"calls": [WRITE]},
-               {"calls": [second]},                       # round 3: out of rounds, never executed
-               {"calls": [second]},                       # turn 2, round 1: the step picked up again
+               {"calls": [second]},
+               {"text": "Wrote both."},                  # the reply just ends: one nudge turn follows
                {"calls": [call("desk_done", summary="Both files written.")]},
                {"text": "Finished."})
         made = make_desk("Write two files")
@@ -520,60 +520,30 @@ def test_a_chained_turn_hands_off_before_it_ends() -> None:
         check({"plan_card", "plan_decision", "desk_status"} <= set(names),
               f"the four new ChatEvent names all really leave the bus, got {sorted(set(names))}")
         rows = run_store.list(desk_id=did, statuses=None)
-        check(len(rows) == 2, f"two bounded runs, not one long one, got {len(rows)}")
+        check(len(rows) == 2, f"a run and its one nudge turn, got {len(rows)}")
         check({r["turn"] for r in rows} == {0, 1}, f"numbered as consecutive turns, got {[r['turn'] for r in rows]}")
         check(desk(did)["turn"] == 2, f"the desk counted both turns, got {desk(did)['turn']}")
-        check(workspace.resolve_in(did, "outputs/second.md").is_file(), "the second step really ran on the next turn")
+        check(workspace.resolve_in(did, "outputs/second.md").is_file(), "the second step really ran")
         spent = plans.get(desk(did)["plan_id"])
         check([s["status"] for s in spent["steps"]] == ["done", "done"], "both approved steps are spent exactly once")
     finally:
-        settings_patch(maxToolRounds=25, deskDoneGate=True, deskSelfReview=True)
+        settings_patch(deskDoneGate=True, deskSelfReview=True)
 
 
-def test_a_turn_that_consumed_no_step_does_not_chain() -> None:
-    settings_patch(maxToolRounds=2)
-    try:
-        script({"calls": [propose("One file", step("desk_write_file", WRITE["arguments"]))]},
-               {"calls": [call("desk_read_file", path="work/missing.txt")]},         # a round spent on nothing the plan asked for, and it errors: no progress
-               {"calls": [WRITE]},                        # round 3: out of rounds, never executed
-               {"text": "Finished."})
-        did = make_desk("Spin the wheels")["desk"]["id"]
-        j("POST", f"/approvals/{card(did, PLAN_TOOL)['call_id']}", {"decision": "allow"})
-        quiet(did)
-        time.sleep(0.5)      # long enough for a chained turn to have appeared, if one were coming
-
-        check(len(run_store.list(desk_id=did, statuses=None)) == 1, "no second turn was started")
-        state = desk(did)
-        # §9 calls this landing in `failed`; Desks.settle maps a budget-window stop to review/budget
-        # whatever the reason, and review is in NEEDS_YOU, so the user sees it either way.
-        check(state["status"] == "review" and state["status_reason"] == "budget",
-              f"the desk stops and asks the user instead, got {state['status']}/{state['status_reason']}")
-        check(_desk_tasks.get(did) is None, "and the supervisor let go")
-    finally:
-        settings_patch(maxToolRounds=25)
-
-
-def test_the_desk_budget_caps_the_chain_even_with_turns_left() -> None:
-    """_should_chain's five guards, asserted directly: a scripted run never costs real money, so
-    the cost axis cannot be reached through the app."""
-    did = make_desk("Budgeted", start=False)["desk"]["id"]
-    plan = plans.open(f"budget:{did}",
-                      {"title": "t", "steps": [{"tool": "desk_write_file", "arguments": WRITE["arguments"], "why": ""}]},
-                      run_id=None, conversation_id=j("GET", f"/cowork/desks/{did}")["conversation_id"],
-                      message_id="", tainted=False, desk_id=did)
-    plans.decide(f"budget:{did}", "allow")
-    base = {"status": "working", "turn": 0, "cost": 0.0, "plan_id": plan["plan_id"], "budget": None}
+def test_nothing_caps_a_desk_chain_but_the_single_nudge() -> None:
+    """_should_chain asserted directly: neither spend, the turn count nor a stored desk budget stops a desk."""
+    did = make_desk("Uncapped", start=False)["desk"]["id"]
+    base = {"status": "working", "turn": 0, "cost": 0.0, "plan_id": None, "budget": None}
     run = Run("unused")
-    run.partial, run.steps_consumed = "rounds", 1
+    run.partial = None
     try:
         check(_should_chain(base, run) is True, "the baseline turn would chain")
         check(_should_chain({**base, "cost": 99.0}, run) is True, "spend never stops a desk")
-        check(_should_chain({**base, "turn": 99}, run) is False, "so does the turn cap")
-        check(_should_chain({**base, "budget": {"maxTurns": 1}}, run) is False, "a desk's own budget may make the user's settings stricter")
-        run.steps_consumed = 0
-        check(_should_chain(base, run) is False, "a turn that consumed no step is not progress")
-        run.steps_consumed = 1
-        check(_should_chain({**base, "status": "review"}, run) is False, "and a desk that is not working never chains")
+        check(_should_chain({**base, "turn": 99}, run) is True, "there is no turn cap")
+        check(_should_chain({**base, "budget": {"maxTurns": 1}, "turn": 5}, run) is True, "a stored desk budget is ignored")
+        check(_should_chain({**base, "status": "review"}, run) is False, "a desk that is not working never chains")
+        run.partial = "loop"
+        check(_should_chain(base, run) is False, "a stuck loop never chains")
     finally:
         run.end()
 
@@ -607,7 +577,7 @@ def test_leaving_needs_you_clears_the_old_ask() -> None:
 def test_a_steer_does_not_double_charge_the_turn() -> None:
     """A steered reply closes its current segment with its own `done` and carries on in a fresh
     assistant message. _run_desk read every `done` as end-of-turn, so one turn was charged twice
-    and the desk hit its turn budget half a turn early."""
+    and the desk counted turns twice."""
     script({"text": " ".join(["Thinking."] * 40)}, {"text": "Folded in the steer."}, delay=0.02)
     made = make_desk("Steer me")
     did, cid = made["desk"]["id"], made["conversation_id"]
@@ -884,8 +854,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_wake_that_lost_the_race_with_its_own_run_is_retried,
          test_a_watched_card_never_parks,
          test_a_chained_turn_hands_off_before_it_ends,
-         test_a_turn_that_consumed_no_step_does_not_chain,
-         test_the_desk_budget_caps_the_chain_even_with_turns_left,
+         test_nothing_caps_a_desk_chain_but_the_single_nudge,
          test_desk_ask_moves_the_desk_to_needs_you,
          test_ask_as_it_goes_cards_each_change_instead_of_planning_first,
          test_seen_clears_the_desks_needs_you_badge,

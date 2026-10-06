@@ -375,7 +375,7 @@ class Jobs:
                 d["allowed_tools"] = json.loads(raw) if raw else None
             except ValueError:
                 d["allowed_tools"] = None
-            # NULL = JOB_BUDGET as is; otherwise a JSON object of the caps this job tightens.
+            # Legacy column: older clients stored caps here; nothing reads it any more.
             try:
                 d["budget"] = json.loads(d["budget"]) if d.get("budget") else None
             except ValueError:

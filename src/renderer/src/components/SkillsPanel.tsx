@@ -7,7 +7,7 @@ import ProjectChip from './ProjectChip'
 import TeachTaskPanel from './TeachTaskPanel'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
-import { debounceLatest, LINT_DELAY_MS, skillDisclosure } from '../lib/skillLint'
+import { debounceLatest, LINT_DELAY_MS } from '../lib/skillLint'
 import { skillSlug } from '../lib/slashCommands'
 
 type SkillText = { name: string; description: string; procedure: string }
@@ -171,7 +171,6 @@ export default function SkillsPanel(): JSX.Element {
   const formFindings = useSkillLint(form, adding)
   const [intent, setIntent] = useState('')
   const [drafting, setDrafting] = useState(false)
-  const budget = useStore((s) => s.settings.skillsInlineBudget ?? 6000)
   const [preview, setPreview] = useState<SkillPreview | null>(null)
 
   const draftFromIntent = async (): Promise<void> => {
@@ -290,9 +289,7 @@ export default function SkillsPanel(): JSX.Element {
           {preview.block ? (
             <p className="muted small">
               {preview.included.length} approved skill{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.{' '}
-              {skillDisclosure(preview.block, budget) === 'inline'
-                ? `Under the ${budget}-character budget, so each chat gets the full text below.`
-                : `Over the ${budget}-character budget, so chats get only names and one-line descriptions and open a procedure when it fits. Below is the full text.`}
+              Chats get the full text below while it fits the model's window; past that they get names and one-line descriptions and open a procedure when it applies.
               {preview.omitted.length > 0 && ` Past the procedure limit and left out: ${preview.omitted.map((o) => o.name).join(', ')}.`}
             </p>
           ) : <p className="muted small">No approved procedures, so chats see nothing from here.</p>}

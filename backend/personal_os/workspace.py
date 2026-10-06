@@ -34,7 +34,7 @@ import os
 import re
 import shutil
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 MAX_FILE_CHARS = 400_000
 MAX_FILES = 500
@@ -127,6 +127,7 @@ class Workspace:
         self.root = Path(data_dir) / sub
         self.max_files = max_files
         self.max_total_bytes = max_total_bytes
+        self.on_save: Callable[[str, Path], None] | None = None  # (desk id, saved file): chat_files records a chat's outputs; set by app.py
 
     # ---- layout ----
     def desk_root(self, desk_id: str) -> Path:
@@ -395,6 +396,11 @@ class Workspace:
             target.write_bytes(data)
         except OSError as e:
             raise _oserror(rel, "written", e) from e
+        if self.on_save is not None:
+            try:
+                self.on_save(desk_id, target)
+            except Exception:  # noqa: BLE001 - recording a save never breaks the write
+                pass
         return self.output_entry(desk_id, target)
 
     def output_entry(self, desk_id: str, path: Path) -> dict[str, Any]:

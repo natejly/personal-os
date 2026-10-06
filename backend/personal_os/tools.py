@@ -704,6 +704,7 @@ class Toolbox:
         # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
+        self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -2573,6 +2574,8 @@ def _register_docs(self: Toolbox) -> None:
         # The chat's own project decides which tree it lands in, so a doc written inside a project is
         # filed under that project without the model having to be told which one it is in.
         d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
+        if self.chat_files is not None:
+            self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
         return _scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
                 "note": "Created in Files. The user can undo it from the file's revision history."})
@@ -2628,6 +2631,8 @@ def _register_docs(self: Toolbox) -> None:
             if not applied:
                 return _missing(ctx, doc)
             rev = self.docs.revision(rev["id"]) or rev
+            if self.chat_files is not None:
+                self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], applied.get("title") or d["title"], "edited", ctx.get("message_id"))
             return _scrub_strings({"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                     "note": "Written into the file. The user sees the diff in the chat and can undo it from the file's "

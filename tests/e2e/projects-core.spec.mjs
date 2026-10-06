@@ -153,7 +153,7 @@ test('project view: tabs, counts, new chat button, empty state, memory add insid
   await page.reload()
   await sidebar(page).getByText('Tabs', { exact: true }).click()
   await expect(page.getByText('No chats yet')).toBeVisible()
-  await page.getByRole('button', { name: /Memory/ }).click()
+  await page.locator('.project-page .tabs').getByRole('button', { name: /Memory/ }).click()
   await page.getByPlaceholder(/Remember something in this project/).fill('tabs memory one')
   await page.getByPlaceholder(/Remember something in this project/).press('Enter')
   await expect(page.getByText('tabs memory one')).toBeVisible()

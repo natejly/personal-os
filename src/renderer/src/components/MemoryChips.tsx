@@ -4,21 +4,25 @@ import type { ContextUsed } from '@shared/types'
 import { useStore } from '../store'
 import { memoriesUsed, memoryLine, type MemoryItem } from '../lib/memoryChip'
 
-/** "Used N memories" for what a reply was given, and "Learned M" once its auto-learn pass saved something (with Undo per row). */
 const st = useStore.getState
 
+/** "Used N memories" for what a reply was given, and "Learned M" once its auto-learn pass saved something (with Undo per row). */
 export default function MemoryChips({ messageId, ctx }: { messageId: string; ctx: ContextUsed | null }): JSX.Element | null {
   const used = memoriesUsed(ctx)
   const learnedRows = useStore((s) => s.learnedByMessage[messageId])
   const [open, setOpen] = useState<'used' | 'learned' | null>(null)
-  const suggested = useStore((s) => s.pinSuggestedByMessage[messageId])
+  const suggestedRows = useStore((s) => s.pinSuggestedByMessage[messageId])
   const [pinnedNow, setPinnedNow] = useState<Set<string>>(new Set())
-  const isPinned = (id: string): boolean => pinnedNow.has(id) || !!learnedRows?.find((m) => m.id === id)?.pinned
+  // A suggested row can be a new version that superseded an old one, so it is not in learnedRows.
+  const learnedAll = [...(learnedRows ?? []), ...(suggestedRows ?? []).filter((m) => !learnedRows?.some((l) => l.id === m.id))]
+  const isPinned = (id: string): boolean => pinnedNow.has(id) || !!learnedAll.find((m) => m.id === id)?.pinned
   const pin = async (id: string): Promise<void> => {
-    await st().updateMemory(id, { pinned: true })
-    setPinnedNow((p) => new Set(p).add(id))
+    try {
+      await st().updateMemory(id, { pinned: true })
+      setPinnedNow((p) => new Set(p).add(id))
+    } catch (e) { st().toast((e as Error).message, 'error') }
   }
-  const learned: MemoryItem[] = (learnedRows ?? []).map((m) => ({ id: m.id, text: memoryLine(m.content) }))
+  const learned: MemoryItem[] = learnedAll.map((m) => ({ id: m.id, text: memoryLine(m.content) }))
   if (!used.length && !learned.length) return null
   const rows = open === 'learned' ? learned : used
   const toggle = (k: 'used' | 'learned'): void => setOpen((o) => (o === k ? null : k))
@@ -44,10 +48,10 @@ export default function MemoryChips({ messageId, ctx }: { messageId: string; ctx
                 <span style={{ display: 'inline-flex', gap: 8, whiteSpace: 'nowrap' }}>
                   {isPinned(m.id)
                     ? <span className="muted small">Pinned</span>
-                    : suggested?.includes(m.id)
+                    : suggestedRows?.some((r) => r.id === m.id)
                       ? <button type="button" className="link small" style={{ fontWeight: 600 }} title="The assistant thinks this is a standing preference" onClick={() => void pin(m.id)}>Pin to profile?</button>
                       : <button type="button" className="link small" onClick={() => void pin(m.id)}>Pin to profile</button>}
-                  <button type="button" className="link small" onClick={() => void st().undoLearned(messageId, m.id)}>Undo</button>
+                  {learnedRows?.some((r) => r.id === m.id) && <button type="button" className="link small" onClick={() => void st().undoLearned(messageId, m.id)}>Undo</button>}
                 </span>
               )}
             </div>

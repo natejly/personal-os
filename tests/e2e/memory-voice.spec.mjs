@@ -6,7 +6,7 @@ const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserv
 const PROFILE = { summary: 'Writes short warm notes, VOICESUM style.', guidelines: ['Open with a first name', 'GUIDELINEMARK keep it brief'], phrases: ['cheers then'], avoid: ['exclamation marks'] }
 
 async function openVoice(page) {
-  await page.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(page.getByRole('heading', { name: /Writing samples/ })).toBeVisible()
 }
@@ -64,7 +64,7 @@ test('voice panel: edit guidelines, phrases, never, summary; edits persist and m
   expect(s.profile.edited).toBeTruthy()
   await expect(page.getByText(/Hand-edited/)).toBeVisible()
   const p2 = await grain.relaunch()
-  await p2.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await p2.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await p2.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(p2.getByLabel('Style summary')).toHaveValue('Edited summary SUMEDIT')
   clean(grain)

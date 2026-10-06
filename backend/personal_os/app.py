@@ -1164,7 +1164,10 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 async def delete_project(id: str) -> dict[str, Any]:
     # async so each run's stop Event is set on the loop that owns it. Stop is cooperative: the replies wind down and
     # persist what they wrote, and the chats are still there to restore.
-    stopped = sum(1 for c in convos.list(id, include_jobs=True, include_desks=True) if bus.stop(c["id"]))
+    stopped = 0
+    for c in convos.list(id, include_jobs=True, include_desks=True):
+        stopped += bool(bus.stop(c["id"]))
+        await workers_mgr.stop_conversation(c["id"])  # its background workers end with it, unannounced
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
     return {"ok": True, "stopped": stopped}

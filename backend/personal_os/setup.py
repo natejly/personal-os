@@ -201,7 +201,11 @@ def router(get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[d
         preset = providers.get(body.provider)
         if not preset:
             raise HTTPException(422, f"Unknown provider {body.provider!r}")
-        base, model = body.baseUrl.strip() or preset["baseUrl"], body.model.strip()
+        try:
+            base = providers.check_base_url(body.baseUrl) or preset["baseUrl"]
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        model = body.model.strip()
         key = (body.apiKey or "").strip()
         if not base:
             raise HTTPException(422, "A base URL is required")

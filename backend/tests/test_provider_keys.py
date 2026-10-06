@@ -388,3 +388,42 @@ def test_setup_complete_switch_and_return() -> None:
     assert r.status_code == 200
     assert active() == ("ollama", "http://localhost:11434/v1", "")
     assert provider_keys.load(db.secrets) == {"fireworks": FW_KEY, "openai": OAI_KEY}
+
+
+BAD_ADDRESSES = ["http://localhost:11x34/v1", "http://localhost:99999/v1", "http://[::1/v1", "http://host:abc", "http://host:-1"]
+
+
+@pytest.mark.parametrize("bad", BAD_ADDRESSES)
+def test_a_stored_malformed_address_never_breaks_settings_setup_or_startup(bad: str) -> None:
+    db.set_settings({"baseUrl": bad})  # what an install that saved one before the check still holds
+    assert providers.infer(bad) == "custom"
+    provider_keys.migrate(db)  # runs at import
+    assert client.get("/settings").status_code == 200
+    assert client.put("/settings", json={"autonomousByDefault": True}).status_code == 200
+    assert client.get("/setup/status").status_code == 200
+    # The address can be corrected afterwards.
+    assert client.put("/settings", json={"baseUrl": FW}).status_code == 200
+    assert client.get("/settings").json()["baseUrl"] == FW
+
+
+@pytest.mark.parametrize("bad", BAD_ADDRESSES + ["javascript:alert(1)", "ftp://host/v1", "localhost:4000"])
+def test_a_malformed_address_is_refused_and_changes_nothing(bad: str) -> None:
+    db.set_settings({"baseUrl": FW})
+    assert client.put("/settings", json={"baseUrl": bad}).status_code == 422
+    assert client.get("/settings").json()["baseUrl"] == FW
+    done = client.post("/setup/complete", json={"provider": "custom", "baseUrl": bad, "model": "m"})
+    assert done.status_code == 422
+    assert client.get("/settings").json()["baseUrl"] == FW and not db.get_settings().get("onboardedAt")
+
+
+def test_an_empty_address_and_the_known_providers_are_still_accepted() -> None:
+    assert client.put("/settings", json={"baseUrl": ""}).status_code == 200
+    assert client.put("/settings", json={"baseUrl": "http://localhost:11434/v1", "provider": "ollama"}).status_code == 200
+    assert client.put("/settings", json={"provider": None}).status_code == 200
+
+
+@pytest.mark.parametrize("bad", [5, "bogus", ["openai"]])
+def test_an_unknown_provider_is_refused_and_changes_nothing(bad: object) -> None:
+    db.set_settings({"provider": "openai"})
+    assert client.put("/settings", json={"provider": bad}).status_code == 422
+    assert db.get_settings()["provider"] == "openai"

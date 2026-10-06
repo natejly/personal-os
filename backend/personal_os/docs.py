@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import difflib
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -112,6 +113,36 @@ CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
 DATA_URI = re.compile(r"\(data:[^)\s]*\)")
 ASSET_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 ASSET_MAX_BYTES = 8 * 1024 * 1024
+
+# Per-doc type: a font family name, a size in px and a measure (line width) in ch. Stored as JSON in
+# docs.typography; NULL (or {}) follows the global `docTypography` setting. The same shape is the setting.
+TYPOGRAPHY_FONTS = ("serif", "sans", "mono", "book")
+TYPOGRAPHY_SIZE = (10, 32)
+TYPOGRAPHY_MEASURE = (40, 120)
+COMMENT_CONTEXT = 32  # chars of rendered text kept either side of a comment's quote
+
+
+def clean_typography(raw: Any) -> dict[str, Any] | None:
+    """Keep only the known keys, in range; None when nothing valid is left (= use the default)."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    if raw.get("font") in TYPOGRAPHY_FONTS:
+        out["font"] = raw["font"]
+    for key, (lo, hi) in (("size", TYPOGRAPHY_SIZE), ("measure", TYPOGRAPHY_MEASURE)):
+        v = raw.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi:
+            out[key] = int(v)
+    return out or None
+
+
+def _parse_typography(d: dict[str, Any]) -> dict[str, Any]:
+    raw = d.get("typography")
+    try:
+        d["typography"] = clean_typography(json.loads(raw)) if raw else None
+    except ValueError:
+        d["typography"] = None
+    return d
 
 
 class AssetError(ValueError):
@@ -289,7 +320,8 @@ class Docs:
             self._migrate_folder_scope(c)
             # Soft delete (trash.py). docs is created here, not in db.py, so its columns are added here too.
             have = {r["name"] for r in c.execute("PRAGMA table_info(docs)").fetchall()}
-            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0"}.items():
+            # typography also lands via migration 10 on a database that already had docs; the loop covers a fresh one.
+            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0", "typography": "TEXT"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
             # doc_chunks.blurb: optional model-written context line (retrieval.contextualize_pending).
@@ -412,7 +444,7 @@ class Docs:
             where.append("(d.title LIKE ? OR d.content LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
-            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.created_at, d.updated_at, d.content, "
+            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.typography, d.created_at, d.updated_at, d.content, "
             "  length(d.content) AS size, "
             "  (SELECT group_concat(tag, char(10)) FROM doc_tags t WHERE t.doc_id=d.id) AS tag_list, "
             "  (SELECT COUNT(*) FROM doc_revisions r WHERE r.doc_id=d.id AND r.status='pending') AS pending "
@@ -423,7 +455,7 @@ class Docs:
             rows = c.execute(sql, args).fetchall()
         out = []
         for r in rows:
-            d = dict(r)
+            d = _parse_typography(dict(r))
             tl = d.pop("tag_list")
             d["tags"] = sorted(tl.split("\n")) if tl else []
             body = d.pop("content") or ""  # the list shows a preview; bodies stay out of the payload
@@ -437,6 +469,7 @@ class Docs:
                 return None
             pending = [row_to_dict(r) for r in c.execute(
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='pending' ORDER BY created_at", (id,)).fetchall()]
+        _parse_typography(d)
         d["words"] = word_count(d["content"])
         d["pending"] = [self._rev_view(r, d["content"]) for r in pending]  # type: ignore[arg-type]
         return d
@@ -545,7 +578,7 @@ class Docs:
 
     def update_meta(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Title/folder/star/project moves that are not content edits, so they skip the history."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id", "typography"}}
         if not fields:
             return self.get(id)
         if "title" in fields:
@@ -555,6 +588,9 @@ class Docs:
                 fields[flag] = 1 if fields[flag] else 0
         if "folder" in fields:
             fields["folder"] = folder_path(fields["folder"])
+        if "typography" in fields:  # {} or anything invalid clears it: the doc follows the global default again
+            t = clean_typography(fields["typography"])
+            fields["typography"] = json.dumps(t) if t else None
         fields["updated_at"] = now()
         with self.db.tx() as c:
             c.execute(f"UPDATE docs SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
@@ -585,6 +621,7 @@ class Docs:
             except Exception as e:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
                 log.warning("docs: could not purge recordings of doc %s: %s", id, e)
         with self.db.tx() as c:
+            c.execute("DELETE FROM doc_comments WHERE doc_id=?", (id,))  # the FK cascades too; explicit so it needs no PRAGMA
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
             c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (id,))
@@ -887,3 +924,63 @@ class Docs:
             return None
         return self.save(r["doc_id"], content=r["after"], title=r["title_after"],
                          summary=f"Restored revision from {r['created_at']:.0f}", author="user", coalesce=False)
+
+    # ---- comments ----
+    # A thread row (parent_id NULL) anchors to a quoted span of the rendered text; the renderer finds it again by
+    # exact match, then by context (comments.ts), and shows a thread it cannot place as detached rather than
+    # dropping it. Replies carry the thread's id in parent_id and no anchor. Rows come back flat, by creation.
+    def comments(self, doc_id: str, include_resolved: bool = True) -> list[dict[str, Any]] | None:
+        if not self.get(doc_id):
+            return None
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute("SELECT * FROM doc_comments WHERE doc_id=? ORDER BY created_at", (doc_id,)).fetchall()]
+        if include_resolved:
+            return rows
+        resolved = {r["id"] for r in rows if r["parent_id"] is None and r["resolved"]}
+        return [r for r in rows if r["id"] not in resolved and r["parent_id"] not in resolved]
+
+    def comment(self, comment_id: str) -> dict[str, Any] | None:
+        with self.db.tx() as c:
+            return row_to_dict(c.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+
+    def add_comment(self, doc_id: str, body: str, quote: str = "", prefix: str = "", suffix: str = "",
+                    offset_hint: int = 0, author: str = "user", parent_id: str | None = None) -> dict[str, Any] | None:
+        """A new thread on `doc_id`, or with `parent_id` a reply under that thread (a reply to a reply joins its thread)."""
+        if not self.get(doc_id):
+            return None
+        text = (body or "").strip()
+        if not text:
+            return None
+        if parent_id:
+            parent = self.comment(parent_id)
+            if not parent or parent["doc_id"] != doc_id:
+                return None
+            parent_id = parent["parent_id"] or parent["id"]
+            quote = prefix = suffix = ""
+            offset_hint = 0
+        cid, t = new_id(), now()
+        with self.db.tx() as c:
+            c.execute("INSERT INTO doc_comments(id,doc_id,parent_id,author,body,quote,prefix,suffix,offset_hint,resolved,created_at,updated_at)"
+                      " VALUES(?,?,?,?,?,?,?,?,?,0,?,?)",
+                      (cid, doc_id, parent_id, "agent" if author == "agent" else "user", text[:20000], (quote or "")[:2000],
+                       (prefix or "")[-COMMENT_CONTEXT:], (suffix or "")[:COMMENT_CONTEXT], max(0, int(offset_hint or 0)), t, t))
+        return self.comment(cid)
+
+    def update_comment(self, comment_id: str, body: str | None = None, resolved: bool | None = None) -> dict[str, Any] | None:
+        """Edit a comment's text, or resolve / reopen its thread (resolved is a thread-row flag: a reply's id resolves its thread)."""
+        cur = self.comment(comment_id)
+        if not cur:
+            return None
+        t = now()
+        with self.db.tx() as c:
+            if body is not None and body.strip():
+                c.execute("UPDATE doc_comments SET body=?, updated_at=? WHERE id=?", (body.strip()[:20000], t, comment_id))
+            if resolved is not None:
+                c.execute("UPDATE doc_comments SET resolved=?, updated_at=? WHERE id=?", (1 if resolved else 0, t, cur["parent_id"] or cur["id"]))
+        return self.comment(comment_id)
+
+    def delete_comment(self, comment_id: str) -> bool:
+        """A thread goes with its replies; a reply goes alone."""
+        with self.db.tx() as c:
+            n = c.execute("DELETE FROM doc_comments WHERE id=? OR parent_id=?", (comment_id, comment_id)).rowcount
+        return n > 0

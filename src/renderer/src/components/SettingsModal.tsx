@@ -32,6 +32,7 @@ import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
 import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
+import TypographyControls from '../features/notes/TypographyMenu'
 import PlannerMailSettings from './PlannerMailSettings'
 import { VoiceSettings } from './ReadAloudButton'
 
@@ -716,6 +717,12 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Compact chats</b><small>A chat window added to a space starts as a blob: just the chat's creature, no frame. Drag the creature to move it, click it to open the chat; the face button in an open chat's head shrinks it again.</small></span>
                 <input type="checkbox" checked={!!draft.compactChats} onChange={(e) => patch({ compactChats: e.target.checked })} /><span className="switch" />
               </label>
+              <h4>Files</h4>
+              <div className="setting-row">
+                <span className="toggle-text"><b>Default font</b><small>How files read and edit unless a file has its own choice (the Font button in its toolbar). Auto keeps the app's own size and line width.</small></span>
+                <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
+                  onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
+              </div>
               <h4>Appearance</h4>
               <div className="setting-row">
                 <span className="toggle-text"><b>Theme</b><small>System follows your Mac.</small></span>

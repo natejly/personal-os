@@ -705,6 +705,46 @@ clock stops while the card is open), and a run with nobody to ask refuses it. At
 most 50 calls and 300 seconds; stdout is kept as 40% head and 60% tail up to 50 KB,
 the whole text behind a handle, and stderr to 10 KB.
 
+## Coding sessions
+
+`coding_session_start(agent, repo_path, prompt, new_worktree?, branch?, model?, permission_mode?, name?)` hands a
+coding task to Claude Code (`agent: "claude"`) or OpenCode (`agent: "opencode"`) on a git repo inside a workspace
+folder and returns at once; the agent works in the background and the app follows it. With `new_worktree` the agent
+gets its own branch and `git worktree` under `<repo>/.claude/worktrees/` (default branch `grain/<task>-<hex>`, never
+`main` or `master`), so the repo's checkout stays as it was. Each session is a row in `coding_sessions` (migration 11)
+and every change is published as a `coding_session` event, which the "Coding sessions" section of the chat's context drawer and the tool cards read.
+
+| Driver | Where it runs | How it is followed |
+| --- | --- | --- |
+| Claude Code | `claude --bg` in the repo or worktree, **outside** Grain's sandbox, with your own account and tools | the CLI's own files under `~/.claude/jobs/<id>/` (`state.json`, `timeline.jsonl`), read as untrusted text |
+| OpenCode | `opencode run` under the OS sandbox as a background job in the shell registry; writes stay in the workspace folder that holds the repo | the job's event stream; a follow-up continues the same OpenCode session |
+
+**Permissions.** Claude Code keeps its normal prompting: Grain passes no permission flag. A permission prompt shows as
+`needs_you` (attention: needs you) and you answer it in a terminal with `claude attach <id>`; the card says so.
+`permission_mode` (`acceptEdits` or `bypassPermissions`, Claude Code only) relaxes the prompting for that one session
+only; a call that sets it is always a card, whatever the tool's mode or any standing grant, and the card spells out
+what the mode allows. OpenCode has nobody at its prompt, so it runs with every permission allowed inside the sandbox
+and takes no `permission_mode`. Starting and following up are `external` tools: they ask first in a chat and are only
+proposals in an unattended run, and they ask again once the reply has read untrusted content. Subagents are gated
+the same way as `opencode_run`.
+
+| Tool | Danger | Default |
+| --- | --- | --- |
+| `coding_session_start` | external | ask |
+| `coding_session_send(id, message)` | external | ask |
+| `coding_session_stop(id)` | executes | on |
+| `coding_session_list`, `coding_session_status(id, lines?)`, `coding_session_diff(id, full?)` | safe | on |
+
+`send` only reaches a session that is `done` or `stopped`: continuing one that is still running would start a copy
+of it, so it is refused until the session finishes or is stopped. `diff` runs `git status`, `git diff --stat` and the
+commits ahead of `origin/main` in the session's worktree (the full patch with `full: true`, cut at 60 KB). Nothing here
+removes a session (`claude rm` is never run), force-pushes or pushes at all; shipping the branch is `ship_checklist`.
+OpenCode jobs end at the shell registry's 600 second cap; a follow-up carries on.
+
+Routes: `GET /coding-sessions`, `GET /coding-sessions/{id}`, `GET /coding-sessions/{id}/logs?limit=`,
+`GET /coding-sessions/{id}/diff?full=0|1`, `POST /coding-sessions/{id}/stop`, `POST /coding-sessions/{id}/send`
+(`{message}`, 409 when the session cannot take one).
+
 ## Traces
 
 Each assistant message carries a `trace`: spans of kind `context`, `llm`, `tool`

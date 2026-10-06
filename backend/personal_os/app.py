@@ -82,6 +82,7 @@ from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
 from . import ship as ship_mod
+from . import codingagents
 from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .commands import expand as expand_command
@@ -5411,6 +5412,71 @@ async def cancel_ship(id: str) -> dict[str, Any]:
 async def retry_ship(id: str) -> dict[str, Any]:
     """Re-run from the first step that is not green; a merge asks for confirmation again."""
     return await _ship_do(ship_runner.retry, id)
+
+
+# ---------------- coding sessions (codingagents.py): Claude Code / OpenCode on a repo or a fresh worktree ----------------
+async def _coding_run(argv: list[str], cwd: str, timeout: float, env: dict[str, str] | None = None) -> tuple[bool, str]:
+    return await shell_tool.run_fixed(toolbox.shell, argv, cwd, settings(), sandboxed=False, timeout=timeout, label="coding",
+                                      extra_env=env)
+
+
+coding = codingagents.CodingSessions(db, toolbox.shell, _coding_run, events.publish, settings,
+                                     roots=lambda: shell_tool.granted_roots(settings(), None), tb=toolbox)
+codingagents.register(toolbox, coding)
+
+
+class CodingSendIn(BaseModel):
+    message: str
+
+
+def _coding_row(id: str) -> dict[str, Any]:
+    row = coding.get(id)
+    if not row:
+        raise HTTPException(404, "No such coding session")
+    return coding.refresh(row)
+
+
+async def _coding_do(fn: Any, *args: Any) -> Any:
+    try:
+        return await fn(*args)
+    except (codingagents.CodingError, shell_tool.ShellError) as e:
+        raise HTTPException(409, shell_tool._scrub(str(e))) from e
+
+
+# These read handlers are `async` on purpose: a refresh publishes an event, and the topic is not thread-safe.
+@app.get("/coding-sessions")
+async def list_coding_sessions() -> dict[str, Any]:
+    return {"sessions": [codingagents.summary(coding.refresh(r), None) for r in coding.list(50)]}
+
+
+@app.get("/coding-sessions/{id}")
+async def get_coding_session(id: str) -> dict[str, Any]:
+    return codingagents.summary(_coding_row(id), None)
+
+
+@app.get("/coding-sessions/{id}/logs")
+async def coding_session_logs(id: str, limit: int = 4000) -> dict[str, Any]:
+    row = _coding_row(id)
+    return {"id": id, "output": row["log_tail"][-_clamp(limit, 50_000):], "status": row["status"]}
+
+
+@app.get("/coding-sessions/{id}/diff")
+async def coding_session_diff(id: str, full: int = 0) -> dict[str, Any]:
+    _coding_row(id)
+    return await _coding_do(coding.diff, id, bool(full))
+
+
+@app.post("/coding-sessions/{id}/stop")
+async def stop_coding_session(id: str) -> dict[str, Any]:
+    _coding_row(id)
+    return codingagents.summary(await _coding_do(coding.stop, id), None)
+
+
+@app.post("/coding-sessions/{id}/send")
+async def send_coding_session(id: str, body: CodingSendIn) -> dict[str, Any]:
+    """A follow-up from the user: only a session that has finished or been stopped can take one."""
+    _coding_row(id)
+    return codingagents.summary(await _coding_do(coding.send, id, body.message), None)
 
 
 def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -> dict[str, Any]:

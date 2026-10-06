@@ -26,7 +26,7 @@ import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, CodingSession, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
@@ -188,6 +188,10 @@ export interface State {
   /** Ship checklists by id, kept live by the `ship_checklist` event (job rows and ship_checklist tool cards read it). */
   shipChecklists: Record<string, ShipChecklist>
   upsertShip: (c: ShipChecklist) => void
+  /** Coding sessions by id, kept live by the `coding_session` event (coding_session_* cards and the Coding sessions list read it). */
+  codingSessions: Record<string, CodingSession>
+  upsertCodingSession: (c: CodingSession) => void
+  refreshCodingSessions: () => Promise<void>
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
   routineDraft: RoutineDraft | null
   scheduleAsRoutine: (conversationId: string, messageId: string) => void
@@ -1334,6 +1338,8 @@ export const useStore = create<State>((set, get) => {
             if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
           } else if (ev.event === 'ship_checklist') {
             get().upsertShip(ev.data)
+          } else if (ev.event === 'coding_session') {
+            get().upsertCodingSession(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
@@ -1872,6 +1878,14 @@ export const useStore = create<State>((set, get) => {
     jobs: [],
     shipChecklists: {},
     upsertShip: (c) => set((st) => ({ shipChecklists: { ...st.shipChecklists, [c.id]: c } })),
+    codingSessions: {},
+    upsertCodingSession: (c) => set((st) => ({ codingSessions: { ...st.codingSessions, [c.id]: c } })),
+    refreshCodingSessions: async () => {
+      try {
+        const { sessions } = await api.coding.list()
+        set({ codingSessions: Object.fromEntries(sessions.map((c) => [c.id, c])) })
+      } catch { /* keep what we have */ }
+    },
     routineDraft: null,
     scheduleAsRoutine: (conversationId, messageId) => {
       const msgs = get().sessions[conversationId]?.conversation.messages ?? []

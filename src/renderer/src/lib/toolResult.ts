@@ -18,7 +18,7 @@ export interface Parsed {
   cut: boolean
 }
 
-const STRING_KEYS = ['output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
+const STRING_KEYS = ['id', 'output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
   'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format']
 const NUMBER_KEYS = ['exit_code', 'duration_s', 'bytes', 'width', 'height', 'tab', 'total_pages', 'total_bytes']
 const BOOL_KEYS = ['timed_out', 'still_running', 'background', 'ocr', 'truncated']

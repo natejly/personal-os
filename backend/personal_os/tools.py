@@ -141,6 +141,7 @@ def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 # ---- error shaping: no tracebacks to the model, always a way forward ----
 ALTERNATIVE = {
     "opencode_run": "fs_edit and shell_run, making the change yourself step by step",
+    "coding_session_start": "opencode_run, or fs_edit and shell_run yourself",
     "gmail_send": "gmail_draft, which writes the same email without sending it",
     "gmail_outbox": "tell the user to use the Undo button on the pending send",
     "gmail_draft": "write the email text in your reply so the user can send it",

@@ -3,6 +3,7 @@ import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, W
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import ShellJobs from './ShellJobs'
+import CodingSessions from './CodingSessions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { viewHidden } from '../moduleToggles'
 import { api } from '../lib/api'
@@ -250,6 +251,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
 
       <ShellJobs />
+      <CodingSessions />
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>

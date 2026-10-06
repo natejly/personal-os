@@ -61,7 +61,7 @@ def personal_visible(pid) -> dict[str, bool]:
     used = ctx(pid)
     c = {"project_id": pid}
     return {
-        "memory": any(m["project_id"] is None for m in used["memories"]),
+        "memory": any(m["project_id"] is None for m in used["profile"] + used["memories"]),  # the pin rides in the profile
         "graph": any(n["label"] == "Home" for n in used["nodes"]),
         "chunks": any(h["name"] == "personal.txt" for h in used["chunks"]),
         "pinned": bool(used["pinned"]),

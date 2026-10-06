@@ -28,6 +28,12 @@ class _Repo:
     def for_context(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
 
+    def profile(self, *_a: Any, **_k: Any) -> list[Any]:
+        return []
+
+    def matching(self, *_a: Any, **_k: Any) -> list[Any]:
+        return []
+
     def neighborhood(self, *_a: Any, **_k: Any) -> dict[str, list[Any]]:
         return {"nodes": [], "edges": []}
 

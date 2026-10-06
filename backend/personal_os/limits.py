@@ -24,7 +24,8 @@ MESSAGE_WINDOW_FRACTION = 0.5      # one message may fill at most this share of 
 MCP_DEFER_ABOVE = 12               # offer connector tools through search once more than this many are ready (0 = send all)
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
 SKILLS_INLINE_BUDGET = 6000        # characters of approved skill text inlined in the system prompt
-CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000}  # tokens per retrieval block
+CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000,
+                  "profile": 1000}  # tokens per retrieval block; "profile" is the always-on standing preferences (memory_limits)
 
 # ---- Run budget ----
 RUN_TOKENS = 200_000               # per reply, prompt+completion summed over every model call (0 = none)

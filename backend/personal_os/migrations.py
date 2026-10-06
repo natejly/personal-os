@@ -250,6 +250,13 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     c.execute("DROP TABLE notes")
 
 
+def _memories_expires_at(c: sqlite3.Connection) -> None:
+    """Short-lived notes: a memory past `expires_at` (epoch seconds) leaves context and search but stays as history.
+    NULL = no expiry."""
+    if "expires_at" not in {r[1] for r in c.execute("PRAGMA table_info(memories)")}:
+        c.execute("ALTER TABLE memories ADD COLUMN expires_at REAL")
+
+
 def sync_memories_fts(c: sqlite3.Connection, ids: list[str] | None = None) -> None:
     """Make memories_fts hold exactly the live memories (not trashed, not superseded or forgotten), for `ids` or all.
     Idempotent. Trash and restore call it for the rows they flip, so search never ranks a row that context drops."""
@@ -327,8 +334,9 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (12, "sticky_notes_into_docs", _sticky_notes_into_docs),
     (13, "permission_mode", _permission_mode),
     (14, "chat_files", _chat_files),
-    (15, "memories_fts_live", _memories_fts_live),
-    (16, "memory_provenance_backfill", _memory_provenance_backfill),
+    (15, "memories_expires_at", _memories_expires_at),
+    (16, "memories_fts_live", _memories_fts_live),
+    (17, "memory_provenance_backfill", _memory_provenance_backfill),
 ]
 
 

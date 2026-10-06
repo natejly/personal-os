@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { dialog, openSettings, save, seedJobRuns, seedUsage, sql } from './helpers/home.mjs'
+import { dialog, openAdvanced, openSettings, save, seedJobRuns, seedUsage, sql } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -54,21 +54,21 @@ test('Today: the quick-ask box starts a chat and ⌘↵ adds a todo', async ({ g
   noErrors(grain)
 })
 
-test('Settings → Modules hides and shows each Today card and sidebar view', async ({ grain }) => {
+test('Settings → Advanced → Layout hides and shows each Today card and sidebar view', async ({ grain }) => {
   const { page, api } = grain
   const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) + (await page.locator(`.app-switcher button[aria-label="${name}"]`).count()) > 0
-  await openSettings(page, 'Modules')
+  await openAdvanced(page, 'Layout')
   // One row per view: Sidebar, Title bar or Hidden.
-  const views = dialog(page).locator('h4', { hasText: 'Views' }).locator('xpath=following-sibling::div[1]').locator('.place-row')
+  const views = dialog(page).locator('.place-row')
   const names = await views.locator('b').allInnerTexts()
-  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Health']))
+  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Health', 'Memory']))
   const setAll = async (where) => {
-    await openSettings(page, 'Modules')
+    await openAdvanced(page, 'Layout')
     for (let i = 0; i < names.length; i++) await views.nth(i).getByRole('button', { name: where }).click()
     await save(page)
   }
   await setAll('Hidden')
-  expect((await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
+  expect((await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'memory', 'todos'])
   for (const n of names) expect(await shown(n), `${n} hidden`).toBe(false)
   await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])
@@ -76,12 +76,12 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   expect(await page.locator('.app-switcher button[aria-label="Calendar"]').count()).toBe(0)
   // One at a time: hide it, then bring it back in the title bar.
   for (const n of ['Library', 'Mail']) {
-    await openSettings(page, 'Modules')
+    await openAdvanced(page, 'Layout')
     await views.filter({ hasText: n }).getByRole('button', { name: 'Hidden' }).click()
     await save(page)
     expect(await shown(n), `${n} off`).toBe(false)
     for (const o of names.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)
-    await openSettings(page, 'Modules')
+    await openAdvanced(page, 'Layout')
     await views.filter({ hasText: n }).getByRole('button', { name: 'Title bar' }).click()
     await save(page)
     expect(await shown(n), `${n} on`).toBe(true)
@@ -89,7 +89,7 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   }
 
   // Today cards that need no Google account.
-  await openSettings(page, 'Modules')
+  await openAdvanced(page, 'Layout')
   const cards = dialog(page).locator('h4', { hasText: 'Today screen' }).locator('xpath=following-sibling::div[1]').locator('label.toggle-row')
   const cardNames = await cards.locator('b').allInnerTexts()
   expect(cardNames).toEqual(expect.arrayContaining(['Agent inbox', 'Projects', 'Recently learned', 'Recent chats', 'Daily recap']))
@@ -98,13 +98,13 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   for (const t of ['Projects', 'Recently learned', 'Recent chats']) await expect(card(page, t)).toBeVisible()
   await expect(page.locator('main.home .agent-inbox')).toBeVisible()
   for (const t of ['Projects', 'Recently learned', 'Recent chats']) {
-    await openSettings(page, 'Modules')
+    await openAdvanced(page, 'Layout')
     await dialog(page).getByRole('checkbox', { name: t }).click({ force: true })
     await save(page)
     await expect(card(page, t)).toHaveCount(0)
     expect((await api('/settings')).homeWidgets[Object.keys((await api('/settings')).homeWidgets).pop()]).toBe(false)
   }
-  await openSettings(page, 'Modules')
+  await openAdvanced(page, 'Layout')
   await dialog(page).getByRole('checkbox', { name: 'Agent inbox' }).click({ force: true })
   await save(page)
   await expect(page.locator('main.home .agent-inbox')).toHaveCount(0)
@@ -125,7 +125,7 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
 test('hiding the view you are on sends you home', async ({ grain }) => {
   const { page } = grain
   await page.locator('.sidebar .nav-item', { hasText: 'Library' }).first().click()
-  await openSettings(page, 'Modules')
+  await openAdvanced(page, 'Layout')
   await dialog(page).locator('.place-row', { hasText: 'Library' }).getByRole('button', { name: 'Hidden' }).click()
   await save(page)
   await expect(page.locator('main.home')).toBeVisible()
@@ -193,9 +193,10 @@ test('Usage: five chats give real totals, never NaN', async ({ grain }) => {
     await expect(page.locator('.msg.assistant').last()).toContainText(`answer ${i}`, { timeout: 30_000 })
   }
   await expect.poll(async () => (await api('/usage')).totals.calls, { timeout: 20_000 }).toBeGreaterThanOrEqual(5)
-  await openSettings(page, 'Provider & cost')
+  await openSettings(page, 'Usage')
   const usage = dialog(page).locator('.usage')
-  await expect(usage.locator('.usage-tile')).toHaveCount(6)
+  await expect(usage.locator('.usage-periods .usage-tile')).toHaveCount(3) // today, this week, this month
+  await expect(usage.locator('.usage-tiles:not(.usage-periods) .usage-tile')).toHaveCount(6)
   const text = await usage.innerText()
   expect(text).not.toMatch(/NaN|undefined|Infinity/)
   await expect(usage.locator('.usage-tile', { hasText: 'Model calls' })).toContainText(/[5-9]|\d\d/)
@@ -222,7 +223,7 @@ test('Usage: 500 seeded rows with null costs render without NaN', async ({ grain
     const resp = await api(`/usage?days=${d}`, { raw: true })
     expect(resp.status).toBeLessThan(500)
   }
-  await openSettings(page, 'Provider & cost')
+  await openSettings(page, 'Usage')
   const usage = dialog(page).locator('.usage')
   await expect(usage.locator('.usage-tile').first()).toBeVisible()
   expect(await usage.innerText()).not.toMatch(/NaN|Infinity|undefined/)
@@ -238,7 +239,7 @@ test('Data: back up, list, restore stages a pending restore that can be cancelle
   let n = 0
   page.removeAllListeners('dialog')
   page.on('dialog', (d) => { n++; void (n % 2 === 1 ? d.accept() : d.dismiss()) })
-  await openSettings(page, 'Data')
+  await openAdvanced(page, 'Data and support')
   const btn = dialog(page).getByRole('button', { name: 'Back up now' })
   await btn.dblclick() // double click: the second press lands on a disabled button
   await expect.poll(async () => (await api('/data')).backups.length).toBeGreaterThanOrEqual(1)
@@ -275,7 +276,7 @@ test('Data: a staged restore is applied at the next start', async ({ grain }) =>
   await api(`/data/backups/${name}/restore`, { method: 'POST' })
   // Restart the backend by relaunching the app with a fresh backend process is not possible through the harness
   // (the backend outlives Electron), so assert the staged state and that it is visible in the UI.
-  await openSettings(page, 'Data')
+  await openAdvanced(page, 'Data and support')
   await expect(dialog(page).getByText('A restore is waiting')).toBeVisible()
   await dialog(page).getByRole('button', { name: 'Cancel restore' }).click()
   expect(keep.id && gone.id).toBeTruthy()
@@ -289,7 +290,7 @@ test('Trash: deleted chat and file appear, restore one, purge one, empty the res
   const c2 = await api('/conversations', { method: 'POST', body: { title: 'Purged chat' } })
   for (const path of [`/conversations/${c.id}`, `/docs/${d.id}`, `/conversations/${c2.id}`]) await api(path, { method: 'DELETE' })
   page.on('dialog', (x) => x.accept().catch(() => {}))
-  await openSettings(page, 'Data')
+  await openAdvanced(page, 'Data and support')
   const trash = dialog(page).locator('section', { has: page.getByRole('heading', { name: 'Trash' }) }).last()
   await expect(trash).toContainText('Doomed chat')
   await expect(trash).toContainText('Doomed file')
@@ -312,7 +313,7 @@ test('Trash: 150 deleted chats list and empty cleanly', async ({ grain }) => {
     await api(`/conversations/${c.id}`, { method: 'DELETE' })
   }
   page.on('dialog', (x) => x.accept().catch(() => {}))
-  await openSettings(page, 'Data')
+  await openAdvanced(page, 'Data and support')
   const trash = dialog(page).locator('section', { has: page.getByRole('heading', { name: 'Trash' }) }).last()
   await expect(trash.locator('.trash-row')).toHaveCount(150)
   await trash.getByRole('button', { name: 'Empty trash' }).click()
@@ -322,7 +323,7 @@ test('Trash: 150 deleted chats list and empty cleanly', async ({ grain }) => {
 
 test('Data tab survives the backend going away', async ({ grain }) => {
   const { page } = grain
-  await openSettings(page, 'Data')
+  await openAdvanced(page, 'Data and support')
   await expect(dialog(page).getByText('Last backup')).toBeVisible()
   grain.backend.child.kill('SIGKILL')
   await dialog(page).getByRole('button', { name: 'Back up now' }).click()

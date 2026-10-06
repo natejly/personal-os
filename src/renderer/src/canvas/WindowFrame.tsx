@@ -96,7 +96,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
     return subscribeDragOverlay(apply)
   }, [win.id])
 
-  /** §6 'minimal': a note never offered zoom or minimize, and still does not. */
+  /** §6 'minimal': a face never offered zoom or minimize, and still does not. */
   const minimal = def?.chrome === 'minimal'
   const zoomed = win.state === 'maximized'
   const items: MenuEntry[] = locked

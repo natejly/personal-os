@@ -1,9 +1,8 @@
 """Meetings: a recorded conversation plus the notes taken during it.
 
-The fourth text-bearing type, and distinct from the three that already exist:
+The third text-bearing type, and distinct from the two that already exist:
   * `docs` — markdown the user writes, with a revision history.
   * `documents` — files the user uploaded, chunked for retrieval. Read-only knowledge.
-  * `notes` — canvas mode's sticky notes: a body, a colour, no history.
 
 A meeting is the only one whose body is partly machine-made, so it keeps the two halves in
 separate columns: `notes` is what the user typed and has exactly one writer, and `enhanced` is
@@ -46,7 +45,7 @@ log = logging.getLogger("personal_os.meetings")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meetings (
   id TEXT PRIMARY KEY,
-  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like docs/notes/todos
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like docs/todos
   title TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'scheduled',
       -- scheduled | recording | stopped | transcribing | enhancing | ready | failed | notes_only

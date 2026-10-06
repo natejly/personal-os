@@ -11,6 +11,7 @@ already had content.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Callable
 
@@ -184,6 +185,54 @@ def _coding_sessions(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_conv ON coding_sessions(conversation_id, created_at)")
 
 
+def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
+    """Sticky notes become docs. Each note row turns into a doc with the SAME id (so a space window keeps its
+    ref_id), titled from its first line (docs.title_from_body), body, project and timestamps kept, filed at the
+    root. Windows of kind 'note' on spaces and in stored presets become kind 'doc'; then `notes` is dropped
+    (a premigrate backup exists). The doc's search row is written here; chunks and tags come from Docs.__init__'s
+    backfills on the next start. `canvas_windows` / `canvas_presets` are owned by Canvases / CanvasPresets, so
+    they are touched only if they already exist."""
+    from .docs import title_from_body  # lazy: docs imports db, which imports this module
+
+    def has(name: str) -> bool:
+        return c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+    if not has("notes"):
+        return
+    if not has("docs"):  # normally created by Docs.__init__; its column loop completes this base set later
+        c.execute("""CREATE TABLE docs (
+          id TEXT PRIMARY KEY,
+          project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+          title TEXT NOT NULL DEFAULT 'Untitled',
+          content TEXT NOT NULL DEFAULT '',
+          folder TEXT NOT NULL DEFAULT '',
+          starred INTEGER NOT NULL DEFAULT 0,
+          created_at REAL NOT NULL,
+          updated_at REAL NOT NULL)""")
+    c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(title, content, doc_id UNINDEXED, tokenize='porter unicode61')")
+    for n in c.execute("SELECT id, project_id, body, created_at, updated_at FROM notes").fetchall():
+        if c.execute("SELECT 1 FROM docs WHERE id=?", (n[0],)).fetchone():
+            continue
+        title = title_from_body(n[2])
+        c.execute("INSERT INTO docs(id,project_id,title,content,folder,starred,created_at,updated_at) VALUES(?,?,?,?,'',0,?,?)",
+                  (n[0], n[1], title, n[2], n[3], n[4]))
+        c.execute("INSERT INTO docs_fts(title, content, doc_id) VALUES(?,?,?)", (title, n[2], n[0]))
+    if has("canvas_windows"):
+        c.execute("UPDATE canvas_windows SET kind='doc' WHERE kind='note'")
+    if has("canvas_presets"):
+        for pid, raw in c.execute("SELECT id, windows FROM canvas_presets").fetchall():
+            try:
+                ws = json.loads(raw or "[]")
+            except ValueError:
+                continue
+            if isinstance(ws, list) and any(isinstance(w, dict) and w.get("kind") == "note" for w in ws):
+                for w in ws:
+                    if isinstance(w, dict) and w.get("kind") == "note":
+                        w["kind"] = "doc"
+                c.execute("UPDATE canvas_presets SET windows=? WHERE id=?", (json.dumps(ws), pid))
+    c.execute("DROP TABLE notes")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -197,6 +246,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (9, "ship_checklists", _ship_checklists),
     (10, "doc_comments_typography", _doc_comments_typography),
     (11, "coding_sessions", _coding_sessions),
+    (12, "sticky_notes_into_docs", _sticky_notes_into_docs),
 ]
 
 

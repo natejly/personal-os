@@ -17,7 +17,7 @@ from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 passed = 0
-# Shared across tests (they run in order): the source canvas, its preset, and the note it references.
+# Shared across tests (they run in order): the source canvas, its preset, and the doc it references.
 fx: dict[str, Any] = {}
 
 
@@ -36,10 +36,10 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
 def test_create_from_canvas() -> None:
     cid = j("POST", "/canvases", {"name": "Preset source"})["id"]
     j("PUT", f"/canvases/{cid}", {"snap_mode": "grid", "grid_size": 24})
-    note = j("POST", "/notes", {"body": "preset note"})
+    note = j("POST", "/docs", {"title": "preset doc", "content": "preset body"})
     todos = j("POST", f"/canvases/{cid}/windows", {"kind": "todos", "x": 10, "y": 20, "config": {"scope": "all"}})
     j("PUT", f"/windows/{todos['id']}", {"opacity": 0.6})
-    nw = j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": note["id"], "x": 0, "y": 0, "w": 1200, "h": 900})
+    nw = j("POST", f"/canvases/{cid}/windows", {"kind": "doc", "ref_id": note["id"], "x": 0, "y": 0, "w": 1200, "h": 900})
     j("PUT", f"/windows/{nw['id']}", {"state": "maximized", "restore_bounds": {"x": 40, "y": 60, "w": 300, "h": 280}})
     cal = j("POST", f"/canvases/{cid}/windows", {"kind": "calendar", "x": 700, "y": 30})
     j("PUT", f"/windows/{cal['id']}", {"state": "minimized", "popout_bounds": {"x": 5, "y": 5, "width": 300, "height": 300}})
@@ -49,7 +49,7 @@ def test_create_from_canvas() -> None:
     check(p["name"] == "Morning", "preset name is stripped")
     check(len(p["windows"]) == 3, "preset captures every window")
     check([w["z"] for w in p["windows"]] == [0, 1, 2], "z re-based 0..n-1 in z order")
-    check([w["kind"] for w in p["windows"]] == ["todos", "note", "calendar"], "windows kept in z order")
+    check([w["kind"] for w in p["windows"]] == ["todos", "doc", "calendar"], "windows kept in z order")
     snap = p["windows"][1]
     check((snap["x"], snap["y"], snap["w"], snap["h"]) == (40, 60, 300, 280), "a maximized window keeps its restore bounds")
     check(snap["ref_id"] == note["id"], "ref_id is kept")
@@ -125,11 +125,9 @@ def test_instantiate() -> None:
 
 
 def test_dangling_ref() -> None:
-    j("DELETE", f"/notes/{fx['note']}")
-    live = j("GET", f"/canvases/{fx['cid']}")
-    check(all(w["kind"] != "note" for w in live["windows"]), "deleting the note sweeps its live window")
+    j("DELETE", f"/docs/{fx['note']}")  # to the trash: a trashed doc is as good as gone for a preset
     made = j("POST", f"/canvas-presets/{fx['pid']}/instantiate", {})
-    check(made["skipped"] == 1, f"the dangling note window is skipped, got {made['skipped']}")
+    check(made["skipped"] == 1, f"the dangling doc window is skipped, got {made['skipped']}")
     check([w["kind"] for w in made["windows"]] == ["todos", "calendar"], "the other windows survive")
     check(len(j("GET", f"/canvas-presets/{fx['pid']}")["windows"]) == 3, "the preset itself still lists 3 windows")
     j("DELETE", f"/canvases/{made['id']}")
@@ -227,21 +225,26 @@ def test_export_import_round_trip() -> None:
     from personal_os.app import db
 
     cid = j("POST", "/canvases", {"name": "Portable"})["id"]
-    note = j("POST", "/notes", {"body": "carry me", "color": "blue"})
-    j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": note["id"]})
+    note = j("POST", "/docs", {"title": "carry me", "content": "carry me"})
+    j("POST", f"/canvases/{cid}/windows", {"kind": "doc", "ref_id": note["id"]})
     j("POST", f"/canvases/{cid}/windows", {"kind": "todos"})
     p = j("POST", "/canvas-presets", {"canvas_id": cid})
     exp = j("GET", f"/canvas-presets/{p['id']}/export")
-    check(exp["embedded"][note["id"]]["body"] == "carry me", "export embeds the note body")
-    # Drop the referents, then import: they must be recreated, not skipped.
-    j("DELETE", f"/notes/{note['id']}")
+    check(exp["embedded"] == {}, "export embeds nothing: a doc stays a ref")
     got = j("POST", "/canvas-presets/import", {"file": json.loads(json.dumps(exp))})
     made = got["canvas"]
-    check(made["skipped"] == 0, "nothing skipped: referents were recreated")
-    check([w["kind"] for w in made["windows"]] == ["note", "todos"], "same kinds and count")
-    nid = made["windows"][0]["ref_id"]
-    check(nid != note["id"] and j("GET", f"/notes/{nid}")["body"] == "carry me", "note recreated under a new id")
+    check([w["kind"] for w in made["windows"]] == ["doc", "todos"], "same kinds and count")
+    check(made["windows"][0]["ref_id"] == note["id"], "the doc ref is kept")
     check(j("GET", f"/canvas-presets/{got['preset']['id']}")["name"] == p["name"], "preset stored")
+    # A file exported before sticky notes became docs: the embedded note becomes a doc, its window a doc window.
+    old = {**exp, "windows": [{**exp["windows"][0], "kind": "note", "ref_id": "n-old"}, exp["windows"][1]],
+           "embedded": {"n-old": {"kind": "note", "body": "# Old idea\nmore", "color": "blue"}}}
+    got = j("POST", "/canvas-presets/import", {"file": old})
+    made = got["canvas"]
+    check(made["skipped"] == 0 and [w["kind"] for w in made["windows"]] == ["doc", "todos"], "an old note window turns into a doc window")
+    nid = made["windows"][0]["ref_id"]
+    d = j("GET", f"/docs/{nid}")
+    check(nid != "n-old" and d["title"] == "Old idea" and d["content"] == "# Old idea\nmore", "the embedded note becomes a titled doc")
     j("POST", "/canvas-presets/import", {"file": {"windows": []}}, expect=400)
     j("GET", "/canvas-presets/nope/export", expect=404)
 

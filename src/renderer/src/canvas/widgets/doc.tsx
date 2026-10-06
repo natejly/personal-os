@@ -76,7 +76,8 @@ function DocWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.E
   useEffect(() => {
     if (pending.current === null) return
     if (!live) return save(pending.current)
-    const t = setTimeout(() => save(pending.current ?? ''), SAVE_MS)
+    // An immediate save (toggle, Cmd+S) clears `pending`; the armed timer must then do nothing, not write ''.
+    const t = setTimeout(() => { if (pending.current !== null) save(pending.current) }, SAVE_MS)
     return () => clearTimeout(t)
   }, [body, live, save])
   // Closing the window mid-edit still writes.

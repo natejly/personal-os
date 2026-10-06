@@ -60,6 +60,8 @@ export interface ContextUsed {
   meetings: string | null
   /** Pinned documents carried whole this turn. Absent on older messages. */
   pinned?: { document_id: string; name: string }[]
+  /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
+  profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
   /** Items dropped per section because it hit its token budget (contextBudget). */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
@@ -886,6 +888,8 @@ export interface Memory {
   valid_from?: number | null
   invalid_at?: number | null
   superseded_by?: string | null
+  /** Unix seconds after which the row is expired: out of the live list and the prompt, kept in history. Null or absent: never expires. */
+  expires_at?: number | null
   source_conversation_id?: string | null
   source_message_id?: string | null
 }
@@ -1732,6 +1736,8 @@ export interface Learned {
   skill_revisions?: { id: string; name: string; why: string; revises: string }[]
   conversation_id?: string
   message_id?: string
+  /** Ids of memories the model suggested pinning to the standing preferences. */
+  pin_suggested?: string[]
 }
 
 /**

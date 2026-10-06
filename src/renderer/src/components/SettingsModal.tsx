@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, type LucideIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
@@ -42,6 +42,7 @@ type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'model', label: 'Model', icon: Cpu },
+  { id: 'usage', label: 'Usage', icon: Gauge },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'texting', label: 'Texting', icon: MessageSquare },
@@ -51,7 +52,7 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 ]
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -390,6 +391,12 @@ export default function SettingsModal(): JSX.Element {
               </div>
             </section>}
 
+            {tab === 'usage' && <section className="usage-tab">
+              <h3>Usage</h3>
+              <p className="muted">Every model call is logged on this Mac with its tokens and, when the price is known, its cost. Information only: nothing here limits Grain.</p>
+              <UsageView />
+            </section>}
+
             {tab === 'permissions' && <section className="permissions-tab">
               <h3>Permissions</h3>
               <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
@@ -581,11 +588,6 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
                 <AdvancedRetrieval draft={draft} patch={patch} models={models} />
                 <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
-              </AdvGroup>
-
-              <AdvGroup id="usage" title="Usage" {...gp}>
-                <p className="muted">Every model call is logged locally with its token counts and cost.</p>
-                <UsageView />
               </AdvGroup>
 
               <AdvGroup id="desks" title="Desks and background" {...gp}>

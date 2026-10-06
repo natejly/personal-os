@@ -69,14 +69,11 @@ test('one page-agent action toggles the page agent once', () => {
 test('a view action routes, and view:graph opens memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
-  // Memory lives in Settings → Advanced → Memory and search now: the page underneath stays put.
+  // Memory is its own page now.
   fire('view:graph')
-  assert.equal(useStore.getState().view, 'todos')
-  assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'advanced')
-  assert.equal(useStore.getState().settingsGroup, 'memory')
+  assert.equal(useStore.getState().view, 'memory')
+  assert.equal(useStore.getState().settingsOpen, false)
   assert.equal(useStore.getState().memoryMode, 'graph')
-  useStore.getState().setSettingsOpen(false)
 })
 
 /** A stand-in DOM for the duration of `fn`: node has neither `document` nor `KeyboardEvent`. */

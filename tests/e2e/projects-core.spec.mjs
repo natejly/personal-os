@@ -121,7 +121,7 @@ test('delete project: chats and memories go to the trash, docs fall back to pers
   clean(grain)
 })
 
-test('sidebar group lists the newest 4 chats, notes sit under its Files switch, View all opens the project', async ({ grain }) => {
+test('sidebar group lists only the newest 4 chats (no switch), View all opens Chats, notes sit under Artifacts', async ({ grain }) => {
   const { page, api } = grain
   const p = await api('/projects', { method: 'POST', body: { name: 'Mixed' } })
   for (let i = 1; i <= 5; i++) {
@@ -135,13 +135,16 @@ test('sidebar group lists the newest 4 chats, notes sit under its Files switch, 
   const titles = await group.locator('.project-rows .convo-title').allInnerTexts()
   expect(titles[0]).toBe('chat 5')
   expect(titles.some((t) => t.startsWith('note'))).toBe(false)
-  await group.getByRole('button', { name: 'Files', exact: true }).click()
-  await expect(group.locator('.project-rows .cf-name', { hasText: 'note 2' })).toBeVisible()
+  // the project group has no Chats | Documents switch and no files view of its own
+  await expect(group.locator('.cf-seg')).toHaveCount(0)
+  await expect(group.locator('.cf-row')).toHaveCount(0)
   await group.getByRole('button', { name: 'View all' }).click()
   await expect(page.getByRole('heading', { name: 'Mixed' })).toBeVisible()
-  await expect(page.locator('.tabs button.active')).toContainText('Files')
-  await page.locator('.tabs').getByRole('button', { name: /^Chats/ }).click()
+  await expect(page.locator('.tabs button.active')).toContainText('Chats')
   await expect(page.locator('.chat-row')).toHaveCount(5)
+  await page.locator('.tabs').getByRole('button', { name: /^Artifacts/ }).click()
+  await expect(page.locator('.tabs button.active')).toContainText('Artifacts')
+  await expect(page.locator('.pf .cf-name', { hasText: 'note 2' })).toBeVisible()
   // collapse via the folder twist and the choice survives a relaunch
   await group.getByRole('button', { name: /Collapse Mixed|Expand Mixed/ }).first().click().catch(() => {})
   clean(grain)
@@ -153,14 +156,14 @@ test('project view: tabs, counts, new chat button, empty state, memory add insid
   await page.reload()
   await sidebar(page).getByText('Tabs', { exact: true }).click()
   await expect(page.getByText('No chats yet')).toBeVisible()
-  await page.getByRole('button', { name: /Memory/ }).click()
+  await page.locator('.project-page .tabs').getByRole('button', { name: /Memory/ }).click()
   await page.getByPlaceholder(/Remember something in this project/).fill('tabs memory one')
   await page.getByPlaceholder(/Remember something in this project/).press('Enter')
   await expect(page.getByText('tabs memory one')).toBeVisible()
   const mems = await api('/memories?project_id=' + p.id + '&include_global=false')
   expect(mems.map((m) => m.content)).toContain('tabs memory one')
-  await page.locator('.tabs').getByRole('button', { name: /^Files/ }).click()
-  await expect(page.getByText('No files yet')).toBeVisible()
+  await page.locator('.tabs').getByRole('button', { name: /^Artifacts/ }).click()
+  await expect(page.getByText('No artifacts yet')).toBeVisible()
   await page.locator('.tabs').getByRole('button', { name: /^Chats/ }).click()
   await page.locator('.page-header').getByRole('button', { name: /New chat/ }).click()
   await expect(page.getByText('New chat in Tabs')).toBeVisible()

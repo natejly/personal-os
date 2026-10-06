@@ -10,11 +10,11 @@ import { DocTextModal } from './DocumentsView'
 import './chatFiles.css'
 
 /**
- * A project's Files tab: its chats' files, notes and uploads in one list, by type or by chat, with search
+ * A project's Artifacts tab: its chats' files, notes and uploads in one list, by type or by chat, with search
  * and upload. Reloads from the top when a chat, note or upload changes. An upload no chat used opens its
  * text here; everything else opens the way it does anywhere else (chat + side panel, editor, Finder).
  */
-export default function ProjectFiles({ projectId }: { projectId: string }): JSX.Element {
+export default function ProjectArtifacts({ projectId }: { projectId: string }): JSX.Element {
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
   const documents = useStore((s) => s.documents)
@@ -71,7 +71,7 @@ export default function ProjectFiles({ projectId }: { projectId: string }): JSX.
       {files?.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
-          <h2>No files yet</h2>
+          <h2>No artifacts yet</h2>
           <p>Uploads, notes and what this project&apos;s chats make or read show up here. Drop files anywhere on this page.</p>
           {uploadBtn}
         </div>
@@ -79,14 +79,14 @@ export default function ProjectFiles({ projectId }: { projectId: string }): JSX.
       {!!files?.length && (
         <div className="pf-bar">
           {uploadBtn}
-          <input type="search" className="pf-search" placeholder="Search files" aria-label="Search files" value={q} onChange={(e) => setQ(e.target.value)} />
-          <span className="cf-seg" role="group" aria-label="Group files">
+          <input type="search" className="pf-search" placeholder="Search artifacts" aria-label="Search artifacts" value={q} onChange={(e) => setQ(e.target.value)} />
+          <span className="cf-seg" role="group" aria-label="Group artifacts">
             <button className={byChat ? '' : 'on'} aria-pressed={!byChat} onClick={() => setByChat(false)}>By type</button>
             <button className={byChat ? 'on' : ''} aria-pressed={byChat} onClick={() => setByChat(true)}>By chat</button>
           </span>
         </div>
       )}
-      {!!files?.length && !shown.length && <p className="empty-hint">No files match.</p>}
+      {!!files?.length && !shown.length && <p className="empty-hint">No artifacts match.</p>}
       {byChat
         ? groupByChat(shown).map((g) => <section key={g.conversationId}><h4>{g.title}</h4>{g.files.map((f) => row(f, false))}</section>)
         : groupByKind(shown).map((g) => <section key={g.kind}><h4>{g.label}</h4>{g.files.map((f) => row(f, true))}</section>)}

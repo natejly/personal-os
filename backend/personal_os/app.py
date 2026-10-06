@@ -40,7 +40,7 @@ from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_sk
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
 from .graph_learn import canonical_type, normalize_predicate
-from .graph_recall import GraphRecall
+from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
@@ -3590,7 +3590,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
-        yield "learned", tool_ctx["learned"]
+        yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
     # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
     gone = convos.get(conv_id, with_messages=False) is None
@@ -5956,7 +5956,7 @@ async def _graph_hits(project_id: str | None, query: str, cfg: dict[str, Any], c
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
         vec = graph_recall.similar(project_id, qvec, memory_index.embedder.model(cfg)) if qvec is not None else {}
-        return graph_recall.subgraph(graph, project_id, query, vec)
+        return graph_subgraph(graph, project_id, query, vec)  # the module function; `graph_recall` here is the GraphRecall instance
     except Exception:  # noqa: BLE001
         log.exception("graph retrieval failed; falling back to mentions")
         return None
@@ -6077,6 +6077,23 @@ def restore_memory(id: str) -> dict[str, Any]:
 @app.get("/memories/{id}/history")
 def memory_history(id: str) -> list[dict[str, Any]]:
     return memories.history(id)
+
+
+@app.get("/memories/{id}/source")
+def memory_source(id: str) -> dict[str, Any]:
+    m = memories.get(id)
+    if not m or not m.get("source_message_id"):
+        raise HTTPException(404)
+    with db.tx() as c:
+        r = c.execute("SELECT m.id, m.conversation_id, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id "
+                      "WHERE m.id=? AND c.deleted_at IS NULL", (m["source_message_id"],)).fetchone()
+    if not r:
+        raise HTTPException(404)
+    quote = " ".join(str(r["content"]).split())
+    cap = memory_limits.SOURCE_QUOTE_CHARS
+    if len(quote) > cap:
+        quote = quote[:cap].rstrip() + "…"
+    return {"conversation_id": r["conversation_id"], "message_id": r["id"], "title": r["title"], "quote": quote}
 
 
 @app.post("/memories")

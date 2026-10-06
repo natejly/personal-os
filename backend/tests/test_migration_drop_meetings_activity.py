@@ -1,6 +1,6 @@
-"""Migration 15: the meetings and activity-monitor tables are dropped; their settings rows are left readable.
+"""The drop_meetings_activity migration: the meetings and activity-monitor tables are dropped; their settings rows are left readable.
 
-(a) a bare in-memory database stamped 12 with the old tables loses exactly those tables;
+(a) a bare in-memory database stamped just before it, with the old tables, loses exactly those tables;
 (b) a real data directory written by the old build (tables, rows, legacy `meetings`/`activity`/`digest` settings)
     migrates on open, and the app imported on top of it starts and serves /settings and /voice/config;
 (c) a fresh data directory ends at the latest version with none of the tables.
@@ -89,18 +89,21 @@ def _seed_old_rows(c: sqlite3.Connection) -> None:
     c.execute("INSERT INTO activity_profile(id, content) VALUES (1, 'works in bursts')")
 
 
-def test_migration_15_drops_exactly_those_tables() -> None:
+DROP_V = next(v for v, name, _ in migrations.MIGRATIONS if name == "drop_meetings_activity")
+
+
+def test_migration_drops_exactly_those_tables() -> None:
     c = sqlite3.connect(":memory:", isolation_level=None)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys = ON")
-    c.execute("PRAGMA user_version = 12")
+    c.execute(f"PRAGMA user_version = {DROP_V - 1}")
     c.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)")
     c.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     c.execute("INSERT INTO settings VALUES ('meetings', '{\"sttBackend\": \"local\"}')")
     c.executescript(OLD_SCHEMA)
     _seed_old_rows(c)
     assert set(DROPPED) <= _tables(c)
-    assert migrations.run(c) == [15]
+    assert migrations.run(c) == list(range(DROP_V, migrations.latest() + 1))
     left = _tables(c)
     assert not set(DROPPED) & left, set(DROPPED) & left
     assert not {n for n in left if n.startswith(("meetings_fts", "meeting_", "activity_"))}, left  # shadow tables too
@@ -113,7 +116,7 @@ def test_a_fresh_database_has_none_of_the_tables() -> None:
     with tempfile.TemporaryDirectory() as td:
         db = Database(td)
         with db.connect() as c:
-            assert migrations.current(c) == migrations.latest() >= 15
+            assert migrations.current(c) == migrations.latest() >= DROP_V
             assert not set(DROPPED) & _tables(c)
 
 

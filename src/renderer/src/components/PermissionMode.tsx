@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from 'react'
 import { ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useStore } from '../store'
-import { MODES, modeOf, needsConfirm, pillLabel, type PermissionMode } from '../lib/permissionMode'
+import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
 /** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice saves at once. */
 export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => Promise<void> }): JSX.Element {
@@ -60,29 +60,16 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-/** Composer pill: the current mode, red under Allow everything. Opens Settings on Permissions. */
+/** Composer pill: the current mode, red under Allow everything. That red pill is the only Allow everything cue
+    (no app-wide banner). Opens Settings on Permissions. */
 export function PermissionModePill(): JSX.Element {
   const mode = useStore((s) => modeOf(s.settings))
   const openSettings = useStore((s) => s.openSettings)
+  const title = pillTitle(mode)
   return (
-    <button type="button" className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title="Permission mode. Click to change it in Settings."
-      onClick={() => openSettings('permissions')}>
-      {mode === 'allow_all' ? <ShieldAlert size={13} /> : <ShieldCheck size={13} />} {pillLabel(mode)}
+    <button type="button" className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title}
+      data-mode={mode} onClick={() => openSettings('permissions')}>
+      {mode === 'allow_all' ? <ShieldAlert size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />} {pillLabel(mode)}
     </button>
-  )
-}
-
-/** Shown over every view while Allow everything is on. */
-export function AllowAllBanner(): JSX.Element | null {
-  const mode = useStore((s) => modeOf(s.settings))
-  const save = useStore((s) => s.saveSettings)
-  const toast = useStore((s) => s.toast)
-  if (mode !== 'allow_all') return null
-  return (
-    <div className="allow-all-banner" role="alert">
-      <ShieldAlert size={14} />
-      <span>Allow everything is on — Grain acts without asking.</span>
-      <button type="button" onClick={() => void save({ permissionMode: 'auto' }).catch((e: Error) => toast(e.message, 'error'))}>Switch back to Auto</button>
-    </div>
   )
 }

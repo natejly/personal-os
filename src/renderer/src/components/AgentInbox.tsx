@@ -785,7 +785,7 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const draft = useStore((s) => s.routineDraft)
   const [showJobs, setShowJobs] = useState(!!draft)
   const [adding, setAdding] = useState(!!draft)
@@ -820,7 +820,7 @@ export default function AgentInbox(): JSX.Element | null {
       if (first) void openDoc(first.id)
       else openFiles('notes')
     }
-    else if (key === 'memory') { setMemoryMode('list'); openSettings('memory') }
+    else if (key === 'memory') useStore.getState().openMemory('list')
     else { setLibraryTab(key === 'workflows' ? 'automations' : key); setView('library') }
   }
   const away = box.while_you_were_away

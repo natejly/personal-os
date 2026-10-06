@@ -86,6 +86,7 @@ from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
+from .attention import for_job, for_run
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
@@ -5116,7 +5117,19 @@ def _check_job_budget(budget: dict[str, Any] | None) -> None:
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
-    return jobs.list()
+    return _with_attention(jobs.list())
+
+
+def _with_attention(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each job's attention state (attention.py), from its last run and its pending proposals."""
+    waiting: dict[str, int] = {}
+    for p in proposals.list("pending", limit=500):
+        if p.get("job_id"):
+            waiting[p["job_id"]] = waiting.get(p["job_id"], 0) + 1
+    for jb in rows:
+        last = run_store.get(jb["last_run_id"]) if jb.get("last_run_id") else None
+        jb["attention"] = for_job(jb, (last or {}).get("status"), waiting.get(jb["id"], 0))
+    return rows
 
 
 @app.get("/jobs/preview")
@@ -5499,11 +5512,12 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0), "seen": r["run_id"] in seen,
+            "attention": for_run(r),
             "links": fire.get("links") or [],  # the daily digest's fix-it links; job runs have none
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
-                    "consecutive_failures": jb["consecutive_failures"]}
+                    "consecutive_failures": jb["consecutive_failures"], "attention": "blocked"}
                    for jb in jobs.list() if not jb["enabled"] and jb.get("paused_reason")]
     # One row per desk waiting on the user, unless one of its approvals is already listed above (same thing, twice).
     asked = {a.get("desk_id") for a in pending_approvals if a.get("desk_id")}

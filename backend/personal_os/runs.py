@@ -21,6 +21,7 @@ import time
 from collections import deque
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterable
 
+from .attention import for_run
 from .db import Database, new_id
 
 log = logging.getLogger("personal_os")
@@ -582,7 +583,8 @@ class Run:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
                 "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
                 "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
-                "turn": self.turn, "ended_at": self.ended_at, "error": self.error}
+                "turn": self.turn, "ended_at": self.ended_at, "error": self.error,
+                "attention": for_run({"status": self.status})}
 
     def set_status(self, status: str) -> None:
         if status == self.status:

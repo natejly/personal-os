@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
+from .memory_limits import LEXICAL_HITS
 
 
 ALL = "__all__"  # sentinel: every scope (used by the library views)
@@ -687,9 +688,12 @@ class Memories:
         m = self.get(id)
         if not m:
             return None
+        t = now()
+        # An expired row is history too: restoring it makes it live again, with no end date. A future expiry stays.
+        if m.get("expires_at") is not None and m["expires_at"] <= t:
+            m = self.update(id, {"expires_at": None}) or m
         if m["invalid_at"] is None:
             return m
-        t = now()
         with self.db.tx() as c:
             nxt = m["superseded_by"]
             if nxt:
@@ -751,7 +755,7 @@ class Memories:
             rows = c.execute(f"SELECT * FROM memories WHERE {where} AND pinned=1 AND {live_mem()} ORDER BY updated_at DESC", args).fetchall()
         return [d for d in (row_to_dict(r) for r in rows) if d]
 
-    def matching(self, project_id: str | None, query: str, limit: int = 15, include_global: bool = True) -> list[dict[str, Any]]:
+    def matching(self, project_id: str | None, query: str, limit: int = LEXICAL_HITS, include_global: bool = True) -> list[dict[str, Any]]:
         """Live memories that lexically match the query: FTS hits by bm25, then CJK substring hits (the tokenizer
         indexes an unspaced run as one token), deduped. Nothing else: no pins, no recency."""
         where, args = _scope_clause(project_id, include_global)
@@ -789,7 +793,7 @@ class Memories:
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
             base = c.execute(f"SELECT * FROM memories WHERE {where} AND {live_mem()} ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
-        out: dict[str, dict[str, Any]] = {d["id"]: d for d in self.matching(project_id, query, 15)}
+        out: dict[str, dict[str, Any]] = {d["id"]: d for d in self.matching(project_id, query)}
         for r in base:
             d = row_to_dict(r)
             if d:

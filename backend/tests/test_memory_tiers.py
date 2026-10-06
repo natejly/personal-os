@@ -289,16 +289,16 @@ def test_export_import_carry_expiry() -> None:
 
 
 # ---------------- migration ----------------
-def test_migration_14_adds_expires_at_to_an_older_database() -> None:
-    assert migrations.latest() >= 14 and migrations.MIGRATIONS[13][:2] == (14, "memories_expires_at")
+def test_migration_adds_expires_at_to_an_older_database() -> None:
+    step = next(n for n, name, _ in migrations.MIGRATIONS if name == "memories_expires_at")
     with tempfile.TemporaryDirectory() as tmp:
         db = Database(tmp)
         cols = lambda: {r[1] for r in db.connect().execute("PRAGMA table_info(memories)")}  # noqa: E731
         assert "expires_at" in cols()
         keep = Memories(db).create(None, "Survives the migration", kind="fact")
-        with db.tx() as c:  # a database from before step 14
+        with db.tx() as c:  # a database from before the step
             c.execute("ALTER TABLE memories DROP COLUMN expires_at")
-            c.execute("PRAGMA user_version = 13")
+            c.execute(f"PRAGMA user_version = {step - 1}")
         assert "expires_at" not in cols()
         db = Database(tmp)
         assert "expires_at" in cols()
@@ -340,3 +340,41 @@ def test_near_duplicate_never_raises_when_the_embedder_fails(env) -> None:
     idx = MemoryIndex(db, memories, graph, Embedder(boom))
     memories.create(None, "Some stored fact", kind="fact")
     assert asyncio.run(idx.near_duplicate(CFG, None, "Some stored fact")) is None
+
+
+def test_restoring_an_expired_row_makes_it_live_with_no_end_date(env) -> None:
+    _, memories, _, _ = env
+    m = memories.create(None, "User is in Lisbon this week", expires_at=time.time() - 60)
+    assert not memories.list(None)
+    back = memories.restore(m["id"])
+    assert back["expires_at"] is None and [r["id"] for r in memories.list(None)] == [m["id"]]
+
+
+def test_restore_revives_a_forgotten_row_that_also_expired_and_keeps_a_future_expiry(env) -> None:
+    _, memories, _, _ = env
+    gone = memories.create(None, "User is in Oslo this week", expires_at=PAST)
+    memories.invalidate(gone["id"])
+    back = memories.restore(gone["id"])
+    assert back["invalid_at"] is None and back["expires_at"] is None and gone["id"] in {r["id"] for r in memories.list(None)}
+    live = memories.create(None, "User is on call until Friday", expires_at=FUTURE)
+    assert memories.restore(live["id"])["expires_at"] == FUTURE
+
+
+def test_until_in_the_log_names_the_last_day_it_holds(env) -> None:
+    from datetime import date
+
+    from personal_os.learn import until_ts
+    db, memories, graph, _ = env
+    m = memories.create(None, "User is staying in Lisbon", kind="fact", expires_at=until_ts("2099-11-20", date.today()))
+    _, used = ctx(db, memories, graph, "lisbon", memory_hits=[memories.get(m["id"])])
+    assert "(until 2099-11-20)" in used["volatile_blocks"][0]
+
+
+def test_near_duplicate_stays_in_its_own_scope(env) -> None:
+    db, memories, _, idx = env
+    pid = Projects(db).create("Team")["id"]
+    personal = memories.create(None, "User wants answers under 100 words", kind="preference")
+    VEC.update({"User wants answers under 100 words": unit(1.0), "Keep answers below 100 words": unit(0.96)})
+    asyncio.run(idx.index(CFG))
+    assert asyncio.run(idx.near_duplicate(CFG, pid, "Keep answers below 100 words")) is None  # a project save never rewrites a personal row
+    assert asyncio.run(idx.near_duplicate(CFG, None, "Keep answers below 100 words"))["id"] == personal["id"]

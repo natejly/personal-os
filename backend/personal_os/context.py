@@ -314,10 +314,11 @@ def build_context(
             cap = int(limits.context_window(settings.get("contextWindow")) if window is None else window) * memory_limits.PROFILE_WINDOW_SHARE
             budget = min(_budget(settings, "profile") or int(cap), int(cap))
             lines, n = _fit([ln for _, ln in rows], budget, head)
+            if n:
+                trimmed["profile"] = n
             if lines:
                 if n:
                     lines.append(_omitted(n))
-                    trimmed["profile"] = n
                 parts.append(head + "\n".join(lines))
                 used["profile"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"], "pinned": bool(m["pinned"])}
                                    for m, _ in rows[:len(rows) - n]]
@@ -338,7 +339,7 @@ def build_context(
                     "when two notes disagree, the newer one wins.\n")
             rows = [(m, _one_line(_public(str(m.get("content") or "")), 500)) for m in mems]
             mems = [m for m, t in rows if t]
-            items = [_note(m, t) + (f" (until {_day(m['expires_at'])})" if m.get("expires_at") else "") for m, t in rows if t]
+            items = [_note(m, t) + (f" (until {_day(m['expires_at'] - 1)})" if m.get("expires_at") else "") for m, t in rows if t]
             lines, n = _fit(items, _budget(settings, "memories"), head)
             mems = mems[:len(lines)]
             if n:

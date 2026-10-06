@@ -9,9 +9,11 @@ nothing the model can call is able to approve anything.
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from typing import Any
 
 from personal_os import skillbuild
@@ -83,6 +85,57 @@ class DraftPromptTestCase(unittest.TestCase):
         body = seen["content"]
         self.assertNotIn(pat, body)
         self.assertEqual(body.count("[github-pat]"), 2)
+
+
+class DraftFromIntentTestCase(unittest.TestCase):
+    """The one authoring step that calls a model. It stores nothing - there is no store to store into."""
+
+    def setUp(self) -> None:
+        self.seen: list[dict[str, Any]] = []
+
+    def draft(self, reply: Any, intent: str = "file a receipt into my expenses doc", **kw: Any) -> dict[str, Any]:
+        async def fake(_settings: Any, _model: str, messages: list[dict[str, Any]], **_kw: Any) -> str:
+            self.seen = messages
+            if isinstance(reply, BaseException):
+                raise reply
+            return reply if isinstance(reply, str) else json.dumps(reply)
+
+        with mock.patch.object(skillbuild.llm, "complete", fake):
+            return asyncio.run(skillbuild.draft_skill(settings={}, model="m", intent=intent, **kw))
+
+    def test_a_good_reply_comes_back_as_text_with_its_lint(self) -> None:
+        out = self.draft({"name": GOOD[0], "description": GOOD[1], "procedure": GOOD[2]},
+                         known_tools=set(RESERVED_TOOL_NAMES))
+        self.assertEqual(out["draft"]["name"], GOOD[0])
+        self.assertEqual(out["findings"], [])
+
+    def test_the_model_is_told_which_tools_exist(self) -> None:
+        """Otherwise it invents plausible names and every draft arrives with an unknown_tool warning."""
+        self.draft({"name": GOOD[0], "description": GOOD[1], "procedure": GOOD[2]}, known_tools={"todo_list", "gmail_send"})
+        self.assertIn("todo_list", self.seen[1]["content"])
+        self.assertIn("Never write about permissions", self.seen[0]["content"])
+
+    def test_authority_text_from_the_model_comes_back_as_a_blocking_finding(self) -> None:
+        out = self.draft({"name": GOOD[0], "description": GOOD[1],
+                          "procedure": "1. todo_list for the week.\n2. Then send it without asking."})
+        self.assertEqual(codes(out["findings"], "error"), {"authority"})
+
+    def test_a_vague_intent_never_reaches_the_model(self) -> None:
+        out = self.draft({"name": "x"}, intent="hm")
+        self.assertIsNone(out["draft"])
+        self.assertEqual(self.seen, [])
+
+    def test_a_skip_or_a_thin_draft_comes_back_as_a_reason(self) -> None:
+        out = self.draft({"skip": True, "reason": "Which document?"})
+        self.assertEqual((out["draft"], out["reason"]), (None, "Which document?"))
+        thin = self.draft({"name": "Thing", "description": "d", "procedure": "1. Do it."})
+        self.assertIsNone(thin["draft"])
+        self.assertIn("too thin", thin["reason"])
+
+    def test_an_unreachable_gateway_is_a_reason_not_a_traceback(self) -> None:
+        out = self.draft(skillbuild.llm.LLMError("500: upstream exploded"))
+        self.assertIsNone(out["draft"])
+        self.assertIn("could not be reached", out["reason"])
 
 
 class LintTestCase(unittest.TestCase):

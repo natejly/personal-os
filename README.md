@@ -294,6 +294,9 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   candidate — there is no tool that approves one, and a revision of an approved
   procedure is forked beside it rather than overwriting the text in use. The
   preview shows the real injected block, assembled by the function the chat uses.
+  Writing one is tooled: say what it is for and the model drafts the steps into the
+  form for you to edit (nothing is saved until you add it), and the lint reads the
+  draft as you type.
   Skills can be imported by URL, and a Popular skills catalog offers presets.
   The memory extractor turns repeated friction in a chat into one suggested skill.
 - **Agents and subagents.** A reply can delegate to subagents (`agent_spawn`).

@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -489,6 +489,12 @@ export const api = {
     /** Files the chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/). */
     outputs: (id: string) => req<ChatOutputs>(`/conversations/${id}/outputs`),
     downloadOutput: (id: string, path: string) => saveDownload(`/conversations/${id}/outputs/download?path=${encodeURIComponent(path)}`, path)
+  },
+  /** Detached background workers of a chat (the assistant's `delegate` tool). Resuming starts a new worker (new id) with the old one's history. */
+  workers: {
+    list: (convId: string) => req<{ workers: WorkerInfo[] }>(`/conversations/${encodeURIComponent(convId)}/workers`),
+    stop: (id: string) => req<{ ok: boolean; worker: WorkerInfo }>(`/workers/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+    resume: (id: string, text?: string) => req<{ worker: WorkerInfo }>(`/workers/${encodeURIComponent(id)}/resume`, { method: 'POST', body: json(text ? { text } : {}) })
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {

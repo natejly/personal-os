@@ -57,6 +57,12 @@ SHELL_TIMEOUT_SECONDS = 120        # foreground shell default; a call may ask fo
 SHELL_MAX_BACKGROUND = 4           # live background shell jobs at once
 CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own pool apart from SHELL_MAX_BACKGROUND
 LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
+# Workers (workers.py): detached background agents the chat's front agent hands work to. These route and queue work;
+# none of them ends a worker's run.
+DELEGATION_AFTER_ROUNDS = 2        # rounds of tool calls a chat reply makes itself before the rest must go to a worker (routing, not a cap)
+WORKER_MAX_CONCURRENT = 4          # workers running at once; the rest wait in a queue and start in order
+WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
+WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt
@@ -121,6 +127,8 @@ RANGES: dict[str, tuple[float, float]] = {
     "telegramLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
     "codingSessionMaxConcurrent": (1, 20),
+    "delegationAfterRounds": (1, 20),
+    "workerMaxConcurrent": (1, 16),
 }
 
 

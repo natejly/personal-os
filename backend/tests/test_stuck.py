@@ -116,7 +116,7 @@ def breakers_of(events: list[tuple[str, Any]]) -> list[Any]:
 
 
 def test_pingpong_nudged_then_stopped() -> None:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False})
     cid = appmod.convos.create(None, "t", "m")["id"]
     SEEN.clear()
     ROUNDS[:] = pingpong(24)

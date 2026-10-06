@@ -526,6 +526,16 @@ export default function SettingsModal(): JSX.Element {
               <AdvGroup id="desks" title="Desks and background" {...gp}>
                 <CoworkSettings draft={draft} patch={patch} />
                 <CoworkAdvanced draft={draft} patch={patch} />
+                <h4>Background workers</h4>
+                <Switch title="Delegate long work" help="Once a reply has used its tool rounds, the assistant hands the rest to a background worker and answers you at once. Nothing is cut off." checked={draft.delegationForce !== false} onChange={(delegationForce) => patch({ delegationForce })} />
+                {draft.delegationForce !== false && (
+                  <label className="setting-row"><span className="toggle-text"><b>Delegate after this many tool rounds</b><small>1 to 20. Quick lookups under this stay in the chat.</small></span>
+                    <input type="number" min={1} max={20} value={draft.delegationAfterRounds ?? 2} onChange={(e) => patch({ delegationAfterRounds: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 2)) })} />
+                  </label>
+                )}
+                <label className="setting-row"><span className="toggle-text"><b>Background workers at once</b><small>1 to 16. The rest wait in a queue and start in order.</small></span>
+                  <input type="number" min={1} max={16} value={draft.workerMaxConcurrent ?? 4} onChange={(e) => patch({ workerMaxConcurrent: Math.min(16, Math.max(1, Math.round(Number(e.target.value)) || 4)) })} />
+                </label>
                 <h4>Coding sessions</h4>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
                   <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />

@@ -253,6 +253,36 @@ class RunStore:
             log.warning("could not persist event %s#%s of run %s", event, seq, run_id, exc_info=True)
             return False
 
+    def append_transcript(self, run_id: str, seq: int, data: Any) -> bool:
+        """A subagent's whole history as one `transcript` event. Only the newest is kept: a worker writes one every round."""
+        ok = self.append(run_id, seq, "transcript", data)
+        if ok:
+            try:
+                self._exec("DELETE FROM run_events WHERE run_id=? AND type='transcript' AND seq<?", (run_id, seq))
+            except sqlite3.Error:
+                log.warning("could not drop old transcripts of run %s", run_id, exc_info=True)
+        return ok
+
+    def mark_input(self, run_id: str, **fields: Any) -> None:
+        """Set keys inside a run's stored input (a worker's wake bookkeeping). Never raises."""
+        if not fields:
+            return
+        sets = ",".join(f"'$.{k}',json(?)" for k in fields)
+        try:
+            self._exec(f"UPDATE agent_runs SET input=json_set(input,{sets}) WHERE run_id=?", (*[_dumps(v) for v in fields.values()], run_id))
+        except sqlite3.Error:
+            log.warning("could not update the input of run %s", run_id, exc_info=True)
+
+    def workers(self, conversation_id: str | None = None, undelivered: bool = False) -> list[dict[str, Any]]:
+        """Worker runs (kind='worker'), newest first: one conversation's, or every ended worker whose wake is still owed."""
+        where, params = ["kind='worker'"], []
+        if conversation_id:
+            where.append("json_extract(input,'$.conversation_id')=?")
+            params.append(conversation_id)
+        if undelivered:
+            where.append("ended_at IS NOT NULL AND COALESCE(json_extract(input,'$.wake_delivered'),1)=0")
+        return [self._run_row(r) for r in self._all(f"SELECT * FROM agent_runs WHERE {' AND '.join(where)} ORDER BY started_at DESC, rowid DESC", params)]  # type: ignore[misc]
+
     def events(self, run_id: str, since: int = 0, until: int | None = None) -> list[RunEvent]:
         sql, params = "SELECT seq, type, data FROM run_events WHERE run_id=? AND seq>?", [run_id, since]
         if until is not None:

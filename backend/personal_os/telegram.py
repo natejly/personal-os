@@ -733,7 +733,7 @@ class TelegramBridge:
         if owner is None:
             return
         if run.status == "awaiting_approval":
-            self._spawn(self._notify_approvals(run, owner))
+            self._spawn(self._notify_approvals(owner, run_id=rid))
         if rid in self._runs.seen:
             if rid not in self._answered.seen and (run.replied or not run.live):
                 self._answered.add(rid)
@@ -759,15 +759,17 @@ class TelegramBridge:
         title = self.deps.conversation_title(run.conversation_id) or "a chat"
         await self._send(chat_id, f"Grain finished: {_one_line(title, 80)} ({max(1, round(took / 60))} min)")
 
-    async def _notify_approvals(self, run: Any, chat_id: int) -> None:
+    async def _notify_approvals(self, chat_id: int, run_id: str | None = None, call_id: str | None = None) -> None:
+        """Text the pending cards of one run, or the one card `call_id` (a background worker's: it has no run, and its chat
+        may not be the Texts one, so it is sent whichever chat it came from)."""
         notify_all = bool(self._settings().get("telegramNotifyLongRuns"))
         async with self._approval_lock:  # the code and the sent mark are decided together, one card at a time
             target_conv = self._peek_target()
             for a in self.deps.pending_approvals():
                 cid = a["call_id"]
-                if a.get("run_id") != run.run_id or cid in self._texted.seen or cid in self._told.seen:
+                if (run_id and a.get("run_id") != run_id) or (call_id and cid != call_id) or cid in self._texted.seen or cid in self._told.seen:
                     continue
-                if not self.deps.is_live(cid) or not (a.get("conversation_id") == target_conv or notify_all):
+                if not self.deps.is_live(cid) or not (call_id or a.get("conversation_id") == target_conv or notify_all):
                     continue
                 if a.get("tool") in self.deps.app_only_tools:
                     if await self._send(chat_id, f"{a.get('tool')} is waiting in Grain. Open the app to answer."):
@@ -788,6 +790,22 @@ class TelegramBridge:
                     self._codes[code] = cid
                     if len(self._codes) > 300:
                         self._codes.pop(min(self._codes))
+
+    def notify_worker_approval(self, call_id: str) -> None:
+        """A background worker raised an approval card: text it, with Approve / Deny buttons, to the paired chat."""
+        if self._lock_fd is None:  # not the poller: this process sends nothing
+            return
+        owner = self._state().get("ownerChatId")
+        if owner is not None:
+            self._spawn(self._notify_approvals(owner, call_id=call_id))
+
+    def push(self, text: str) -> None:
+        """Text the owner a reply written outside any run they started (a worker's result, after its wake turn)."""
+        if self._lock_fd is None:
+            return
+        owner, plain = self._state().get("ownerChatId"), to_plain(text or "")
+        if owner is not None and plain:
+            self._spawn(self._send_all(owner, plain))
 
     # ---- surface for the app
     def status(self) -> dict[str, Any]:

@@ -32,6 +32,7 @@ import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { stepZoom } from './lib/zoom'
+import { isWake, withoutWake } from './lib/workers'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -803,6 +804,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
         const at = pend ? pend.findIndex((p) => p.text.trim() === ev.data.content) : -1
         const rest = at >= 0 && pend ? pend.filter((_, i) => i !== at) : pend
         const pendingSends = rest && rest.length ? rest : undefined
+        // A wake turn is the assistant's own bookkeeping, not something the user said.
+        if (isWake(ev.data)) return s
         if (msgs.some((m) => m.id === ev.data.id)) return at >= 0 ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
         return { ...withMsgs([...msgs, ev.data]), runError: null, pendingSends }
       }
@@ -1023,8 +1026,9 @@ export const useStore = create<State>((set, get) => {
   const settleSteer = (convId: string, message: Message | undefined): void => {
     if (message) patchSession(convId, (s) => applyEvent(s, { event: 'user_message', data: message } as ChatEvent, get().focusedConversationId === convId))
   }
-  const putSession = (conversation: Conversation): void =>
+  const putSession = (fetched: Conversation): void =>
     set((st) => {
+      const conversation = fetched.messages?.some(isWake) ? { ...fetched, messages: withoutWake(fetched.messages) } : fetched
       const cur = st.sessions[conversation.id]
       // A fetch that lands among the deltas must not clobber what the stream already applied: the
       // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
@@ -1199,6 +1203,8 @@ export const useStore = create<State>((set, get) => {
             get().upsertCodingSession(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
+          } else if (ev.event === 'workers') {
+            window.dispatchEvent(new CustomEvent('grain-workers', { detail: ev.data }))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -2495,7 +2501,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const c = await api.activateMessage(conversationId, messageId)
         // Replace the list wholesale: merging would keep the swapped-out row alive.
-        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: withoutWake(c.messages) }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2521,7 +2527,7 @@ export const useStore = create<State>((set, get) => {
       try {
         await api.conversations.deleteMessage(conversationId, messageId)
         const c = await api.conversations.get(conversationId)
-        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: withoutWake(c.messages) }))
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

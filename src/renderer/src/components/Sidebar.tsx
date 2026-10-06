@@ -91,10 +91,10 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docsPending = useStore((s) => s.docsPending)
   const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
+  const memoryProposals = useStore((s) => s.memoryProposals)
   /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const meetingsPending = useStore((s) => s.meetingsPending)
-  const memoryProposals = useStore((s) => s.memoryProposals)
   /** Everything agents left for the user (approvals, proposals, desks, review queues) plus unread job runs: the Agent inbox on Today. */
   const inboxCount = useStore((s) => inboxBadge(s.agentInbox))
   const inCanvas = useStore((s) => s.view === 'canvas')
@@ -227,6 +227,7 @@ export default function Sidebar(): JSX.Element {
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     if (v === 'library') return skillCandidates || null
+    if (v === 'memory') return memoryProposals || null
     // Load-bearing, not cosmetic: without it a Meetings row would show no review count.
     if (v === 'meetings') return meetingsPending || null
     return null

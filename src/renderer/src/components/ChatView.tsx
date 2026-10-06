@@ -82,7 +82,25 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
-  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
+  const { stick, unseen, jump, release } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
+
+  // "Open in chat" from a memory's source: scroll to that message once the transcript is in. The history is
+  // not windowed, so a message missing from a loaded chat is gone. The frame wait lets the stick-to-bottom
+  // pass for a fresh chat run first; release() then keeps it from pulling the view back down.
+  const chatJump = useStore((s) => s.chatJump)
+  useEffect(() => {
+    if (conversationId || !chatJump || chatJump.conversationId !== convo?.id || !msgs.length) return
+    const raf = requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(chatJump.messageId)}"]`)
+      useStore.setState({ chatJump: null })
+      if (!el) return useStore.getState().toast('That message is no longer in this chat', 'info')
+      release()
+      el.scrollIntoView({ block: 'center' })
+      el.classList.add('msg-flash')
+      setTimeout(() => el.classList.remove('msg-flash'), 2000)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [chatJump, msgs, conversationId, convo?.id, release])
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {

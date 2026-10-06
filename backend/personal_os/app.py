@@ -6151,6 +6151,23 @@ def memory_history(id: str) -> list[dict[str, Any]]:
     return memories.history(id)
 
 
+@app.get("/memories/{id}/source")
+def memory_source(id: str) -> dict[str, Any]:
+    m = memories.get(id)
+    if not m or not m.get("source_message_id"):
+        raise HTTPException(404)
+    with db.tx() as c:
+        r = c.execute("SELECT m.id, m.conversation_id, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id "
+                      "WHERE m.id=? AND c.deleted_at IS NULL", (m["source_message_id"],)).fetchone()
+    if not r:
+        raise HTTPException(404)
+    quote = " ".join(str(r["content"]).split())
+    cap = memory_limits.SOURCE_QUOTE_CHARS
+    if len(quote) > cap:
+        quote = quote[:cap].rstrip() + "…"
+    return {"conversation_id": r["conversation_id"], "message_id": r["id"], "title": r["title"], "quote": quote}
+
+
 @app.post("/memories")
 def create_memory(body: MemoryIn) -> dict[str, Any]:
     if not body.content.strip():

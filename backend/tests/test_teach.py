@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image  # noqa: E402
 
-from personal_os import activity, skillbuild, teach  # noqa: E402
+from personal_os import macos, skillbuild, teach  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.learn import Skills  # noqa: E402
 
@@ -75,27 +75,27 @@ class StoreTest(unittest.TestCase):
         self.addCleanup(d.cleanup)
         self.db = Database(Path(d.name))
         self.t = teach.Teach(self.db)
-        self.saved = (activity.IS_MAC, activity.screen_recording_status, activity.frontmost_app,
-                      activity.focused_window_title, activity.secure_input_active, teach.INTERVAL)
+        self.saved = (macos.IS_MAC, macos.screen_recording_status, macos.frontmost_app,
+                      macos.focused_window_title, macos.secure_input_active, teach.INTERVAL)
         self.addCleanup(self._restore)
-        activity.IS_MAC = True
-        activity.frontmost_app = lambda: ("Mail", "", 1)
-        activity.focused_window_title = lambda pid: "Inbox"
-        activity.secure_input_active = lambda: False
+        macos.IS_MAC = True
+        macos.frontmost_app = lambda: ("Mail", "", 1)
+        macos.focused_window_title = lambda pid: "Inbox"
+        macos.secure_input_active = lambda: False
         teach.INTERVAL = 0.01
 
     def _restore(self) -> None:
-        (activity.IS_MAC, activity.screen_recording_status, activity.frontmost_app,
-         activity.focused_window_title, activity.secure_input_active, teach.INTERVAL) = self.saved
+        (macos.IS_MAC, macos.screen_recording_status, macos.frontmost_app,
+         macos.focused_window_title, macos.secure_input_active, teach.INTERVAL) = self.saved
 
     def test_permission_gate_records_nothing(self) -> None:
-        activity.screen_recording_status = lambda: activity.DENIED
-        self.assertEqual(self.t.start(), {"needs_permission": True, "state": activity.DENIED})
+        macos.screen_recording_status = lambda: macos.DENIED
+        self.assertEqual(self.t.start(), {"needs_permission": True, "state": macos.DENIED})
         self.assertEqual(self.t.list(), [])
         self.assertIsNone(self.t._active)
 
     def test_record_dedupes_and_delete_removes_frames(self) -> None:
-        activity.screen_recording_status = lambda: activity.GRANTED
+        macos.screen_recording_status = lambda: macos.GRANTED
         self.t._grab = lambda dest: bool(_img(dest))  # the same screen every tick
         row = self.t.start()
         time.sleep(0.2)

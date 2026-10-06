@@ -326,12 +326,6 @@ class Docs:
         self.db = db
         # Called with a doc id whenever its chunks were rebuilt (app.py wires background embedding to it).
         self.on_chunks: Any = None
-        # Called with a doc id just before its row is hard-deleted (app.py wires linked recordings to it).
-        self.on_delete: Any = None
-        # Called with (doc id, new project id or None) after a doc changed project (app.py keeps its recordings in step).
-        self.on_move: Any = None
-        # (query, limit) -> recording hits [{doc_id, snippet}]; wired by app.py so spoken words are searchable.
-        self.recording_search: Any = None
         # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
         self._daily_lock = threading.Lock()
         with db.tx() as c:
@@ -346,7 +340,7 @@ class Docs:
             # doc_chunks.blurb: optional model-written context line (retrieval.contextualize_pending).
             if "blurb" not in {r["name"] for r in c.execute("PRAGMA table_info(doc_chunks)").fetchall()}:
                 c.execute("ALTER TABLE doc_chunks ADD COLUMN blurb TEXT NOT NULL DEFAULT ''")
-            # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
+            # doc_revisions.append arrived after the first release (append proposals), so an existing DB needs it added.
             have_rev = {r["name"] for r in c.execute("PRAGMA table_info(doc_revisions)").fetchall()}
             if "append" not in have_rev:
                 c.execute("ALTER TABLE doc_revisions ADD COLUMN append TEXT")
@@ -535,17 +529,6 @@ class Docs:
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break
-            seen = {o["doc_id"] for o in out}
-            for h in (self.recording_search(q, max(1, limit) * 3) if self.recording_search else []):
-                if len(out) >= limit:
-                    break
-                if h["doc_id"] in seen:
-                    continue
-                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (h["doc_id"],)).fetchone()
-                if not d or (project_id != "__all__" and d["project_id"] != project_id):
-                    continue
-                seen.add(d["id"])
-                out.append({"doc_id": d["id"], "title": d["title"], "snippet": h["snippet"], "via": "recording"})
         return out
 
     # ---- writes ----
@@ -616,11 +599,6 @@ class Docs:
             d = c.execute("SELECT title, content FROM docs WHERE id=?", (id,)).fetchone()
             if d:
                 self._reindex(c, id, d["title"], d["content"])
-        if "project_id" in fields and d and self.on_move:
-            try:
-                self.on_move(id, fields["project_id"])
-            except Exception as e:  # noqa: BLE001 - the doc already moved; a stale recording scope is not worth failing it
-                log.warning("docs: could not move recordings of doc %s: %s", id, e)
         return self.get(id)
 
     def move(self, id: str, scope: str | None, folder: str = "") -> dict[str, Any] | None:
@@ -633,12 +611,6 @@ class Docs:
         return self.update_meta(id, {"project_id": sc or None, "folder": folder})
 
     def delete(self, id: str) -> None:
-        if self.on_delete:
-            # Before the row goes: a linked recording's FTS row and audio dir are not covered by any FK cascade.
-            try:
-                self.on_delete(id)
-            except Exception as e:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
-                log.warning("docs: could not purge recordings of doc %s: %s", id, e)
         with self.db.tx() as c:
             c.execute("DELETE FROM doc_comments WHERE doc_id=?", (id,))  # the FK cascades too; explicit so it needs no PRAGMA
             c.execute("DELETE FROM docs WHERE id=?", (id,))

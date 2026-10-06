@@ -27,20 +27,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Activity monitor (macOS). Without these the monitor still runs, but app tracking falls back to
-# `lsappinfo` (app name only) and the keystroke/click tap is unavailable.
-activity = [
+# macOS system access (macos.py, teach, voice input). Without these the frontmost-app probe falls back to
+# `lsappinfo` (app name only) and permission checks report "unknown".
+mac = [
   "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-ApplicationServices>=10.3; sys_platform == 'darwin'",
-  # Microphone authorization, AVAudioEngine capture, Core Audio process taps.
+  # Microphone authorization.
   "pyobjc-framework-AVFoundation>=10.3; sys_platform == 'darwin'",
-  "pyobjc-framework-CoreAudio>=10.3; sys_platform == 'darwin'",
-  # On-device SFSpeechRecognizer, so meetings/activity do not need whisper.cpp.
+  # On-device SFSpeechRecognizer, so voice input does not need whisper.cpp.
   "pyobjc-framework-Speech>=10.3; sys_platform == 'darwin'",
 ]
 # Whistle: a 17 MB seven-language speech-to-text model that runs on the CPU in this process
-# (meetings.sttBackend = whistle). Its weights download from Hugging Face on first use.
+# (voice.sttBackend = whistle). Its weights download from Hugging Face on first use.
 whistle = [
   "cactus-needle>=3.1",
 ]

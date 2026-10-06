@@ -55,19 +55,16 @@ model_list:
       mode: embedding
 
   # ---------------------------------------------------------------- speech to text
-  # Nothing above answers /v1/audio/transcriptions, so the meetings feature and the activity
-  # monitor's audio signals have no transcription route on a default config: every clip fails,
-  # keeps its wav, and waits for a retry. Fireworks deprecated audio transcription
+  # Nothing above answers /v1/audio/transcriptions, so voice input has no transcription route on a
+  # default config through the proxy. Fireworks deprecated audio transcription
   # (docs/research/roadmap.md:101), which is why there is no Fireworks entry to uncomment here.
   #
-  # Pick ONE of the two blocks below, uncomment it, and press Test in Settings -> Meetings.
-  # The model_name must stay `whisper-1`: that is meetings' `sttModel` default and
-  # activity.py's `audio.model` default, so neither needs reconfiguring.
+  # Pick ONE of the two blocks below, uncomment it, and press Test in Settings -> Behavior -> Voice input.
+  # The model_name must stay `whisper-1`: that is the `sttModel` default, so nothing needs reconfiguring.
   #
-  # You do not need either one. stt.py's local whisper.cpp backend is the no-cloud default and
-  # needs no proxy route at all - `brew install whisper-cpp` plus a ggml model, and `sttBackend:
-  # auto` picks it up (docs/meetings.md). Only add a route here if you want audio transcribed by
-  # a provider instead of on this machine.
+  # You do not need either one. stt.py's on-device backends (Speech, Whistle, whisper.cpp) need no
+  # proxy route at all - `sttBackend: auto` picks the first one that is ready (docs/voice-input.md).
+  # Only add a route here if you want audio transcribed by a provider instead of on this machine.
   #
   # GOTCHA, learnt the hard way on the embedding entry above: a `mode:` declaration belongs
   # under `model_info`, not under `litellm_params`. LiteLLM silently passes an unknown

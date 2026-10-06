@@ -61,23 +61,6 @@ sys_, used = build(doc_hits=hits)
 check(0 < len(used["chunks"]) < 30 and used["trimmed"]["chunks"] == 30 - len(used["chunks"]), "chunks trimmed and counted")
 check(used["chunks"][0]["chunk_id"] == "c0", "best chunk kept")
 
-# ---- activity / meetings (pre-built text blocks)
-class Block:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    def context_block(self) -> str:
-        return self.text
-
-    def context_has_foreign_text(self) -> bool:
-        return False
-
-
-big = "## Recent activity\n" + "\n".join(f"- line {i} " + "z" * 100 for i in range(100))
-_, used = build(activity=Block(big), meetings=Block(big.replace("activity", "meetings")))
-check(used["trimmed"]["activity"] > 0 and estimate_tokens(used["activity"]) <= 800 + 20, "activity trimmed")
-check(used["trimmed"]["meetings"] > 0 and used["meetings"].startswith("## Recent meetings"), "meetings trimmed, heading kept")
-
 # ---- pinned documents
 proj = projects.create("P")
 other = projects.create("Q")
@@ -109,8 +92,8 @@ sys_, used = build(project_id=proj["id"])
 check("Pinned files" not in sys_ and used["pinned"] == [], "unpin removes it")
 
 # ---- hidden views are named, so the model does not send the user to a page they cannot see
-sys_, _ = build(settings={"hiddenViews": ["library", "activity", "docs"]})
-check("Library, Activity, Files" in sys_ and "Settings → Modules" in sys_, "hidden views named with where to turn them on")
+sys_, _ = build(settings={"hiddenViews": ["library", "health", "docs"]})
+check("Library, Health, Files" in sys_ and "Settings → Modules" in sys_, "hidden views named with where to turn them on")
 check("Hidden in this app" not in build()[0], "nothing hidden, no line")
 
 pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"

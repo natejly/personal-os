@@ -227,7 +227,7 @@ def test_proxy_bills_the_audio_length_not_the_wall_clock() -> None:
             stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
         assert len(seen) == 1, seen
         assert seen[0]["model"] == "whisper-1"
-        assert seen[0]["kind"] == "meeting-stt"
+        assert seen[0]["kind"] == "voice-stt"
         assert seen[0]["duration_ms"] == 4250           # VERBOSE_JSON's duration, in ms
         # No duration in the reply means no row: a made-up number is worse than a missing one.
         with proxy_replies(200, {"text": "hi"}, ""), whisper_is(""), speech_is(False):
@@ -296,7 +296,6 @@ def test_resolve_backend_puts_whistle_between_speech_and_whisper() -> None:
         assert stt.resolve_backend(CFG, data_dir) == "whistle"             # beats an installed whisper.cpp
     with speech_is(True), whistle_is(True), whisper_is(""):
         assert stt.resolve_backend(CFG, data_dir) == "speech"              # but not an authorized Speech
-        assert stt.resolve_backend({**CFG, "diarize": True}, data_dir) == "whistle"   # unless timing is needed
     with speech_is(False), whistle_is(True), whisper_is(""):
         assert stt.resolve_backend({"sttBackend": "local"}, data_dir) == "local"      # explicit still wins
 

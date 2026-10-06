@@ -153,6 +153,22 @@ test('the server wins where it holds more, and its own rows come through untouch
   assert.deepEqual(ids(merged), ['m1', 'm2'])
 })
 
+// Regression: ISSUE-008 — streamed text is duplicated in a default (autonomous) chat
+// Found by /qa on 2026-10-06
+// Report: .gstack/qa-reports/run-20261006T212932Z/
+test('a refetch that holds more than the stream has applied cannot replace the reply the stream is still filling', () => {
+  // The stored row already has the whole reply while this window still has deltas to apply; taking the longer copy
+  // would let those deltas append to text that already holds them.
+  const local = convo([msg('m1', 'plain line 0\n', { reasoning: 'think' })])
+  const remote = convo([msg('m1', 'plain line 0\nplain line 1\n', { reasoning: 'think harder' })])
+  const live = mergeConversation(local, remote, true, 'm1').messages?.[0]
+  assert.equal(live?.content, 'plain line 0\n')
+  assert.equal(live?.reasoning, 'think')
+  const idle = mergeConversation(local, remote, true).messages?.[0]
+  assert.equal(idle?.content, 'plain line 0\nplain line 1\n', 'with no stream filling it the stored copy still wins')
+  assert.equal(mergeConversation(local, remote, true, 'other').messages?.[0].content, 'plain line 0\nplain line 1\n')
+})
+
 test('tool events and spans survive a refetch that has none of them yet', () => {
   const events = [{ id: 't1', name: 'web_search', pending: false } as unknown as ToolEvent]
   const trace = [{ id: 's1' } as unknown as Span]

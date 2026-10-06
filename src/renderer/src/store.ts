@@ -1034,7 +1034,7 @@ export const useStore = create<State>((set, get) => {
       // A fetch that lands among the deltas must not clobber what the stream already applied: the
       // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
       const next = cur
-        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming), touchedAt: Date.now() }
+        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming, cur.streaming?.messageId), touchedAt: Date.now() }
         : newSession(conversation)
       const sessions = { ...st.sessions, [conversation.id]: next }
       return { sessions: evict(sessions, st.focusedConversationId) }

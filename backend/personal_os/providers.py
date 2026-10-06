@@ -11,10 +11,10 @@ from urllib.parse import urlparse
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "fireworks", "name": "Fireworks AI", "baseUrl": "https://api.fireworks.ai/inference/v1", "needsKey": True,
-     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/kimi-k3",
-     "models": ["accounts/fireworks/models/kimi-k3", "accounts/fireworks/models/deepseek-v4-pro",
-                "accounts/fireworks/models/deepseek-v4p1-flash", "accounts/fireworks/models/qwen3p8-max",
-                "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/gpt-oss-120b"],
+     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/glm-5p3",
+     "models": ["accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
+                "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
+                "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
      "note": None},
     {"id": "openai", "name": "OpenAI", "baseUrl": "https://api.openai.com/v1", "needsKey": True,
      "keyUrl": "https://platform.openai.com/api-keys", "defaultModel": "gpt-5-mini",

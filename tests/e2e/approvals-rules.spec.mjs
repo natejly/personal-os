@@ -1,6 +1,7 @@
 import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { openAdvanced } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
@@ -12,11 +13,10 @@ const seed = async (grain, extra = {}) => {
   return ws
 }
 
-test('Settings → Tools: add rules in the UI, bad rules are refused, the tester explains, Save persists', async ({ grain }) => {
+test('Settings → Advanced → Approvals: add rules in the UI, bad rules are refused, the tester explains, Save persists', async ({ grain }) => {
   const { page } = grain
   await resize(grain)
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Permissions' }).click()
+  await openAdvanced(page, 'Approvals')
   const add = async (kind, text, ok = true) => {
     const input = page.getByLabel(`New ${kind} rule`)
     await input.scrollIntoViewIfNeeded()
@@ -35,8 +35,7 @@ test('Settings → Tools: add rules in the UI, bad rules are refused, the tester
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(async () => (await grain.api('/settings')).permissionRules).toMatchObject({ allow: ['Bash(touch *)'], deny: ['Bash(touch blocked*)'], ask: ['Bash(touch ask*)'] })
   // Save closes the modal: reopen it so the tester runs against what was saved
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('tab', { name: 'Permissions' }).click()
+  await openAdvanced(page, 'Approvals')
   // the tester reads saved rules
   const test1 = async (cmd) => {
     await page.getByLabel('Command: command to test').fill(cmd)

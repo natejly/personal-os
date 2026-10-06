@@ -41,7 +41,7 @@ test('app switcher icons open Lists, Calendar, Mail and the page agent; one is p
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('hidden views are not in the sidebar; More modules opens Settings → Modules', async ({ grain }) => {
+test('hidden views are not in the sidebar; More modules opens Settings → Advanced → Layout', async ({ grain }) => {
   const { page, api } = grain
   // Library ships on; hiding it takes it out of the sidebar
   await expect(sidebarItem(page, 'Library')).toHaveCount(1)
@@ -51,7 +51,8 @@ test('hidden views are not in the sidebar; More modules opens Settings → Modul
   await expect(sidebarItem(page, 'Library')).toHaveCount(0)
   await page.getByRole('button', { name: /More modules/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.getByRole('tab', { name: /Modules/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.adv-group[open] > summary', { hasText: 'Layout' })).toBeVisible()
 })
 
 test('⌘B hides and shows the sidebar from the menu, the button and the title-bar toggle', async ({ grain }) => {

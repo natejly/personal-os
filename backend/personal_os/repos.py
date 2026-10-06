@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from . import blobs
 from .db import Database, new_id, now, row_to_dict
 from .migrations import sync_memories_fts
 from .memory_limits import LEXICAL_HITS
@@ -1039,7 +1040,10 @@ class Documents:
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+            d = row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+        if d:
+            d["has_original"] = blobs.inside_uploads(self.db.data_dir, d.get("path")) is not None  # read-time, so no column to migrate
+        return d
 
     def set_pinned(self, id: str, pinned: bool) -> dict[str, Any] | None:
         with self.db.tx() as c:

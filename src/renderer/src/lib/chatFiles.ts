@@ -80,3 +80,6 @@ export function rowAction(f: Pick<ChatFile, 'kind' | 'missing'>): ChatFileClick 
   if (f.kind === 'coding' || f.missing) return 'jump-to-chat'
   return { upload: 'open-upload', note: 'open-doc', output: 'open-output', local: 'open-local' }[f.kind] as ChatFileClick
 }
+
+/** Where an upload opens: in the chat's side panel when a chat is on hand, else the standalone viewer. */
+export const uploadTarget = (chatId: string | null | undefined): 'panel' | 'viewer' => (chatId ? 'panel' : 'viewer')

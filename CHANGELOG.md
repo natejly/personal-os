@@ -12,7 +12,7 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Changed
 
-- **Voice input settings.** Composer dictation keeps working; its transcription settings (backend, model, whisper.cpp paths, hallucination filter, tidy-with-model) moved from the Meetings tab to Settings → Behavior → Voice input, stored under `voice` and seeded once from the old meetings settings. The `activity` Python extra is now `mac`, without CoreAudio.
+- **Voice input settings.** Composer dictation keeps working; its transcription settings (backend, model, whisper.cpp paths, hallucination filter, tidy-with-model) moved from the Meetings tab to Settings → Advanced → Voice and shortcuts, stored under `voice` and seeded once from the old meetings settings. The `activity` Python extra is now `mac`, without CoreAudio.
 
 ## Unreleased — 2026-10-03
 

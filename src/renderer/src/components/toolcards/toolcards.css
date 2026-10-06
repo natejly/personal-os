@@ -138,3 +138,6 @@
 .coding-list li { display: flex; align-items: center; gap: 8px; }
 .coding-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coding-list .inbox-dot, .ctx-section .inbox-dot { display: inline-block; flex-shrink: 0; }
+
+/* Which connector a call came from, and what that server claims about the tool. */
+.tc-origin { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }

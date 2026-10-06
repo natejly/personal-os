@@ -1654,6 +1654,21 @@ export type BackgroundEvent =
   | { event: 'workflow_run'; data: WorkflowRun }
   /** A ship checklist moved (ship.py): the whole row, so the card and the job row update without a refetch. */
   | { event: 'ship_checklist'; data: ShipChecklist }
+  /** A coding session moved (codingagents.py): the whole summary row. */
+  | { event: 'coding_session'; data: CodingSession }
+
+/** GET /coding-sessions: one background Claude Code or OpenCode session started through the coding_session_* tools. */
+export interface CodingSession {
+  id: string; agent: 'claude' | 'opencode'; name: string
+  status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
+  attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
+  external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
+  /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
+  attach_hint?: string | null
+  created_at: number; updated_at: number; ended_at: number | null
+}
+/** GET /coding-sessions/{id}/diff: what the session changed in its worktree. `diff` only with ?full=1. */
+export interface CodingSessionDiff { worktree: string; branch: string | null; status: string; diff_stat: string; log: string; diff?: string; truncated: boolean }
 
 /** One step of a ship checklist. awaiting_confirm is only ever the merge step. */
 export type ShipStepStatus = 'pending' | 'running' | 'green' | 'red' | 'skipped' | 'awaiting_confirm'

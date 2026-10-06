@@ -132,3 +132,9 @@
 .ship-step-name { min-width: 92px; }
 .ship-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .ship-actions:empty { display: none; }
+
+/* Coding sessions (CodingSessionCard.tsx, CodingSessions.tsx): the status dot sits inline in a row. */
+.coding-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.coding-list li { display: flex; align-items: center; gap: 8px; }
+.coding-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coding-list .inbox-dot, .ctx-section .inbox-dot { display: inline-block; flex-shrink: 0; }

@@ -19,7 +19,7 @@ import type {
   BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail,
   TeachDraft, TeachRecording
 } from '@shared/types'
-import type { ShipChecklist } from '@shared/types'
+import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
@@ -260,6 +260,15 @@ export const api = {
     confirm: (id: string) => req<ShipChecklist>(`/ship/${id}/confirm`, { method: 'POST' }),
     cancel: (id: string) => req<ShipChecklist>(`/ship/${id}/cancel`, { method: 'POST' }),
     retry: (id: string) => req<ShipChecklist>(`/ship/${id}/retry`, { method: 'POST' })
+  },
+  /** Background coding sessions (Claude Code / OpenCode) started by the agent. */
+  coding: {
+    list: () => req<{ sessions: CodingSession[] }>('/coding-sessions'),
+    get: (id: string) => req<CodingSession>(`/coding-sessions/${id}`),
+    logs: (id: string, limit = 4000) => req<{ id: string; output: string; status: string }>(`/coding-sessions/${id}/logs?limit=${limit}`),
+    diff: (id: string, full = false) => req<CodingSessionDiff>(`/coding-sessions/${id}/diff${full ? '?full=1' : ''}`),
+    stop: (id: string) => req<CodingSession>(`/coding-sessions/${id}/stop`, { method: 'POST' }),
+    send: (id: string, message: string) => req<CodingSession>(`/coding-sessions/${id}/send`, { method: 'POST', body: json({ message }) })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),

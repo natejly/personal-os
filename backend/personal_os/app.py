@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import imessage, system_access
-from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -39,7 +39,6 @@ from . import learn
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
-from .meeting_index import MeetingIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -54,13 +53,11 @@ from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
                    Scheduler, local_tz_name, next_fire, spent, valid_cron, valid_tz)
-from . import guide, meeting_import, skillbuild, skillmd
+from . import guide, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
-from .meeting_recorder import RecorderBusy
-from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
@@ -268,10 +265,6 @@ _MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-# Stamp 5 shows Meetings and Activity once (and the Meetings card on Today). Every earlier stamp hid them by
-# default and nothing recorded an explicit hide, so a stored hide is read as that default; a hide made after
-# stamp 5 is the user's and stays. Showing a view records nothing.
-_SHOWN_AT_5 = ("meetings", "activity")
 
 
 def _seed_hidden_modules() -> None:
@@ -286,10 +279,6 @@ def _seed_hidden_modules() -> None:
     if current < 4:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
-    if current < 5:
-        hidden = [v for v in hidden if v not in _SHOWN_AT_5]
-        if widgets.get("meetings") is False:
-            del widgets["meetings"]
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
 
 
@@ -414,7 +403,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def _todos_changed() -> None:
-    """Any todo write (routes, assistant tools, sync, meetings) tells open windows to re-read the list.
+    """Any todo write (routes, assistant tools, sync) tells open windows to re-read the list.
     Sync routes run in a threadpool, so off-loop calls are handed to the loop like _desk_changed."""
     try:
         asyncio.get_running_loop()
@@ -449,7 +438,6 @@ _desk_tasks: dict[str, asyncio.Task[None]] = {}
 sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
 # A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
 sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
-monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, pim, settings)
 app.include_router(outbox_router(outbox))
@@ -472,7 +460,7 @@ bus.after_hooks.append(_snapshot_after)
 app.include_router(backups.router(db.data_dir))
 # Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
 retention = RetentionWorker(db, settings)
-app.include_router(reliability_router(db, settings, retention, lambda: activity.permissions()))
+app.include_router(reliability_router(db, settings, retention, lambda: system_access.permissions()))
 
 
 @app.on_event("startup")
@@ -498,26 +486,15 @@ guide.ensure(skills)  # the built-in "Using Grain" skill: created approved, text
 # Auto-learn may only ever *propose* a skill (a friction fix, or a revised copy of one that failed); the lint it
 # runs is the approval gate's, so a draft that claims authority never even becomes a candidate.
 learner.skills, learner.known_tools = skills, lambda: _known_tools()
-# The repo first, then the service around it: both routes and the 45s tick read through one
-# instance, so a meeting's rows are never written by two Meetings objects at once.
-meeting_store = Meetings(db)
-meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=pim, todos=todos, docs=docs)
-# A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
-docs.on_delete = meeting_store.purge_doc
-docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
-# A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
-docs.on_move = meeting_store.move_doc
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=pim, sandboxes=sandboxes, docs=docs, activity=monitor,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=pim, sandboxes=sandboxes, docs=docs,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap,
+                  style=style, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
-meeting_index = MeetingIndex(db, meeting_store, embedder)
-meeting_store.on_final = lambda mid: meeting_index.schedule(settings(), [mid])
 learner.index = memory_index
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
@@ -533,7 +510,6 @@ toolbox.retriever = retriever
 toolbox.trash = trash
 toolbox.style_relearn = queue_style_relearn
 toolbox.memory_index = memory_index
-toolbox.meeting_index = meeting_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
 toolbox.work_env = work_env  # python_install and run_python find the shared work venv here
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
@@ -550,9 +526,6 @@ workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_stor
                               conv_cfg=lambda cfg, cid: _conv_cfg(cfg, cid))
 command_store = Commands(db)
 toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
-# The insights pass proposes automations, so it is told which tools this install actually has - an
-# unwired integration must not turn into a suggestion that cannot be carried out.
-monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
 mcp_store = McpServers(db)
 # Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
 # to hold a reply, so everything it offers goes through McpClient's bounded calls.
@@ -759,7 +732,7 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "imessageState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "meetings"}
+SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
 
 
 def public_settings() -> dict[str, Any]:
@@ -1983,7 +1956,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         project=project, project_id=conv["project_id"], query=user_text, retrieval_text=rq,
         settings=cfg, conv_settings=conv["settings"],
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
-        activity=monitor, skills=skills, style=style, meetings=meeting_svc,
+        skills=skills, style=style,
         page=body.page_context.model_dump() if body.page_context else None,
         draft=bool(conv["settings"].get("draftMode")),
     )
@@ -2044,7 +2017,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         rbuf: list[str] = []
         error: str | None = None
         tool_events: list[dict[str, Any]] = []
-        # Meeting titles, activity window titles, and uploaded-file excerpts are text the user did not
+        # Uploaded-file excerpts are text the user did not
         # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
         # grant would send mail with no card.
         ctx_taints = context_taints(used)
@@ -5617,13 +5590,10 @@ def _review_queues() -> list[dict[str, Any]]:
     each rather than re-implementing its review UI. A queue that fails to count is left out, never fatal."""
     queues: list[tuple[str, str, Callable[[], int]]] = [
         ("doc_edits", "Proposed doc edits", docs.pending_count),
-        ("meetings", "Meeting notes to review", meeting_store.pending_count),
         ("skills", "Skills to approve", lambda: len(skills.list(status="candidate", project_id="__all__"))),
         ("workflows", "Workflow runs to approve",
          lambda: sum(1 for r in workflow_store.list_runs(limit=200) if r.get("status") == "awaiting_approval")),
         ("memory", "Memory tidy-ups", lambda: len(consolidator.list("pending", ALL))),
-        ("suggestions", "Activity suggestions",
-         lambda: sum(1 for s in monitor.insights.list_suggestions() if s.get("status") == "new")),
     ]
     out = []
     for key, label, count in queues:
@@ -5647,43 +5617,6 @@ def _inbox_runs(hours: float, limit: int, include_dry: int) -> list[dict[str, An
     return runs
 
 
-def _digest_gaps() -> list[tuple[str, dict[str, str]]]:
-    """Setup gaps that quietly switch part of an on-by-default module off, each with the one place that fixes it."""
-    if not activity.IS_MAC:
-        return []
-    gaps: list[tuple[str, dict[str, str]]] = []
-    if meeting_svc.config().get("enabled") and activity.microphone_status() in (activity.DENIED, activity.UNASKED):
-        gaps.append(("Microphone not granted, so meetings will not record.",
-                     {"label": "Meetings settings", "settings": "meetings"}))
-    if monitor.config().get("enabled") and not activity.accessibility_trusted():
-        gaps.append(("Accessibility not granted, so Activity sees app names only: no window titles or typing rhythm.",
-                     {"label": "Activity permissions", "view": "activity"}))
-    return gaps
-
-
-_digest_checked = 0.0
-
-
-def _maybe_digest() -> str | None:
-    """Write today's digest if it is due. Read-driven (GET /inbox), so it costs nothing while nobody looks; checked
-    at most every 10 minutes, since a day with nothing to say writes no row and would otherwise stay due."""
-    global _digest_checked
-    from . import digest as digest_mod
-    cfg, t = digest_mod.config(settings()), time.time()
-    if not cfg["enabled"] or t - _digest_checked < 600:
-        return None
-    _digest_checked = t
-    if not digest_mod.due(t, cfg["hour"], digest_mod.last_at(run_store, t)):
-        return None
-    since = t - 86400
-    recorded = sum(1 for m in meeting_store.list(status="ready", limit=200, include_docs=True)
-                   if float(m.get("ended_at") or 0) >= since)
-    apps = digest_mod.app_seconds(monitor.store.recent(limit=20000, since=since, kinds=["focus"]))
-    body, links = digest_mod.assemble(recorded=recorded, notes_pending=meeting_store.pending_count(), apps=apps,
-                                      gaps=_digest_gaps())
-    return digest_mod.write(run_store, body, links, t) if body else None
-
-
 @app.get("/inbox")
 def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
@@ -5692,10 +5625,6 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     whose late-fire notice, failure and counts all come from the journal — the reply text is shown as the body, but
     nothing about the entry is parsed out of it.
     """
-    try:
-        _maybe_digest()
-    except Exception:  # noqa: BLE001 - a digest that cannot be built must not blank the inbox
-        log.exception("inbox: daily digest failed")
     pending_approvals = []
     for a in _untrashed(run_store.approvals("pending", limit=100)):
         row = run_store.get(a["run_id"]) if a["run_id"] else None
@@ -5734,7 +5663,6 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0), "seen": r["run_id"] in seen,
             "attention": for_run(r),
-            "links": fire.get("links") or [],  # the daily digest's fix-it links; job runs have none
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
@@ -5900,14 +5828,14 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
 async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     cfg = settings()
     project = projects.get(body.project_id) if sid(body.project_id) else None
-    conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                     "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings}
+    conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True,
+                     "useSkills": True, "useStyle": True, **body.conv_settings}
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
         doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
         query=body.query, settings=cfg, conv_settings=conv_settings,
-        global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
+        global_system_prompt=cfg["systemPrompt"], skills=skills, style=style,
         draft=bool(conv_settings.get("draftMode")),
     )
     return used
@@ -6728,17 +6656,27 @@ async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
         raise HTTPException(502, f"Review failed: {e}") from e
 
 
-class DictationCleanIn(BaseModel):
-    text: str
+class VoiceConfigIn(BaseModel):
+    """A partial patch over the stored voice config; stt.clean_config validates and clamps the result."""
+
+    sttBackend: str | None = None
+    sttModel: str | None = None
+    whisperModelPath: str | None = None
+    whisperVadModelPath: str | None = None
+    hallucinationFilter: bool | None = None
+    dictationCleanup: bool | None = None
 
 
-@app.post("/docs/dictation/clean")
-async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
-    """Optional model pass over one committed dictation clip. Off by default: no model call is made
-    unless meetings.dictationCleanup is on. Always returns text, the input itself when anything fails."""
-    if not meeting_svc.config().get("dictationCleanup"):
-        return {"text": body.text}
-    return {"text": await assist.clean_dictation(settings(), body.text)}
+@app.get("/voice/config")
+def get_voice_config() -> dict[str, Any]:
+    return stt.config_for(db.get_settings())
+
+
+@app.put("/voice/config")
+def put_voice_config(body: VoiceConfigIn) -> dict[str, Any]:
+    cfg = stt.clean_config({**stt.config_for(db.get_settings()), **body.model_dump(exclude_none=True)})
+    db.set_settings({"voice": cfg})
+    return cfg
 
 
 # A dictated chat clip: 2 minutes of 16 kHz mono 16-bit PCM plus the WAV header.
@@ -6747,16 +6685,16 @@ STT_CLIP_MAX_BYTES = 2 * 60 * 16000 * 2 + 1024
 
 @app.post("/stt/transcribe")
 async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) -> dict[str, Any]:
-    """One short WAV from the composer's mic, transcribed by the configured meetings backend.
+    """One short WAV from the composer's mic, transcribed by the configured voice backend.
 
     Nothing is kept: the clip goes to a temp file that is removed whatever happens, and the text is
     returned for the composer to insert, never sent. 409 with the fix when no backend can run.
     """
-    cfg = meeting_svc.config()
+    cfg = stt.config_for(db.get_settings())
     backend = stt.resolve_backend(cfg, db.data_dir)
     if backend == "off":
         raise HTTPException(409, f"Transcription is off. {stt.OFF_FIX}")
-    if backend == "speech" and not (activity.IS_MAC and stt.speech_ready()):
+    if backend == "speech" and not (macos.IS_MAC and stt.speech_ready()):
         row = next((r for r in stt.capabilities(cfg, db.data_dir) if r["id"] == "stt"), {})
         raise HTTPException(409, row.get("fix") or "On-device Speech Recognition is not available.")
     data = bytearray()
@@ -6778,6 +6716,8 @@ async def stt_transcribe(audio: UploadFile = File(...), prompt: str = Form("")) 
     text = str(res.get("text") or "").strip()
     if text and not res.get("error") and cfg.get("hallucinationFilter", True):
         text = stt.filter_hallucinations(text, res.get("detail"), None, cfg)[0].strip()
+    if text and not res.get("error") and cfg["dictationCleanup"]:
+        text = (await assist.clean_dictation(settings(), text)).strip()
     return {"text": text, "backend": res.get("backend") or backend, "error": res.get("error") or "",
             "ms": res.get("ms", 0)}
 
@@ -7236,100 +7176,6 @@ def append_daily_doc(body: DailyAppendIn) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
 
 
-class DocRecordingIn(BaseModel):
-    mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
-    template: str = "general"
-    title: str | None = None
-    keep_audio: bool | None = None   # keep this recording's audio for playback; None follows the global setting
-
-
-async def _start_doc_recording(d: dict[str, Any], mode: str, template: str, title: str | None = None,
-                               meeting_id: str | None = None, **meeting_kw: Any) -> dict[str, Any]:
-    """Create (or adopt `meeting_id`) a recording linked to doc `d` and start it, through the same
-    consent + preflight gate as any meeting. A refused start deletes the row made for it; raises
-    HTTPException, and the caller decides what else to clean up."""
-    if mode not in ("record", "dictate"):
-        raise HTTPException(400, "mode must be 'record' or 'dictate'")
-    if not activity.IS_MAC:
-        row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
-        raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
-    m = meeting_store.create(
-        title=(title or "").strip() or d["title"], project_id=d["project_id"], template=template,
-        status="scheduled", doc_id=d["id"], doc_mode=mode, **meeting_kw)
-    try:
-        started = await asyncio.to_thread(meeting_svc.start, m["id"])
-    except BaseException as e:
-        meeting_store.delete(m["id"])
-        if isinstance(e, MeetingBlocked):
-            raise HTTPException(409, {"blockers": e.blockers}) from e
-        if isinstance(e, RecorderBusy):
-            raise HTTPException(409, {"meeting_id": e.meeting_id, "blockers": [{
-                "id": "busy", "label": "Already recording", "ok": False, "detail": str(e),
-                "fix": "Stop the meeting that is recording before starting another."}]}) from e
-        raise
-    if not started:
-        meeting_store.delete(m["id"])
-        raise HTTPException(404)
-    return started
-
-
-@app.post("/docs/{doc_id}/recordings")
-async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
-    d = docs.get(doc_id)
-    if not d:
-        raise HTTPException(404)
-    return await _start_doc_recording(d, body.mode, body.template, body.title, keep_audio=bool(body.keep_audio))
-
-
-class DocFromEventIn(BaseModel):
-    event_id: str
-    title: str = ""
-    start: float | None = None
-    attendees: list[Any] = []
-    project_id: str | None = None
-    mode: str = "record"
-    template: str = "general"
-
-
-# Declared above /docs/{id}, like /docs/daily.
-@app.post("/docs/from-event")
-async def doc_from_event(body: DocFromEventIn) -> dict[str, Any]:
-    """Calendar 'Take notes': one doc titled from the event, with the attendees listed, and a recording
-    linked to it. Repeating the call for the same event hands back the same doc. If the start is refused
-    (consent, preflight, busy) the doc is deleted too, so a blocked click leaves nothing behind."""
-    eid = body.event_id.strip()
-    if not eid:
-        raise HTTPException(400, "event_id is required")
-    prior = meeting_store.by_event(eid)
-    if prior and prior.get("doc_id") and (d := docs.get(prior["doc_id"])):
-        return {"doc": d, "started": prior, "existing": True}
-    people = [p for p in (_attendee_label(a) for a in body.attendees) if p]
-    title = body.title.strip() or "Meeting notes"
-    head = f"# {title}\n\n" + (f"Attendees: {', '.join(people)}\n\n" if people else "")
-    d = docs.create(title, head, wsid(body.project_id))
-    try:
-        started = await _start_doc_recording(
-            d, body.mode, body.template, title, calendar_event_id=None if prior else eid, attendees=body.attendees,
-            scheduled_start=body.start)
-    except BaseException:
-        docs.delete(d["id"])
-        raise
-    return {"doc": docs.get(d["id"]), "started": started, "existing": False}
-
-
-def _attendee_label(a: Any) -> str:
-    if isinstance(a, dict):
-        return str(a.get("name") or a.get("displayName") or a.get("email") or "").strip()
-    return str(a or "").strip()
-
-
-@app.get("/docs/{doc_id}/recordings")
-def doc_recordings(doc_id: str) -> list[dict[str, Any]]:
-    if not docs.get(doc_id):
-        raise HTTPException(404)
-    return meeting_store.for_doc(doc_id)
-
-
 @app.get("/docs/{doc_id}/backlinks")
 def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
     out = docs.backlinks(doc_id)
@@ -7466,8 +7312,7 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
         raise HTTPException(404)
     # A doc the user wrote is the best evidence of their voice there is — far better than chat. Banked
     # under a stable ref, so editing one doc for a week refreshes one sample instead of adding seven.
-    # Not for a doc with a recording in it: its accepted summaries are other people's speech, not the user's voice.
-    if settings().get("learnStyle", True) and not meeting_store.records_doc(id):
+    if settings().get("learnStyle", True):
         if style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}"):
             queue_style_relearn(d["project_id"])
     return d
@@ -7597,835 +7442,6 @@ def delete_doc_comment(cid: str) -> dict[str, bool]:
     if not docs.delete_comment(cid):
         raise HTTPException(404)
     return {"ok": True}
-
-
-# ---------------- activity monitor ----------------
-#
-# Everything here is inert until the user turns it on. The renderer drives it from the Activity
-# panel; the summaries it produces land in <data_dir>/context/activity.md and, when the user
-# leaves injection on, in each chat's context block.
-
-
-class ActivityConfigIn(BaseModel):
-    """A partial patch, deep-merged over the stored config."""
-
-    enabled: bool | None = None
-    signals: dict[str, bool] | None = None
-    sampleSeconds: int | None = None
-    idleSeconds: int | None = None
-    rollupMinutes: int | None = None
-    retentionHours: float | None = None
-    summaryRetentionDays: float | None = None
-    contextDays: int | None = None
-    injectContext: bool | None = None
-    redact: bool | None = None
-    excludeApps: list[str] | None = None
-    excludeTitlePatterns: list[str] | None = None
-    excludeRules: list[dict[str, str]] | None = None
-    redactAllow: list[str] | None = None
-    redactDeny: list[str] | None = None
-    redactThreshold: float | None = None
-    categories: list[dict[str, Any]] | None = None
-    audio: dict[str, Any] | None = None
-    summaryModel: str | None = None
-    profileEveryHours: float | None = None
-    recordEverything: bool | None = None
-    insights: dict[str, Any] | None = None
-
-
-class PauseIn(BaseModel):
-    minutes: float = 30.0
-
-
-class PurgeIn(BaseModel):
-    scope: str = "expired"  # expired | events | summaries | all
-
-
-@app.get("/activity/status")
-def activity_status() -> dict[str, Any]:
-    return monitor.status()
-
-
-@app.put("/activity/config")
-def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True)
-    # Record-everything mode never travels as a plain field: it has to go through set_record_everything, which
-    # snapshots the settings it is about to flatten so they can be put back.
-    recordEverything = patch.pop("recordEverything", None)
-    if patch:
-        monitor.set_config(patch)
-    if recordEverything is not None and bool(recordEverything) != bool(monitor.config().get("recordEverything")):
-        monitor.set_record_everything(bool(recordEverything))
-    return monitor.status()
-
-
-@app.get("/activity/categories")
-def activity_categories_get() -> dict[str, Any]:
-    from . import activity_categories as cats
-    return cats.effective(monitor.config())
-
-
-class CategoriesIn(BaseModel):
-    rules: list[dict[str, Any]] | None = None   # null resets to the default tree
-
-
-@app.put("/activity/categories")
-def activity_categories_put(body: CategoriesIn) -> dict[str, Any]:
-    from . import activity_categories as cats
-    try:
-        return cats.save(monitor, body.rules)
-    except ValueError as e:
-        msg, idx = e.args
-        raise HTTPException(400, {"error": msg, "index": idx})
-
-
-@app.get("/activity/categories/report")
-def activity_categories_report(days: int = 7) -> dict[str, Any]:
-    from . import activity_categories as cats
-    return cats.report_for(monitor, max(1, min(90, days)))
-
-
-class RedactTestIn(BaseModel):
-    text: str = ""
-
-
-@app.post("/activity/redact/test")
-def activity_redact_test(body: RedactTestIn) -> dict[str, Any]:
-    """Run a string through the current redaction config. In memory only: not stored, not logged."""
-    return activity.redact_preview(monitor.config(), body.text)
-
-
-class RecordEverythingIn(BaseModel):
-    on: bool = True
-
-
-@app.post("/activity/record-everything")
-def activity_record_everything(body: RecordEverythingIn) -> dict[str, Any]:
-    """Record everything, or put back what was there before. The gate's discretionary filters go
-    down with it, so the panel spells out what it does before anyone presses it."""
-    if body.on and not activity.IS_MAC:
-        raise HTTPException(400, "The activity collectors are macOS-only.")
-    return monitor.set_record_everything(bool(body.on))
-
-
-class PermissionIn(BaseModel):
-    id: str
-    browser: str = ""
-
-
-@app.post("/activity/permissions/request")
-def activity_permission_request(body: PermissionIn) -> dict[str, Any]:
-    """Ask macOS for one permission - the only route that can put a system dialog on screen, and
-    it exists because the user pressed Grant."""
-    out = activity.request_permission(body.id, body.browser)
-    return {"result": out, "status": monitor.status()}
-
-
-@app.post("/activity/permissions/open")
-def activity_permission_open(body: PermissionIn) -> dict[str, bool]:
-    """Open the Privacy & Security pane for one permission. Opening a pane grants nothing."""
-    return {"ok": activity.open_settings(body.id)}
-
-
-@app.post("/activity/start")
-def activity_start() -> dict[str, Any]:
-    if not activity.IS_MAC:
-        raise HTTPException(400, "The activity collectors are macOS-only.")
-    return monitor.start()
-
-
-@app.post("/activity/stop")
-def activity_stop() -> dict[str, Any]:
-    return monitor.stop()
-
-
-@app.post("/activity/pause")
-def activity_pause(body: PauseIn) -> dict[str, Any]:
-    return monitor.pause(body.minutes)
-
-
-@app.post("/activity/resume")
-def activity_resume() -> dict[str, Any]:
-    return monitor.resume()
-
-
-@app.get("/activity/events")
-def activity_events(limit: int = 200, hours: float = 24.0, kind: str = "") -> list[dict[str, Any]]:
-    """The raw log, newest first - so the user can see exactly what was recorded about them."""
-    kinds = [k for k in kind.split(",") if k] or None
-    return monitor.store.recent(limit=min(int(limit), 2000), since=time.time() - max(0.1, hours) * 3600, kinds=kinds)
-
-
-@app.delete("/activity/events/{eid}")
-def activity_delete_event(eid: str) -> dict[str, bool]:
-    monitor.store.delete_event(eid)
-    return {"ok": True}
-
-
-@app.get("/activity/summaries")
-def activity_summaries(day: str | None = None, days: float = 7.0, limit: int = 200) -> list[dict[str, Any]]:
-    since = None if day else time.time() - max(0.1, days) * 86400
-    return monitor.store.summaries(day=day, since=since, limit=min(int(limit), 500))
-
-
-@app.delete("/activity/summaries/{sid_}")
-def activity_delete_summary(sid_: str) -> dict[str, bool]:
-    monitor.store.delete_summary(sid_)
-    monitor.write_markdown()
-    return {"ok": True}
-
-
-@app.post("/activity/rollup")
-async def activity_rollup() -> dict[str, Any]:
-    """Summarize whatever is pending right now instead of waiting for the interval."""
-    s = await monitor.rollup_once(force=True)
-    return {"summary": s, "status": monitor.status()}
-
-
-@app.post("/activity/profile")
-async def activity_profile() -> dict[str, Any]:
-    return {"profile": await monitor.refresh_profile()}
-
-
-@app.get("/activity/context")
-def activity_context() -> dict[str, Any]:
-    """The markdown file plus the trimmed block chats actually see."""
-    monitor.write_markdown()
-    return {"path": str(monitor.md_path), "markdown": monitor.read_markdown(), "injected": monitor.context_block()}
-
-
-@app.post("/activity/purge")
-def activity_purge(body: PurgeIn) -> dict[str, Any]:
-    return {"deleted": monitor.purge(body.scope), "status": monitor.status()}
-
-
-# ---------------- insights: habits and automation suggestions ----------------
-#
-# Everything under here is derived from the activity data: the patterns are mined locally with no
-# model, the habits are written into the ordinary memory panel (and listed with a Forget button),
-# and a suggestion is a proposal with a status. Nothing applies itself - /apply exists because the
-# user pressed a button, and for the common `prompt` action it does not even act: it hands back the
-# message for them to send, so the setup happens in a chat with the usual tool approvals.
-
-
-class SuggestionStatusIn(BaseModel):
-    status: str
-    note: str = ""
-    snooze_days: float = 7.0
-
-
-@app.get("/activity/insights")
-def activity_insights() -> dict[str, Any]:
-    return monitor.insights.overview()
-
-
-@app.post("/activity/insights/mine")
-def activity_insights_mine() -> dict[str, Any]:
-    """Re-mine the patterns without calling a model. Cheap, offline, and what the panel shows."""
-    monitor.insights.mine_now()
-    return monitor.insights.overview()
-
-
-@app.post("/activity/insights/refresh")
-async def activity_insights_refresh() -> dict[str, Any]:
-    return await monitor.insights.refresh(force=True)
-
-
-@app.post("/activity/insights/{sid_}/status")
-def activity_insight_status(sid_: str, body: SuggestionStatusIn) -> dict[str, Any]:
-    try:
-        out = monitor.insights.set_status(sid_, body.status, body.note, body.snooze_days)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    if not out:
-        raise HTTPException(404, "No such suggestion")
-    return out
-
-
-@app.post("/activity/insights/{sid_}/apply")
-def activity_insight_apply(sid_: str) -> dict[str, Any]:
-    try:
-        return monitor.insights.apply(sid_)
-    except KeyError as e:
-        raise HTTPException(404, "No such suggestion") from e
-
-
-@app.delete("/activity/habits/{hid}")
-def activity_habit_forget(hid: str) -> dict[str, bool]:
-    """Forget a habit and the memory it wrote. The memory panel's own delete still works too."""
-    monitor.insights.forget_habit(hid, drop_memory=True)
-    monitor.write_markdown()
-    return {"ok": True}
-
-
-@app.on_event("startup")
-async def _activity_startup() -> None:
-    """Resume the monitor if it was on when the app last quit, and run the rollup loop."""
-    if monitor.config().get("enabled") and activity.IS_MAC:
-        try:
-            monitor.start()
-        except Exception as e:  # noqa: BLE001 - a failing probe must not stop the backend booting
-            log.warning("activity: could not resume: %s", e)
-    app.state.activity_task = asyncio.create_task(monitor.loop())
-
-
-@app.on_event("shutdown")
-async def _activity_shutdown() -> None:
-    task = getattr(app.state, "activity_task", None)
-    if task:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-    monitor.stop(persist=False)  # keep `enabled` so the next launch resumes
-
-
-# ---------------- meetings: recorded calls with reviewable enhanced notes ----------------
-#
-# Inert until the user turns it on AND acknowledges the recording notice: `consentedAt` is 0 by
-# default and preflight blocks Start until it is stamped. Start is blocked rather than warned
-# about, because recording an hour of audio nothing can transcribe is worse than refusing.
-#
-# Nothing here expires. /activity/purge runs a bare DELETE FROM activity_events, and no route
-# below can be reached by it.
-
-
-def _recording_changed(event: dict[str, Any]) -> None:
-    """A recording moved (segment settled, status change, summary landed): tell every window.
-
-    Called from the recorder's worker thread as well as the event loop, and a Topic's queues belong
-    to the loop, so off-loop calls are handed to it (same shape as _desk_changed)."""
-    try:
-        running = asyncio.get_running_loop()
-    except RuntimeError:
-        running = None
-    if running is not None:
-        events.publish("recording", event)
-    elif _loop is not None and not _loop.is_closed():
-        _loop.call_soon_threadsafe(events.publish, "recording", event)
-
-
-meeting_svc.publish = _recording_changed
-
-
-def _preview_changed(event: dict[str, Any]) -> None:
-    """Volatile/final dictation text, from the audio thread: same hand-off to the loop as above."""
-    if _loop is not None and not _loop.is_closed():
-        _loop.call_soon_threadsafe(events.publish, "preview", event)
-
-
-meeting_svc.preview_publish = _preview_changed
-
-
-class MeetingIn(BaseModel):
-    """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
-    this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
-
-    title: str = ""
-    project_id: str | None = None
-    template: str = "general"
-    status: str = "scheduled"
-    # Adopting a calendar candidate comes through here too: the partial unique index on
-    # calendar_event_id makes a second POST for one event hand back the row that already exists.
-    calendar_event_id: str | None = None
-    calendar_id: str | None = None
-    calendar_link: str = ""
-    conference_link: str = ""
-    # list[Any] because create() normalises either shape: a list of {email,name,...} dicts, or the
-    # bare email strings a caller holding only a calendar event's `attendees` array would send.
-    attendees: list[Any] = []
-    scheduled_start: float | None = None
-    scheduled_end: float | None = None
-    # A recording made for a doc (audio import into a doc goes through here, then import-audio).
-    doc_id: str | None = None
-    doc_mode: str | None = None
-
-
-class MeetingSummarizeIn(BaseModel):
-    template: str | None = None
-    focus: str = ""
-    force: bool = False
-
-
-class MeetingPatch(BaseModel):
-    """What the user owns. `started_at`, `sources`, `transcript`, `duration_ms` and `audio_dir` are
-    deliberately absent: those go through the service, so no PATCH body can claim a meeting
-    captured a channel it never opened."""
-
-    title: str | None = None
-    notes: str | None = None
-    enhanced: str | None = None
-    summary: str | None = None
-    template: str | None = None
-    keep_audio: bool | None = None
-    conversation_id: str | None = None
-    project_id: str | None = None
-    clear_project: bool = False  # exclude_none=True would otherwise drop a null project_id
-
-
-class MeetingConfigIn(BaseModel):
-    """A partial patch, deep-merged over the stored config (ActivityConfigIn's shape).
-
-    `consentedAt` is not here: it is stamped by POST /meetings/consent and nothing else, so a
-    settings PUT cannot acknowledge the recording notice on the user's behalf.
-    """
-
-    enabled: bool | None = None
-    autoRecord: bool | None = None
-    nudgeSeconds: int | None = None
-    micDevice: str | None = None
-    micDeviceName: str | None = None
-    outputDevice: str | None = None
-    outputDeviceName: str | None = None
-    sources: list[str] | None = None
-    segmentSeconds: int | None = None
-    docSegmentSeconds: int | None = None
-    dictationSegmentSeconds: int | None = None
-    maxMeetingSeconds: int | None = None
-    drainSeconds: int | None = None
-    sttBackend: str | None = None
-    sttModel: str | None = None
-    whisperModelPath: str | None = None
-    template: str | None = None
-    customTemplates: list[dict[str, Any]] | None = None
-    recipes: list[dict[str, Any]] | None = None
-    summaryLanguage: str | None = None
-    enhanceOnStop: bool | None = None
-    enhanceModel: str | None = None
-    maxTranscriptChars: int | None = None
-    minSummaryWords: int | None = None
-    vocabularyPrompt: bool | None = None
-    keepAudio: bool | None = None
-    silencePauseMinutes: int | None = None
-    maxAudioBytes: int | None = None
-    redactSecrets: bool | None = None
-    injectContext: bool | None = None
-    autoStopGraceSeconds: int | None = None
-    calendarIds: list[str] | None = None
-    minAttendees: int | None = None
-    vadGate: bool | None = None
-    livePreview: bool | None = None
-    vadMinSpeechRatio: float | None = None
-    hallucinationFilter: bool | None = None
-    whisperVadModelPath: str | None = None
-    maxImportSeconds: int | None = None
-    diarize: bool | None = None
-    diarizeBackend: str | None = None
-    diarizeSegmentationModel: str | None = None
-    diarizeEmbeddingModel: str | None = None
-    diarizeThreshold: float | None = None
-    diarizeSpeakers: int | None = None
-    dictationCleanup: bool | None = None
-    terms: list[str] | None = None
-
-
-class MeetingSpeakersIn(BaseModel):
-    """Display names for diarized speaker ids, e.g. {"S1": "Dana"}. A blank name clears one."""
-
-    names: dict[str, str]
-
-
-class MeetingActionsIn(BaseModel):
-    """Which proposed action items become todos. Empty `ids` means every one still proposed."""
-
-    ids: list[str] = []
-    project_id: str | None = None
-
-
-# Every literal sub-path is registered BEFORE /meetings/{id}: FastAPI matches in declaration
-# order, so a later /meetings/status would be read as a meeting id. Same trap as the one flagged
-# at app.py:1302 and relied on by /docs/pending.
-@app.get("/meetings/status")
-def meeting_status() -> dict[str, Any]:
-    """Cheap enough to poll at a second or two: no network call, and the device list is TTL-cached."""
-    return meeting_svc.status()
-
-
-@app.get("/meetings/preflight")
-async def meeting_preflight(force: bool = False) -> dict[str, Any]:
-    """Capabilities plus a real round trip, cached ten minutes. Threaded: it runs ffmpeg and an
-    HTTP request with a 120s timeout, neither of which belongs on the event loop."""
-    return await asyncio.to_thread(meeting_svc.preflight, force)
-
-
-@app.put("/meetings/config")
-def meeting_config(body: MeetingConfigIn) -> dict[str, Any]:
-    """Deep-merged, and it never touches a live recording: picking a different microphone halfway
-    through a call applies to the next segment instead of tearing the capture down."""
-    try:
-        meeting_svc.set_config(body.model_dump(exclude_none=True))
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    return meeting_svc.status()
-
-
-@app.get("/meetings/config")
-def get_meeting_config() -> dict[str, Any]:
-    return meeting_svc.config()
-
-
-@app.post("/meetings/consent")
-def meeting_consent() -> dict[str, Any]:
-    """The one-time acknowledgement that the people on the call will be told."""
-    meeting_svc.consent()
-    return meeting_svc.status()
-
-
-@app.post("/meetings/selftest")
-async def meeting_selftest() -> dict[str, Any]:
-    """Force the probe: a synthesized silent wav, recorded and transcribed for real. Returns the
-    whole preflight, so a passing self-test also clears whatever it was blocking."""
-    return await asyncio.to_thread(meeting_svc.preflight, True)
-
-
-@app.get("/meetings/suggest")
-async def meeting_suggest() -> list[dict[str, Any]]:
-    """Calendar events happening right now that are worth taking notes on. No LLM, 60s cached.
-
-    [] rather than an error whenever Google is not connected or the scope was never granted: a
-    missing suggestion is a missing row in a panel, not a broken panel.
-    """
-    st = pim.status()
-    if not st["connected"] or (pim.provider == "google" and not _google_has(st, "calendar")):
-        return []
-    return await meeting_svc.suggest()
-
-
-@app.get("/meetings/pending")
-def meetings_pending() -> dict[str, int]:
-    """Badge count for the sidebar: enhance proposals waiting to be reviewed."""
-    return {"pending": meeting_store.pending_count()}
-
-
-@app.post("/meetings/revisions/{rev_id}/accept")
-def accept_meeting_revision(rev_id: str) -> dict[str, Any]:
-    """Writes `enhanced` and nothing else - what the user typed is never touched."""
-    m = meeting_store.accept(rev_id)
-    if not m:
-        raise HTTPException(404, "No pending revision with that id")
-    return m
-
-
-@app.post("/meetings/revisions/{rev_id}/reject")
-def reject_meeting_revision(rev_id: str) -> dict[str, Any]:
-    m = meeting_store.reject(rev_id)
-    if not m:
-        raise HTTPException(404, "No pending revision with that id")
-    return m
-
-
-@app.get("/meetings")
-def list_meetings(project_id: str | None = "all", q: str = "", status: str = "",
-                  since_days: int = 0, limit: int = 100, doc_id: str | None = None,
-                  include_docs: bool = False) -> list[dict[str, Any]]:
-    """Preview rows: counts and the first 240 characters of the notes, never a body.
-
-    Recordings made inside a doc are not meetings of their own: they are left out unless
-    `include_docs` is set, and `doc_id` selects one doc's."""
-    scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.list(scope, q, status, since_days, _clamp(limit), doc_id=doc_id, include_docs=include_docs)
-
-
-@app.post("/meetings")
-def create_meeting(body: MeetingIn) -> dict[str, Any]:
-    doc_project: str | None = None
-    if body.doc_id:
-        doc = docs.get(body.doc_id)  # None when missing or trashed
-        if not doc:
-            raise HTTPException(404, "That file does not exist or is in the trash.")
-        if body.doc_mode not in (None, "record", "dictate"):
-            raise HTTPException(400, "doc_mode must be 'record' or 'dictate'")
-        doc_project = doc["project_id"]
-    return meeting_store.create(
-        doc_id=body.doc_id, doc_mode=body.doc_mode if body.doc_id else None,
-        title=body.title, project_id=doc_project if body.doc_id else wsid(body.project_id), template=body.template,
-        calendar_event_id=body.calendar_event_id, calendar_id=body.calendar_id,
-        calendar_link=body.calendar_link, conference_link=body.conference_link,
-        attendees=body.attendees, scheduled_start=body.scheduled_start,
-        scheduled_end=body.scheduled_end, status=body.status)
-
-
-@app.get("/meetings/{id}")
-def get_meeting(id: str) -> dict[str, Any]:
-    m = meeting_store.get(id, include_hidden=False)
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-@app.put("/meetings/{id}")
-def update_meeting(id: str, body: MeetingPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
-    if body.clear_project:
-        patch["project_id"] = None
-    elif "project_id" in patch:
-        patch["project_id"] = wsid(patch["project_id"])
-    m = meeting_store.patch(id, patch)
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-@app.delete("/meetings/{id}")
-def delete_meeting(id: str) -> dict[str, bool]:
-    """Idempotent, like delete_note: a missing id is already the state the caller asked for."""
-    meeting_store.delete(id)
-    return {"ok": True}
-
-
-@app.post("/meetings/{id}/start")
-async def start_meeting(id: str) -> dict[str, Any]:
-    """Open the configured channels. Blocked, not warned: a failing preflight is a 409 carrying the
-    checklist, and something already recording is a 409 naming the meeting that holds the mic."""
-    if not activity.IS_MAC:
-        row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
-        raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
-    try:  # preflight runs ffmpeg and a real HTTP round trip, and launching ffmpeg blocks too
-        m = await asyncio.to_thread(meeting_svc.start, id)
-    except MeetingBlocked as e:
-        raise HTTPException(409, {"blockers": e.blockers}) from e
-    except RecorderBusy as e:
-        raise HTTPException(409, {"meeting_id": e.meeting_id, "blockers": [{
-            "id": "busy", "label": "Already recording", "ok": False, "detail": str(e),
-            "fix": "Stop the meeting that is recording before starting another."}]}) from e
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-@app.post("/meetings/{id}/stop")
-async def stop_meeting(id: str) -> dict[str, Any]:
-    """Captures down, queue drained (up to drainSeconds), transcript rolled up. The enhance pass is
-    queued rather than awaited, so a slow model does not hold the stop request open."""
-    m = await meeting_svc.stop(id)
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-@app.post("/meetings/{id}/import-audio", status_code=202)
-async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
-    """Transcribe an existing recording into this meeting. 202: the work runs in the background and
-    the existing /meetings/{id}/segments poll carries progress."""
-    try:
-        meeting_import.check(meeting_svc, id)
-    except LookupError as e:
-        raise HTTPException(404) from e
-    except MeetingBlocked as e:
-        raise HTTPException(409, {"blockers": e.blockers}) from e
-    except meeting_import.ImportRefused as e:
-        raise HTTPException(409, str(e)) from e
-    tmp = db.data_dir / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
-    dest = tmp / f"import-{new_id()}-{meeting_import.safe_name(file.filename or '')}"
-    size, cap = 0, 1 << 30
-    try:
-        with dest.open("wb") as out:
-            while chunk := await file.read(1 << 20):
-                size += len(chunk)
-                if size > cap:
-                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
-                out.write(chunk)
-        await asyncio.to_thread(meeting_import.probe, dest, meeting_svc.config())
-    except ValueError as e:
-        dest.unlink(missing_ok=True)
-        raise HTTPException(400, str(e)) from e
-    except BaseException:
-        dest.unlink(missing_ok=True)
-        raise
-
-    async def _go() -> None:
-        try:
-            await meeting_import.run(meeting_svc, id, dest, cleanup_src=True)
-        except Exception as e:  # noqa: BLE001 - the run already put the reason on the meeting
-            logging.getLogger("personal_os").warning("meeting import %s: %s", id, e)
-
-    asyncio.ensure_future(_go())
-    return meeting_store.get(id, include_hidden=False) or {}
-
-
-@app.post("/meetings/{id}/diarize")
-async def diarize_meeting(id: str) -> dict[str, Any]:
-    """(Re)run speaker separation on retained audio. With no backend it answers ok=false and a note,
-    never an error: the transcript simply keeps its channel labels."""
-    res = await meeting_svc.diarize(id)
-    if res.get("note") == "no such meeting":
-        raise HTTPException(404)
-    return {**res, "meeting": meeting_store.get(id, include_hidden=False)}
-
-
-@app.put("/meetings/{id}/speakers")
-async def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
-    try:
-        m = meeting_svc.set_speakers(id, body.names)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-class NoteMarksIn(BaseModel):
-    """Lines typed during a recording: [{line, t}] with t the recording offset in seconds."""
-
-    marks: list[dict[str, Any]] = Field(default_factory=list)
-
-
-@app.put("/meetings/{id}/note-marks")
-def put_note_marks(id: str, body: NoteMarksIn) -> dict[str, Any]:
-    out = meeting_svc.meetings.set_note_marks(id, body.marks[-500:])
-    if out is None:
-        raise HTTPException(404)
-    return {"marks": out}
-
-
-@app.post("/meetings/{id}/pause")
-def pause_meeting(id: str) -> dict[str, Any]:
-    """ffmpeg keeps running so segment numbering stays monotonic; the worker discards the audio.
-    Never a stop/start pair: that would restart the counter and overwrite earlier files."""
-    st = meeting_svc.pause(id)
-    if not st:
-        raise HTTPException(409, "That meeting is not recording")
-    return st
-
-
-@app.post("/meetings/{id}/resume")
-def resume_meeting(id: str) -> dict[str, Any]:
-    st = meeting_svc.resume(id)
-    if not st:
-        raise HTTPException(409, "That meeting is not recording")
-    return st
-
-
-@app.get("/meetings/{id}/segments")
-def meeting_segments(id: str, since: int = -1, offset: int = 0, limit: int = 200,
-                     channel: str = "") -> list[dict[str, Any]]:
-    """The live transcript pane's poll. `since` is a rowid cursor and each row carries the `cursor`
-    to pass back, so since=0 is the whole tail with cursors; omitting it pages by t_start."""
-    if meeting_store.is_hidden(id):
-        raise HTTPException(404)
-    limit = _clamp(limit, 2000)
-    if since >= 0:
-        return meeting_store.since(id, since, limit)
-    return meeting_store.segments(id, max(0, offset), limit, channel)
-
-
-@app.post("/meetings/{id}/enhance")
-async def enhance_meeting(id: str, force: bool = False, template: str | None = None) -> dict[str, Any]:
-    """Cache-or-generate, like /recap: an existing proposal is the answer unless ?force=true.
-
-    Returns a REVISION, not the meeting. A degraded pass is a 200 carrying `degraded: true` - its
-    mechanical fallback still holds the user's notes verbatim, so there is something to accept -
-    and only a pass that could write no revision at all is a 502.
-    """
-    m = meeting_store.get(id, include_hidden=False)
-    if not m:
-        raise HTTPException(404)
-    if m.get("doc_id"):
-        raise HTTPException(400, "This is a recording of a file: use /meetings/{id}/summarize.")
-    rev = await meeting_svc.enhance(id, force, template)
-    if not rev:
-        raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
-    return rev
-
-
-@app.post("/meetings/{id}/summarize")
-async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]:
-    """Write a summary of a doc recording and PROPOSE it as a section at the end of its doc. Never
-    applied here, whatever the doc edit mode is: the user accepts it in the doc. A model failure is a
-    200 with `error` set and no revision, so the UI can offer it again."""
-    m = meeting_store.get(id, include_hidden=False)
-    if not m:
-        raise HTTPException(404)
-    if not m.get("doc_id"):
-        raise HTTPException(400, "Only a recording made in a file can be summarized into it.")
-    return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
-
-
-@app.get("/meetings/{id}/actions")
-def meeting_actions(id: str) -> list[dict[str, Any]]:
-    if not meeting_store.get(id, include_hidden=False):
-        raise HTTPException(404)
-    return meeting_store.action_items(id)
-
-
-@app.post("/meetings/{id}/actions/add-todos")
-def meeting_actions_add_todos(id: str, body: MeetingActionsIn) -> list[dict[str, Any]]:
-    """Promote proposed items into real todos. Idempotent per item - one that already carries a
-    todo_id is left alone - and todos.on_change pushes each new task to Google within ~2s."""
-    if not meeting_store.get(id, include_hidden=False):
-        raise HTTPException(404)
-    scope = wsid(body.project_id) if body.project_id else None  # None means "the meeting's own"
-    want = set(body.ids)
-    for a in meeting_store.action_items(id):
-        if a["status"] == "proposed" and (not want or a["id"] in want):
-            meeting_store.promote_action_item(a["id"], todos, scope)
-    return meeting_store.action_items(id)
-
-
-@app.post("/meetings/{id}/actions/{action_id}/dismiss")
-def meeting_action_dismiss(id: str, action_id: str) -> dict[str, Any]:
-    a = meeting_store.dismiss_action_item(action_id)
-    if not a:
-        raise HTTPException(404)
-    return a
-
-
-@app.post("/meetings/{id}/retranscribe")
-async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
-    """Replay the failed segments whose wav is still on disk. One HTTP request per segment, so it
-    runs in a thread. Attempts are reset first: the ceiling is there for the unattended tick."""
-    if not meeting_store.get(id, include_hidden=False):
-        raise HTTPException(404)
-    # `retranscribe` settles every meeting it touched itself, rebuilding `transcript`, the FTS row
-    # and the error column clause by clause. This route used to redo that rebuild and compute
-    # `error = "" if text and not failed_segments(id)`, which cleared the WHOLE column - throwing
-    # away banners that are still true after a replay, like a dead loopback channel or a failed
-    # enhance pass. Let the service own it.
-    meeting_store.reset_attempts(id)  # the user asked: segments past the tick's ceiling get another go
-    settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
-    return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
-
-
-@app.get("/meetings/{id}/segments/{seg_id}/audio")
-def meeting_segment_audio(id: str, seg_id: str) -> FileResponse:
-    """One kept segment's wav, for click-to-play. 404 unless the recording keeps audio and the file is inside its audio dir."""
-    if meeting_store.is_hidden(id):
-        raise HTTPException(404)
-    p = meeting_store.kept_segment_wav(id, seg_id)
-    if not p:
-        raise HTTPException(404, "Audio was not kept")
-    return FileResponse(p, media_type="audio/wav")
-
-
-@app.delete("/meetings/{id}/audio")
-def delete_meeting_audio(id: str) -> dict[str, Any]:
-    """The wavs go; the segment rows stay, so the UI can still say why retranscribe is over."""
-    m = meeting_store.delete_audio(id)
-    if not m:
-        raise HTTPException(404)
-    return m
-
-
-@app.on_event("startup")
-async def _meetings_startup() -> None:
-    """Close out whatever a quit interrupted, then run the 45s nudge/auto-stop/retranscribe tick."""
-    try:
-        meeting_svc.recover()
-    except Exception as e:  # noqa: BLE001 - a failing probe must not stop the backend booting
-        log.warning("meetings: could not recover interrupted meetings: %s", e)
-    app.state.meetings_task = asyncio.create_task(meeting_svc.loop())
-
-
-@app.on_event("shutdown")
-async def _meetings_shutdown() -> None:
-    task = getattr(app.state, "meetings_task", None)
-    if task:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
-    # Synchronous, and up to ~5s per live meeting: every ffmpeg gets its graceful `q` so the last
-    # segment is flushed rather than left as a 0-byte orphan.
-    await asyncio.to_thread(meeting_svc.shutdown)
 
 
 # ---------------- space presets: named templates of a canvas ----------------
@@ -8793,7 +7809,7 @@ def teach_list() -> list[dict[str, Any]]:
 @app.post("/teach/start")
 def teach_start() -> dict[str, Any]:
     """Start a screen recording. {needs_permission: true} when macOS has not granted Screen Recording: the panel
-    then offers the same Grant / Open System Settings as the Activity panel (/activity/permissions/*)."""
+    then offers Grant / Open System Settings (/system/permissions/*)."""
     try:
         return teach_svc.start()
     except teach.TeachError as e:
@@ -9741,7 +8757,7 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
         return {"ref": rev["id"], "verified": ok,
                 "error": None if ok else "the pending revision does not match the file"}
     if dest == "todo":
-        # source='desk': the titles are agent-written, so listing them taints a turn like mail or a meeting does.
+        # source='desk': the titles are agent-written, so listing them taints a turn like mail does.
         items = checklist_items(content)
         if not items:
             return {"ref": None, "verified": False, "error": "the file has no lines to make todos from"}

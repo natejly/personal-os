@@ -9,7 +9,7 @@ Privacy is the whole design:
 - A loopback endpoint is fine; a remote one is refused unless `allowRemote` is set.
 - Without `includeContent`, only names, timings, token counts, model, finish reasons, tool names,
   error strings and ids go out. The system prompt, memories and retrieved text never do, with or
-  without the flag, and content is dropped for a reply whose context carried activity or meetings.
+  without the flag.
 - Nothing here can fail or delay a reply.
 """
 from __future__ import annotations
@@ -67,11 +67,6 @@ def _int(v: Any) -> int:
         return 0
 
 
-def content_allowed(include_content: bool, used: dict[str, Any] | None) -> bool:
-    """Activity and meeting text can reach a reply without the user quoting it, so it vetoes the flag."""
-    return bool(include_content) and not (used or {}).get("activity") and not (used or {}).get("meetings")
-
-
 def _span_attrs(s: dict[str, Any], model: str, with_content: bool) -> dict[str, Any]:
     m = s.get("meta") or {}
     kind = s.get("kind")
@@ -105,8 +100,8 @@ def _span_attrs(s: dict[str, Any], model: str, with_content: bool) -> dict[str, 
 def to_otlp(trace_spans: list[dict[str, Any]], *, conversation_id: str, message_id: str, model: str, project_name: str | None = None,
             include_content: bool = False, content: dict[str, Any] | None = None) -> dict[str, Any]:
     """An OTLP/JSON ExportTraceServiceRequest. `content` is {"reply": str, "used": context_used}; it is read
-    only when include_content is true and the reply's context carried no activity or meetings."""
-    with_content = content_allowed(include_content, (content or {}).get("used"))
+    only when include_content is true."""
+    with_content = bool(include_content)
     trace_id = _hex(message_id, 32)
     root_id = _hex("root:" + message_id, 16)
     end_default = now_ms()

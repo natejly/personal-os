@@ -757,7 +757,7 @@ def test_a_checklist_becomes_one_todo_per_line() -> None:
     made = [todos.get(i) for i in out["ref"].split(",")]
     check([t["title"] for t in made] == ["Book the room", "Send the agenda", "Pick a date"],
           f"one todo per checklist line, headings skipped, got {[t['title'] for t in made]}")
-    check(all(t["source"] == "desk" for t in made), "marked as agent input, like mail and meetings")
+    check(all(t["source"] == "desk" for t in made), "marked as agent input, like mail")
     check(checklist_items("first\n\n  second  \n") == ["first", "second"], "with no list lines, every non-empty line")
     check(len(checklist_items("\n".join(f"{n}. step" for n in range(80)))) == 50, "and never more than 50")
 

@@ -348,7 +348,7 @@ def system_prompt_for(project_id: str | None = None) -> str:
     system, _ = build_context(
         memories=appmod.memories, graph=appmod.graph, documents=appmod.documents, project=None,
         project_id=project_id, query="how do I do the monthly thing", settings=appmod.settings(),
-        conv_settings={}, global_system_prompt="You are Grain.", activity=None, skills=appmod.skills,
+        conv_settings={}, global_system_prompt="You are Grain.", skills=appmod.skills,
     )
     return system
 

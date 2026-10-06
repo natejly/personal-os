@@ -59,21 +59,3 @@ def test_injection_is_data_and_an_answer_instead_of_an_edit_is_dropped() -> None
 
 def test_empty_reply_returns_raw() -> None:
     assert run("  ")[0] == RAW
-
-
-def test_setting_off_makes_no_model_call() -> None:
-    from fastapi.testclient import TestClient
-    from personal_os.app import AUTH_TOKEN, app
-
-    calls: list = []
-
-    async def fake(*a, **k):
-        calls.append(1)
-        return "X"
-
-    orig, llm.complete = llm.complete, fake
-    try:
-        r = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN}).post("/docs/dictation/clean", json={"text": "hi um"})
-    finally:
-        llm.complete = orig
-    assert r.json() == {"text": "hi um"} and not calls

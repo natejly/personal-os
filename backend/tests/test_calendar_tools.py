@@ -79,13 +79,9 @@ def test_the_list_tool_returns_compact_local_rows() -> None:
                       "calendar_id": "primary"}, "an all-day date is left alone"
 
 
-def test_meeting_brief_lists_attendee_memories_and_past_meetings() -> None:
+def test_meeting_brief_lists_attendee_memories() -> None:
     tb = appmod.toolbox
     tb.memories.create(None, "Mira Chen prefers short agendas", kind="fact", source="auto")
-    mt = tb.meetings.meetings if hasattr(tb.meetings, "meetings") else tb.meetings
-    m = mt.create(title="Roadmap sync")
-    with mt.db.tx() as c:
-        c.execute("UPDATE meetings SET attendees=? WHERE id=?", ('[{"email":"mira@example.com"}]', m["id"]))
     ev = {"summary": "Review", "start": "2026-10-05T10:00", "end": "2026-10-05T11:00", "attendee_details": [
         {"email": "me@example.com", "self": True}, {"email": "mira@example.com", "name": "Mira Chen"}]}
     g = tb.google
@@ -97,4 +93,4 @@ def test_meeting_brief_lists_attendee_memories_and_past_meetings() -> None:
         g.calendar_get = real  # type: ignore[method-assign]
     (p,) = out["people"]
     assert p["email"] == "mira@example.com" and "short agendas" in p["notes"][0]
-    assert p["past_meetings"][0]["title"] == "Roadmap sync"
+    assert "past_meetings" not in p

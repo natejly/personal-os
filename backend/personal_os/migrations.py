@@ -235,6 +235,16 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     c.execute("DROP TABLE notes")
 
 
+def _drop_meetings_activity(c: sqlite3.Connection) -> None:
+    """The meetings recorder and the activity monitor are gone: drop their tables (child tables first; an index
+    goes with its table, and a virtual table takes its shadow tables with it). Settings rows `meetings`, `activity`
+    and `digest` are left alone: stt.config_for seeds the voice config from a legacy `meetings` row at read time."""
+    for table in ("meeting_action_items", "meeting_revisions", "meeting_segments", "meeting_vectors", "meetings_fts",
+                  "meetings", "activity_events", "activity_summaries", "activity_profile", "activity_day_stats",
+                  "activity_habits", "activity_suggestions", "activity_patterns"):
+        c.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -249,6 +259,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (10, "doc_comments_typography", _doc_comments_typography),
     (11, "coding_sessions", _coding_sessions),
     (12, "sticky_notes_into_docs", _sticky_notes_into_docs),
+    (13, "drop_meetings_activity", _drop_meetings_activity),
 ]
 
 

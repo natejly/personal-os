@@ -330,5 +330,17 @@ def test_backfill_skips_sourced_and_user_memories(db) -> None:
     assert _backfill(db, mine) == (None, None)
 
 
+def test_backfill_skips_a_row_that_replaced_another(db) -> None:
+    chat = _Chat(db)
+    conv = chat.conv()
+    chat.say(conv, "user", T - 100)
+    chat.say(conv, "assistant", T - 90, ends_at=T - 30)
+    old = _memory(db, text="User likes tea")
+    merged = _memory(db, text="User likes green tea")
+    with db.tx() as c:
+        c.execute("UPDATE memories SET superseded_by=? WHERE id=?", (merged, old))
+    assert _backfill(db, merged) == (None, None)
+
+
 def test_migrations_14_and_13_are_registered() -> None:
     assert [n for _, n, _ in migrations.MIGRATIONS[-2:]] == ["memories_fts_live", "memory_provenance_backfill"]

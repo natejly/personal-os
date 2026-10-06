@@ -571,7 +571,7 @@ def run_transcript(messages: list[dict[str, Any]], message_id: str | None = None
     Tool calls are included, because the procedure is the method, not the prose around it.
     `reason` is set when there is nothing worth sending to the model.
     """
-    usable = [m for m in messages if m.get("role") in ("user", "assistant")]
+    usable = [m for m in messages if m.get("role") in ("user", "assistant") and m.get("kind") != "wake"]
     if message_id:
         idx = next((i for i, m in enumerate(usable) if m.get("id") == message_id), None)
         if idx is None:

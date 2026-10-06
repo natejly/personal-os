@@ -11,8 +11,8 @@ from urllib.parse import urlparse
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "fireworks", "name": "Fireworks AI", "baseUrl": "https://api.fireworks.ai/inference/v1", "needsKey": True,
-     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/glm-5p3",
-     "models": ["accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/ember-1", "accounts/fireworks/models/kimi-k3",
+     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/ember-1",
+     "models": ["accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
                 "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
                 "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
      "note": None},
@@ -31,7 +31,7 @@ PROVIDERS: list[dict[str, Any]] = [
      "keyUrl": None, "defaultModel": "llama3.2", "models": ["llama3.2", "qwen3", "gpt-oss:20b"],
      "note": "Runs on this Mac; pull the model first (ollama pull llama3.2)."},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "kimi-k3", "models": ["kimi-k3", "deepseek-v4-flash"],
+     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "kimi-k3", "deepseek-v4-flash"],
      "note": "Your own proxy; model names are whatever its config defines."},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
      "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API."},
@@ -41,6 +41,19 @@ BY_ID = {p["id"]: p for p in PROVIDERS}
 
 def get(provider_id: str | None) -> dict[str, Any] | None:
     return BY_ID.get(provider_id or "")
+
+
+# Grain's default chat model, by base name: each preset spells it its own way (accounts/fireworks/models/ember-1 on Fireworks,
+# ember-1 behind the LiteLLM proxy), and a provider that does not list it keeps its own default.
+DEFAULT_CHAT_MODEL = "ember-1"
+
+
+def default_model(settings: dict[str, Any]) -> str:
+    """The chat model when none is saved: Ember 1 as the active provider names it, else that provider's own default."""
+    p = get(effective(settings))
+    if not p:
+        return ""
+    return next((m for m in p["models"] if m.rsplit("/", 1)[-1] == DEFAULT_CHAT_MODEL), p["defaultModel"])
 
 
 def _hostport(url: str) -> str:

@@ -74,7 +74,7 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
 def _portal():  # type: ignore[no-untyped-def]
     real = llm.stream_chat
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual"})
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "permissionMode": "manual", "delegationForce": False})  # forced delegation would refuse the scripted tool calls after round 2
         yield
     llm.stream_chat = real
 

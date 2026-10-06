@@ -301,6 +301,8 @@ def render_conversation_md(conv: dict[str, Any], msgs: list[dict[str, Any]], pro
     if exported is None:
         out.append(f"{project} · {conv.get('model') or ''} · {_when(conv['created_at'])}\n\n")
     for m in msgs:
+        if m.get("kind") == "wake":
+            continue
         who = "You" if m["role"] == "user" else "Grain"
         head = f"## {who} · {_when(m['created_at'])}" + (f" · {m['model']}" if m["role"] != "user" and m.get("model") else "")
         out.append(head + "\n\n")
@@ -330,7 +332,7 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
         convs = _rows(c, f"SELECT id, project_id, title, model, created_at, updated_at FROM conversations {trashed}ORDER BY created_at")
         # Regenerated answers are kept as superseded rows; the export reads one answer per turn.
         live = "WHERE superseded_at IS NULL " if "superseded_at" in mcols else ""
-        extra = "".join(f", {k}" for k in ("error", "tool_events", "trace") if k in mcols)
+        extra = "".join(f", {k}" for k in ("error", "tool_events", "trace", "kind") if k in mcols)
         msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at{extra} FROM messages {live}ORDER BY created_at, rowid")
         mems = _rows(c, "SELECT id, project_id, content, kind, source, pinned, created_at FROM memories ORDER BY created_at")
         docs = _rows(c, "SELECT id, project_id, name, mime, size, text, created_at FROM documents ORDER BY created_at")
@@ -342,7 +344,8 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
 
     by_conv: dict[str, list[dict[str, Any]]] = {}
     for m in msgs:
-        by_conv.setdefault(m["conversation_id"], []).append(m)
+        if m.get("kind") != "wake":  # a worker's report handed to the assistant: not something either side said
+            by_conv.setdefault(m["conversation_id"], []).append(m)
     md: list[str] = []
     for cv in convs:
         cv["project"] = scope(cv["project_id"])

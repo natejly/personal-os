@@ -38,7 +38,7 @@ def retrieval_query(prior: list[dict[str, Any]], text: str) -> str:
     the history is clipped, so its own terms survive fts_query's term cap and the embedder's character cut."""
     if len(text.split()) >= 12 and not _ANAPHOR.search(text):
         return text
-    prev_user = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "user"), "")
+    prev_user = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "user" and m.get("kind") != "wake"), "")
     if not prev_user.strip():
         return text
     reply = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "assistant"), "")

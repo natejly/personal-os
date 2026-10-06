@@ -139,9 +139,24 @@ def _lead(text: str) -> str:
     return f"Task: {text}" if text.startswith("-") else text
 
 
+DEFAULT_CLAUDE_MODEL = "fable"
+# Two generic helpers every session may hand work to, inline (--agents): one writes, one checks.
+CLAUDE_AGENTS = json.dumps({
+    "implementer": {"description": "Makes a focused code change: reads the surrounding code, edits the files and runs what it touched.",
+                    "prompt": "You implement one well-scoped change. Read the code around it first, keep the change small and in the "
+                              "style of the file, run the relevant checks, and report exactly what you changed and what you verified.",
+                    "model": "sonnet"},
+    "tester-reviewer": {"description": "Tests and reviews a finished change: runs the tests, reads the diff and reports problems.",
+                        "prompt": "You verify a change someone else made. Run the relevant tests, read the diff for bugs and missed "
+                                  "cases, and report concrete problems with file and line, then what looks fine. Do not rewrite the change.",
+                        "model": "sonnet"},
+}, separators=(",", ":"))
+
+
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None) -> list[str]:
-    """The start command. A permission flag appears only when the caller asked for a mode."""
-    return [exe, "--bg", "-n", name, *(["--model", model] if model else []),
+    """The start command: the model asked for, else fable, with the two inline sub-agents. A permission flag appears
+    only when the caller asked for a mode."""
+    return [exe, "--bg", "-n", name, "--model", model or DEFAULT_CLAUDE_MODEL, "--agents", CLAUDE_AGENTS,
             *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 

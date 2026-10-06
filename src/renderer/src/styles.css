@@ -2508,6 +2508,15 @@ select:focus-visible {
 .plan-step.done .plan-text { color: var(--text-faint); text-decoration: line-through; }
 .plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
 
+/* Workers sit under the checklist, so they drop its top gap. */
+.worker-panel { padding-top: 4px; }
+.worker-panel .worker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
+.worker-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
+.worker-open small { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-approval { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding-left: 16px; color: var(--text-muted); }
+.worker-approval span { flex: 1; min-width: 0; }
+
 /* ---------- Skills review (procedural memory) ---------- */
 /* ---------------- Library: skills and what has been made ----------------
    The connectors shelf renders McpSettings; its add form is styled under .mcp-add. */

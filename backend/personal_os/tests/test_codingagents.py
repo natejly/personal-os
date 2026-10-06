@@ -53,7 +53,7 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         self.events: list[tuple[str, dict[str, Any]]] = []
         self.jobs = SimpleNamespace(jobs={})
         self.cs = ca.CodingSessions(Database(self.tmp / "data"), self.jobs, self.fake, lambda e, d: self.events.append((e, d)),
-                                    lambda: {}, roots=lambda: [self.tmp / "work"], claude_home=self.home)
+                                    lambda: {}, claude_home=self.home)
         p = unittest.mock.patch.object(ca, "claude_binary", return_value="/bin/claude")
         p.start()
         self.addCleanup(p.stop)
@@ -75,13 +75,6 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class Validation(CodingTestCase):
-    async def test_repo_outside_a_granted_root_is_refused(self) -> None:
-        other = self.tmp / "elsewhere"
-        (other / ".git").mkdir(parents=True)
-        with self.assertRaises(ca.CodingError):
-            await self.cs.start("claude", str(other), "x")
-        self.assertEqual(self.fake.calls, [])
-
     async def test_folder_without_git_is_refused(self) -> None:
         plain = self.tmp / "work" / "plain"
         plain.mkdir()
@@ -153,8 +146,11 @@ class ClaudeDriver(CodingTestCase):
 
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
-        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "do it"])
+        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--model", "fable", "--agents", ca.CLAUDE_AGENTS, "do it"])
         self.assertNotIn("--permission-mode", plain)
+        agents = json.loads(plain[plain.index("--agents") + 1])
+        self.assertEqual(len(agents), 2)
+        self.assertTrue(all(set(a) == {"description", "prompt", "model"} and a["model"] == "sonnet" for a in agents.values()))
         asked = ca.claude_argv("/bin/claude", "n", "do it", "opus", "acceptEdits")
         self.assertEqual(asked[asked.index("--permission-mode") + 1], "acceptEdits")
         self.assertEqual(asked[asked.index("--model") + 1], "opus")
@@ -258,7 +254,7 @@ class ClaudeDriver(CodingTestCase):
     async def test_recover_rereads_live_claude_sessions(self) -> None:
         row = await self.started()
         self.job_files("deadbeef", "done")
-        again = ca.CodingSessions(self.cs.db, self.jobs, self.fake, lambda e, d: None, lambda: {}, roots=lambda: [],
+        again = ca.CodingSessions(self.cs.db, self.jobs, self.fake, lambda e, d: None, lambda: {},
                                   claude_home=self.home)
         self.assertEqual(again.get(row["id"])["status"], "done")
 

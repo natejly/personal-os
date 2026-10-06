@@ -62,7 +62,7 @@ def sh(i: int, command: str) -> dict[str, Any]:
 
 
 def setup(rules: dict[str, list[str]] | None = None, mode: str = "ask", **settings: Any) -> str:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "workspaceRoots": [],
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False, "workspaceRoots": [],
                             "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
     appmod.convos.update(cid, {"settings": {"tools": {"shell_run": mode}}})

@@ -21,6 +21,7 @@ import { WorkspaceRoots } from './WorkspaceRoots'
 import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings from './RunSafetySettings'
 import SandboxSettings from './SandboxSettings'
+import IMessageSettings from './IMessageSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
 import MeetingSettings from './MeetingSettings'
@@ -529,6 +530,7 @@ export default function SettingsModal(): JSX.Element {
                 </label>
               )}
               <PlannerMailSettings />
+              <IMessageSettings draft={draft} saved={settings} patch={patch} />
               <h4>Web search keys</h4>
               <p className="muted small">All optional. A Firecrawl key makes it the first engine for web search and page reads. Without one, web search uses Exa, then DuckDuckGo.</p>
               <label><span className="toggle-text"><b>Firecrawl API key</b><small>Searches and reads pages first when set; the engines below are the fallback. Firecrawl sees the page address. {settings.firecrawlEnvKey && !settings.firecrawlApiKeySet ? 'Using FIRECRAWL_API_KEY from the environment.' : 'Empty uses FIRECRAWL_API_KEY from the environment, if set.'}</small></span><input type="password" value={draft.firecrawlApiKey ?? ''} onChange={(e) => patch({ firecrawlApiKey: e.target.value })} placeholder={settings.firecrawlApiKeySet ? 'Saved. Type to replace' : 'fc-…'} spellCheck={false} /></label>

@@ -1445,6 +1445,13 @@ export interface Settings {
   requireReadBeforeWrite?: boolean
   /** When set, Firecrawl answers web search and page reads first; the other engines are the fallback. Empty = the FIRECRAWL_API_KEY environment variable, if any. */
   firecrawlApiKey?: string
+  /** Texting channel: only the allowlisted handles can control Grain by iMessage. */
+  imessageEnabled?: boolean
+  imessageHandles?: string[]
+  /** null = the dedicated "Texts" conversation. */
+  imessageConversationId?: string | null
+  imessageNotifyLongRuns?: boolean
+  imessageLongRunMinutes?: number
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
@@ -1686,6 +1693,18 @@ export interface SandboxInfo {
   name: string; conversation_id: string | null; title: string | null; status: string; created: string
   last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
 }
+export interface IMessageStatus {
+  enabled: boolean
+  running: boolean
+  status: 'off' | 'running' | 'needs_full_disk_access' | 'locked' | 'error'
+  fda_ok: boolean | null
+  last_poll_at: number | null
+  last_error: string | null
+  ignored_count: number
+  last_ignored_at: number | null
+  target_conversation: { id: string; title: string } | null
+}
+
 export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {

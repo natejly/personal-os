@@ -157,3 +157,12 @@ def test_doc_search_recording_hit_is_fenced() -> None:
         docs.search = prev
     nonce_of(msgs["1"])
     assert msgs["2"] == json.dumps({"todos": ["buy milk"]})
+
+
+def test_no_emoji_rule_is_always_sent() -> None:
+    def system() -> str:
+        return "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
+    run([])
+    assert appmod.NO_EMOJI_HINT in system()
+    run([], settings={"useTools": False})
+    assert appmod.NO_EMOJI_HINT in system()

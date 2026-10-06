@@ -44,7 +44,7 @@ from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .recap import Recaps, generate_recap
 from . import vision
-from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
+from .docs import ASSET_MIMES, asset_path, AssetError, Docs, clean_typography, save_asset, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .pim import Pim
@@ -858,6 +858,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
+        elif k == "docTypography":
+            clean[k] = clean_typography(v) or {}
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
@@ -7077,6 +7079,8 @@ class DocMetaPatch(BaseModel):
     # Unlike `project_id` it can say "personal" out loud, so one patch can carry a whole drag —
     # project and folder together — without needing `clear_project` as a second flag.
     scope: str | None = None
+    # Per-doc type ({font, size, measure}); {} clears it so the doc follows the global default again.
+    typography: dict[str, Any] | None = None
 
 
 @app.get("/docs")
@@ -7468,6 +7472,72 @@ def restore_revision(rev_id: str) -> dict[str, Any]:
     if not d:
         raise HTTPException(404)
     return d
+
+
+# ---- comments: threads anchored to a span of a doc's rendered text (docs.py `comments`) ----
+class CommentIn(BaseModel):
+    body: str
+    quote: str = ""
+    prefix: str = ""
+    suffix: str = ""
+    offset_hint: int = 0
+
+
+class CommentPatch(BaseModel):
+    body: str | None = None
+    resolved: bool | None = None
+
+
+@app.get("/docs/{id}/comments")
+def doc_comments(id: str, include_resolved: bool = True) -> list[dict[str, Any]]:
+    rows = docs.comments(id, include_resolved)
+    if rows is None:
+        raise HTTPException(404)
+    return rows
+
+
+@app.post("/docs/{id}/comments")
+def add_doc_comment(id: str, body: CommentIn) -> dict[str, Any]:
+    if not body.body.strip():
+        raise HTTPException(422, "A comment needs some text")
+    c = docs.add_comment(id, body.body, body.quote, body.prefix, body.suffix, body.offset_hint)
+    if not c:
+        raise HTTPException(404)
+    return c
+
+
+@app.post("/docs/comments/{cid}/replies")
+def reply_doc_comment(cid: str, body: CommentPatch) -> dict[str, Any]:
+    if not (body.body or "").strip():
+        raise HTTPException(422, "A reply needs some text")
+    parent = docs.comment(cid)
+    if not parent:
+        raise HTTPException(404)
+    c = docs.add_comment(parent["doc_id"], body.body or "", parent_id=cid)
+    if not c:
+        raise HTTPException(404)
+    return c
+
+
+@app.patch("/docs/comments/{cid}")
+def patch_doc_comment(cid: str, body: CommentPatch) -> dict[str, Any]:
+    """Edit the text (the user's own comments only: an agent's words stay the agent's) or resolve / reopen the thread."""
+    cur = docs.comment(cid)
+    if not cur:
+        raise HTTPException(404)
+    if body.body is not None and cur["author"] != "user":
+        raise HTTPException(403, "Only your own comments can be edited")
+    c = docs.update_comment(cid, body.body, body.resolved)
+    if not c:
+        raise HTTPException(404)
+    return c
+
+
+@app.delete("/docs/comments/{cid}")
+def delete_doc_comment(cid: str) -> dict[str, bool]:
+    if not docs.delete_comment(cid):
+        raise HTTPException(404)
+    return {"ok": True}
 
 
 # ---------------- activity monitor ----------------

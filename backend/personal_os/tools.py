@@ -92,7 +92,7 @@ ALWAYS_CARD = frozenset({"calendar_propose"})
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
-    "doc_create", "doc_edit", "doc_delete",
+    "doc_create", "doc_edit", "doc_delete", "doc_comment_reply",
     "todo_add", "todo_delete", "todo_update",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
@@ -2617,6 +2617,47 @@ def _register_docs(self: Toolbox) -> None:
         _obj({"doc": {"type": "string", "description": "File id or title"}}, ["doc"]), doc_delete, "docs", "writes")
     spec.default = "ask"
     R("doc_delete", spec)
+
+    # Comments are the user's margin notes on a file. The agent may read the open threads and answer in them as
+    # itself; it never resolves, edits or deletes them (those are the user's calls, made in the file's panel).
+    def _thread_view(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_root: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            if r["parent_id"] is None:
+                by_root[r["id"]] = {"thread_id": r["id"], "quote": r["quote"], "resolved": bool(r["resolved"]),
+                                    "messages": [{"author": r["author"], "body": r["body"]}]}
+        for r in rows:
+            if r["parent_id"] in by_root:
+                by_root[r["parent_id"]]["messages"].append({"author": r["author"], "body": r["body"]})
+        return list(by_root.values())
+
+    async def doc_comments(ctx: dict[str, Any], doc: str, include_resolved: bool = False) -> Any:
+        d = _find(ctx, doc)
+        if not d:
+            return _missing(ctx, doc)
+        rows = self.docs.comments(d["id"], include_resolved) or []
+        return _scrub_strings({"doc_id": d["id"], "title": d["title"], "threads": _thread_view(rows),
+                               "note": "Each thread quotes the passage it is about. Reply in a thread with doc_comment_reply; "
+                                       "a change to the text itself goes through doc_edit."})
+    R("doc_comments", ToolSpec("doc_comments", "Read the comment threads on one of the user's files: who said what about which quoted passage. Open threads by default; include_resolved adds the closed ones. Use it when the user asks about the comments on a file or wants them addressed.",
+        _obj({"doc": {"type": "string", "description": "File id or title"}, "include_resolved": {"type": "boolean", "default": False}}, ["doc"]),
+        doc_comments, "docs"))
+
+    async def doc_comment_reply(ctx: dict[str, Any], thread_id: str, body: str) -> Any:
+        parent = self.docs.comment(thread_id)
+        if not parent:
+            return {"error": f"No comment thread '{thread_id}'", "hint": "pass a thread_id from doc_comments"}
+        d = _find(ctx, parent["doc_id"])
+        if not d:
+            return _missing(ctx, parent["doc_id"])
+        c = self.docs.add_comment(d["id"], body, author="agent", parent_id=thread_id)
+        if not c:
+            return {"error": "The reply was empty, so nothing was posted"}
+        return _scrub_strings({"doc_id": d["id"], "thread_id": c["parent_id"], "comment_id": c["id"], "status": "posted",
+                               "note": "Posted in the file's comment panel as the assistant. The user resolves the thread themselves."})
+    R("doc_comment_reply", ToolSpec("doc_comment_reply", "Reply in a comment thread on one of the user's files, as the assistant. Read the thread with doc_comments first; answer the question it asks or say what you changed. It does not edit the file (doc_edit does) and never resolves the thread.",
+        _obj({"thread_id": {"type": "string", "description": "thread_id from doc_comments"}, "body": {"type": "string", "description": "The reply, markdown"}}, ["thread_id", "body"]),
+        doc_comment_reply, "docs", "writes"))
 
 
 def _register_meetings(self: Toolbox) -> None:

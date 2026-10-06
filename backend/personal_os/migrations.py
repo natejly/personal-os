@@ -247,6 +247,13 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     c.execute("DROP TABLE notes")
 
 
+def _memories_expires_at(c: sqlite3.Connection) -> None:
+    """Short-lived notes: a memory past `expires_at` (epoch seconds) leaves context and search but stays as history.
+    NULL = no expiry."""
+    if "expires_at" not in {r[1] for r in c.execute("PRAGMA table_info(memories)")}:
+        c.execute("ALTER TABLE memories ADD COLUMN expires_at REAL")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -263,6 +270,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (12, "sticky_notes_into_docs", _sticky_notes_into_docs),
     (13, "permission_mode", _permission_mode),
     (14, "chat_files", _chat_files),
+    (15, "memories_expires_at", _memories_expires_at),
 ]
 
 

@@ -96,7 +96,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const [showPrompt, setShowPrompt] = useState(false)
   const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
+  const has = ctx.memories.length + (ctx.profile?.length ?? 0) + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
@@ -132,6 +132,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         <section>
           <h5><Mic size={12} /> Meetings <button className="link" onClick={() => setView('meetings')}>manage</button></h5>
           <pre className="ctx-prompt">{ctx.meetings}</pre>
+        </section>
+      )}
+      {(ctx.profile?.length ?? 0) > 0 && (
+        <section>
+          <h5><Brain size={12} /> Standing preferences ({ctx.profile!.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
+          <ul>{ctx.profile!.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
         </section>
       )}
       {ctx.memories.length > 0 && (

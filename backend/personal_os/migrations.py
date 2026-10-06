@@ -86,6 +86,18 @@ def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
             c.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps({"enabled": True}), key))
 
 
+def _approval_history(c: sqlite3.Connection) -> None:
+    """Slot reserved for the approval decision log (owner: approval-history)."""
+
+
+def _teach_recordings(c: sqlite3.Connection) -> None:
+    """Slot reserved for teach-a-task screen recordings (owner: teach-a-task)."""
+
+
+def _ship_checklists(c: sqlite3.Connection) -> None:
+    """Slot reserved for the job ship checklist (owner: ship-checklist)."""
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -94,6 +106,9 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (4, "activity_record_everything_keys", _activity_record_everything_keys),
     (5, "permissions_store", _permissions_store),
     (6, "meetings_activity_defaults", _meetings_activity_defaults),
+    (7, "approval_history", _approval_history),
+    (8, "teach_recordings", _teach_recordings),
+    (9, "ship_checklists", _ship_checklists),
 ]
 
 

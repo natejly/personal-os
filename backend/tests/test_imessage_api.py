@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from test_imessage import ME, STRANGER, ChatDB  # noqa: E402
+from test_imessage import BODY, MARK, ME, SELF_GUID, STRANGER, ChatDB  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
 from personal_os import imessage as im  # noqa: E402
@@ -54,7 +54,7 @@ async def _fake_runner(argv: list[str]) -> tuple[int, str]:
 
 
 def texts() -> list[str]:
-    return [a[4] for a in SENT]
+    return [a[4].removeprefix(MARK) for a in SENT]
 
 
 def wait_until(pred: Callable[[], Any], label: str, timeout: float = 15.0) -> Any:
@@ -81,6 +81,7 @@ def _portal():  # type: ignore[no-untyped-def]
     im.open_full_disk_access = lambda: OPENED.append(1) or True  # type: ignore[assignment]
     bridge.deps.runner = _fake_runner
     bridge.poll_seconds, bridge.send_gap = 0.05, 0
+    bridge.record_delays = (0.0,)
     with client:
         client.put("/settings", json={"autoLearn": False, "learnStyle": False, "baseUrl": ""})
         yield
@@ -92,6 +93,7 @@ def _reset():  # type: ignore[no-untyped-def]
     llm.stream_chat = _scripted
     SENT.clear()
     OPENED.clear()
+    appmod.db.set_settings({"imessageSelfChatGuid": None, "imessageReplyMarker": MARK})
     STREAM["slow"] = False
     yield
 
@@ -131,19 +133,71 @@ def test_settings_validate_normalize_and_hide_the_state() -> None:
 def test_status_shape() -> None:
     s = j("GET", "/imessage/status")
     assert set(s) == {"enabled", "running", "status", "fda_ok", "last_poll_at", "last_error", "ignored_count", "last_ignored_at",
-                      "target_conversation"}
+                      "target_conversation", "self_chat"}
     assert s["enabled"] is False and s["status"] == "off" and s["running"] is False
+    assert s["self_chat"] == {"guid": None, "handle": None}
 
 
 def test_test_message_only_goes_to_allowlisted_handles() -> None:
     j("PUT", "/settings", {"imessageHandles": [ME]})
     j("POST", "/imessage/test", {"handle": STRANGER}, expect=400)
     assert SENT == []
-    assert j("POST", "/imessage/test", {}) == {"ok": True}
-    assert SENT[-1][2] == im.SCRIPT_PARTICIPANT and SENT[-1][3] == ME and SENT[-1][4] == "Grain is connected ✅"
-    assert j("POST", "/imessage/test", {"handle": "(555) 123-4567"}) == {"ok": True}
+    assert j("POST", "/imessage/test", {}) == {"ok": True, "to": "handle"}
+    assert SENT[-1][2] == im.SCRIPT_PARTICIPANT and SENT[-1][3] == ME and SENT[-1][4] == MARK + "Grain is connected ✅"
+    assert j("POST", "/imessage/test", {"handle": "(555) 123-4567"}) == {"ok": True, "to": "handle"}
     j("PUT", "/settings", {"imessageHandles": []})
-    j("POST", "/imessage/test", {}, expect=400)
+    assert "note-to-self" in j("POST", "/imessage/test", {}, expect=400)["detail"]
+
+
+def test_the_self_chat_and_marker_settings_validate() -> None:
+    s = j("GET", "/settings")
+    assert s["imessageSelfChatGuid"] is None and s["imessageReplyMarker"] == MARK
+    assert j("PUT", "/settings", {"imessageSelfChatGuid": f"  {SELF_GUID} "})["imessageSelfChatGuid"] == SELF_GUID
+    assert j("PUT", "/settings", {"imessageSelfChatGuid": "  "})["imessageSelfChatGuid"] is None
+    assert j("PUT", "/settings", {"imessageSelfChatGuid": SELF_GUID})["imessageSelfChatGuid"] == SELF_GUID
+    assert j("PUT", "/settings", {"imessageSelfChatGuid": None})["imessageSelfChatGuid"] is None
+    j("PUT", "/settings", {"imessageSelfChatGuid": 7}, expect=422)
+    j("PUT", "/settings", {"imessageSelfChatGuid": "x" * 201}, expect=422)
+    assert j("PUT", "/settings", {"imessageSelfChatGuid": "x" * 200})["imessageSelfChatGuid"] == "x" * 200
+    assert j("PUT", "/settings", {"imessageReplyMarker": "🤖 "})["imessageReplyMarker"] == "🤖 "
+    assert j("PUT", "/settings", {"imessageReplyMarker": ""})["imessageReplyMarker"] == ""  # stored; the bridge falls back
+    assert j("PUT", "/settings", {"imessageReplyMarker": "x" * 16})["imessageReplyMarker"] == "x" * 16
+    j("PUT", "/settings", {"imessageReplyMarker": "x" * 17}, expect=422)
+    j("PUT", "/settings", {"imessageReplyMarker": 5}, expect=422)
+    j("PUT", "/settings", {"imessageReplyMarker": None}, expect=422)
+    assert j("GET", "/settings")["imessageReplyMarker"] == "x" * 16  # a rejected save changed nothing
+    j("PUT", "/settings", {"imessageSelfChatGuid": None, "imessageReplyMarker": MARK})
+
+
+def test_test_message_goes_to_the_self_chat_when_one_is_set() -> None:
+    j("PUT", "/settings", {"imessageHandles": [ME], "imessageSelfChatGuid": SELF_GUID})
+    assert j("POST", "/imessage/test", {}) == {"ok": True, "to": "self_chat"}
+    assert SENT[-1][2] == im.SCRIPT_CHAT and SENT[-1][3] == SELF_GUID and SENT[-1][4] == MARK + "Grain is connected ✅"
+    assert j("GET", "/imessage/status")["self_chat"] == {"guid": SELF_GUID, "handle": im.mask_handle(ME)}
+    j("PUT", "/settings", {"imessageHandles": []})
+    assert j("POST", "/imessage/test", {}) == {"ok": True, "to": "self_chat"}  # the chat is enough; no allowlist needed to send there
+
+
+def test_self_chats_lists_candidates_without_any_message_text() -> None:
+    j("PUT", "/settings", {"imessageHandles": [ME]})
+    chat_db.add(ME, BODY, from_me=1)
+    chat_db.add(STRANGER, BODY, from_me=1)
+    res = j("GET", "/imessage/self-chats")
+    assert set(res) == {"chats"} and [c["guid"] for c in res["chats"]] == [SELF_GUID]
+    assert set(res["chats"][0]) == {"guid", "handle", "last_activity", "source", "best"}
+    assert res["chats"][0]["best"] is True and res["chats"][0]["source"] == "allowlist" and res["chats"][0]["handle"] == "…4567"
+    assert "ZEBRA" not in str(res)
+    j("PUT", "/settings", {"imessageHandles": []})
+    assert j("GET", "/imessage/self-chats") == {"chats": []}
+
+
+def test_self_chats_needs_full_disk_access_when_the_database_is_unreadable() -> None:
+    real = bridge.deps.chat_db_path
+    bridge.deps.chat_db_path = str(Path(_DATA) / "nowhere" / "chat.db")
+    try:
+        assert j("GET", "/imessage/self-chats", expect=409) == {"detail": "needs_full_disk_access"}
+    finally:
+        bridge.deps.chat_db_path = real
 
 
 def test_open_fda_route_uses_the_hook() -> None:
@@ -207,9 +261,9 @@ def test_an_approval_answered_by_text_is_decided_as_imessage() -> None:
     chat_db.add(ME, "yes")
     row = wait_until(lambda: (r := appmod.run_store.approval("call-text-1")) and r["status"] == "approved" and r, "the decision")
     assert row["decided_by"] == "imessage" and row["decision"] == "allow"
-    assert fut.done() and fut.result() == "allow"  # the waiting run was woken through approve_tool_call
+    wait_until(lambda: fut.done() and "Approved." in texts(), "the run to wake and the confirmation text")  # a beat after the row is written
+    assert fut.result() == "allow"  # the waiting run was woken through approve_tool_call
     assert appmod.run_store.approval("call-orphan")["status"] == "pending"
-    assert "Approved." in texts()
     hist = j("GET", "/approvals/history?tool=send_email")["items"]
     assert hist and hist[0]["decision"] == "allow_once" and "(imessage)" in hist[0]["note"]
 

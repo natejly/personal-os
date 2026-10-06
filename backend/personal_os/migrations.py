@@ -155,6 +155,35 @@ def _doc_comments_typography(c: sqlite3.Connection) -> None:
             c.execute("ALTER TABLE docs ADD COLUMN typography TEXT")
 
 
+def _coding_sessions(c: sqlite3.Connection) -> None:
+    """Coding sessions (codingagents.py): one row per coding agent started on a repo or a fresh worktree of it.
+    agent: claude | opencode. external_id: claude's short job id, or the opencode job id in the shell registry;
+    session_id: claude's full sessionId (what --resume needs) or opencode's own session id when seen.
+    status: starting | working | needs_you | blocked | done | stopped | failed."""
+    c.execute("""CREATE TABLE IF NOT EXISTS coding_sessions (
+      id TEXT PRIMARY KEY,
+      agent TEXT NOT NULL,
+      external_id TEXT,
+      session_id TEXT,
+      repo_path TEXT NOT NULL,
+      worktree TEXT NOT NULL,
+      branch TEXT,
+      conversation_id TEXT,
+      desk_id TEXT,
+      run_id TEXT,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      model TEXT,
+      permission_mode TEXT,
+      status TEXT NOT NULL,
+      detail TEXT,
+      log_tail TEXT NOT NULL DEFAULT '',
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL,
+      ended_at REAL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_coding_sessions_conv ON coding_sessions(conversation_id, created_at)")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -167,6 +196,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (8, "teach_recordings", _teach_recordings),
     (9, "ship_checklists", _ship_checklists),
     (10, "doc_comments_typography", _doc_comments_typography),
+    (11, "coding_sessions", _coding_sessions),
 ]
 
 

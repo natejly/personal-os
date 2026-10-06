@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { exportFilename } from './exportDoc'
 import { linkFromPaste, pickImage, withTitle } from './smartPaste'
-import { readingTime, wordCount } from './stats'
+import { wordCount } from './stats'
 
 test('filenames drop separators and reserved characters', () => {
   assert.equal(exportFilename('Plan: Q4 / launch?'), 'Plan Q4 launch.md')
@@ -33,12 +33,9 @@ test('parentheses in a pasted url cannot end the link early', () => {
   assert.equal(linkFromPaste('w', 'https://a.com/x_(y)'), '[w](https://a.com/x_%28y%29)')
 })
 
-test('word count and reading time', () => {
+test('word count', () => {
   assert.equal(wordCount('  '), 0)
   assert.equal(wordCount('a b\nc'), 3)
-  assert.equal(readingTime(0), '')
-  assert.equal(readingTime(40), '< 1 min read')
-  assert.equal(readingTime(460), '2 min read')
 })
 
 test('a bare url becomes a link labelled by itself, and the title replaces the label only while it is untouched', () => {

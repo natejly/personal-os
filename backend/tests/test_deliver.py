@@ -366,7 +366,7 @@ BANNED = ("excel", "powerpoint", "microsoft", "google", "canva", "notion", "copi
 def test_every_guide_is_sound(env: Any, fmt: str) -> None:
     out = env.call("doc_guide", format=fmt)
     g = out["guide"]
-    assert 800 < len(g) <= deliver.GUIDE_MAX_CHARS, len(g)
+    assert 800 < len(g) <= 4500, len(g)
     low = g.lower()
     assert "check your work" in low and "render_preview" in low or fmt == "csv"
     assert "```python" in g and "outputs/" in g

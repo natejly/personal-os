@@ -364,5 +364,3 @@ export const def: WidgetDef = {
   accepts: ACCEPTS,
   Component: ChatWidget
 }
-
-export default ChatWidget

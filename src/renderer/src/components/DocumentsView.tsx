@@ -7,7 +7,7 @@ import ProjectChip from './ProjectChip'
 
 
 /**
- * Uploads, for Files → Uploads, Settings and a project. Always hosted by another view, so it is a body
+ * Uploads, for Files → Uploads and a project. Always hosted by another view, so it is a body
  * with no page header of its own; `embedded` is accepted for those callers, it is the only mode.
  */
 export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {

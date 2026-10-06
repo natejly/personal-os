@@ -71,7 +71,6 @@ export const visibleRect = (v: Viewport): Rect => {
 }
 
 export const snapValue = (v: number, pitch: number): number => (pitch > 0 ? Math.round(v / pitch) * pitch : v)
-export const snapRectToGrid = (r: Rect, pitch: number): Rect => ({ ...r, x: snapValue(r.x, pitch), y: snapValue(r.y, pitch) })
 
 /** Shift held: keep the larger component, drop the other. */
 export const constrain = (d: Point): Point => (Math.abs(d.x) >= Math.abs(d.y) ? { x: d.x, y: 0 } : { x: 0, y: d.y })

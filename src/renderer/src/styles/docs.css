@@ -170,15 +170,6 @@
 .doc-title-input:hover { border-color: var(--border); }
 .doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
 
-/* .model-picker pins every svg to the right; this picker leads with a folder icon on the left. */
-.doc-folder-pick svg:first-child { right: auto; left: 8px; }
-/* Specific enough to beat .model-picker select, which sets its own padding and would otherwise run
-   the path under the folder icon. Nested paths are longer, so the box is wider too. */
-.doc-toolbar .doc-folder-pick select { padding-left: 26px; font-size: 12px; max-width: 220px; }
-/* The pickers give way first when the row is tight. */
-.doc-toolbar .doc-folder-pick { flex: 0 1 auto; min-width: 0; }
-.doc-toolbar .doc-folder-pick select { min-width: 0; max-width: 100%; }
-
 /* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
 .dot-badge {
   position: absolute; top: -2px; right: -2px;

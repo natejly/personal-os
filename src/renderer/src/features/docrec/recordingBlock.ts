@@ -23,11 +23,6 @@ export const recordingIdFromHref = (href?: string): string | null => {
   return /^[\w-]+$/.test(id) ? id : null
 }
 
-/** Every recording id linked from a doc, in order. */
-export function parseRecordingBlocks(text: string): string[] {
-  return [...text.matchAll(/\]\(grain-recording:([\w-]+)\)/g)].map((m) => m[1])
-}
-
 /** What to type at the caret so the block sits on a line of its own. `before`/`after` are the text around the caret. */
 export function blockInsertText(line: string, before: string, after: string): string {
   return `${before === '' || before.endsWith('\n') ? '' : '\n'}${line}${after.startsWith('\n') ? '' : '\n'}`

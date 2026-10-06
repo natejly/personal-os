@@ -554,18 +554,6 @@ kbd {
    overflows no longer narrows the column mid-stream, and the column stays centred over the composer. */
 .chat-main > .messages { scrollbar-gutter: stable both-edges; }
 .messages-inner { max-width: var(--chat-col); margin: 0 auto; padding: 14px 24px 8px; }
-/* The new-chat screen. Not .empty-state: that is the page-level pattern, with its own spacing. */
-.chat-empty {
-  height: 100%;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 0 24px;
-  color: var(--text-muted);
-}
-.chat-empty h1 { font-size: 30px; font-weight: 500; color: var(--text); margin: 0 0 8px; letter-spacing: -0.01em; text-align: center; }
-.chat-empty p { margin: 0; }
-.chat-starters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; max-width: 560px; }
-.chat-starters .ghost-btn { text-align: left; }
 
 .msg { display: flex; gap: 10px; margin-bottom: 4px; }
 .avatar {
@@ -1223,7 +1211,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .add-row > input[type=text], .add-row > input:not([type]) { flex-shrink: 1; }
 .add-row input[type=text], .add-row > input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 12px; outline: 0; }
 .add-row > input:focus { border-color: var(--accent); }
-.add-row select, .mem-meta select, .add-inline input, .node-panel select, .node-panel input, .node-panel textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: 0; }
+.add-row select, .mem-meta select, .node-panel select, .node-panel input, .node-panel textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: 0; }
 .check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
 .tag.global { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
@@ -1324,8 +1312,6 @@ button.tag:disabled { cursor: default; }
 .project-tools[open] summary { margin-bottom: 10px; }
 
 /* ---------- Graph ---------- */
-.add-inline { display: flex; align-items: center; gap: 2px; }
-.add-inline input { width: 140px; padding: 5px 10px; }
 .graph-body { flex: 1; display: flex; min-height: 0; }
 .graph-canvas { flex: 1; position: relative; overflow: hidden; cursor: grab; user-select: none; }
 .graph-canvas:active { cursor: grabbing; }
@@ -1651,7 +1637,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .add-row input[type=date], .add-row .date-input { flex: 0 0 150px; width: 150px; }
 .date-input { padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; outline: 0; color-scheme: inherit; }
 .date-input:focus { border-color: var(--accent); }
-.add-row .list-input { flex: 0 0 120px; width: 120px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; outline: 0; color: inherit; font: inherit; }
 input[type=date] { appearance: none; font: inherit; }
 input[type=date]::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
 input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
@@ -1791,7 +1776,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
    drops its own box: one edge, one wash, one place to answer. */
 .tool-event.awaiting > .approval, .tool-event.awaiting > .aplan { margin: 0; padding: 2px 10px 10px; border: 0; border-radius: 0; background: none; }
 .approval-text { font-size: 13px; line-height: 1.5; margin-bottom: 6px; }
-.approval-args { margin: 0 0 8px; font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 160px; overflow: auto; }
 /* Row one of every approval: the primary action first, then the plain refusal. Nothing else. */
 .approval-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 /* Row two, deliberately quieter: the standing grants and the denial with a note, as text links.
@@ -1814,32 +1798,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .tag.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .tag.unproven, .tag.bad { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 
-/* One card for a whole plan: the arguments are the card, so they are shown, not summarised.
-   .plan-head / .plan-steps / .plan-step are shared names with the plan panel above the composer, so
-   both sets are scoped to their own root (.plan-approval here, .plan-panel there) and never mix. */
-.plan-approval .plan-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
-.plan-approval .plan-head > svg { color: var(--accent); flex-shrink: 0; }
-.plan-approval .plan-head b { font-weight: 600; }
-.plan-count { margin-left: auto; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
-.plan-approval .plan-steps { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.plan-approval .plan-step { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg-input); }
-.plan-approval .plan-step.dropped { opacity: 0.45; }
-.plan-step-head { display: flex; align-items: center; gap: 6px; }
-.plan-keep { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; min-height: 24px; }
-.plan-keep input { accent-color: var(--accent); }
-.plan-tool { font-size: 12px; font-weight: 600; text-transform: capitalize; }
-.plan-step-head .ghost-btn.sm { margin-left: auto; }
-.plan-why { font-size: 11px; color: var(--text-faint); margin: 2px 0 0 22px; }
-.plan-args { margin: 4px 0 0 22px; font-size: 11.5px; display: flex; flex-direction: column; gap: 2px; }
-.plan-arg { display: flex; gap: 6px; align-items: baseline; }
-.plan-arg dt { color: var(--text-faint); min-width: 64px; flex-shrink: 0; }
-.plan-arg dd { margin: 0; white-space: pre-wrap; word-break: break-word; min-width: 0; }
-.plan-empty { font-size: 11px; color: var(--text-faint); }
-.plan-edit { width: 100%; margin: 4px 0 2px; font-family: var(--mono); font-size: 11px; resize: vertical;
-  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
-.plan-note { width: 100%; margin: 0 0 8px; font-size: 11.5px; padding: 5px 7px; border-radius: 6px;
-  background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
-.plan-warn { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--danger); margin: 2px 0; }
 .tag.p1, .tag.overdue { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 .tool-perm.row { justify-content: space-between; padding: 6px 0; }
 .tool-perm.unavailable { opacity: 0.5; }
@@ -1964,10 +1922,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .agent-inbox > p.muted { margin: 2px 0 0; font-size: 13px; }
 .inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 5px 6px 5px 10px; }
-.inbox-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 /* A read run: one line, quieter. */
 .inbox-item.seen { padding: 4px 10px; color: var(--text-muted); }
-.inbox-item.seen .inbox-item-head { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
 /* One line per row: status dot, what it is, a summary that gives way first, then the one action.
    Arguments and reports sit behind the disclosure at the end, so the list scans as a list. */
 .inbox-row { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 13px; }
@@ -2067,7 +2023,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcard-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .kcol-addbtn { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; color: var(--text-faint); font-size: 12px; }
 .kcol-addbtn:hover { background: var(--hover); color: var(--text); }
-.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .row { display: flex; gap: 8px; align-items: center; }
 
 /* ---------- Calendar ---------- */
@@ -2604,7 +2559,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   padding-right: 26px;
   cursor: pointer;
 }
-.mem-meta select, .tool-perms.compact select, .todo-prio, .dw-width {
+.mem-meta select, .tool-perms.compact select, .todo-prio {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -2792,8 +2747,6 @@ select:focus-visible {
 .subagent-head svg.rot90 { transform: rotate(90deg); }
 .subagent-role { font-weight: 600; }
 .subagent-now { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.crew-face { display: inline-flex; padding: 1px; border: 0; background: none; border-radius: 50%; cursor: pointer; }
-.crew-face:hover { background: var(--hover); }
 .agent-run-head { display: flex; align-items: center; }
 .agent-run-head .tool-head { flex: 1; }
 .agent-run-head .agent-talk { flex-shrink: 0; margin-right: 4px; }
@@ -2847,21 +2800,8 @@ select:focus-visible {
 /* Buttons in these rows are the shared .primary-btn.sm / .ghost-btn.sm; there is no local size. */
 .row-actions { display: flex; align-items: center; gap: 8px; }
 
-.skill-title { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: none; padding: 0; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
-.skill-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.skill-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-faint); }
-.skill-badge.approved { color: var(--ok); border-color: var(--ok); }
-.skill-badge.candidate { color: var(--warn); border-color: var(--warn); }
 .skill-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .skill-desc { margin: 4px 0 0; }
-.skill-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
-.skill-edit textarea { font-family: var(--mono); font-size: 12px; }
-.skill-edit-actions { display: flex; align-items: center; gap: 10px; }
-.made-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-.made-card { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
-.made-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.made-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.made-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 
 /* ---------- Page agent (⌘I) ---------- */
 .page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
@@ -2918,7 +2858,6 @@ select:focus-visible {
 .todo-blocked { display: inline-flex; color: var(--text-dim); }
 .todo-subinput { margin-top: 4px; font-size: 12px; }
 .todo-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
-.kcol .count.over-limit { color: var(--danger, #d33); font-weight: 600; }
 .msg-editor { display: flex; flex-direction: column; gap: 8px; width: min(560px, 100%); }
 .msg-editor textarea {
   width: 100%; min-height: 72px; resize: vertical; font: inherit; line-height: 1.55; color: var(--text);

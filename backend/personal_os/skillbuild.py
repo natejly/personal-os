@@ -41,7 +41,6 @@ from .learn import (
 Finding = dict[str, Any]
 
 MAX_DRAFT_STEPS = 15
-MIN_DRAFT_STEPS = 2
 
 
 # ---------------- authority: the text that must not reach the fence ----------------

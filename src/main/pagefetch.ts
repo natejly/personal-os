@@ -2,7 +2,7 @@
  * The open_page tool's offscreen browser. The backend cannot render JavaScript, so main listens on a
  * loopback port with its own bearer secret, tells the backend where (POST /bridge/page), and the backend
  * asks it to load a URL. Each request gets a hidden BrowserWindow in the `persist:agent` session -- its own
- * cookie jar, never the user's or the web widget's -- that loads the page, reads its title and visible
+ * cookie jar, never the user's -- that loads the page, reads its title and visible
  * text, and is destroyed. Fetch and read only: no input events are ever sent to the page.
  */
 import { BrowserWindow, session } from 'electron'
@@ -295,10 +295,6 @@ export function startPageBridge(): Promise<void> {
       resolve()
     })
   })
-}
-
-export function pageBridgeUrl(): string {
-  return bridgeUrl
 }
 
 export function stopPageBridge(): void {

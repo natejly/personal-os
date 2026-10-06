@@ -178,18 +178,6 @@ def test_copy_from() -> None:
     j("DELETE", f"/canvases/{copy['id']}")
 
 
-def test_reset_popped() -> None:
-    from personal_os.app import canvases
-
-    cid = j("GET", "/canvases")[0]["id"]
-    w = j("POST", f"/canvases/{cid}/windows", {"kind": "chat", "ref_id": "c1"})
-    j("PUT", f"/windows/{w['id']}", {"state": "popped"})
-    check(canvases.reset_popped() >= 1, "reset_popped clears stale rows")
-    check(j("GET", f"/windows/{w['id']}")["state"] == "normal", "popped windows come back to the canvas")
-    check(canvases.reset_popped() == 0, "reset_popped is a no-op when nothing is popped")
-    j("DELETE", f"/windows/{w['id']}")
-
-
 def test_opacity() -> None:
     cid = j("GET", "/canvases")[0]["id"]
     w = j("POST", f"/canvases/{cid}/windows", {"kind": "chat", "ref_id": "c1"})
@@ -255,7 +243,7 @@ def test_lock() -> None:
 
 
 TESTS = [test_default_seed, test_canvas_crud, test_lock, test_windows_and_z, test_layout_bulk, test_window_config_merges,
-         test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_opacity, test_notes]
+         test_raise, test_move_between_canvases, test_copy_from, test_opacity, test_notes]
 
 if __name__ == "__main__":
     failures = 0

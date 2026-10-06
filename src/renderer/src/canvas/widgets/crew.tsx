@@ -283,5 +283,3 @@ export const def: WidgetDef = {
   heavy: true,
   Component: CrewWidget
 }
-
-export default CrewWidget

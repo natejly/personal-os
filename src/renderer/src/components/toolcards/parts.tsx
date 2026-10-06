@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, CheckCircle2, CircleDashed, FileDown, FolderOpen, Loader2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
 import type { ToolEvent } from '@shared/types'
@@ -189,8 +189,4 @@ export function OutputFiles({ event, conversationId }: { event: ToolEvent; conve
       {problem && <span className="tc-muted" role="alert">{problem}</span>}
     </div>
   )
-}
-
-export function Section({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="tc-section">{children}</div>
 }

@@ -105,7 +105,7 @@ function CodingListRows({ rows }: { rows: CodingSession[] }): JSX.Element {
 }
 
 /** The six coding_session_* tools: the approval says what will run and where; afterwards the live session. */
-export default function CodingSessionCard(props: ToolCardProps): JSX.Element {
+function CodingSessionCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const p = useParsed(event)
   const a = event.arguments

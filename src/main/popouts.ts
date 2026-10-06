@@ -272,11 +272,6 @@ export const syncPopoutOpacity = (windowId: string, opacity: number): boolean =>
   return true
 }
 
-export const popoutOpacity = (windowId: string): number | null => {
-  const e = popouts.get(windowId)
-  return e && !e.win.isDestroyed() ? e.opacity : null
-}
-
 export const setPopoutMinSize = (windowId: string, minWidth: number, minHeight: number): boolean => {
   const e = popouts.get(windowId)
   if (!e || e.win.isDestroyed()) return false

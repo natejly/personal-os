@@ -5,47 +5,6 @@
  * diff classes the spec names are scoped under .desk-diff for the same reason.
  */
 
-.cowork-page { display: flex; flex-direction: column; min-height: 0; }
-/* min-height/overflow keep the .app grid row definite, styles.css:120-126. */
-.cowork-body {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
-}
-.cowork-side { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; min-height: 0; }
-.cowork-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-/* No desks: no rail, and the shared .empty-state takes the whole body. */
-.cowork-body.solo { grid-template-columns: minmax(0, 1fr); }
-
-/* ---- the rail ---- */
-.desk-rail { display: flex; flex-direction: column; gap: 10px; }
-.desk-section h4 {
-  display: flex; align-items: center; gap: 6px; margin: 4px 6px 4px;
-  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--text-faint);
-}
-.desk-section h4 .count { margin-left: auto; font-variant-numeric: tabular-nums; }
-
-.desk-row {
-  display: flex; align-items: center; gap: 7px;
-  padding: 6px; border-radius: 8px; cursor: pointer; color: var(--text-muted);
-}
-.desk-row:hover { background: var(--hover); color: var(--text); }
-.desk-row.active { background: var(--active); color: var(--text); }
-.desk-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
-.desk-row-title {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.desk-row-meta { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-faint); min-width: 0; }
-/* The status in words. Mixed towards --text so the amber and the pastel accent stay readable as
-   10px type in both themes; the ring beside it carries the pure colour. */
-.desk-row-status { flex: none; font-weight: 600; color: color-mix(in srgb, var(--ring, var(--text-faint)) 70%, var(--text)); }
-.desk-row-head { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.desk-row-age { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
-
 .desk-badge {
   flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px;
   background: var(--border); color: var(--text-muted);
@@ -53,32 +12,15 @@
 }
 .desk-badge.ask { background: color-mix(in srgb, var(--st-needs-you) 16%, transparent); color: var(--st-needs-you); }
 
-/* ---- status ring: the app-wide --st-* vocabulary, shared by the rail ring, the row's status
-   label and the detail pill. Working is amber, anything waiting on you is the accent. ---- */
-.desk-ring {
-  flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 50%;
-  border: 1px solid var(--ring, var(--border-strong)); color: var(--ring, var(--text-muted));
-  background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
-}
+/* ---- status ring: the app-wide --st-* vocabulary, read by the desk strip's ring.
+   Working is amber, anything waiting on you is the accent. ---- */
 .desk-ring-draft, .desk-ring-paused, .desk-ring-queued, .desk-ring-stopped { --ring: var(--st-idle); }
 .desk-ring-planning, .desk-ring-working { --ring: var(--st-working); }
 .desk-ring-awaiting_plan, .desk-ring-needs_approval, .desk-ring-blocked, .desk-ring-review { --ring: var(--st-needs-you); }
 .desk-ring-interrupted, .desk-ring-failed { --ring: var(--st-failed); }
 .desk-ring-done { --ring: var(--st-done); }
 
-/* ---- new desk ---- */
-.desk-new { padding: 20px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
-.desk-new > header { display: flex; align-items: center; gap: 8px; }
-.desk-new > header h3 { margin: 0; font-size: 15px; }
-.desk-new > footer { display: flex; justify-content: flex-end; gap: 8px; }
-.desk-field { display: flex; flex-direction: column; gap: 5px; }
-.desk-field > span { font-size: 12px; font-weight: 600; color: var(--text-muted); }
-.desk-field textarea, .desk-field input {
-  width: 100%; background: var(--bg-input); border: 1px solid var(--border);
-  border-radius: 8px; padding: 8px 10px; color: var(--text); font: inherit; outline: 0; resize: vertical;
-}
-.desk-field textarea:focus, .desk-field input:focus { border-color: var(--accent); }
+/* ---- autonomy options ---- */
 .desk-autonomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 .desk-autonomy-opt {
   display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; align-items: start;
@@ -88,40 +30,10 @@
 .desk-autonomy-opt b { font-size: 13px; font-weight: 600; }
 .desk-autonomy-opt small { grid-column: 2; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
 
-/* ---- detail header ---- */
-/* No rule under the header: the tab strip follows it directly and draws the one line for both. */
-.desk-head { padding: 12px 16px 0; }
-.desk-head-top { display: flex; align-items: center; gap: 8px; }
-.desk-title-input {
-  flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 8px;
-  padding: 3px 6px; color: var(--text); font: inherit; font-size: 16px; font-weight: 600; outline: 0;
-}
-.desk-title-input:hover { border-color: var(--border); }
-.desk-title-input:focus { border-color: var(--accent); background: var(--bg-input); }
-.desk-pill {
-  flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-  border: 1px solid var(--ring, var(--border-strong));
-  color: color-mix(in srgb, var(--ring, var(--text-muted)) 70%, var(--text));
-  background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
-}
-.desk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.desk-meter {
-  display: flex; align-items: center; gap: 12px; padding: 6px 6px 0;
-  font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums;
-}
-.desk-brief {
-  margin: 6px 6px 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
-  max-height: 3.2em; overflow: hidden; text-overflow: ellipsis;
-}
-
 .desk-tabs { flex: none; padding: 6px 16px 0; border-bottom: 1px solid var(--border); }
 /* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
 .desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
 
-/* What the desk is waiting on, in a band under the tabs. It scrolls on its own so a long approval
-   never pushes the transcript off screen, and collapses to nothing when there is nothing to say. */
-.desk-banners { flex: none; max-height: 45vh; overflow-y: auto; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.desk-banners:empty { display: none; }
 .desk-banner {
   display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 10px;
   font-size: 13px; background: var(--hover); border: 1px solid var(--border);
@@ -137,56 +49,21 @@
   border-color: color-mix(in srgb, var(--st-failed) 35%, transparent);
 }
 .desk-banner.warn > svg { color: var(--st-failed); }
-/* The answer box inside a banner is a field, not a second composer bar. */
-.desk-banner .desk-steer { padding: 8px 0 0; border-top: 0; }
 
 /* ---- waiting cards, desk settings, limits ---- */
-.desk-banner .desk-banner-action { margin-top: 6px; }
 .desk-cards { display: flex; flex-direction: column; gap: 8px; }
 .desk-card { display: flex; flex-direction: column; gap: 6px; }
 .desk-card + .desk-card { border-top: 1px solid var(--border); padding-top: 8px; }
-.desk-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.desk-card-head code { font-size: 12.5px; }
-.desk-card .approval-args { margin: 0; max-height: 160px; overflow: auto; }
-.desk-card .approval-actions, .desk-settings .approval-actions { display: flex; gap: 6px; }
-.desk-settings { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--hover); }
+.desk-card .approval-actions { display: flex; gap: 6px; }
 .desk-limits { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
 .desk-limits label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .desk-limits input { width: 80px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font: inherit; }
 .desk-limits input:focus { border-color: var(--accent); outline: none; }
 .desk-limits small { flex-basis: 100%; }
-.desk-inputs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
-.desk-inputs select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; max-width: 220px; }
-.desk-input-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 240px; padding: 2px 2px 2px 9px; border-radius: 12px;
-  background: var(--active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .desk-pane { flex: 1; min-height: 0; padding: 12px 16px; }
 .desk-pane.scroll { overflow-y: auto; }
-
-/* ---- steer box ---- */
-.desk-steer { display: flex; gap: 8px; align-items: flex-end; padding: 10px 16px 14px; border-top: 1px solid var(--border); }
-.desk-steer textarea {
-  flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
-  padding: 8px 10px; color: var(--text); font: inherit; outline: 0; resize: vertical; min-height: 38px;
-}
-.desk-steer textarea:focus { border-color: var(--accent); }
-.desk-steer textarea:disabled { opacity: 0.5; }
-
-/* ---- timeline ---- */
-.desk-timeline { margin-bottom: 10px; }
-.desk-timeline-head {
-  display: flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 0;
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint);
-}
-.desk-timeline-head .rot90 { transform: rotate(90deg); }
-.desk-timeline ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.desk-timeline li { display: flex; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
-.desk-timeline li.needs { color: var(--text); }
-.desk-timeline time { flex: none; color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.desk-ev-kind { flex: none; width: 72px; color: var(--text-faint); }
-.desk-ev-body { flex: 1; min-width: 0; }
 
 /* ---- plan tab ---- */
 .desk-plan { display: flex; flex-direction: column; gap: 10px; }

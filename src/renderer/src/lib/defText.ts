@@ -1,14 +1,5 @@
 import type { AgentDef } from '@shared/types'
 
-export const AGENT_SKELETON = `---
-name: my-agent
-description: One line on when to use this agent
-steps: 20
-tools: read_local_file, web_search
----
-Role: my-agent. Say what it does, what it must not do, and how it should report back.
-`
-
 export const COMMAND_SKELETON = `---
 name: my-command
 description: One line on what this command does

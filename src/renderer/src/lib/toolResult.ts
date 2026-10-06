@@ -65,13 +65,6 @@ export const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 export const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 export const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
 
-/** The last `max` lines of output, and how many earlier lines are not shown. */
-export function tailLines(text: string, max = 12): { shown: string; hidden: number } {
-  const lines = text.replace(/\s+$/, '').split('\n')
-  if (lines.length <= max) return { shown: lines.join('\n'), hidden: 0 }
-  return { shown: lines.slice(-max).join('\n'), hidden: lines.length - max }
-}
-
 /** "reached pypi.org · blocked example.com", from a shell result's `network` field (an object, or a plain boolean). */
 export function networkLine(net: unknown): string | null {
   if (net === true) return 'network allowed'
@@ -155,9 +148,6 @@ export function snapshotLine(snapshot: string, ref: string): string {
 
 /** A field that holds a secret: typed text must never be echoed into the transcript for these. */
 export const looksSecret = (line: string): boolean => /password|passcode|one-time|cvv|cvc|card number|credit card|\bcc-/i.test(line)
-
-/** The page-state facts every browser result shares. */
-export interface BrowserView { action: string; subject: string; url: string; title: string }
 
 /**
  * One line for a browser_* call. A typed value is shown only when the snapshot proves the field is not a

@@ -1,7 +1,6 @@
 """Response style presets: a short block appended to the chat system prompt, after the instructions and before memories."""
 from __future__ import annotations
 
-STYLES = ("default", "concise", "formal", "tutor", "thorough", "custom")
 CUSTOM_MAX = 2000
 
 _BLOCKS = {

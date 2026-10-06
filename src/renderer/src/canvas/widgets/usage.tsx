@@ -8,7 +8,7 @@ import type { WidgetDef, WidgetProps } from '../registry'
 
 const RANGES = [7, 30, 90] as const
 
-export default function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
+function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const days = typeof win.config.days === 'number' ? win.config.days : 30
   const [report, setReport] = useState<UsageReport | null>(null)
   const [error, setError] = useState<string | null>(null)

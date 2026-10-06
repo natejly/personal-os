@@ -25,7 +25,7 @@ function Row({ m }: { m: Memory }): JSX.Element {
   )
 }
 
-export default function MemoryWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
+function MemoryWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const memories = useStore((s) => s.memories)
   const projects = useStore((s) => s.projects)
   const refreshMemories = useStore((s) => s.refreshMemories)

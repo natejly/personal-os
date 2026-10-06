@@ -5,7 +5,7 @@ const pane = (page) => page.locator('.memory-page')
 const ignorable = /favicon|ResizeObserver|Failed to load resource|ERR_CONNECTION|fetch|NetworkError/i
 
 async function openMemory(page) {
-  await page.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await expect(page.getByPlaceholder(/Remember something/)).toBeVisible()
 }
 

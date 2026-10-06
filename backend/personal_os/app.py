@@ -3617,7 +3617,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
-        yield "learned", tool_ctx["learned"]
+        yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
     # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
     gone = convos.get(conv_id, with_messages=False) is None

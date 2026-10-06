@@ -5,7 +5,7 @@ const pane = (page) => page.locator('.memory-page')
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
 
 async function openMemory(page) {
-  await page.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await expect(page.getByPlaceholder(/Remember something/)).toBeVisible()
 }
 const addBox = (page) => page.getByPlaceholder(/Remember something/)
@@ -71,7 +71,7 @@ test('add, edit, pin, forget a memory from Settings; counts follow', async ({ gr
   expect(trash.groups.memories).toHaveLength(1)
   await api(`/trash/memory/${trash.groups.memories[0].id}/restore`, { method: 'POST' })
   const p2 = await grain.relaunch()
-  await p2.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await p2.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await expect(p2.locator('.memory-page').getByText('I live in Porto')).toBeVisible()
   clean(grain)
 })
@@ -227,7 +227,7 @@ test('memories persist across relaunch; export file round-trips through import',
   const file = await api('/memories/export')
   expect(file.memories).toHaveLength(2)
   const p = await grain.relaunch()
-  await p.locator('.sidebar').getByRole('button', { name: 'Memory', exact: true }).click()
+  await p.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await expect(p.locator('.memory-page').getByText('persist me')).toBeVisible()
   await expect(p.locator('.memory-page').getByText('and me', { exact: true })).toBeVisible()
   const pr = await api('/projects', { method: 'POST', body: { name: 'Target' } })

@@ -283,8 +283,8 @@ export interface State {
   memories: Memory[]
   /** What each reply's auto-learn pass saved, by message id (this session only; the chip's Undo works from it). */
   learnedByMessage: Record<string, Memory[]>
-  /** Learned ids per message the model suggested pinning to the profile. */
-  pinSuggestedByMessage: Record<string, string[]>
+  /** Rows per message the model suggested pinning to the profile (new or superseding versions). */
+  pinSuggestedByMessage: Record<string, Memory[]>
   /** Memory ids the Memory panel is narrowed to, set by a reply's memory chip. */
   memoryFocus: string[] | null
   /** A message the next ChatView render should scroll to; cleared once it has. */
@@ -472,7 +472,7 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
-  /** Open Settings → Memory narrowed to these rows. */
+  /** Open the Memory page narrowed to these rows. */
   showMemories: (ids: string[]) => void
   /** Trash one memory a reply learned, and drop it from that reply's chip. */
   undoLearned: (messageId: string, memoryId: string) => Promise<void>
@@ -2284,7 +2284,9 @@ export const useStore = create<State>((set, get) => {
     },
     openChatAt: async (conversationId, messageId) => {
       set({ chatJump: { conversationId, messageId } })
-      await get().selectChat(conversationId)
+      try { await get().selectChat(conversationId) } finally {
+        if (get().focusedConversationId !== conversationId) set({ chatJump: null })
+      }
     },
     selectChat: async (id) => {
       set({ view: 'chat', settingsOpen: false, traceMessageId: null })
@@ -3449,7 +3451,10 @@ export const useStore = create<State>((set, get) => {
       // Updates and forgets count as changes: they edit open lists too.
       const text = learnedText(l)
       if (l.message_id && l.memories.length) set((s) => ({ learnedByMessage: { ...s.learnedByMessage, [l.message_id!]: l.memories } }))
-      if (l.message_id && l.pin_suggested?.length) set((s) => ({ pinSuggestedByMessage: { ...s.pinSuggestedByMessage, [l.message_id!]: l.pin_suggested! } }))
+      if (l.message_id && l.pin_suggested?.length) {
+        const rows = [...l.memories, ...(l.updated ?? [])].filter((m) => l.pin_suggested!.includes(m.id))
+        set((s) => ({ pinSuggestedByMessage: { ...s.pinSuggestedByMessage, [l.message_id!]: rows } }))
+      }
       // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
       // merge into existing entities, so removing them could take the user's own relations with them.
       const added = l.memories.map((m) => m.id)

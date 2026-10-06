@@ -349,7 +349,7 @@ def test_migration_drops_the_budget_settings() -> None:
     con = sqlite3.connect(path)
     con.execute("PRAGMA user_version = 19")
     con.commit()
-    assert migrations.run(con)[0] == 20  # later migrations may follow
+    assert migrations.run(con)[0] == 20  # later steps may follow
     left = {r[0] for r in con.execute("SELECT key FROM settings")}
     con.close()
     assert not left & set(OLD_KEYS) and "uiZoom" in left

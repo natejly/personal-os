@@ -531,6 +531,8 @@ class Run:
         self.steps_consumed = 0
         # Tool calls that ran and returned without an error: the other half of a desk turn's progress.
         self.tool_ok = 0
+        # Every tool call the model made this turn, run or refused: a turn with none (and no plan) was a plain answer.
+        self.tool_calls = 0
         # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
         self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None

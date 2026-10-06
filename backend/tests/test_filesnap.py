@@ -169,12 +169,15 @@ def test_prune() -> None:
 
 
 def test_paths_rejected() -> None:
-    for bad in ("/etc/passwd", "~/Library/x.txt", "~/.ssh/k"):
+    """Only the protected places are refused (Grain's own data folder and app); the rest of the Mac is snapshotted per file."""
+    for bad in (str(mac._app_data_dir() / "personal-os.db"), "/Applications/Grain.app/Contents/Info.plist"):
         try:
             FS.capture("overwrite", bad, CTX)
             check(False, f"{bad} should be rejected")
         except mac.LocalPathError:
             check(True, f"{bad} rejected")
+    for ok in ("/etc/grain-test-hosts", "~/Library/x.txt", "~/.config/k"):  # nothing there to snapshot, but no refusal either
+        check(FS.capture("overwrite", ok, CTX) is None, f"{ok} is not refused")
 
 
 def test_failed_write_leaves_no_row() -> None:

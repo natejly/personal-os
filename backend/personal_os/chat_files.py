@@ -220,7 +220,7 @@ class ChatFiles:
             missing = not Path(ref).exists()
         if kind == "local":
             try:
-                mac.allowed_path(ref)  # never expose a path the local-file tools would refuse
+                mac.readable_path(ref)  # never expose a path the local-file tools would refuse
             except mac.LocalPathError:
                 return None
         elif kind == "output":

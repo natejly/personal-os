@@ -8,6 +8,7 @@ test('old tab ids map to the new sections', () => {
   assert.deepEqual(resolveTab('modules'), { tab: 'advanced', group: 'layout' })
   assert.deepEqual(resolveTab('cowork'), { tab: 'advanced', group: 'desks' })
   assert.deepEqual(resolveTab('data'), { tab: 'advanced', group: 'data' })
+  assert.deepEqual(resolveTab('workspace'), { tab: 'permissions' })
   assert.deepEqual(resolveTab('permissions'), { tab: 'permissions' })
   assert.deepEqual(resolveTab('nope'), { tab: 'model' })
 })

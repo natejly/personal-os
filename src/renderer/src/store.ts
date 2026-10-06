@@ -6,6 +6,7 @@ import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit,
   AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
+import type { DraftAutonomy } from './lib/autonomyDefault'
 import { markRunsSeen } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
@@ -216,6 +217,8 @@ export interface State {
   draftChatSettings: Partial<ConversationSettings>
   /** The next new chat is private: it is created with `private`, which only creation can set. */
   draftPrivate: boolean
+  /** Autonomy picked on a draft. Null follows `settings.autonomousByDefault`; `send` starts the new chat's desk with it. */
+  draftAutonomy: DraftAutonomy
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -424,7 +427,9 @@ export interface State {
   askAboutEmail: (id: string, subject: string | null | undefined) => Promise<boolean>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   /** `attachments`: uploaded files going with this turn; the row keeps them and the model reads their text. */
-  send: (text: string, conversationId?: string, attachments?: Attachment[]) => Promise<boolean>
+  /** `autonomy`: only the main new-chat composer passes it (lib/autonomyDefault.ts); a chat that exists already ignores it. */
+  send: (text: string, conversationId?: string, attachments?: Attachment[], autonomy?: DeskAutonomy | null) => Promise<boolean>
+  setDraftAutonomy: (a: DraftAutonomy) => void
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string, attachments?: Attachment[]) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
@@ -1000,6 +1005,20 @@ export const useStore = create<State>((set, get) => {
       const rest = s.pendingSends.filter((p) => p.key !== key)
       return { ...s, pendingSends: rest.length ? rest : undefined }
     })
+  /** A message for a chat working autonomously: it goes to its desk, which steers a live turn or wakes the next one,
+   *  and attached files are copied into the desk's inputs/ folder rather than inlined. */
+  const sendToDesk = async (convId: string, deskId: string, text: string, ids: string[] | undefined, key: number): Promise<boolean> => {
+    try {
+      if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
+    } catch (e) {
+      get().toast((e as Error).message, 'error')
+      dropPending(convId, key)
+      return false
+    }
+    const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
+    dropPending(convId, key)
+    return ok
+  }
   /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
   const settleSteer = (convId: string, message: Message | undefined): void => {
     if (message) patchSession(convId, (s) => applyEvent(s, { event: 'user_message', data: message } as ChatEvent, get().focusedConversationId === convId))
@@ -1675,6 +1694,7 @@ export const useStore = create<State>((set, get) => {
     draftFast: false,
     draftChatSettings: {},
     draftPrivate: false,
+    draftAutonomy: null,
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -2003,7 +2023,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2217,7 +2237,8 @@ export const useStore = create<State>((set, get) => {
       return get().send(emailAsk(id, subject))
     },
 
-    send: async (text, conversationId, attachments) => {
+    setDraftAutonomy: (draftAutonomy) => set({ draftAutonomy }),
+    send: async (text, conversationId, attachments, autonomy) => {
       const ids = attachments?.length ? attachments.map((a) => a.id) : undefined
       if (!text.trim() && !ids) return false
       // Checked first: an oversized send creates no chat and never reaches the steer-then-409 fallthrough.
@@ -2247,17 +2268,7 @@ export const useStore = create<State>((set, get) => {
         // A chat working autonomously: the message goes to its desk, which steers a live turn or wakes the next one,
         // and attached files are copied into the desk's inputs/ folder rather than inlined.
         const deskId = get().sessions[id]?.conversation.settings.deskId
-        if (deskId) {
-          try {
-            if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
-          } catch (e) {
-            get().toast((e as Error).message, 'error')
-            return fail()
-          }
-          const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
-          dropPending(id, pend.key)
-          return ok
-        }
+        if (deskId) return sendToDesk(id, deskId, text, ids, pend.key)
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
@@ -2347,14 +2358,26 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
       }))
       void get().refreshProjects()
+      // A new chat that starts autonomous: its desk is made now, asleep, and the first message wakes it.
+      let deskId = ''
+      if (autonomy) {
+        try {
+          const { desk } = await api.cowork.desks.create({ conversation_id: c.id, autonomy, brief: text, start: false })
+          bindDesk(c.id, desk.id)
+          await get().refreshDesks()
+          deskId = desk.id
+        } catch (e) {
+          get().toast(`Could not start working autonomously: ${(e as Error).message}`, 'error')
+        }
+      }
       // Released once the run has started, so a waiting send sees it streaming and steers it.
-      const ok = await runStream(c.id, { content: text, attachments: ids }, pend.key)
+      const ok = deskId ? await sendToDesk(c.id, deskId, text, ids, pend.key) : await runStream(c.id, { content: text, attachments: ids }, pend.key)
       if (!ok) dropPending(c.id, pend.key)
       draftCreate = null
       created(c.id)

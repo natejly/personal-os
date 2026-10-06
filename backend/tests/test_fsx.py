@@ -1,4 +1,4 @@
-"""File tools over granted folders (fsx.py): glob, grep, exact-string edit, copy, mkdir, the read-before-write
+"""File tools for anywhere on this Mac (fsx.py): glob, grep, exact-string edit, copy, mkdir, the read-before-write
 ledger, secret-file refusals, and the desk mount in the sandbox container's argv. Offline: a fake HOME in a tmpdir."""
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (h / "proj").mkdir(parents=True)
     (h / "other").mkdir()
     monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(tmp_path / "data"))  # where make() puts the desk workspaces
     return h
 
 
@@ -273,7 +274,7 @@ def test_secret_files_are_refused_even_through_symlinks(home: Path, tmp_path: Pa
     assert fsx.sensitive_reason("/x/.env.local") and not fsx.sensitive_reason("/x/key_notes.md")
 
 
-def test_writes_outside_the_grant_need_approval(home: Path, tmp_path: Path) -> None:
+def test_writes_need_approval_only_for_credential_stores_and_after_untrusted_content(home: Path, tmp_path: Path) -> None:
     tb, _ = make(home, tmp_path)
     inside, outside = home / "proj" / "ok.txt", home / "other" / "no.txt"
     inside.write_text("a")
@@ -281,37 +282,86 @@ def test_writes_outside_the_grant_need_approval(home: Path, tmp_path: Path) -> N
     ctx = {"conversation_id": "c1"}
     call(tb, "read_local_file", ctx, path=str(inside))
     call(tb, "read_local_file", ctx, path=str(outside))
-    # the reply loop asks about exactly the calls the tool would refuse
+    # the whole Mac is in scope: no folder needs granting, so a plain write is not a card
     assert not tb.fs_needs_ask("fs_edit", {"path": str(inside), "old": "a", "new": "b"}, ctx)
-    assert tb.fs_needs_ask("fs_edit", {"path": str(outside), "old": "a", "new": "b"}, ctx)
-    assert tb.fs_needs_ask("fs_mkdir", {"path": str(home / "other" / "d")}, ctx)
-    assert tb.fs_needs_ask("fs_copy", {"src": str(inside), "dst": str(home / "other" / "c.txt")}, ctx)
+    assert not tb.fs_needs_ask("fs_edit", {"path": str(outside), "old": "a", "new": "b"}, ctx)
+    assert not tb.fs_needs_ask("fs_mkdir", {"path": str(tmp_path / "elsewhere" / "d")}, ctx)
+    assert not tb.fs_needs_ask("fs_copy", {"src": str(inside), "dst": str(home / "other" / "c.txt")}, ctx)
     assert not tb.fs_needs_ask("fs_glob", {"pattern": "*"}, ctx)
-    refused = call(tb, "fs_edit", ctx, path=str(outside), old="a", new="b")
-    assert "needs their approval" in refused["error"] and outside.read_text() == "a"
-    assert not (home / "other" / "d").exists() or call(tb, "fs_mkdir", ctx, path=str(home / "other" / "d"))["error"]
-    # once the loop has the user's yes it sets the flag, and the same call goes through
-    ok = call(tb, "fs_edit", {**ctx, "fs_outside_ok": True}, path=str(outside), old="a", new="b")
+    ok = call(tb, "fs_edit", ctx, path=str(outside), old="a", new="b")
     assert ok["replacements"] == 1 and outside.read_text() == "b"
-    # untrusted content in the reply makes even a granted folder ask
-    assert tb.fs_needs_ask("fs_edit", {"path": str(inside), "old": "a", "new": "b"}, {**ctx, "tainted": True, "taint_sources": ["fetch_url"]})
+    # a credential store asks, for a read as well as a write, and the tool refuses until the loop has the user's yes
+    env = home / "other" / ".env"
+    env.write_text("TOKEN=1")
+    ssh = home / ".ssh"
+    ssh.mkdir()
+    for name, args in (("fs_edit", {"path": str(env), "old": "1", "new": "2"}), ("fs_mkdir", {"path": str(ssh / "d")}),
+                       ("fs_copy", {"src": str(inside), "dst": str(ssh / "c.txt")}), ("fs_copy", {"src": str(env), "dst": str(inside) + ".bak"}),
+                       ("fs_grep", {"pattern": "T", "root": str(ssh)}), ("fs_glob", {"pattern": "*", "root": str(ssh)}),
+                       ("read_local_file", {"path": str(env)})):
+        assert tb.fs_needs_ask(name, args, ctx), (name, args)
+    refused = call(tb, "fs_edit", ctx, path=str(env), old="1", new="2")
+    assert "approval" in refused["error"] and env.read_text() == "TOKEN=1"
+    assert "approval" in call(tb, "fs_mkdir", ctx, path=str(ssh / "d"))["error"] and not (ssh / "d").exists()
+    assert "approval" in call(tb, "fs_glob", ctx, pattern="*", root=str(ssh))["error"]
+    assert call(tb, "fs_mkdir", {**ctx, "fs_outside_ok": True}, path=str(ssh / "d"))["created"]
+    (ssh / "config").write_text("Host x")
+    assert sorted(r["rel"] for r in call(tb, "fs_glob", {**ctx, "fs_outside_ok": True}, pattern="*", root=str(ssh))["files"]) == ["config", "d"]
+    call(tb, "read_local_file", {**ctx, "fs_outside_ok": True}, path=str(env))
+    edited = call(tb, "fs_edit", {**ctx, "fs_outside_ok": True}, path=str(env), old="1", new="2")
+    assert edited["replacements"] == 1 and env.read_text() == "TOKEN=2"
+    # untrusted content in the reply makes any write outside a desk workspace ask
+    tainted = {**ctx, "tainted": True, "taint_sources": ["fetch_url"]}
+    assert tb.fs_needs_ask("fs_edit", {"path": str(inside), "old": "a", "new": "b"}, tainted)
+    assert tb.fs_needs_ask("fs_mkdir", {"path": str(tmp_path / "elsewhere")}, tainted)
+    assert not tb.fs_needs_ask("fs_glob", {"pattern": "*"}, tainted)  # reads are not
+    assert "approval" in call(tb, "fs_mkdir", tainted, path=str(home / "proj" / "t"))["error"]
     # an unattended run may not write outside a desk workspace even with the flag
     bg = call(tb, "fs_mkdir", {**ctx, "proposal_only": True, "fs_outside_ok": True}, path=str(home / "proj" / "x"))
     assert "unattended" in bg["error"]
 
 
-def test_symlink_out_of_a_root_is_outside(home: Path, tmp_path: Path) -> None:
+def test_the_protected_places_are_refused_whatever_the_approval(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grain's own data folder (its database and secrets) and the Grain app: no read, write, move or trash, in any mode, with
+    or without the user's yes; the active desk's own workspace inside that folder is the one way in."""
     tb, _ = make(home, tmp_path)
-    target = home / "other" / "t.txt"
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    db = data / "personal-os.db"
+    db.write_text("sentinel")
+    (home / "link.db").symlink_to(db)
+    root = tb.workspace.ensure("desk1")
+    (root / "work" / "n.txt").write_text("hello")
+    yes = {"conversation_id": "c1", "fs_outside_ok": True}
+    for target in (str(db), str(data), str(data / "x.txt"), str(home / "link.db"), "/Applications/Grain.app/Contents/Info.plist"):
+        for name, args in (("read_local_file", {"path": target}), ("fs_glob", {"pattern": "*", "root": target}), ("fs_grep", {"pattern": "s", "root": target}),
+                           ("fs_edit", {"path": target, "old": "s", "new": "t"}), ("fs_mkdir", {"path": target + "/d"}),
+                           ("fs_copy", {"src": target, "dst": str(home / "out.txt")}), ("fs_copy", {"src": str(home / "proj"), "dst": target}),
+                           ("write_local_file", {"path": target, "content": "x", "mode": "overwrite"}), ("trash_local_file", {"path": target}),
+                           ("move_local_file", {"path": target, "to": str(home / "moved.db")})):
+            out = call(tb, name, dict(yes), **args)
+            assert "error" in out, (name, target, out)
+        assert not tb.fs_needs_ask("read_local_file", {"path": target}, {})  # nothing to ask: no card can buy it
+    assert db.read_text() == "sentinel" and not (home / "out.txt").exists() and not (home / "moved.db").exists()
+    # the desk's own workspace is the exception, for that desk only
+    ctx = {"conversation_id": "c1", "desk_id": "desk1"}
+    assert call(tb, "fs_grep", ctx, pattern="hell")["count"] == 1
+    assert not tb.fs_needs_ask("fs_mkdir", {"path": "work/sub"}, ctx)
+    assert "error" in call(tb, "fs_grep", {"conversation_id": "c1", "desk_id": "other"}, pattern="hell", root=str(root))
+
+
+def test_a_symlink_to_a_credential_store_asks(home: Path, tmp_path: Path) -> None:
+    tb, _ = make(home, tmp_path)
+    target = home / "other" / ".env"
     target.write_text("a")
     link = home / "proj" / "link.txt"
     link.symlink_to(target)
     ctx = {"conversation_id": "c1"}
     assert tb.fs_needs_ask("fs_edit", {"path": str(link), "old": "a", "new": "b"}, ctx)
-    call(tb, "read_local_file", ctx, path=str(link))
-    assert "needs their approval" in call(tb, "fs_edit", ctx, path=str(link), old="a", new="b")["error"]
+    assert tb.fs_needs_ask("read_local_file", {"path": str(link)}, ctx)
+    assert "error" in call(tb, "read_local_file", ctx, path=str(link))
+    assert "approval" in call(tb, "fs_edit", ctx, path=str(link), old="a", new="b")["error"]
     assert target.read_text() == "a"
-    assert not mac.in_roots(link, [home / "proj"]) and mac.in_roots(home / "proj" / "x", [home / "proj"])
 
 
 def test_a_token_in_a_file_tool_error_is_stripped(home: Path, tmp_path: Path) -> None:
@@ -414,17 +464,19 @@ def test_edit_snapshots_for_undo(home: Path, tmp_path: Path) -> None:
 
     db = Database(tmp_path / "db")
     fs = FileSnapshots(db, tmp_path / "snaps", lambda: {})
-    cfg: dict[str, Any] = {"workspaceRoots": [str(home / "proj")]}
+    cfg: dict[str, Any] = {}
     tb = Toolbox(None, None, None, lambda: cfg, filesnap=fs)  # type: ignore[arg-type]
-    f = home / "proj" / "u.txt"
-    f.write_text("before")
-    ctx = {"conversation_id": "c1"}
-    call(tb, "read_local_file", ctx, path=str(f))
-    out = call(tb, "fs_edit", ctx, path=str(f), old="before", new="after")
-    sid = out["undo"]["snapshot_id"]
-    assert sid and f.read_text() == "after"
-    fs.restore(sid)
-    assert f.read_text() == "before"
+    elsewhere = tmp_path / "outside-home"  # not under the home folder: the undo copy is per file, wherever it is
+    elsewhere.mkdir()
+    for f in (home / "proj" / "u.txt", elsewhere / "u.txt"):
+        f.write_text("before")
+        ctx = {"conversation_id": "c1"}
+        call(tb, "read_local_file", ctx, path=str(f))
+        out = call(tb, "fs_edit", ctx, path=str(f), old="before", new="after")
+        sid = out["undo"]["snapshot_id"]
+        assert sid and f.read_text() == "after"
+        fs.restore(sid)
+        assert f.read_text() == "before"
 
 
 def test_desk_workspace_is_always_granted(home: Path, tmp_path: Path) -> None:

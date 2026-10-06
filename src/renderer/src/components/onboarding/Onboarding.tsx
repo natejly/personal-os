@@ -260,7 +260,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'permissions' && (
           <>
-            <p className="muted">Optional. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
+            <p className="muted">Optional. Grain can work anywhere on this Mac; Full Disk Access also opens Desktop, Documents, Downloads, Mail and Messages. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
             <PermissionsPanel compact />
           </>
         )}

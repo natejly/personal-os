@@ -38,7 +38,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 ## Chat
 - New chat: Cmd+N. Model and effort pickers sit under the composer.
 - Attach: drop or paste a file. It rides on the message as a chip, and its text goes to the model up to a size cap.
-- Working folder: set one per chat if the assistant should read or write files there. With none set it uses ~/Grain.
+- Files: the assistant's file and shell tools work anywhere on this Mac. Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) ask first, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages) need Full Disk Access in System Settings.
 - Per-chat context toggles (memory, graph, files, auto-learn, tools) are in the Context panel (Ctrl+Cmd+I). It also shows exactly what was injected into the last reply.
 - Regenerate, stop, edit and resend are on each message. Cmd+F finds in the chat, Cmd+Shift+F searches all chats.
 - A face by each chat blinks while it works. Compact chats in Settings folds chat windows in Spaces to the face and one line.
@@ -101,7 +101,8 @@ Type / in the composer:
 ## Settings people touch (Cmd+,)
 - Tools: each tool is on, ask or off, set globally, per project or per chat. Always-ask, whatever the mode: Gmail send, calendar delete, trash or move a file, run a shortcut, install a Python package, schedule a task.
 - Allowed hosts (under Tools): fetching a page after the reply read untrusted content asks once. Approve the card, or click "Allow <host> from now on".
-- Workspace folders (under Tools): where file and shell tools may work. With none set, ~/Grain.
+- System access (under Permissions): what macOS has granted Grain, plus what the file tools may not touch and what asks first.
+- Autonomous (on by default): a new chat runs as a task that works through its steps, and a quick question is simply answered.
 - Data: daily backups (newest 7 plus one a week for four weeks), Back up now, restore (applied on next start), Export all data as a zip.
 - Modules: which views appear and where. Voice and Memory live under Memory. Usage shows spend, tokens and calls. Integrations holds Google and connectors. Compact chats and Trash are here too.
 

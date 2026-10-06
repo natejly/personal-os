@@ -1,8 +1,9 @@
-"""A host shell for the agent, confined to a workspace by the OS.
+"""A host shell for the agent, kept off the secrets by the OS.
 
-`shell_run` runs one command in /bin/zsh on the user's machine under macOS Seatbelt (sandbox.shell_profile): the
-whole disk is readable except secrets, writes land only in the folder the command runs in (a desk workspace or a
-granted `workspaceRoots` entry) and a private temp dir. The network has three modes: open (`shellNetwork`), off, or
+`shell_run` runs one command in /bin/zsh on the user's machine under macOS Seatbelt (sandbox.shell_profile): it may run
+in any folder and read and write anywhere the user could, except Grain's own data folder and app (never written), the
+credential stores (never read or written) and the files that run code later (rc files, git hooks, launch agents). The
+default folder is the desk workspace in a desk, else the home folder. The network has three modes: open (`shellNetwork`), off, or
 -- the default when a registry preset or allowed domains apply -- one allowlisting proxy on localhost (egress.py) and
 nothing else. The sandbox is the boundary, the approval card is the courtesy: nothing here relies on parsing the command.
 
@@ -47,8 +48,6 @@ MAX_TRACKED = 64
 FINISHED_KEEP_S = 30 * 60
 SPILL_DAYS = 7
 SAFE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-NO_ROOT = ("shell_run needs a folder to work in: there is no desk workspace and no workspace root. Ask the user to add "
-           "a folder under Settings (Workspace folders), set the chat's Working folder, or run it from a desk.")
 
 
 class ShellError(Exception):
@@ -98,36 +97,19 @@ def _remember_cwd(conversation_id: str | None, p: str) -> None:
         _LAST_CWD.pop(next(iter(_LAST_CWD)))
 
 
-def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path]:
-    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder `mac.allowed_root` accepts,
-    so a root stored before that check (the home folder, "/") never widens what the shell may write."""
-    out: list[Path] = [_real(desk_root)] if desk_root else []
-    for r in permissions.get(settings, "workspaceRoots") or []:
-        if isinstance(r, str) and r.strip() and os.path.isabs(os.path.expanduser(r.strip())):
-            try:
-                p = mac.allowed_root(r)
-            except mac.LocalPathError:
-                continue
-            if p.is_dir() and p not in out:
-                out.append(p)
-    return out
-
-
-def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
-    """(cwd, the granted root that contains it). Raises ShellError with a message the model can act on."""
-    if not roots:
-        raise ShellError(NO_ROOT)
+def resolve_cwd(cwd: str | None, default: Path, desk: Path | None = None) -> Path:
+    """The folder a command runs in: any existing folder except Grain's own data folder and app (the active desk's
+    workspace, which lives in there, is fine). A relative cwd is relative to `default`. Raises ShellError with a message
+    the model can act on."""
     if not cwd or not str(cwd).strip():
-        return roots[0], roots[0]
+        return _real(default)
     raw = Path(os.path.expanduser(str(cwd).strip()))
-    p = _real(raw if raw.is_absolute() else roots[0] / raw)  # a relative cwd is relative to the default root
-    for r in roots:
-        if _inside(p, r):
-            if not p.is_dir():
-                raise ShellError(f"{p} is not a folder.")
-            return p, r
-    raise ShellError(f"{p} is outside the folders this shell may work in ({', '.join(str(r) for r in roots)}). "
-                     "Ask the user to add it under Settings (Workspace folders).")
+    p = _real(raw if raw.is_absolute() else default / raw)
+    if not (desk and _inside(p, _real(desk))) and (why := mac.protected_reason(raw if raw.is_absolute() else default / raw, p)):
+        raise ShellError(f"{p}: {why}.")
+    if not p.is_dir():
+        raise ShellError(f"{p} is not a folder.")
+    return p
 
 
 def reaches_out(settings: dict[str, Any]) -> bool:
@@ -157,7 +139,7 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     real = [_real(r) for r in roots]
     raw = str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or None
     try:
-        where, _root = resolve_cwd(raw, real)
+        where = resolve_cwd(raw, real[0], real[0])
     except ShellError:
         return False
     return any(_inside(where, r) for r in real)
@@ -652,14 +634,15 @@ def register(tb: Any) -> None:
         in_desk = bool(ctx.get("desk_id"))
         if not in_desk:
             on_timeout = "kill"
-        # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that is
-        # still inside a granted root (the roots may have changed since), otherwise the default folder.
-        roots = granted_roots(s, desk_root(ctx))
+        # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that
+        # folder is still there, otherwise the default folder (the desk workspace, else the home folder).
+        dr = desk_root(ctx)
+        default = dr or mac.home()
         try:
-            where, root = resolve_cwd(cwd, roots)
+            where = resolve_cwd(cwd, default, dr)
             if not (cwd and str(cwd).strip()) and remembered_cwd(ctx.get("conversation_id")):
                 try:
-                    where, root = resolve_cwd(remembered_cwd(ctx.get("conversation_id")), roots)
+                    where = resolve_cwd(remembered_cwd(ctx.get("conversation_id")), default, dr)
                 except ShellError:
                     pass
         except ShellError as e:
@@ -701,10 +684,9 @@ def register(tb: Any) -> None:
                 token = jobs.egress.new_run(allowed)
                 env.update(jobs.egress.env(token))
         if not unsandboxed:
-            writable = [str(root), tmp]
-            dr = desk_root(ctx)
+            writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
             if dr:
-                writable.append(str(dr))
+                writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
             argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None), *argv]
         if network or unsandboxed:
             # Whatever a networked or unconfined command prints may be third-party text.
@@ -768,9 +750,9 @@ def register(tb: Any) -> None:
         shown, cut = truncate(text)
         if job.end_cwd:
             try:
-                ended, _r = resolve_cwd(job.end_cwd, roots)
+                ended = resolve_cwd(job.end_cwd, default, dr)
             except ShellError:
-                ended = None  # it cd'd out of every granted root: the next call starts from the default folder again
+                ended = None  # it ended somewhere it may not run (or the folder is gone): the next call starts from the default folder again
             if ended:
                 _remember_cwd(ctx.get("conversation_id"), str(ended))
                 base["cwd"] = _scrub(str(ended))
@@ -789,18 +771,19 @@ def register(tb: Any) -> None:
                 out["result_id"] = row["id"]
         _note_shell_copies(ctx, since_ns)
         return out
-    spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac inside the working folder. It is sandboxed by the OS: the "
-                    "disk is readable except secrets, files can be written only inside the working folder, and the network is "
+    spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac. It is sandboxed by the OS: it can read and write anywhere "
+                    "on this Mac except Grain's own data folder and app, credential stores (~/.ssh, keychains, browser cookies and "
+                    "passwords, .env files) and the files that run code later (shell rc files, git hooks, launch agents); the network is "
                     "open only if the user enabled it, otherwise limited to package registries and the user's allowed domains "
-                    "through a proxy (anything else is blocked), or off. cwd must be inside the desk workspace or a workspace "
-                    "root; by default it is where the last command in this conversation ended (cd persists, environment "
-                    "variables do not), else that folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
+                    "through a proxy (anything else is blocked), or off. macOS-protected folders (Desktop, Documents, Downloads...) need "
+                    "Full Disk Access in System Settings. cwd is any folder on this Mac; by default it is where the last command in this "
+                    "conversation ended (cd persists, environment variables do not), else the desk workspace in a desk, else the home folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
                     "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
                     "unsandboxed=true escapes the sandbox and always asks the user.",
-                    _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "A folder inside the working folder"},
+                    _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
                           "unsandboxed": {"type": "boolean", "default": False},

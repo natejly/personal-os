@@ -47,7 +47,7 @@ function ChatRing({ convId, status, title }: { convId: string; status: string; t
   const kids = Object.values(useSubagents(convId)).filter((k) => k.message_id === latest)
   const face = useChatFace(conv)
   const openSubagent = useStore((s) => s.openSubagent)
-  return <CrewRing center={{ name: face.name, hue: face.hue, status, title }}
+  return <CrewRing center={{ ...face, status, title }}
     kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
 }
 

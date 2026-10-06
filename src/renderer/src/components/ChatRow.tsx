@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { EyeOff, MoreHorizontal, Paperclip } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
-import { useChatAttention, useChatFace, useStore } from '../store'
+import { useChatAttention, useStore } from '../store'
 import ChatPulse, { AttentionDot } from './ChatPulse'
 import { api } from '../lib/api'
 import { copyMarkdown, downloadMarkdown } from '../features/notes/exportDoc'
@@ -20,7 +20,6 @@ import './chatFiles.css'
  */
 export default function ChatRow({ conv, active, sub = false, lead, trail }: { conv: Conversation; active: boolean; sub?: boolean; lead?: ReactNode; trail?: ReactNode }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const face = useChatFace(conv)
   // One attention mark per row (lib/attention.ts): a chat working autonomously carries its desk's state. Nothing once it is idle.
   const attn = useChatAttention(conv)
   const deskStatus = useStore((s) => (conv.settings?.deskId ? s.desks.find((d) => d.id === conv.settings.deskId)?.status : undefined))
@@ -92,7 +91,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         // A text field inside a draggable element cannot select by mouse: the drag wins.
         draggable={!renaming}
       >
-        <ChatPulse conversationId={conv.id} face={face} size={sub ? 12 : 14} />
+        <ChatPulse conv={conv} size={sub ? 12 : 14} />
         <span className="convo-title">
           {lead}
           {conv.settings?.private && <EyeOff size={11} className="convo-private" aria-label="Private chat" />}

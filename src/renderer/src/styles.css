@@ -878,6 +878,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
 .test-msg.fail { color: var(--danger); }
+.model-prompt { color: var(--warn); font-size: 12px; }
 /* Pinned to the bottom of the scroller, so Save/Cancel is always reachable. */
 .modal footer {
   display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;
@@ -2239,6 +2240,15 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .usage-tile-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-tile-sub { font-size: 10.5px; color: var(--text-faint); }
 .usage-charts { display: flex; flex-direction: column; }
+.usage-sub { margin: 16px 0 6px; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; border: 1px solid var(--border); border-radius: var(--radius); }
+.usage-table th, .usage-table td { padding: 5px 10px; border-top: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.usage-table thead th { border-top: 0; background: var(--hover); color: var(--text-muted); font-weight: 600; font-size: 11px; }
+.usage-table th:first-child { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.usage-table tbody th { font-weight: 400; }
+.usage-periods .usage-tile-value { font-size: 16px; }
+.usage-more { margin-top: 14px; }
+.usage-more > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .usage-prices { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
 .usage-prices table { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* --text-faint is only 4.01:1 over the --hover header fill. */

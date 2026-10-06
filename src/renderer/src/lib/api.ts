@@ -22,7 +22,7 @@ import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
-export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
+export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
 export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
 /** Reply tracker settings (modules/mailwatch.py). */
@@ -181,6 +181,8 @@ export const api = {
     status: () => req<SetupStatus>('/setup/status'),
     providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
     test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
+    /** The provider's own model list; `models` is null when it could not be read (see `error`). */
+    models: (body: SetupBody) => req<{ models: string[] | null; error: string | null }>('/setup/models', { method: 'POST', body: json(body) }),
     complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { BackendInfo, BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
+import type { AgentBrowserApi, AgentBrowserFrame } from '../shared/agentBrowserTypes'
 
 /** Subscribe to a main->renderer channel, returning an unsubscribe function. */
 function listen<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -8,7 +9,25 @@ function listen<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, handler)
 }
 
-const api: GrainApi = {
+/** The agent's interactive browser: list / take over / watch. Frames are pushed by main only while subscribed. */
+const agentBrowser: AgentBrowserApi = {
+  list: () => ipcRenderer.invoke('agentBrowser:list'),
+  show: (session) => ipcRenderer.invoke('agentBrowser:show', session),
+  hide: (session) => ipcRenderer.invoke('agentBrowser:hide', session),
+  subscribe: (session, cb) => {
+    const off = listen<AgentBrowserFrame & { session: string }>('agentBrowser:frame', (f) => {
+      if (f.session === session) cb({ dataUrl: f.dataUrl, url: f.url, title: f.title, at: f.at })
+    })
+    ipcRenderer.send('agentBrowser:subscribe', session)
+    return () => {
+      off()
+      ipcRenderer.send('agentBrowser:unsubscribe', session)
+    }
+  }
+}
+
+const api: GrainApi & { agentBrowser: AgentBrowserApi } = {
+  agentBrowser,
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),

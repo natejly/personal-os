@@ -5,14 +5,16 @@
  * cookie jar, never the user's or the web widget's -- that loads the page, reads its title and visible
  * text, and is destroyed. Fetch and read only: no input events are ever sent to the page.
  */
-import { BrowserWindow, session } from 'electron'
+import { BrowserWindow } from 'electron'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
 import { backendToken, backendUrl } from './backend'
-import { hostBlocked, isPrivateHost } from './pageGuard'
+import { hostBlocked } from './pageGuard'
+import { PARTITION, agentSession, forbiddenNavigation, isHttp } from './agentSession'
+import { handleBrowserRoute } from './agentBrowser'
 
-const PARTITION = 'persist:agent'
 const MAX_BODY = 16 * 1024
+const MAX_BROWSER_BODY = 256 * 1024 // typed text and upload path lists are larger than a URL
 const MAX_CHARS = 60_000
 const MAX_TIMEOUT_MS = 45_000
 const SETTLE_MS = 700 // after load: let client-side rendering paint before reading
@@ -23,49 +25,12 @@ let server: Server | null = null
 let bridgeUrl = ''
 const secret = randomBytes(32).toString('base64url')
 let active = 0
-let sessionReady = false
 let timer: NodeJS.Timeout | null = null
 
 type PageResult = { url: string; title: string; text: string; truncated: boolean; timedOut: boolean }
 
-const isHttp = (u: URL): boolean => u.protocol === 'http:' || u.protocol === 'https:'
-
-function forbiddenNavigation(to: string): boolean {
-  try {
-    const u = new URL(to)
-    return !(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:') || isPrivateHost(u.hostname)
-  } catch {
-    return true
-  }
-}
-
-function agentSession(): Electron.Session {
-  const ses = session.fromPartition(PARTITION)
-  if (sessionReady) return ses
-  sessionReady = true
-  ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
-  ses.setPermissionCheckHandler(() => false)
-  ses.on('will-download', (e) => e.preventDefault())
-  // Subresources too: a page must not reach into the user's LAN or the app's own loopback services.
-  ses.webRequest.onBeforeRequest((details, cb) => {
-    let u: URL
-    try {
-      u = new URL(details.url)
-    } catch {
-      return cb({ cancel: true })
-    }
-    if (u.protocol === 'data:' || u.protocol === 'blob:') return cb({})
-    if (!(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:')) return cb({ cancel: true })
-    // Redirects and subresources included. A name is resolved here: the backend only checked the first URL.
-    void hostBlocked(u.hostname).then(
-      (blocked) => cb({ cancel: blocked }),
-      () => cb({ cancel: true })
-    )
-  })
-  // Plain Chrome UA: some sites refuse anything that says Electron.
-  ses.setUserAgent(ses.getUserAgent().replace(/\s+(Electron|grain|Grain)\/\S+/g, ''))
-  return ses
-}
+// The session itself (permissions, the one webRequest host guard, downloads) lives in agentSession.ts so the
+// interactive browser shares it: webRequest allows a single handler per session.
 
 /** Picks the densest of <main>/<article>/[role=main] when it carries most of the text, else the whole body. */
 const EXTRACT = (max: number): string => `(() => {
@@ -147,12 +112,25 @@ const authorized = (req: IncomingMessage): boolean => {
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (req.method !== 'POST' || req.url !== '/page') return send(res, 404, { error: 'not found' })
+  const path = req.url ?? ''
+  const isBrowser = path.startsWith('/browser/')
+  if (req.method !== 'POST' || !(path === '/page' || isBrowser)) return send(res, 404, { error: 'not found' })
   if (!authorized(req)) return send(res, 401, { error: 'unauthorized' })
   let raw = ''
+  const limit = isBrowser ? MAX_BROWSER_BODY : MAX_BODY
   for await (const chunk of req) {
     raw += chunk
-    if (raw.length > MAX_BODY) return send(res, 413, { error: 'request too large' })
+    if (raw.length > limit) return send(res, 413, { error: 'request too large' })
+  }
+  if (isBrowser) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw || '{}')
+    } catch {
+      return send(res, 400, { ok: false, error: 'invalid JSON', code: 'bad_request' })
+    }
+    const out = await handleBrowserRoute(path, parsed)
+    return send(res, out.status, out.body)
   }
   let body: { url?: unknown; maxChars?: unknown; timeoutMs?: unknown }
   try {
@@ -192,7 +170,7 @@ async function register(): Promise<void> {
     await fetch(`${base}/bridge/page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Personal-OS-Token': token },
-      body: JSON.stringify({ url: bridgeUrl, token: secret })
+      body: JSON.stringify({ url: bridgeUrl, token: secret, capabilities: ['page', 'browser'] })
     })
   } catch {
     /* backend not up yet: the next tick retries */

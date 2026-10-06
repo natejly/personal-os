@@ -3617,7 +3617,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
-        yield "learned", tool_ctx["learned"]
+        yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
     # A chat deleted mid-reply is neither mined nor banked: the exchange is the user's to discard.
     gone = convos.get(conv_id, with_messages=False) is None
@@ -6149,6 +6149,23 @@ def restore_memory(id: str) -> dict[str, Any]:
 @app.get("/memories/{id}/history")
 def memory_history(id: str) -> list[dict[str, Any]]:
     return memories.history(id)
+
+
+@app.get("/memories/{id}/source")
+def memory_source(id: str) -> dict[str, Any]:
+    m = memories.get(id)
+    if not m or not m.get("source_message_id"):
+        raise HTTPException(404)
+    with db.tx() as c:
+        r = c.execute("SELECT m.id, m.conversation_id, m.content, c.title FROM messages m JOIN conversations c ON c.id = m.conversation_id "
+                      "WHERE m.id=? AND c.deleted_at IS NULL", (m["source_message_id"],)).fetchone()
+    if not r:
+        raise HTTPException(404)
+    quote = " ".join(str(r["content"]).split())
+    cap = memory_limits.SOURCE_QUOTE_CHARS
+    if len(quote) > cap:
+        quote = quote[:cap].rstrip() + "…"
+    return {"conversation_id": r["conversation_id"], "message_id": r["id"], "title": r["title"], "quote": quote}
 
 
 @app.post("/memories")

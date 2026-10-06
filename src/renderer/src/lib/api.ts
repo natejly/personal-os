@@ -1,7 +1,7 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
@@ -642,6 +642,7 @@ export const api = {
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
     history: (id: string) => req<Memory[]>(`/memories/${id}/history`),
+    source: (id: string) => req<MemorySource>(`/memories/${id}/source`),
     exportFile: (s: Scope) => req<MemoryExport>(`/memories/export?${scope(s)}`),
     importFile: (file: unknown, projectId: string | null) => req<{ added: number; skipped: number }>('/memories/import', { method: 'POST', body: json({ file, project_id: projectId }) }),
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
@@ -668,7 +669,11 @@ export const api = {
     deleteNode: (id: string) => req(`/graph/nodes/${id}`, { method: 'DELETE' }),
     createEdge: (e: { project_id: string | null; source_id: string; target_id: string; relation: string }) => req<GraphEdge>('/graph/edges', { method: 'POST', body: json(e) }),
     updateEdge: (id: string, patch: Partial<Pick<GraphEdge, 'relation' | 'properties'>>) => req<GraphEdge>(`/graph/edges/${id}`, { method: 'PUT', body: json(patch) }),
-    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' })
+    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' }),
+    /** `project_id`: null is personal chats, 'all' every chat, else one project. */
+    backfill: (project_id?: string | null) => req<GraphBackfillStatus>('/graph/backfill', { method: 'POST', body: json({ project_id: project_id ?? null }) }),
+    backfillStatus: () => req<GraphBackfillStatus>('/graph/backfill'),
+    cancelBackfill: () => req<GraphBackfillStatus>('/graph/backfill', { method: 'DELETE' })
   },
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),

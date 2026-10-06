@@ -932,6 +932,33 @@ test('a draft parks chat settings instead of writing the global ones, and send a
   assert.deepEqual(useStore.getState().draftChatSettings, {})
 })
 
+test('the first send of a chat armed autonomous makes its desk and sends through it, not as a plain run', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ desk: { id: 'd1', conversation_id: 'c9' }, conversation_id: 'c9' })
+    : m === 'POST' && p.endsWith('/cowork/desks/d1/message') ? json({ ok: true, steered: false })
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks'))?.body, { conversation_id: 'c9', autonomy: 'ask', brief: 'hi', start: false })
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks/d1/message'))?.body, { content: 'hi' })
+  assert.equal(calls.some((c) => c.path.includes('/chat')), false, 'no plain run')
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, 'd1')
+  assert.equal(useStore.getState().focusedConversationId, 'c9')
+})
+
+test('when the desk cannot be made, the first send falls back to a plain chat and says why', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ detail: 'no desks today' }, 500)
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.ok(calls.some((c) => c.path.includes('/chat')), 'the message still goes as a normal run')
+  assert.match(useStore.getState().toasts[0].text, /no desks today/)
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, undefined)
+})
+
 test('a failed PATCH of parked chat settings refuses the run and keeps them on the draft', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: { planMode: 'always' }, toasts: [] })

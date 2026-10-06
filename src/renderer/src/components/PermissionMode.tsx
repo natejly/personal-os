@@ -45,7 +45,7 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
               <p>Grain will not check actions with a second AI and will not show approval cards. It will send, delete, run and schedule without asking.</p>
               <ul>
                 <li>Deny rules still apply.</li>
-                <li>Writes outside your workspace folders still need the folder added.</li>
+                <li>Grain&apos;s own data and app stay off limits. Credential stores (keys, passwords, sign-in files) and writes right after untrusted content still ask.</li>
                 <li>Every action is still logged in approval history.</li>
               </ul>
             </section>

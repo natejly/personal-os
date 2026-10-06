@@ -21,7 +21,7 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   expect((await grain.api(`/cowork/desks/${id}`)).conversation_id).toBe(chat.id) // no second conversation
   await waitStatus(grain, id, 'review')
   await expect(strip(page)).toContainText('Ready to review')
-  await expect(chatRow(page, chat.title).locator('.convo-desk')).toHaveAttribute('aria-label', 'Ready to review')
+  await expect(chatRow(page, chat.title).locator('.attn-dot')).toHaveAttribute('aria-label', /Ready to review/)
   await openPanel(page, 'Review')
   await expect(panel(page).locator('.desk-output')).toContainText('The report')
   await panel(page).getByRole('button', { name: 'Preview' }).click()

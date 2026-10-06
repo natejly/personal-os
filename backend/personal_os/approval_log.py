@@ -48,6 +48,8 @@ def record(db: Any, *, tool: str, decision: str, args: Any = None, scope: str | 
            note: str | None = None, review: dict[str, Any] | None = None, call_id: str | None = None) -> None:
     """Append one row. Never raises: losing a history row must not fail the decision it describes."""
     rv = review or {}
+    if rv.get("confidence"):  # no column of its own: it rides on the note
+        note = f"{note} · confidence: {rv['confidence']}" if note else f"confidence: {rv['confidence']}"
     row = (time.time(), conversation_id, run_id, desk_id, agent or ("desk" if desk_id else "chat"), tool,
            summarize(args) if args is not None else "", decision, scope,
            json.dumps(rule) if rule else None, (note or "").strip()[:500] or None,

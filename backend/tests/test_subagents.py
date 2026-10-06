@@ -30,7 +30,7 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="satest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import llm  # noqa: E402
+from personal_os import limits, llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import subagents as sa  # noqa: E402
@@ -49,6 +49,7 @@ def check(cond: Any, label: str) -> None:
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
 DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds",
                                                   "subagentStaleSeconds", "subagentToolSeconds")}
+DEFAULTS["permissionMode"] = "manual"  # the gates below are the manual ones; the mode tests set their own
 
 # ---- a scripted model ----------------------------------------------------------------------------
 SCRIPTS: dict[str, list[dict[str, Any]]] = {}   # a child's task text -> one entry per round
@@ -589,9 +590,9 @@ def test_child_calls_obey_permission_rules() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
-def test_child_skip_permissions_lifts_plain_ask_only() -> None:
-    """Under the parent's skip flag a child's plain ask runs with no card; an ask rule still raises one."""
-    for rules, mode, expect_ran in (({"allow": [], "ask": [], "deny": []}, "ask", True), ({"allow": [], "ask": ["fetch_url"], "deny": []}, "on", False)):
+def test_child_allow_all_lifts_asks() -> None:
+    """Under the parent's allow-all mode a child's ask runs with no card, an ask rule's included."""
+    for rules, mode, expect_ran in (({"allow": [], "ask": [], "deny": []}, "ask", True), ({"allow": [], "ask": ["fetch_url"], "deny": []}, "on", True)):
         reset(permissionRules=rules)
         spec = appmod.toolbox.specs["fetch_url"]
         real, hits = spec.fn, []
@@ -606,7 +607,7 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
             fr = FakeRun()
             modes = appmod.toolbox.effective({}, None, None)
             modes["fetch_url"] = mode
-            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, skip_permissions=True)
+            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, permission_mode="allow_all")
             ctx["allowed_urls"] = {"https://example.com/a"}
 
             async def go() -> Any:
@@ -625,7 +626,7 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
             spec.fn = real
             appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
         cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
-        check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: skip {'lifted the plain ask' if expect_ran else 'left the ask-rule card, declined'}")
+        check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: allow-all lifted the ask")
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
@@ -1117,8 +1118,10 @@ def test_a_token_in_a_subagent_id_is_stripped() -> None:
 
 def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
-        check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
-    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
+        if k != "permissionMode":  # a permissions key (permissions.DEFAULTS), not an llm setting
+            check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
+    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 0 and limits.slots(llm.DEFAULT_SETTINGS, "subagentMaxConcurrent") >= 2
+          and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
           and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
     reset()
     store = appmod.run_store

@@ -398,7 +398,7 @@ def test_a_job_run_is_told_it_is_a_job_and_runs_on_a_tighter_budget() -> None:
     run = job_runs(job["id"])[0]
     b = run["budget"]
     cfg = appmod.settings()
-    assert b["max_rounds"] == min(cfg["maxToolRounds"], appmod.JOB_BUDGET["maxToolRounds"]) < cfg["maxToolRounds"]
+    assert b["max_rounds"] == appmod.JOB_BUDGET["maxToolRounds"]
     assert b["max_tokens"] < cfg["maxRunTokens"] and b["max_seconds"] < cfg["maxRunSeconds"]
     assert appmod._caps({"maxToolRounds": 3}, appmod.JOB_BUDGET)["maxToolRounds"] == 3, "a stricter setting wins"  # noqa: SLF001
     assert appmod._caps({"maxRunSeconds": 0}, appmod.JOB_BUDGET)["maxRunSeconds"] == 240, "0 means unlimited: capped"  # noqa: SLF001

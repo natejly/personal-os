@@ -59,7 +59,7 @@ class FreshDatabase(unittest.TestCase):
     def test_fresh_database_gets_an_empty_versioned_store_and_the_defaults(self) -> None:
         db = Database(tempfile.mkdtemp(prefix="permstore-fresh-"))
         rows = _rows(db.path)
-        self.assertEqual(rows[permissions.KEY], {"version": permissions.VERSION})
+        self.assertEqual(rows[permissions.KEY], {"version": permissions.VERSION, "permissionMode": "auto"})
         self.assertFalse(permissions.KEYS & set(rows))
         self.assertEqual(permissions.load(db.get_settings()), permissions.DEFAULTS)
 
@@ -85,7 +85,7 @@ class Migration(unittest.TestCase):
         permissions.migrate(c)
         got = dict(c.execute("SELECT key, value FROM settings").fetchall())
         self.assertEqual(set(got), {"permissions"})
-        self.assertEqual(json.loads(got["permissions"]), {"version": 1, "planMode": "auto", "shellNetwork": True})
+        self.assertEqual(json.loads(got["permissions"]), {"version": permissions.VERSION, "planMode": "auto", "shellNetwork": True})
 
 
 class GatesReadTheSameValues(unittest.TestCase):
@@ -111,8 +111,9 @@ class GatesReadTheSameValues(unittest.TestCase):
         self.assertEqual(modes["gmail_send"], "ask")
 
     def test_skip_permissions(self) -> None:
-        self.assertTrue(permrules.skip_permissions_on({}, self.cfg))
-        self.assertFalse(permrules.skip_permissions_on({"skipPermissions": False}, self.cfg))
+        # skipPermissions is legacy: only the global permissionMode skips cards.
+        self.assertFalse(permrules.skip_permissions_on({}, self.cfg))
+        self.assertTrue(permrules.skip_permissions_on({}, {**self.cfg, "permissionMode": "allow_all"}))
 
     def test_permission_rule(self) -> None:
         rules = permrules.load_rules(permissions.get(self.cfg, "permissionRules"))

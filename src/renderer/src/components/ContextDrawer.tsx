@@ -200,7 +200,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
 
   const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
-  const fixModules = { label: 'Turn on in Settings → Modules', open: () => openSettings('modules') }
+  const fixModules = { label: 'Turn on in Settings → Advanced → Layout', open: () => openSettings('modules') }
   const meetingCount = useStore((s) => s.meetings.length)
   const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -266,8 +266,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Stays in history and search; nothing from it becomes a memory, graph relation or draft skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
           {cs.learn === false && <button className="link small" onClick={() => void useStore.getState().forgetLearned(convo.id)}>Forget what was learned here</button>}
         </>}
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} locked={!!cs.private} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, files, memory, graph, todos, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} locked={!!cs.private} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Advanced → Memory and search', open: () => openSettings('memory') }} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">

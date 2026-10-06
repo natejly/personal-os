@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore, type SettingsTab, type View } from '../store'
+import { useStore, type View } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -240,7 +240,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           )}
           {links.map((l) => (
             <button key={l.label} className="ghost-btn sm"
-              onClick={() => { if (l.settings) openSettings(l.settings as SettingsTab); else if (l.view) setView(l.view as View) }}>
+              onClick={() => { if (l.settings) openSettings(l.settings as Parameters<typeof openSettings>[0]); else if (l.view) setView(l.view as View) }}>
               {l.label} <ArrowRight size={13} />
             </button>
           ))}

@@ -69,11 +69,12 @@ test('one page-agent action toggles the page agent once', () => {
 test('a view action routes, and view:graph opens memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
-  // Memory lives in Settings → Memory now: the page underneath stays put.
+  // Memory lives in Settings → Advanced → Memory and search now: the page underneath stays put.
   fire('view:graph')
   assert.equal(useStore.getState().view, 'todos')
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'memory')
+  assert.equal(useStore.getState().settingsTab, 'advanced')
+  assert.equal(useStore.getState().settingsGroup, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
   useStore.getState().setSettingsOpen(false)
 })
@@ -97,9 +98,9 @@ test('view:documents and upload open Files on uploads, where the upload input re
   })
   assert.equal(useStore.getState().filesSection, 'uploads')
   assert.deepEqual(clicked, ['doc-upload-input'])
-  // ⌘, after that still opens on Provider.
+  // ⌘, after that still opens on Model.
   fire('settings')
-  assert.equal(useStore.getState().settingsTab, 'provider')
+  assert.equal(useStore.getState().settingsTab, 'model')
   useStore.getState().setSettingsOpen(false)
 })
 
@@ -133,7 +134,8 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'modules')
+  assert.equal(useStore.getState().settingsTab, 'advanced')
+  assert.equal(useStore.getState().settingsGroup, 'layout')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')

@@ -41,7 +41,7 @@ appmod.mcp.ready_slugs = lambda: [SLUG]  # type: ignore[method-assign]
 
 
 def reply(rules: dict[str, list[str]], grant: str | None, skip: bool, stop_at_card: bool = False) -> list[dict[str, Any]]:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "skipPermissions": skip,
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "permissionMode": "allow_all" if skip else "manual",
                             "permissionRules": {"allow": [], "ask": [], "deny": [], **rules}})
     appmod.mcp_store.clear_grant(SLUG)
     if grant:

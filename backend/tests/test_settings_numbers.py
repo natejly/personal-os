@@ -15,7 +15,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="settingsn
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import llm  # noqa: E402
+from personal_os import limits, llm  # noqa: E402
 from personal_os.app import AUTH_TOKEN, Budget, _caps, app  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
@@ -26,8 +26,8 @@ class PutSettingsTests(unittest.TestCase):
         client.put("/settings", json={"maxToolRounds": llm.DEFAULT_SETTINGS["maxToolRounds"]})
 
     def test_rejects_values_that_would_mean_unlimited_or_crash(self) -> None:
-        # 0 or a negative was "unlimited" to Budget; a string made int() raise on every reply.
-        for bad in (0, -3, "abc", None, True, 1e9):
+        # A negative, a string or a bool must never reach Budget (0 is the "automatic" value, accepted below).
+        for bad in (-3, "abc", None, True, 1e9):
             r = client.put("/settings", json={"maxToolRounds": bad})
             self.assertEqual(r.status_code, 422, bad)
         self.assertEqual(client.get("/settings").json()["maxToolRounds"], llm.DEFAULT_SETTINGS["maxToolRounds"])
@@ -36,6 +36,14 @@ class PutSettingsTests(unittest.TestCase):
         r = client.put("/settings", json={"maxToolRounds": 7.6})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["maxToolRounds"], 7)
+
+    def test_zero_means_automatic_for_the_derived_keys(self) -> None:
+        for key in limits.AUTOMATIC:
+            r = client.put("/settings", json={key: 0})
+            self.assertEqual(r.status_code, 200, key)
+            self.assertEqual(r.json()[key], 0, key)
+        self.assertEqual(client.put("/settings", json={"llmRetries": 0}).json()["llmRetries"], 0)
+        self.assertEqual(client.put("/settings", json={"compactKeepRecent": 0}).status_code, 422, "0 is only automatic for the derived keys")
 
     def test_a_rejected_patch_writes_nothing(self) -> None:
         r = client.put("/settings", json={"maxToolRounds": "x"})
@@ -74,9 +82,14 @@ class RetrievalSettingsTests(unittest.TestCase):
 class BudgetTests(unittest.TestCase):
     def test_junk_stored_before_validation_falls_back_to_defaults(self) -> None:
         b = Budget({"maxToolRounds": "abc", "maxRunTokens": None, "maxRunSeconds": -5})
-        self.assertEqual(b.max_rounds, llm.DEFAULT_SETTINGS["maxToolRounds"])
+        self.assertEqual(b.max_rounds, limits.MAX_ROUNDS_HARD)
         self.assertEqual(b.max_tokens, llm.DEFAULT_SETTINGS["maxRunTokens"])
         self.assertEqual(b.max_seconds, llm.DEFAULT_SETTINGS["maxRunSeconds"])
+
+    def test_stored_round_cap_below_the_hard_one_is_honoured(self) -> None:
+        self.assertEqual(Budget({"maxToolRounds": 7}).max_rounds, 7)
+        self.assertEqual(Budget({"maxToolRounds": 0}).max_rounds, limits.MAX_ROUNDS_HARD)
+        self.assertEqual(Budget(_caps({"maxToolRounds": 0}, {"maxToolRounds": 8})).max_rounds, 8, "a job keeps its 8 rounds")
 
     def test_job_caps_survive_junk(self) -> None:
         self.assertEqual(_caps({"maxToolRounds": "abc"}, {"maxToolRounds": 8})["maxToolRounds"], 8)

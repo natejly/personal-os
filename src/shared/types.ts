@@ -1779,6 +1779,7 @@ export type DeskAction = 'start' | 'pause' | 'resume' | 'stop' | 'message' | 'de
 
 export interface Desk {
   id: string
+  attention?: Attention
   conversation_id: string
   project_id: string | null
   title: string
@@ -2118,6 +2119,9 @@ export interface DragPayload {
 /** Run state of one chat session. Travels the cross-window bus, so it is a shared type, not a store-local one. */
 export type SessionStatus = 'idle' | 'working' | 'done' | 'error' | 'needs-approval'
 
+/** What a chat, desk or job asks of the user right now. Derived in one table (backend attention.py, mirrored by lib/attention.ts). */
+export type Attention = 'idle' | 'working' | 'needs_you' | 'blocked'
+
 /** 200 body of POST /conversations/{id}/chat once the run is a background task. */
 export interface ChatRunStarted {
   run_id: string
@@ -2165,6 +2169,7 @@ export interface RunInfo {
   status?: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   ended_at?: number | null
   error?: string | null
+  attention?: Attention
 }
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
@@ -2176,6 +2181,8 @@ export type RunKind = JobKind | 'digest'
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
   id: string
+  /** From GET /jobs only: rows returned by create/update leave it out. */
+  attention?: Attention
   name: string
   /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off; 'watch' fires when
    *  files appear or change in `watch_dir` (and on `cron` too, when it has one); 'mail' fires when a thread

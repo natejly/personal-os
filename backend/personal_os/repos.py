@@ -799,7 +799,7 @@ class Memories:
             d = row_to_dict(r)
             if d:
                 out.setdefault(d["id"], d)
-        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a budget trim drops one.
+        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a window-share trim drops one.
         return sorted(out.values(), key=lambda d: not d.get("pinned"))[:limit]
 
 

@@ -252,10 +252,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   [docs/meetings.md](docs/meetings.md).
 - **Work autonomously** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
-  once. Long autonomy is bought by chaining bounded replies, never by a longer leash: each
-  turn is an ordinary reply with an ordinary budget, and the desk chains another
-  only while the approved plan still has steps left and the last turn actually
-  consumed one, up to a turn limit you can tighten per chat (the caps are in Settings → Autonomy). Three modes: Plan first (nothing consequential runs until you
+  once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
+  or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
   Ask as it goes (one card per change), and Work and propose (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and
@@ -363,7 +361,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
-  it runs in a fresh chat on a tighter budget, it can read and write inside
+  it runs in a fresh chat, it can read and write inside
   Grain, and anything that would leave the app — mail, calendar events, Docs —
   comes back to the Agent inbox as a **proposal** you accept, edit or reject.
   Accepting is what actually sends it, exactly once. A run cannot schedule
@@ -581,7 +579,7 @@ to turn the view back on instead of opening it.
    neighbours as `A —[relation]→ B` triples.
 4. **Document excerpts**: top BM25 matches over chunks in scope.
 5. **Tools**: the effective tool set after global, project and chat overrides.
-   The model may call tools for up to `maxToolRounds` rounds; each call and
+   The model calls tools until it is done (stuck detection stops a loop); each call and
    result streams to the UI and is stored on the message. A tool in **ask**
    mode pauses the stream until you approve it (once, for the chat, or always)
    or deny it, in which case the model is told to continue without it.
@@ -866,7 +864,7 @@ with the per-track source reports under [docs/research/](docs/research/).
 
 Track 5's four security defects (G1–G4: sandbox profile, SSRF guard, sidecar
 auth, CSP images) were fixed on 2026-09-29. Much of what the roadmap then listed
-as later work has shipped since: durable runs, budgets, taint tracking and the
+as later work has shipped since: durable runs, taint tracking and the
 undo journal, skills, MCP connectors, scripts that call tools, local file tools
 and the agent browser (see [CHANGELOG.md](CHANGELOG.md)). What is still open is
 the planned items below, plus whatever in the roadmap is not in

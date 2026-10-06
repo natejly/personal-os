@@ -948,8 +948,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-pane .setting-row > :not(.toggle-text) { flex: none; }
 .settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
 .settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
-.num-unit { display: inline-flex; align-items: center; gap: 8px; }
-.num-unit em { font-style: normal; font-size: 12px; color: var(--text-muted); }
 .settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Short rows that belong together (the Views switches) sit in one bordered list. */
 .setting-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; }

@@ -423,54 +423,19 @@ def test_a_direct_toolbox_call_records_no_plan() -> None:
     assert out["error"] and "approval gate" in out["error"]
 
 
-# ---------------- the budget ----------------
-@pytest.fixture
-def two_rounds():  # type: ignore[no-untyped-def]
-    """maxToolRounds=2, so a reply that looks something up, then plans, is out of rounds by the time the steps come."""
-    before = j("GET", "/settings")["maxToolRounds"]
-    j("PUT", "/settings", {"maxToolRounds": 2})
-    yield
-    j("PUT", "/settings", {"maxToolRounds": before})
-
-
-def test_an_approved_plan_still_runs_when_drafting_it_used_up_the_budget(two_rounds: None) -> None:
-    """The bug: the user approved the plan, the budget was spent getting there, and every step came back refused."""
-    a, b = f"budget a {time.time()}", f"budget b {time.time()}"
+# ---------------- no round cap ----------------
+def test_an_approved_plan_runs_after_a_lookup_round() -> None:
+    """Nothing caps the rounds: a lookup, the plan, its approved steps and a later lookup all run."""
+    a, b = f"plan a {time.time()}", f"plan b {time.time()}"
     ROUNDS.append({"tool_calls": [call("current_time", {}, "t0")]})
     ROUNDS.append({"tool_calls": [plan_call([{"tool": "todo_add", "arguments": {"title": a}},
                                              {"tool": "todo_add", "arguments": {"title": b}}], cid="p0")]})
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": a}, "s0"), call("todo_add", {"title": b}, "s1")]})
-    ROUNDS.append({"tool_calls": [call("current_time", {}, "t1")]})  # past the plan: the budget applies again
+    ROUNDS.append({"tool_calls": [call("current_time", {}, "t1")]})
     ROUNDS.append(["done"])
     _cid, rid = start({"tools": {"todo_add": "ask"}})
     plan = answer_plan(rid)
     assert drain(rid)["status"] == "done"
     assert len(todos_named(a)) == 1 and len(todos_named(b)) == 1, "both approved steps ran"
     assert [s["status"] for s in plans.get(plan["plan_id"])["steps"]] == ["done", "done"]
-    assert len([r for r in results(rid) if r["name"] == "current_time"]) == 1, "the round after the plan was still stopped"
-
-
-def test_an_over_budget_round_with_an_unplanned_call_is_still_stopped(two_rounds: None) -> None:
-    planned, extra = f"budget planned {time.time()}", f"budget extra {time.time()}"
-    ROUNDS.append({"tool_calls": [call("current_time", {}, "t0")]})
-    ROUNDS.append({"tool_calls": [plan_call([{"tool": "todo_add", "arguments": {"title": planned}}], cid="p0")]})
-    ROUNDS.append({"tool_calls": [call("todo_add", {"title": planned}, "s0"), call("todo_add", {"title": extra}, "s1")]})
-    ROUNDS.append(["done"])
-    _cid, rid = start({"tools": {"todo_add": "ask"}})
-    plan = answer_plan(rid)
-    assert drain(rid)["status"] == "done"
-    assert todos_named(planned) == [] and todos_named(extra) == [], "one unplanned call keeps the whole round under the budget"
-    assert plans.get(plan["plan_id"])["steps"][0]["status"] == "approved", "and the refused step is not spent"
-
-
-def test_covers_counts_each_step_once() -> None:
-    args = {"title": f"covers {time.time()}"}
-    ROUNDS.append({"tool_calls": [plan_call([{"tool": "todo_add", "arguments": args}], cid="p0")]})
-    ROUNDS.append(["done"])
-    _cid, rid = start({"tools": {"todo_add": "ask"}})
-    answer_plan(rid)
-    drain(rid)
-    assert plans.covers(rid, [("todo_add", args)])
-    assert not plans.covers(rid, [("todo_add", args), ("todo_add", args)]), "one step cannot cover two identical calls"
-    assert not plans.covers("some-other-run", [("todo_add", args)]), "scoped to its own run"
-    assert not plans.covers(rid, [])
+    assert len([r for r in results(rid) if r["name"] == "current_time"]) == 2, "the rounds around the plan ran too"

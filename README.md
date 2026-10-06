@@ -734,7 +734,7 @@ from character counts and the row is flagged `estimated`.
 
 The mic button in the chat composer dictates into the message box. On-device Speech is the default
 when macOS has granted it; otherwise Whistle, whisper.cpp or your LLM proxy (a default `litellm.yaml`
-has nothing behind `/v1/audio/transcriptions`, so pick a backend in Settings → Behavior → Voice input).
+has nothing behind `/v1/audio/transcriptions`, so pick a backend in Settings → Advanced → Voice and shortcuts).
 
 ```bash
 cd backend && uv pip install -e '.[mac]'        # Speech and the macOS permission probes

@@ -7,7 +7,7 @@ minutes.
 
 ## Settings
 
-Settings → Behavior → Voice input, stored under the settings key `voice` and served by `GET`/`PUT /voice/config`
+Settings → Advanced → Voice and shortcuts, stored under the settings key `voice` and served by `GET`/`PUT /voice/config`
 (a partial patch; the stored value is validated and the full config is returned).
 
 | Field | Default | Meaning |

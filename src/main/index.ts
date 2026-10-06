@@ -11,7 +11,7 @@ import { isAppUrl } from './appUrl'
 import { guardNavigation } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
-import { registerPrintIpc, renderNotePdf, uniquePath } from './printDoc'
+import { registerPrintIpc, renderNotePdf } from './printDoc'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { registerQuickAsk, toggleAsk } from './quickAsk'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -380,13 +380,16 @@ if (gotLock) app.whenReady().then(async () => {
     return r.canceled || !r.filePath ? null : r.filePath
   })
   registerPrintIpc()
-  handle('print:export-pdf', async (_e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
-    const pdf = await renderNotePdf(String(title), String(content))
-    if (mode !== 'save') return new Uint8Array(pdf)
-    // Straight into Downloads, no dialog. A name already taken gets " (2)", " (3)", … rather than being overwritten.
-    const dest = uniquePath(app.getPath('downloads'), basename(String(filename)))
-    writeFileSync(dest, pdf, { flag: 'wx' })
-    return dest
+  handle('print:export-pdf', async (e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
+    if (mode !== 'save') return new Uint8Array(await renderNotePdf(String(title), String(content)))
+    // The save sheet comes first so a cancel renders nothing; the sheet itself confirms an overwrite.
+    const name = basename(String(filename)).replace(/[/:]/g, ' ')
+    const opts = { title: 'Download PDF', defaultPath: join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] }
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    const r = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return null
+    writeFileSync(r.filePath, await renderNotePdf(String(title), String(content)))
+    return r.filePath
   })
   handle('data:choose-input-files', async () => {
     const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })

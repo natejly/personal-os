@@ -1193,7 +1193,7 @@ class Toolbox:
             # Created only on a successful write, so a refused call emits no "learned" event.
             def learned() -> dict[str, Any]:
                 return ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
-            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
+            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("user_message_id") or ctx.get("message_id")}
             isolated = is_isolated(self.memories.db, ctx.get("project_id"))
             if personal and not (replaces or forget) and isolated:
                 return tool_error("This project keeps its memory to itself, so nothing said here can be saved as personal.",

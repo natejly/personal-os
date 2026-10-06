@@ -52,3 +52,11 @@ CANDIDATES = 40                 # existing memories shown when embeddings rank t
 CANDIDATES_TOP = 20             # of those, how many come from the hybrid ranking (the rest: pinned, then recent)
 EXISTING_LINE_CHARS = 2000      # one existing memory line in the extractor prompt
 MIN_MEMORY_CHARS = 6            # shorter extracted text is noise ("ok", "yes")
+
+# ---- Tidy-up and provenance (learn.py, migrations.py) ----
+# Settings-table row holding the epoch seconds of the last consolidation proposal run: the tidy-up
+# counter is derived from rows newer than this, so it survives a relaunch.
+TIDY_AT_KEY = "memoryTidyAt"
+# How long after an assistant reply finished an auto-learn write can land (extraction is one LLM call
+# queued behind the reply); a wider window would start guessing which reply a memory came from.
+BACKFILL_WINDOW_S = 180

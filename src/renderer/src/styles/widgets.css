@@ -406,3 +406,6 @@
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal, var(--border)) 60%, transparent); }
   100% { box-shadow: 0 0 0 8px transparent; }
 }
+
+/* The doc window's rendered view: fills the body under the bar and scrolls on its own. */
+.widget .docs-render.widget-doc-render { flex: 1; min-height: 0; padding: 10px var(--widget-pad); }

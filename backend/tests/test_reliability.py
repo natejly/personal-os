@@ -423,18 +423,12 @@ class DiagnosticsRoute(unittest.TestCase):
         self.assertEqual(TestClient(app).get("/diagnostics").status_code, 401)
 
 
-class BudgetDeadline(unittest.TestCase):
-    def test_arm_deadline_follows_the_wall_clock_budget(self) -> None:
-        from personal_os.app import Budget
+class NoReplyDeadline(unittest.TestCase):
+    def test_no_stream_deadline_outside_the_closing_answer(self) -> None:
+        from personal_os.app import RunMeter
 
-        b = Budget({"maxRunSeconds": 100})
-        b.arm_deadline()
-        left = (app_llm.stream_deadline.get() or 0) - time.monotonic()
-        self.assertTrue(90 < left <= 100, left)
-        Budget({"maxRunSeconds": 0}).arm_deadline()
         self.assertIsNone(app_llm.stream_deadline.get())
-        Budget({"maxRunSeconds": 0}).arm_deadline(cap=20)
-        self.assertTrue(10 < (app_llm.stream_deadline.get() or 0) - time.monotonic() <= 20)
+        self.assertFalse(hasattr(RunMeter(), "arm_deadline"))
 
 
 def err_body(message: str, code: str | None = None, typ: str | None = None) -> str:
@@ -781,7 +775,7 @@ class StreamRetryTests(unittest.TestCase):
         self.assertEqual((p.calls, events[-1]["finish_reason"], events[-1]["tool_calls"]), (1, "cancelled", []))
 
     def test_an_unanswered_request_is_not_billed(self) -> None:
-        """Stop before any response: no usage row, and usage_est is zero so the run budget does not charge the prompt."""
+        """Stop before any response: no usage row, and usage_est is zero so the run meter does not count the prompt."""
         heard: list[dict[str, Any]] = []
         cancel = asyncio.Event()
         cancel.set()

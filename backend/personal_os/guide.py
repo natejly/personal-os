@@ -89,7 +89,7 @@ Type / in the composer:
 - Approvals: an inline Approve/Deny card. A card nobody answers waits; answering later resumes the run.
 - Needs you: anything waiting on you shows in the Agent inbox on Today, with a count on the sidebar Today row.
 - Scheduled and background runs can only propose anything that leaves the app (mail, calendar, Docs). Proposals land in the Agent inbox; accepting sends them once.
-- Work autonomously (beside plan mode in any chat): the chat keeps working on its task in bounded turns, in its own folder, until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (a card per change) or Work and propose (it only proposes anything external), and optionally a turn limit.
+- Work autonomously (beside plan mode in any chat): the chat keeps working on its task in its own folder until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (a card per change) or Work and propose (it only proposes anything external).
 - A strip above the composer shows the state, turns used and what needs you, with Start, Pause, Resume and Stop; it opens a side panel with Files, Changes and Review. Questions, parked cards and the plan appear at the end of the transcript. Output reaches the app only when you accept it in Review. Files you attach land in its inputs folder.
 - Autonomous chats list with other chats, with a status dot; the Chats header counts what needs you. Turn the control off to stop; the chat answers normally again. Caps live in Settings -> Autonomy.
 

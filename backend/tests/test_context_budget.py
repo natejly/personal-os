@@ -1,4 +1,4 @@
-"""Per-section token budgets, priority trimming, and pinned documents in build_context.
+"""Per-section window shares, priority trimming, and pinned documents in build_context.
 
 Run: backend/.venv/bin/python backend/tests/test_context_budget.py
 """
@@ -13,7 +13,8 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="ctxbud-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.context import PINNED_LIMIT, build_context, estimate_tokens  # noqa: E402
+from personal_os import limits  # noqa: E402
+from personal_os.context import build_context, estimate_tokens  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, Projects  # noqa: E402
 
@@ -43,17 +44,18 @@ def mem_block(system: str) -> str:
 mems = [{"id": str(i), "content": f"note {i} " + "x" * 200, "project_id": None} for i in range(200)]
 sys_, used = build(memory_hits=mems)
 block = "## What you remember about the user" + mem_block(sys_)
-check(estimate_tokens(block) <= 1500, "memories block fits its budget")
+check(estimate_tokens(block) <= limits.context_shares(limits.CONTEXT_WINDOW_FALLBACK)["memories"], "memories block fits its window share")
 n = used["trimmed"]["memories"]
 check(n > 0 and len(used["memories"]) + n == 200, "omitted count recorded")
 check([m["id"] for m in used["memories"]] == [str(i) for i in range(len(used["memories"]))], "order preserved, tail dropped")
 check(f"({n} more omitted)" in sys_, "omitted line shown")
 
-# budget 0 = unlimited, identical to an uncapped build
-unl, used0 = build(settings={"contextBudget": {"memories": 0}}, memory_hits=mems)
-check(len(used0["memories"]) == 200 and "memories" not in used0["trimmed"] and "omitted" not in unl, "budget 0 keeps everything")
-small, _ = build(settings={"contextBudget": {"memories": 100}}, memory_hits=mems)
-check(estimate_tokens("## What you remember about the user" + mem_block(small)) <= 100, "custom budget honoured")
+# the share scales with the window: a big window keeps every note, a small one fewer
+big_w, used_big = build(memory_hits=mems, window=1_000_000)
+check(len(used_big["memories"]) == 200 and "memories" not in used_big["trimmed"], "a 1M window keeps everything")
+small, used_small = build(memory_hits=mems, window=8000)
+check(estimate_tokens("## What you remember about the user" + mem_block(small)) <= limits.context_shares(8000)["memories"], "small window share honoured")
+check(len(used_small["memories"]) < len(used["memories"]), "a small window keeps fewer notes than the default")
 
 # ---- chunks
 hits = [{"chunk_id": f"c{i}", "document_id": f"d{i}", "name": f"f{i}", "idx": 0, "text": "y" * 1000, "source": "file"} for i in range(30)]
@@ -74,7 +76,7 @@ sys_, used = build(project_id=proj["id"])
 check("## Pinned files" in sys_ and "pinned body" in sys_, "pinned text in prompt")
 check([p["document_id"] for p in used["pinned"]] == [mine["id"]], "used['pinned'] lists the doc")
 check("SECRET" not in sys_, "other project's pin out of scope")
-check("…(truncated)" in sys_ and "w" * (PINNED_LIMIT + 50) not in sys_, "clipped to the limit")
+check("…(truncated)" in sys_ and "w" * 4000 not in sys_, "clipped to the limit")
 documents.set_pinned(glob["id"], True)
 sys_, _ = build(project_id=proj["id"])
 check("global pinned text" in sys_, "global pin visible in a project")

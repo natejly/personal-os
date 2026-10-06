@@ -247,7 +247,8 @@ _README = """Grain data export
 grain.db            A complete SQLite snapshot (open with any SQLite tool, or restore it in Grain).
                     API keys are stored outside the database and are not included, but it
                     holds your conversations, memories and documents: keep this file private.
-uploads/            Files you added to the knowledge base, as stored.
+uploads/            Files you added to the knowledge base, as stored: uploads/<sha256>/<original name>,
+                    one file per distinct content.
 doc_assets/         Images pasted into your documents, one folder per document.
 cowork/             Each desk's outputs/ folder: the deliverables it handed in.
 export/             The same content as plain text:

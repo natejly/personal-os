@@ -54,3 +54,9 @@ test('history is capped, and never drops what a pane shows', () => {
   assert.ok(entryOf(s, 'left') && entryOf(s, 'right'))
   assert.equal(entryOf(s, 'right')?.item.title, 'P19')
 })
+
+test('two uploads are two entries even though neither has a path', () => {
+  const up = (id: string): ShowItem => ({ kind: 'file', title: id, documentId: id })
+  const s = open(open(open(undefined, up('a'), 1), up('b'), 2), up('a'), 3)
+  assert.equal(s.entries.length, 2)
+})

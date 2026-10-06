@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -264,6 +264,8 @@ export interface State {
   /** The Advanced group to open when Settings opens on the Advanced tab. */
   settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
+  /** The upload the standalone viewer shows (an upload opened with no chat to put it beside). */
+  uploadPreview: string | null
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
@@ -367,6 +369,7 @@ export interface State {
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
   openSettings: (tab: SettingsTab | LegacySettingsTab, group?: AdvancedGroup) => void
   setProjectModal: (m: State['projectModal']) => void
+  openUploadPreview: (id: string | null) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
@@ -486,7 +489,7 @@ export interface State {
   /** Open the chat a desk works in (every desk is a conversation). */
   goToDesk: (id: string) => Promise<void>
   /** Turn autonomy on for a chat: a desk binds to it and starts. Turning it off stops it and unbinds the chat. */
-  workAutonomously: (convId: string, autonomy: DeskAutonomy, budget?: DeskBudget) => Promise<void>
+  workAutonomously: (convId: string, autonomy: DeskAutonomy) => Promise<void>
   stopWorkingAutonomously: (convId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
@@ -1177,8 +1180,6 @@ export const useStore = create<State>((set, get) => {
             get().upsertCodingSession(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
-          } else if (ev.event === 'usage_alert') {
-            get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -1628,7 +1629,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
     models: [],
     modelsError: null,
     tools: [],
@@ -1717,6 +1718,7 @@ export const useStore = create<State>((set, get) => {
     settingsTab: 'model',
     settingsGroup: null,
     projectModal: null,
+    uploadPreview: null,
     toasts: [],
     paletteOpen: false,
     helpOpen: false,
@@ -1911,6 +1913,7 @@ export const useStore = create<State>((set, get) => {
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
     openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
+    openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
@@ -3055,10 +3058,10 @@ export const useStore = create<State>((set, get) => {
       const convId = deskConv(id) ?? (await api.cowork.desks.get(id).catch(() => null))?.conversation_id
       if (convId) await get().selectChat(convId)
     },
-    workAutonomously: async (convId, autonomy, budget) => {
+    workAutonomously: async (convId, autonomy) => {
       set({ deskBusy: true })
       try {
-        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, budget, start: true })
+        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, start: true })
         if (position) get().toast(queuedNote(position))
         bindDesk(convId, desk.id)
         await get().refreshDesks()

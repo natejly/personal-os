@@ -1,12 +1,12 @@
 """Every tuning number of long-term memory (repos.Memories, memory_index.py, learn.py, context.py), and why.
 
-Stdlib only: nothing here imports from personal_os. Token budgets for the prompt sections live in
-limits.CONTEXT_BUDGET with the other retrieval blocks; this module holds what is specific to memory.
+Stdlib only: nothing here imports from personal_os. The prompt sections' share of the context window lives in
+limits.CONTEXT_SHARES with the other retrieval blocks; this module holds what is specific to memory.
 """
 from __future__ import annotations
 
 # ---- Retrieval (memory_index.py) ----
-RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a turn's budget can carry
+RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a turn's window share can carry
 VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans (a numpy dot over 5k short rows stays under ~10 ms)
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
@@ -22,7 +22,7 @@ W_RECENT = 0.5
 # with no reranker every turn it matches, and a short unrelated sentence routinely scores near that floor.
 MEMORY_MIN_SIMILARITY = 0.4
 LEXICAL_HITS = 15        # keyword hits per lexical pass (FTS, then CJK substring); a few strong matches beat many weak ones
-CONTEXT_HITS = 40        # most log rows a turn asks retrieval for; the "memories" token budget trims further
+CONTEXT_HITS = 40        # most log rows a turn asks retrieval for; the "memories" window share trims further
 SEARCH_HITS = 100        # most rows search_memory ranks before paging
 SEARCH_PAGE = 20         # rows per search_memory page
 
@@ -32,11 +32,6 @@ SEARCH_PAGE = 20         # rows per search_memory page
 # vectors in tests/test_memory_tiers.py). A changed value ("150 words" -> "300 words") that clears it is still right
 # to supersede: newer wins.
 NEAR_DUP_SIMILARITY = 0.92
-
-# ---- Profile (always-on standing preferences) ----
-# The profile rides in the cached system prefix every turn, so it may never take more than this share of the
-# model's context window, whatever the contextBudget "profile" setting says.
-PROFILE_WINDOW_SHARE = 0.02
 
 # ---- Tainted-chat save_memory ----
 # In a chat that read untrusted text, save_memory skips its card only when at least this share of the memory's
@@ -81,7 +76,7 @@ GRAPH_LABEL_CHARS = 80              # a related_to label is a short phrase; long
 GRAPH_MATCH_SIMILARITY = 0.55       # message-to-entity cosine that seeds retrieval without a literal mention
 GRAPH_MIN_MENTION_CHARS = 2         # shortest label or alias matched as a whole word in the message ("PG")
 GRAPH_CONTEXT_MAX_SEEDS = 8         # entities a message may seed; past this the block is a graph dump, not context
-GRAPH_CONTEXT_MAX_EDGES = 24        # live 1-hop edges considered before the token budget trims
+GRAPH_CONTEXT_MAX_EDGES = 24        # live 1-hop edges considered before the "graph" window share trims
 GRAPH_RECENCY_HALF_LIFE_DAYS = 90   # an edge's recency weight halves every this many days since it became true
 GRAPH_QUALIFIER_CHARS = 120         # the role or relationship note shown after an edge line; longer is a sentence, not a qualifier
 GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher

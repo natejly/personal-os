@@ -73,7 +73,7 @@ def _ctx() -> dict[str, Any]:
     cfg = appmod.settings()
     return {"project_id": None, "conversation_id": conv, "message_id": None, "tainted": False, "taint_sources": [],
             "allowed_urls": set(), "settings": cfg, "modes": appmod.toolbox.effective({}, None, None), "depth": 0,
-            "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(cfg), "run": None,
+            "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(), "run": None,
             "citations": []}
 
 

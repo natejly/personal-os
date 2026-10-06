@@ -371,7 +371,7 @@ class ShellJobs:
     # -- starting and finishing --
     async def start(self, argv: list[str], *, command: str, cwd: str, env: dict[str, str], tmp: str | None,
                     conversation_id: str | None, run_id: str | None, background: bool, notify: bool,
-                    timeout: float, max_background: int, on_timeout: str = "kill", egress_token: str | None = None,
+                    timeout: float | None, max_background: int, on_timeout: str = "kill", egress_token: str | None = None,
                     pool: str = "shell") -> Job:
         if background and self.running_background(pool) >= max_background:
             if pool != "shell":
@@ -413,7 +413,8 @@ class ShellJobs:
         except (asyncio.CancelledError, ValueError):
             pass
 
-    async def _watch(self, job: Job, timeout: float) -> None:
+    async def _watch(self, job: Job, timeout: float | None) -> None:
+        """`timeout` None waits for the process to exit, however long that takes (a coding session)."""
         assert job.proc
         timed_out = False
         try:

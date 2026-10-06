@@ -21,10 +21,11 @@ REASONS = {
     "interrupted": "The previous reply was cut off (the app stopped) before it finished. ",
     "error": "The previous reply failed with an error before it finished. ",
     "stopped": "The previous reply was stopped by the user before it finished. ",
-    "rounds": "The previous reply ran out of tool rounds before it finished. ",
-    "tokens": "The previous reply ran out of its token budget before it finished. ",
-    "time": "The previous reply ran out of time before it finished. ",
-    "cost": "The previous reply ran out of its cost budget before it finished. ",
+    # Replies stored before the limits were removed may still carry these outcomes.
+    "rounds": "The previous reply stopped before it finished. ",
+    "tokens": "The previous reply stopped before it finished. ",
+    "time": "The previous reply stopped before it finished. ",
+    "cost": "The previous reply stopped before it finished. ",
     "length": "The previous reply was cut off at the model's output limit. ",
     "incomplete": "The previous reply's stream ended before the model finished. ",
 }

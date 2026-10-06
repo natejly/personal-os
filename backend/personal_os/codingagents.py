@@ -7,11 +7,12 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   which becomes `needs_you` here, and the user answers it with `claude attach <id>`. Progress is read from the plain
   files the CLI keeps under ~/.claude/jobs/<id>/ (state.json, timeline.jsonl), never by following the session's
   output. Those files are untrusted text. A finished session stays open in the daemon, so a follow-up runs in a copy
-  with a new id that the row then follows; a stopped one is woken under the same id. No permission flag is passed
-  unless the caller names a permission_mode, and that is only ever `acceptEdits` or `bypassPermissions`, for that one
-  session.
+  with a new id that the row then follows; a stopped one is woken under the same id. The session's `--permission-mode`
+  follows Grain's own mode (Auto -> auto, Allow all -> bypassPermissions, Manual -> no flag, so it prompts and shows
+  needs_you) unless the caller names a permission_mode (acceptEdits, auto, dontAsk or bypassPermissions) for that one
+  session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift.
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
-  has no prompt to answer: the sandbox is its boundary. The registry's hard job cap (600 s) ends it; a follow-up
+  has no prompt to answer: the sandbox is its boundary. The coding-session timeout (codingSessionTimeoutMinutes, 30 by default) ends it; a follow-up
   `--continue`s the same opencode state folder.
 
 Every change is saved and published on the app `events` topic as a `coding_session` event carrying `summary(row)`.
@@ -19,11 +20,14 @@ Nothing here removes a session, force-pushes, or runs git beyond `worktree add`,
 """
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import os
 import re
 import secrets
 import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -31,10 +35,11 @@ from typing import Any, Awaitable, Callable
 
 from . import opencode, shell
 from .db import new_id
+from .limits import CODING_SESSION_MAX_CONCURRENT, CODING_SESSION_TIMEOUT_MINUTES, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
 
 AGENTS = ("claude", "opencode")
-PERMISSION_MODES = (None, "acceptEdits", "bypassPermissions")
+PERMISSION_MODES = (None, "acceptEdits", "auto", "dontAsk", "bypassPermissions")
 LIVE = ("starting", "working", "needs_you")
 ATTENTION = {"starting": "working", "working": "working", "needs_you": "needs_you", "blocked": "blocked"}
 LOG_TAIL = 4000
@@ -58,6 +63,19 @@ class CodingError(ValueError):
     pass
 
 
+def cli_permission_mode(grain_mode: str, explicit: str | None) -> str | None:
+    """The `--permission-mode` for a Claude Code session: the caller's explicit one, else Grain's mode mapped over."""
+    return explicit or {"auto": "auto", "allow_all": "bypassPermissions"}.get(grain_mode)
+
+
+def own_session_taint(sid: str, sources: Any) -> bool:
+    """True when the run's taint came only from this coding session's own labels (so a follow-up to it is not untrusted-driven)."""
+    srcs = [str(x) for x in sources or []]
+    return bool(srcs) and all(
+        x in (f"coding_session:{k}:{sid}" for k in ("start", "send", "stop", "status", "diff"))
+        or (x.startswith("coding_session:list:") and all(i == sid for i in x[20:].split(",") if i)) for x in srcs)
+
+
 def claude_binary() -> str | None:
     for d in CLAUDE_BINS:
         p = os.path.join(os.path.expanduser(d), "claude")
@@ -66,11 +84,46 @@ def claude_binary() -> str | None:
     return shutil.which("claude")
 
 
+DAEMON_FILE = Path.home() / ".claude" / "daemon.json"   # read-only; tests point this at a temp file
+
+
+def daemon_running(home: Path | None = None) -> bool:
+    """True when the claude daemon recorded in <home or ~/.claude>/daemon.json is alive (signal 0 on its pid)."""
+    try:
+        pid = json.loads((Path(home) / "daemon.json" if home else DAEMON_FILE).read_text()).get("pid")
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            return False
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except (OSError, ValueError, AttributeError):
+        return False
+    return True
+
+
+@functools.cache
+def login_path() -> str | None:
+    """PATH as the user's login shell sets it, or None. ponytail: the first call blocks up to LOGIN_SHELL_TIMEOUT_SECONDS
+    once (cached afterwards); a PATH edited later needs an app restart."""
+    try:
+        r = subprocess.run([os.environ.get("SHELL") or "/bin/zsh", "-lic", 'printf %s "$PATH"'], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=LOGIN_SHELL_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    path = (r.stdout or "").rsplit("\n", 1)[-1].strip()  # interactive rc files may print before the PATH
+    return path if path and all(os.path.isabs(d) for d in path.split(":")) else None
+
+
 def claude_env() -> dict[str, str]:
     """Extra environment for the claude CLI: the user's own PATH (their tools and hooks), and a TMPDIR that outlives the
-    launcher (the registry deletes its per-call tmp dir when the command exits, but the background session keeps running)."""
-    return {"PATH": os.path.expanduser("~/.local/bin") + ":" + (os.environ.get("PATH") or "") + ":" + shell.SAFE_PATH,
-            "TMPDIR": os.environ.get("TMPDIR") or tempfile.gettempdir()}
+    launcher (the registry deletes its per-call tmp dir when the command exits, but the background session keeps running).
+    A daemon started now inherits this environment for good, so with none running it gets the login shell's PATH."""
+    fresh = not daemon_running()
+    path = login_path() if fresh else None
+    if not path:
+        extra = "".join(os.path.expanduser(d) + ":" for d in CLAUDE_BINS) if fresh else ""
+        path = os.path.expanduser("~/.local/bin") + ":" + (os.environ.get("PATH") or "") + ":" + extra + shell.SAFE_PATH
+    return {"PATH": path, "TMPDIR": os.environ.get("TMPDIR") or tempfile.gettempdir()}
 
 
 def parse_job_id(out: str) -> str | None:
@@ -166,13 +219,13 @@ def map_claude(state: dict[str, Any]) -> tuple[str, str] | None:
     return status, shell._scrub(str(detail))[:300]
 
 
-def map_job(job: Any) -> tuple[str, str]:
+def map_job(job: Any, timeout_minutes: int = CODING_SESSION_TIMEOUT_MINUTES) -> tuple[str, str]:
     """(status, detail) for an opencode job in the shell registry."""
     st = job.status
     if st == "exited":
         return ("done", "") if job.exit_code == 0 else ("failed", f"exited with code {job.exit_code}")
     if st == "timed_out":
-        return "failed", f"timed out after {shell.MAX_TIMEOUT} s (the job registry's hard limit); send a follow-up to continue"
+        return "failed", f"timed out after {timeout_minutes} minutes (codingSessionTimeoutMinutes); send a follow-up to continue"
     if st == "orphaned":
         return "blocked", "the app restarted while it ran; Stop ends it"
     return JOB_STATES.get(st, "working"), ""
@@ -213,6 +266,26 @@ class CodingSessions:
         with self.db.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM coding_sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
                                                (max(1, int(limit)),)).fetchall()]
+
+    def _timeout_minutes(self) -> int:
+        try:
+            return max(1, int(self.settings().get("codingSessionTimeoutMinutes") or CODING_SESSION_TIMEOUT_MINUTES))
+        except (TypeError, ValueError):
+            return CODING_SESSION_TIMEOUT_MINUTES
+
+    def _max_concurrent(self) -> int:
+        try:
+            return max(1, int(self.settings().get("codingSessionMaxConcurrent") or CODING_SESSION_MAX_CONCURRENT))
+        except (TypeError, ValueError):
+            return CODING_SESSION_MAX_CONCURRENT
+
+    def _check_capacity(self) -> None:
+        limit = self._max_concurrent()
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE status IN ({','.join('?' * len(LIVE))})", LIVE)]
+        n = sum(1 for r in rows if self.refresh(r)["status"] in LIVE)  # a session that ended unseen must not hold a slot
+        if n >= limit:
+            raise CodingError(f"{n} coding sessions are already running (codingSessionMaxConcurrent); wait for one to finish or stop one.")
 
     def _known(self, sid: str) -> dict[str, Any]:
         row = self.get(str(sid))
@@ -278,7 +351,7 @@ class CodingSessions:
         if self.seen.get(row["id"]) == (job.total, job.status):
             return row  # nothing new since the last look: skip re-parsing the buffer
         self.seen[row["id"]] = (job.total, job.status)
-        status, detail = map_job(job)
+        status, detail = map_job(job, self._timeout_minutes())
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
@@ -319,7 +392,7 @@ class CodingSessions:
         prompt = self._text(prompt, "prompt")
         permission_mode = permission_mode or None
         if permission_mode not in PERMISSION_MODES:
-            raise CodingError("permission_mode must be acceptEdits or bypassPermissions, or left out for Claude Code's normal prompting.")
+            raise CodingError("permission_mode must be acceptEdits, auto, dontAsk or bypassPermissions, or left out to follow Grain's permission mode.")
         if permission_mode and agent != "claude":
             raise CodingError("permission_mode is for Claude Code only: OpenCode already runs with every permission allowed "
                               "inside the OS sandbox.")
@@ -327,9 +400,14 @@ class CodingSessions:
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
         repo = self.check_repo(repo_path)
+        self._check_capacity()
         name = " ".join(str(name or prompt).split())[:60].lstrip("- ") or "coding session"
         sid, wt, want = new_id(), repo, branch
         branch = None
+        if agent == "claude":  # the stored mode is what the CLI gets and what the UI shows
+            from . import autoreview
+            permission_mode = cli_permission_mode(ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or self.settings()),
+                                                  permission_mode)
         if new_worktree:
             branch = str(want or "").strip() or f"grain/{_slug(name)}-{secrets.token_hex(2)}"
             check_branch(branch)
@@ -355,7 +433,7 @@ class CodingSessions:
                       (sid, agent, None, None, row["repo_path"], row["worktree"], branch, row["conversation_id"], row["desk_id"],
                        row["run_id"], name, prompt, model, permission_mode, "starting", None, "", t, t, None))
         self.publish("coding_session", summary(row, None))
-        shell.taint(ctx, f"coding_session:{agent}")  # the agent's text comes back through status, logs and diff
+        shell.taint(ctx, f"coding_session:start:{sid}")  # the agent's text comes back through status, logs and diff
         try:
             if agent == "claude":
                 await self._start_claude(row)
@@ -370,7 +448,7 @@ class CodingSessions:
         if not exe:
             raise CodingError(CLAUDE_HINT)
         ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"]),
-                                 row["worktree"], START_TIMEOUT, claude_env())
+                                 row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
         if not ok:
             raise CodingError(f"claude did not start: {out.strip()[-300:]}")
         jid, sess = parse_job_id(out), None
@@ -390,7 +468,7 @@ class CodingSessions:
     async def _find_agent(self, exe: str, row: dict[str, Any], jid: str | None = None) -> tuple[str | None, str | None]:
         """(short id, sessionId) from `claude agents --json --all` (completed sessions too): the entry with this id, else
         the newest one for this worktree and name."""
-        ok, out = await self.run([exe, "agents", "--json", "--all"], row["worktree"], GIT_TIMEOUT, claude_env())
+        ok, out = await self.run([exe, "agents", "--json", "--all"], row["worktree"], GIT_TIMEOUT, await asyncio.to_thread(claude_env))
         try:
             agents = json.loads(out[out.index("["):]) if ok and "[" in out else []
         except ValueError:
@@ -406,10 +484,12 @@ class CodingSessions:
     async def _launch_opencode(self, row: dict[str, Any], ctx: dict[str, Any], prompt: str, continue_session: bool) -> None:
         if self.tb is None:
             raise CodingError("OpenCode is not wired into this backend.")
+        ctx = {**ctx, "taint_sources": []}  # opencode's own "network" label stays off the caller's ctx; the session's label covers it
         job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"], state_key=f"coding-{row['id']}",
                                            continue_session=continue_session, model=row["model"], background=True,
-                                           timeout=shell.MAX_TIMEOUT, conversation_id=f"coding:{row['id']}",
-                                           run_id=row.get("run_id"), notify=False, on_timeout="kill")
+                                           timeout=self._timeout_minutes() * 60, conversation_id=f"coding:{row['id']}",
+                                           run_id=row.get("run_id"), notify=False, on_timeout="kill",
+                                           pool="coding", max_background=self._max_concurrent())
         row["external_id"] = job.id
 
     async def send(self, sid: str, message: str, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -419,18 +499,19 @@ class CodingSessions:
         if not os.path.isdir(row["worktree"]):
             raise CodingError(f"{row['worktree']} no longer exists.")
         self.refresh(row)
-        shell.taint(ctx, f"coding_session:{row['agent']}")
+        shell.taint(ctx, f"coding_session:send:{sid}")
         if row["agent"] == "claude":
             if row["status"] not in ("done", "stopped"):
                 hint = " It is waiting for the user: `claude attach <id>` answers it." if row["status"] == "needs_you" else ""
                 raise CodingError(f"This session is {row['status'].replace('_', ' ')}; wait for it to finish or stop it first.{hint}")
             if not row.get("session_id"):
                 raise CodingError("This session's id is not known yet, so it cannot be resumed.")
+            self._check_capacity()
             exe = claude_binary()
             if not exe:
                 raise CodingError(CLAUDE_HINT)
             ok, out = await self.run(resume_argv(exe, row["session_id"], message), row["worktree"], START_TIMEOUT,
-                                     claude_env())
+                                     await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude did not resume: {out.strip()[-300:]}")
             new = parse_job_id(out)
@@ -449,6 +530,7 @@ class CodingSessions:
                 raise CodingError("OpenCode is still working on this session; wait for it to finish or stop it first.")
             if row["status"] == "blocked":  # the job record was lost; the process may still run on the same state folder
                 raise CodingError("OpenCode may still be running on this session (its job record was lost); Stop it first, then send the follow-up.")
+            self._check_capacity()
             try:
                 await self._launch_opencode(row, ctx, message, True)
             except shell.ShellError as e:
@@ -465,7 +547,7 @@ class CodingSessions:
             if not (exe and ID_RE.fullmatch(row.get("external_id") or "")):
                 raise CodingError("This session has no Claude Code job id to stop.")
             ok, out = await self.run([exe, "stop", row["external_id"]], row["worktree"], GIT_TIMEOUT,
-                                     claude_env())
+                                     await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude stop failed: {out.strip()[-300:]}")
         else:
@@ -536,7 +618,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                               alternative="fix the cause named above, or run the task another way")
         note = ("Started. It works in the background; coding_session_status(id) reads progress. "
                 + ("If it needs a permission answer its status becomes needs_you and the user runs `claude attach <external_id>`."
-                   if agent == "claude" else "OpenCode ends after 10 minutes at most; send a follow-up to continue."))
+                   if agent == "claude" else f"OpenCode ends after {sessions._timeout_minutes()} minutes at most; send a follow-up to continue."))
         return {**summary(row), "note": note}
 
     spec = ToolSpec("coding_session_start",
@@ -546,34 +628,41 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "untouched. Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
                     "(status needs_you; the user answers with `claude attach <id>`). OpenCode runs inside the OS sandbox, writing "
-                    "only within the workspace folder that holds the repo. permission_mode ('acceptEdits' or 'bypassPermissions', "
-                    "Claude Code only) relaxes its prompting for this one session and always asks the user first; leave it out "
-                    "unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
+                    "only within the workspace folder that holds the repo. permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
+                    "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
+                    "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},
                           "prompt": {"type": "string", "description": "The task, with the files or folders it concerns"},
                           "new_worktree": {"type": "boolean", "default": False},
                           "branch": {"type": "string", "description": "Branch for the new worktree (default grain/<task>-<hex>); never main/master"},
                           "model": {"type": "string"},
-                          "permission_mode": {"type": "string", "enum": ["acceptEdits", "bypassPermissions"]},
+                          "permission_mode": {"type": "string", "enum": ["acceptEdits", "auto", "dontAsk", "bypassPermissions"]},
                           "name": {"type": "string", "description": "A short label for the session"}},
                          ["agent", "repo_path", "prompt"]),
                     coding_session_start, "shell", "external",
                     examples=[{"agent": "claude", "repo_path": "/Users/me/code/app", "prompt": "Add a --dry-run flag to cli.py and cover it in tests",
                                "new_worktree": True}])
     spec.default = "ask"
-    spec.force_ask = lambda args, ctx: bool(ctx.get("tainted")) or bool(args.get("permission_mode"))  # no grant buys off a relaxed mode
+    def _bypass(args: dict[str, Any], ctx: dict[str, Any]) -> bool:  # an explicit bypass that Allow all did not itself choose
+        from . import autoreview
+        gm = ctx.get("permission_mode") or autoreview.mode_of(ctx.get("settings") or sessions.settings())
+        return args.get("permission_mode") == "bypassPermissions" and gm != "allow_all"
+
+    spec.force_card = _bypass  # a hard card: no grant, and not the reviewer, buys it off
+    spec.force_ask = lambda args, ctx: bool(ctx.get("tainted")) or _bypass(args, ctx)
     spec.available_fn = available
     tb.specs["coding_session_start"] = spec
 
     async def coding_session_list(ctx: dict[str, Any]) -> Any:
-        shell.taint(ctx, "coding_session:list")  # each row's detail was written by a coding agent
-        return {"sessions": [summary(sessions.refresh(r), 0) for r in sessions.list(20)]}
+        rows = [summary(sessions.refresh(r), 0) for r in sessions.list(20)]
+        shell.taint(ctx, "coding_session:list:" + ",".join(r["id"] for r in rows))  # each row's detail was written by a coding agent
+        return {"sessions": rows}
 
     async def coding_session_status(ctx: dict[str, Any], id: str, lines: int = 30) -> Any:
         row, err = view(id)
         if err:
             return err
-        shell.taint(ctx, "coding_session:status")  # the log and detail were written by a coding agent
+        shell.taint(ctx, f"coding_session:status:{row['id']}")  # the log and detail were written by a coding agent
         try:
             n = max(1, min(int(lines or 30), 200))
         except (TypeError, ValueError):
@@ -597,7 +686,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             row = await sessions.stop(str(id))
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
-        shell.taint(ctx, f"coding_session:{row['agent']}")  # the row's detail and log may be agent-written
+        shell.taint(ctx, f"coding_session:stop:{row['id']}")  # the row's detail and log may be agent-written
         return summary(row)
 
     async def coding_session_diff(ctx: dict[str, Any], id: str, full: bool = False) -> Any:
@@ -605,7 +694,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
             out = await sessions.diff(str(id), bool(full))
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
-        shell.taint(ctx, "coding_session:diff")  # agent-written content
+        shell.taint(ctx, f"coding_session:diff:{str(id)}")  # agent-written content
         return out
 
     sid = {"id": {"type": "string"}}
@@ -616,7 +705,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
          _obj({**sid, "lines": {"type": "integer", "default": 30}}, ["id"]), coding_session_status, "safe"),
         ("coding_session_send", "Send a follow-up message to a coding session that has finished or been stopped. A session "
          "that is still working or waiting for the user cannot take one: wait, or stop it first. A finished Claude Code session "
-         "may continue as a copy with a new external_id. Always asks the user.",
+         "may continue as a copy with a new external_id. Asks the user in Manual mode, and whenever the run read other untrusted content.",
          _obj({**sid, "message": {"type": "string"}}, ["id", "message"]), coding_session_send, "external"),
         ("coding_session_stop", "Stop a running coding session. It keeps its files and can be continued with "
          "coding_session_send. Never removes a session.", _obj(sid, ["id"]), coding_session_stop, "executes"),
@@ -628,5 +717,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         s.available_fn = available
         if name == "coding_session_send":
             s.default = "ask"
-            s.force_ask = lambda _args, ctx: bool(ctx.get("tainted"))
+            s.taint_ok = lambda args, ctx: (not ctx.get("taint_unsourced")
+                                            and own_session_taint(str(args.get("id") or ""), ctx.get("taint_sources")))
+            s.force_ask = lambda args, ctx, ok=s.taint_ok: bool(ctx.get("tainted")) and not ok(args, ctx)
         tb.specs[name] = s

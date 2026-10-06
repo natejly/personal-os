@@ -1734,6 +1734,7 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
             result = {**result, "replayed": True}
         if spec.taints and not (isinstance(result, dict) and result.get("error")):
             ctx["tainted"] = True
+            ctx.setdefault("taint_sources", []).append(name)
     return result
 
 
@@ -2062,6 +2063,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
             "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
+            # a chat tainted with no recorded source: no tool's own-subject exemption may read its taint as explained
+            "taint_unsourced": bool(conv["settings"].get("tainted")) and not conv["settings"].get("taint_sources"),
             "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
@@ -2112,7 +2115,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             recent, first = autoreview.digest(messages)
             return await autoreview.review(
                 cfg, model, name=name, description=sp.description if sp else _mcp_review_text(name), args=args, danger=danger, user_text=user_text,
-                task=first, recent=recent, mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop, conv_id=conv_id,
+                task=first, recent=recent, mode=raw_mode, tainted=toolbox.tainted_for(name, args, tool_ctx), cancel=stop, conv_id=conv_id,
                 cache=review_cache)
 
         def _log_mode(name: str, args: dict[str, Any], uid: str, decision: str, scope: str, note: str,
@@ -2136,11 +2139,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return True
             if pmode == "auto":
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
-                hard = forced and (bool(tool_ctx["tainted"]) or not locked)
+                hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
                 rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
                 if rt in ("review", "review_strict"):
                     rv = await _review_call(name, args, danger, "ask")
-                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], bool(tool_ctx["tainted"]))
+                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], toolbox.tainted_for(name, args, tool_ctx))
                     if out == "run":
                         _log_mode(name, args, blog, "auto", "auto-review", "mode: auto", rv)
                         return True
@@ -2915,7 +2918,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if fs_ask and mode == "on":
                     mode = "ask"
                 lockable = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(c["name"], args, tool_ctx)))
-                hard_forced = hard_forced or (lockable and bool(tool_ctx["tainted"]))
+                hard_forced = hard_forced or toolbox.forces_card(c["name"], args, tool_ctx) or (
+                    lockable and toolbox.tainted_for(c["name"], args, tool_ctx))
                 desk_cleared = False
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
@@ -2965,7 +2969,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # forces either here, so the card buys no grant or allow rule.
                 # That alone does not stop an approved plan step from standing in for the card: taint the plan did
                 # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
-                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
+                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and toolbox.tainted_for(c["name"], args, tool_ctx)
                 forced = forced or taint_only
                 hard_forced = hard_forced or taint_only
                 perm = permrules.Resolution(mode, forced)
@@ -3078,7 +3082,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         lifted_all = pmode == "allow_all" and danger != "safe"
                     elif rt in ("review", "review_strict"):
                         review = await _review_call(c["name"], args, danger, raw_mode)
-                        outcome = autoreview.apply(rt, review["verdict"], review["confidence"], bool(tool_ctx["tainted"]))
+                        outcome = autoreview.apply(rt, review["verdict"], review["confidence"], toolbox.tainted_for(c["name"], args, tool_ctx))
                         if outcome == "run":
                             mode, forced = "on", False
                         elif outcome == "deny":
@@ -6382,7 +6386,7 @@ def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
 
 def _too_big(n: int) -> str | None:
     if n > MAX_UPLOAD_BYTES:
-        return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"
+        return f"Files must be {limits.MAX_UPLOAD_MB} MB or smaller"
     return None
 
 
@@ -6403,7 +6407,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
     # The project is resolved first so an upload for a deleted project leaves no file behind, and the file is
-    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 20 MB
+    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 50 MB
     # PDF on the event loop would stall every SSE stream.
     pid = wsid(project_id)
     safe = safe_upload_name(name)

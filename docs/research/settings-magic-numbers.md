@@ -130,6 +130,8 @@ Advanced groups: **Assistant behaviour**, **Approvals**, **Files and web**, **Me
 | requireReadBeforeWrite | none | `fsx.py:734,771` | Hide | on, const |
 | shellTimeoutSec | none | `shell.py:671`, `opencode.py:141` | Hide | const 120 |
 | shellMaxBackground | none | `shell.py:712,872` | Hide | const 4 |
+| codingSessionTimeoutMinutes | Advanced | `codingagents.py` `_launch_opencode` | Adv(Desks and background) | const 30 |
+| codingSessionMaxConcurrent | Advanced | `codingagents.py` `_check_capacity` | Adv(Desks and background) | const 3 |
 | visionModel | Autonomy | be 4 / fe 3 | Adv(Assistant behaviour) | "Model that reads pictures" |
 | imageModel | Memory tab | be 4 / fe 2 | Adv(Assistant behaviour) | "Image generation model" |
 | browserMaxTabs | Autonomy > Advanced | `browser.py:190` | Hide | const 4 |
@@ -270,6 +272,8 @@ Verdict key: **(a)** derive adaptively, **(b)** named constant in `limits.py`, *
 | proposalExpireDays / jobExpireDays | 7 / 0 | `jobs.py:774-876` | Expiry. | **(b)** |
 | shellTimeoutSec | 120 (max 600) | `shell.py:671`, `shell.py:38-40` | Foreground shell default. | **(b)** |
 | shellMaxBackground | 4 | `shell.py:712` | Live background jobs. | **(b)** |
+| codingSessionTimeoutMinutes (1-1440) | 30 | `codingagents.py` | An OpenCode coding session is stopped after this. Shown in Advanced. | **(b)** |
+| codingSessionMaxConcurrent (1-20) | 3 | `codingagents.py`, `shell.py` pool `coding` | Live coding sessions (claude and opencode), apart from `shellMaxBackground`. Shown in Advanced. | **(b)** |
 | gmailSendHold.seconds | 90 (clamped 60-120) | `outbox.py` | Undo window. | **(b)** |
 | usageAlerts.dailyCost / monthlyCost | 0 / 0 | `app.py:355-359` | Spend warnings. | **User intent. Keep visible in Adv(Spending). Do not remove.** |
 | mailWatch awaitingAfterDays 3 / needsReplyAfterHours 24 | | `mailwatch.py` | Reply tracker meaning. | User intent; keep in Adv. |

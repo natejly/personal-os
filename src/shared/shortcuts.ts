@@ -66,7 +66,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'stop', label: 'Stop the reply', keys: 'Escape', group: 'Chat', scope: 'component' },
   // The composer binds ⇧⌘P itself; the menu shows it without registering it.
   { id: 'plan-mode', label: 'Cycle Plan Mode', keys: 'CmdOrCtrl+Shift+P', group: 'Chat', scope: 'component' },
-  // The chord is the user's (Settings → Behavior → Voice input); the overlay shows the live one.
+  // The chord is the user's (Settings → Advanced → Voice and shortcuts); the overlay shows the live one.
   { id: 'dictation', label: 'Dictate (hold) or latch (tap)', keys: 'Control+Alt+D', group: 'Chat', scope: 'component' },
 
   // Files (the note editor)

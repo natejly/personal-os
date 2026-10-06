@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, menu } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, menu, editDoc } from './helpers/files.mjs'
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
 
@@ -50,6 +50,7 @@ test('typing 2000 chars fast loses no keystrokes, even across a relaunch', async
   await relaunch(g)
   await openFiles(g.page)
   await g.page.locator('.doc-row', { hasText: 'Untitled' }).first().click()
+  await editDoc(g.page)
   await expect(body(g.page)).toHaveValue(text)
 })
 
@@ -70,6 +71,7 @@ test('edit/split/preview modes persist under grain.docMode', async ({ grain: g }
   await mkDoc(g, { title: 'Mode doc', content: '# Head\n\ntext' })
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'Mode doc' }).first().click()
+  await editDoc(page)
   await expect(page.locator('.doc-panes')).toHaveClass(/split/)
   await page.getByTitle('Preview only').click()
   await expect(page.locator('.doc-panes')).toHaveClass(/preview/)
@@ -80,6 +82,7 @@ test('edit/split/preview modes persist under grain.docMode', async ({ grain: g }
   page = await relaunch(g)
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'Mode doc' }).first().click()
+  await editDoc(page)
   await expect(page.locator('.doc-panes')).toHaveClass(/edit/)
 })
 

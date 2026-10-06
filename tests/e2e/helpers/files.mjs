@@ -4,6 +4,12 @@ export const openFiles = async (page) => {
   await page.getByRole('tablist', { name: 'Files section' }).waitFor()
 }
 export const body = (page) => page.locator('textarea.md-input')
+/** Docs open in the reading view; bring the editor up (Edit toggle) unless it already is, as a doc made from New or remembered per doc. */
+export const editDoc = async (page) => {
+  const t = page.locator('.doc-edit-toggle')
+  if ((await t.getAttribute('aria-pressed')) !== 'true') await t.click()
+  await body(page).waitFor()
+}
 export const titleBox = (page) => page.getByLabel('Title', { exact: true })
 export const waitSaved = async (page) => {
   await page.waitForFunction(() => !document.querySelector('.doc-save-state'), null, { timeout: 60_000 })

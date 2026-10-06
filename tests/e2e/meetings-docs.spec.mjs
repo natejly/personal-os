@@ -1,6 +1,7 @@
 import { test as plain, expect } from './fixtures.mjs'
 import { test } from './helpers/fakemic.mjs'
 import { enableModules, reload, small, realErrors, seedSegments, captureDownloads } from './helpers/mah.mjs'
+import { editDoc } from './helpers/files.mjs'
 
 for (const t of [plain, test]) t.beforeEach(() => t.setTimeout(240_000))
 
@@ -176,6 +177,7 @@ test('Record into a doc: bar, live transcript in the panel, recording block, Pau
   const { page, api } = grain
   const doc = await api('/docs', { method: 'POST', body: { title: 'Live doc', content: '# Live\n\nBefore.\n' } })
   await openDoc(grain, 'Live doc')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Record', exact: true }).click()
   const bar = page.locator('.dr-bar')
   await expect(bar).toBeVisible({ timeout: 60_000 })
@@ -206,6 +208,7 @@ test('dictation: finished clips are typed at the caret once, voice commands work
   const { page, api, stt } = grain
   const doc = await api('/docs', { method: 'POST', body: { title: 'Dictated doc', content: '# Notes\n\n' } })
   await openDoc(grain, 'Dictated doc')
+  await editDoc(page)
   const editor = page.locator('textarea.md-input')
   // put the caret at the end of the doc, as a person would before talking
   await editor.click()

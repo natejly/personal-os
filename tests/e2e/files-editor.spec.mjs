@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, menu } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, menu, editDoc } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -37,6 +37,7 @@ test('wikilinks: [[ autocomplete inserts a link, preview click navigates, unknow
   const src = await mkDoc(g, { title: 'Source', content: '' })
   await openFiles(page)
   await open(page, 'Source')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.insertText('see [[Tar')
   const item = page.getByRole('option', { name: 'Target page' })
@@ -53,6 +54,7 @@ test('wikilinks: [[ autocomplete inserts a link, preview click navigates, unknow
   // click through in the preview
   await page.locator('.docs-render a.wikilink', { hasText: 'Target page' }).click()
   await expect(titleBox(page)).toHaveValue('Target page')
+  await editDoc(page)
   await expect(body(page)).toHaveValue('target body')
   // backlinks list shows Source
   await page.getByRole('button', { name: 'Toggle side panel' }).click()
@@ -75,6 +77,7 @@ test('outline pane follows headings, jumps, and works from preview-only mode', a
   await mkDoc(g, { title: 'Long', content: '# Top\n\n' + lines.join('\n') + '\n### Deep one\n' })
   await openFiles(page)
   await open(page, 'Long')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Toggle side panel' }).click()
   await page.getByRole('tab', { name: 'Outline' }).click()
   const nav = page.getByRole('navigation', { name: 'Outline' })
@@ -147,6 +150,7 @@ test('tags: chips come from #tags, clicking one filters, code/heading hashes are
   await expect(page.getByPlaceholder('Search files')).toHaveValue('')
   // editing the body updates tags
   await open(page, 'Plain')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.keyboard.insertText(' #fresh')
@@ -212,6 +216,7 @@ test('task checkboxes toggle in the preview and write back to the file', async (
   const d = await mkDoc(g, { title: 'Tasks', content: '# T\n\n- [ ] one\n- [x] two\n  - [ ] nested\n\n```\n- [ ] in fence\n```\n\n$$\na\n$$\n\n- [ ] after math\n' })
   await openFiles(page)
   await open(page, 'Tasks')
+  await editDoc(page)
   const boxes = page.locator('.docs-render input.task-live')
   await expect(boxes).toHaveCount(4)
   await boxes.nth(0).click()
@@ -293,6 +298,7 @@ test('cmd-F in a doc does nothing harmful (find-in-doc is not implemented; Find 
   await mkDoc(g, { title: 'Findable', content: 'needle in haystack' })
   await openFiles(page)
   await open(page, 'Findable')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+f')
   await page.keyboard.press('Escape')
@@ -326,11 +332,13 @@ test('250 KB doc: typing latency stays near the small-doc baseline (< 150 ms), p
   })
   // The box this runs on is often at load 30+, so the bound is the 150 ms budget or 8x what a tiny doc costs right now.
   await open(page, 'Small doc')
+  await editDoc(page)
   await page.waitForTimeout(1000)
   const base = await measure()
   const budget = Math.max(150, 8 * base.median)
   const t0 = Date.now()
   await open(page, 'Big doc')
+  await editDoc(page)
   await expect(body(page)).toBeVisible()
   await expect(page.locator('.docs-render h2').first()).toBeVisible({ timeout: 60_000 })
   console.log('250KB open+render ms', Date.now() - t0, 'chars', content.length, 'baseline', JSON.stringify(base), 'budget', budget)
@@ -363,6 +371,7 @@ test('820x520 window with a doc open: toolbar, editor and side panel remain reac
   await mkDoc(g, { title: 'Small', content: '# Small\n\ntext' })
   await openFiles(page)
   await open(page, 'Small')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Toggle side panel' }).click()
   await page.waitForTimeout(500)
   console.log('HISTORY', JSON.stringify(await page.evaluate(() => { const h = document.querySelector('.docs-history'); const b = h.getBoundingClientRect(); const cs = getComputedStyle(h); return { x: b.x, y: b.y, w: b.width, h: b.height, pos: cs.position, disp: cs.display, vis: cs.visibility, ow: cs.overflow, wd: cs.width, par: getComputedStyle(h.parentElement).display, kids: h.children.length, outer: h.outerHTML.slice(0, 200), iw: innerWidth, ih: innerHeight, body: document.querySelector('.docs-body').getBoundingClientRect().toJSON(), cols: getComputedStyle(document.querySelector('.docs-body')).gridTemplateColumns } })))

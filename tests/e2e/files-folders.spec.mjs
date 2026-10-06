@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, smallWindow, patient, relaunch, newDoc, drag } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, smallWindow, patient, relaunch, newDoc, drag, editDoc } from './helpers/files.mjs'
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
 
@@ -131,6 +131,7 @@ test('delete folder: cancelling the confirm keeps it; delete with open doc insid
   await g.api('/docs/folders', { method: 'POST', body: { path: 'Keep', scope: '' } })
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'open one' }).last().click()
+  await editDoc(page)
   await folderRow(page, 'Keep').getByRole('button', { name: 'Actions for Keep' }).click()
   await page.getByRole('button', { name: 'Delete folder' }).click()
   await expect(folderRow(page, 'Keep')).toBeVisible()
@@ -211,6 +212,7 @@ test('820x520 window: tree collapses and re-opens, editor stays usable', async (
   await mkDoc(g, { title: 'Tiny', content: 'tiny body' })
   await openFiles(page)
   await page.locator('.doc-row', { hasText: 'Tiny' }).last().click()
+  await editDoc(page)
   await expect(body(page)).toBeVisible()
   await page.getByRole('button', { name: 'Toggle file tree' }).click()
   await expect(page.locator('.docs-side')).toHaveCount(0)

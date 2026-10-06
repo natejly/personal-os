@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { openSettings, dialog, save } from './helpers/home.mjs'
 import { openFiles, body, titleBox, mkDoc, errorsOf, patient, relaunch } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
@@ -112,7 +113,11 @@ test('per-doc font and the global default', async ({ grain: g }) => {
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).typography.size).toBe(16)
   await page.getByRole('button', { name: 'Use default' }).click()
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).typography).toBeNull()
-  await g.api('/settings', { method: 'PUT', body: { docTypography: { font: 'mono' } } })
+  // The window reads settings at startup and after its own Save, so the global default is set through Settings.
+  await openSettings(page, 'Behavior')
+  await dialog(page).locator('.doc-type .seg button', { hasText: 'Mono' }).click()
+  await save(page)
+  await expect.poll(async () => (await g.api('/settings')).docTypography?.font).toBe('mono')
   await open(page, 'Typed')
   await expect(page.locator('.doc-panes')).toHaveAttribute('style', /Menlo/)
   expect(errorsOf(g)).toEqual([])

@@ -50,6 +50,8 @@ export function spawnBackend({ port, dataDir, token, llmUrl, llmKey, extraEnv = 
     PERSONAL_OS_EXTRACTION_MODEL: process.env.E2E_LLM === 'real' ? (dotenv().PERSONAL_OS_EXTRACTION_MODEL || '') : 'mock-chat',
     PERSONAL_OS_LOG_DIR: join(dataDir, '..', 'logs'),
     PERSONAL_OS_PARENT_WATCH: '1',
+    // e2e backends never call the live web provider (the backend's dotenv loader uses setdefault, so an empty value also blocks a key from a .env file).
+    FIRECRAWL_API_KEY: '',
     ...extraEnv
   }
   delete env.ELECTRON_RUN_AS_NODE
@@ -158,8 +160,12 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   delete env.ELECTRON_RUN_AS_NODE
   const executablePath = join(ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim())
   const consoleErrors = []
+  // Downloads (the PDF export writes there with no dialog) land in the profile, never in the real Downloads folder.
+  const downloadsDir = join(profile, 'downloads')
+  mkdirSync(downloadsDir, { recursive: true })
   const openApp = async () => {
     const app = await electron.launch({ executablePath, args: [join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT, timeout: 60_000 })
+    await app.evaluate(({ app: a }, d) => a.setPath('downloads', d), downloadsDir)
     let page = await app.firstWindow({ timeout: 60_000 })
     // A restored pop-out can open before the main window: the shell is the one that is not a widget surface.
     for (let i = 0; i < 240 && page.url().includes('surface=widget'); i++) {
@@ -174,7 +180,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     if (!process.env.E2E_FOREGROUND) await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isVisible()) w.focus() })
     return { app, page }
   }
-  const g = { api, backend, llm, dataDir, scratch, token, consoleErrors }
+  const g = { api, backend, llm, dataDir, downloadsDir, scratch, token, consoleErrors }
   try {
     Object.assign(g, await openApp())
   } catch (e) { await abandon(e) }

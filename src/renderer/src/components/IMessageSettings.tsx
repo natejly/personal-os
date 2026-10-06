@@ -17,8 +17,8 @@ function statusLine(st: IMessageStatus | null): string {
 }
 
 /**
- * Settings > Integrations: control Grain by text from an allowlist of numbers. The toggle, handles, target chat and
- * long-run options go through the modal's draft and Save; the status line and the test text act at once. `saved` is
+ * Settings > Texting: control Grain by text from an allowlist of numbers. The toggle, handles, target chat and
+ * notify option go through the modal's draft and Save; the status line and the test text act at once. `saved` is
  * what the backend has now, which is what a test text uses.
  */
 export default function IMessageSettings({ draft, saved, patch }: { draft: Settings; saved: Settings; patch: (p: Partial<Settings>) => void }): JSX.Element {
@@ -66,7 +66,6 @@ export default function IMessageSettings({ draft, saved, patch }: { draft: Setti
   const canTest = !!saved.imessageEnabled && savedHandles.length > 0 && !testing
   const unsaved = enabled !== !!saved.imessageEnabled || handles.join('|') !== savedHandles.join('|')
   const target = draft.imessageConversationId ?? ''
-  const longRun = Math.min(1440, Math.max(1, draft.imessageLongRunMinutes ?? 3))
 
   return (
     <div className="workspace-roots">
@@ -105,17 +104,9 @@ export default function IMessageSettings({ draft, saved, patch }: { draft: Setti
       </label>
 
       <label className="toggle-row plain">
-        <span className="toggle-text"><b>Also text me when long runs finish or need approval</b></span>
+        <span className="toggle-text"><b>Text me when long runs finish or need approval</b><small>Sends a text when a run you started finishes or is waiting on you.</small></span>
         <input type="checkbox" checked={!!draft.imessageNotifyLongRuns} onChange={(e) => patch({ imessageNotifyLongRuns: e.target.checked })} /><span className="switch" />
       </label>
-      {draft.imessageNotifyLongRuns && (
-        <label className="setting-row"><span className="toggle-text"><b>Runs longer than</b></span>
-          <span className="num-unit">
-            <input type="number" min={1} max={1440} value={longRun} onChange={(e) => patch({ imessageLongRunMinutes: Math.min(1440, Math.max(1, Math.round(Number(e.target.value)) || 1)) })} />
-            <em>minutes</em>
-          </span>
-        </label>
-      )}
 
       <p className="muted small" role="status">
         <b>{stErr ?? statusLine(st)}</b>

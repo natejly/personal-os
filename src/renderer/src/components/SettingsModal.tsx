@@ -25,7 +25,7 @@ import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork 
 import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
 import { PermissionModeCards } from './PermissionMode'
 import SandboxSettings from './SandboxSettings'
-import IMessageSettings from './IMessageSettings'
+import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
 import MeetingSettings from './MeetingSettings'
@@ -439,7 +439,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'texting' && <section>
               <h3>Texting</h3>
-              <IMessageSettings draft={draft} saved={settings} patch={patch} />
+              <TelegramSettings draft={draft} patch={patch} />
             </section>}
 
             {tab === 'appearance' && <section>

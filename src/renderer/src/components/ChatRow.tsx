@@ -112,7 +112,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
               }}
               onBlur={(e) => commit(e.currentTarget.value)}
             />
-          ) : <>{conv.title}{fileCount > 0 && <span className="convo-files" title={`${fileCount} file${fileCount === 1 ? '' : 's'} in this chat`}><Paperclip size={11} />{formatCount(fileCount)}</span>}{trail}</>}
+          ) : <>{conv.title}{fileCount > 0 && <span className="convo-files" title={`${fileCount} document${fileCount === 1 ? '' : 's'} in this chat`}><Paperclip size={11} />{formatCount(fileCount)}</span>}{trail}</>}
         </span>
         {attn !== 'idle' && <AttentionDot state={attn} detail={deskStatus && STATUS_LABEL[deskStatus]} />}
         <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}

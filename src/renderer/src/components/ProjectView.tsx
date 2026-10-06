@@ -6,7 +6,7 @@ import { rowButton } from '../lib/rowButton'
 import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
-import ProjectFiles from './ProjectFiles'
+import ProjectArtifacts from './ProjectArtifacts'
 import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
@@ -63,7 +63,7 @@ export default function ProjectView(): JSX.Element {
 
   const TABS: { key: ProjectTab; label: string; icon: JSX.Element; n?: number }[] = [
     { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: rows.length },
-    { key: 'files', label: 'Files', icon: <Files size={14} />, n: fileCount },
+    { key: 'artifacts', label: 'Artifacts', icon: <Files size={14} />, n: fileCount },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
   ]
@@ -123,7 +123,7 @@ export default function ProjectView(): JSX.Element {
           <p className="muted small">Saved when you click away.</p>
         </div>
       )}
-      {tab === 'files' && <ProjectFiles key={id} projectId={id} />}
+      {tab === 'artifacts' && <ProjectArtifacts key={id} projectId={id} />}
       {tab === 'memory' && <MemoryPanel projectId={id} />}
     </main>
   )

@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import imessage, system_access
+from . import system_access, telegram
 from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
@@ -214,7 +214,7 @@ run_store = RunStore(db)
 bus = RunBus(run_store)
 def _run_changed(run: Run) -> None:
     events.publish("run_state", run.info())  # `events` is bound below; read at call time
-    imessage_bridge.on_run_change(run)  # bound near the end of this module; it never raises
+    telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
 
 
 bus.on_change = _run_changed
@@ -775,7 +775,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "imessageState"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "telegramState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "meetings"}
@@ -831,22 +831,6 @@ def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
-def _clean_imessage_handles(v: Any) -> list[str]:
-    """Phones and emails, normalized and deduped. A group chat is allowed by its id (chat123… or a full guid)."""
-    out: list[str] = []
-    for e in v:
-        if not isinstance(e, str):
-            raise HTTPException(422, "imessageHandles must be a list of strings")
-        h = imessage.normalize_handle(e)
-        if h is None and re.fullmatch(r"chat\d+|\w+;\+;\S+", e.strip()):
-            h = e.strip()
-        if h is None:
-            raise HTTPException(422, f"imessageHandles: {e!r} is not a phone number or email")
-        if h not in out:
-            out.append(h)
-    return out
-
-
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
@@ -872,20 +856,6 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
-        elif k == "imessageHandles":
-            clean[k] = _clean_imessage_handles(v)
-        elif k == "imessageConversationId" and v is not None and not isinstance(v, str):
-            raise HTTPException(422, "imessageConversationId must be a string or null")
-        elif k == "imessageSelfChatGuid":
-            if v is not None and not isinstance(v, str):
-                raise HTTPException(422, "imessageSelfChatGuid must be a string or null")
-            if v is not None and len(v.strip()) > 200:
-                raise HTTPException(422, "imessageSelfChatGuid is too long")
-            if v is not None and v.strip().startswith("-"):  # it is handed to osascript as an argv item
-                raise HTTPException(422, "imessageSelfChatGuid is not a chat id")
-            clean[k] = (v or "").strip() or None
-        elif k == "imessageReplyMarker" and len(v) > 16:
-            raise HTTPException(422, "imessageReplyMarker must be at most 16 characters")
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
@@ -896,8 +866,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     db.set_settings(clean)
     if "sandboxRuntime" in perm:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
-    if any(k.startswith("imessage") for k in clean) and _loop is not None and not _loop.is_closed():
-        asyncio.run_coroutine_threadsafe(imessage_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
+    if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
+        asyncio.run_coroutine_threadsafe(telegram_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "deskMaxLive" in clean and _loop is not None and not _loop.is_closed():
         # A raised cap frees slots no desk's ending will report; launch queued desks into them now.
         # (A sync route runs in the threadpool, and launching creates tasks on the loop.)
@@ -1436,7 +1406,7 @@ class PageContextIn(BaseModel):
 
 
 class ChatIn(BaseModel):
-    origin: Literal["imessage"] | None = None  # who sent the turn when it was not typed in the app; lands in the run's input
+    origin: Literal["telegram"] | None = None  # who sent the turn when it was not typed in the app; lands in the run's input
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
     page_context: PageContextIn | None = None
@@ -1473,7 +1443,7 @@ Maths renders when written inline as `$...$` and as a display block with `$$` on
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
 The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
 
-# Always on, every path (chats, desks, subagents, scheduled jobs, drafts, iMessage): static, so it sits in the cached prefix.
+# Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
 
 # Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
@@ -4534,7 +4504,7 @@ class ApprovalIn(BaseModel):
     # An editable tool's approval only (approval_edits.EDITABLE_TOOLS): the arguments the user wants run instead of the
     # model's. Validated against the tool's schema; what executes, is journaled and is verified is this, not the original.
     arguments: dict[str, Any] | None = None
-    via: Literal["imessage"] | None = None  # answered by text: recorded as the decider instead of "user"
+    via: Literal["telegram"] | None = None  # answered from Telegram: recorded as the decider instead of "user"
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -6455,7 +6425,7 @@ def delete_document(id: str) -> dict[str, bool]:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    await imessage_bridge.stop()  # before the runs are cancelled: a dying backend must not text "interrupted" replies
+    await telegram_bridge.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
@@ -9965,93 +9935,127 @@ async def _cowork_startup() -> None:
         log.warning("cowork recovery failed", exc_info=True)
 
 
-# ---------------- iMessage bridge (imessage.py) ----------------
-def _imessage_message_text(message_id: str) -> str | None:
+# ---------------- Telegram bridge (telegram.py) ----------------
+def _telegram_message_text(message_id: str) -> str | None:
     with db.tx() as c:
         r = c.execute("SELECT content FROM messages WHERE id=?", (message_id,)).fetchone()
     return r["content"] if r else None
 
 
-def _imessage_create_conversation() -> str:
+def _telegram_create_conversation() -> str:
     return create_conversation(ConvIn(title="Texts"))["id"]
 
 
-async def _imessage_turn(conv_id: str, text: str) -> dict[str, Any]:
-    """A text is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
+async def _telegram_turn(conv_id: str, text: str) -> dict[str, Any]:
+    """A message is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
     for _ in range(2):
         try:
             if bus.answering(conv_id):
                 return await steer_run(conv_id, SteerIn(content=text))
-            return await chat(conv_id, ChatIn(content=text, origin="imessage"))
+            return await chat(conv_id, ChatIn(content=text, origin="telegram"))
         except HTTPException as e:
             if e.status_code != 409:
                 raise
     raise HTTPException(409, "The conversation is busy")
 
 
-async def _imessage_decide(call_id: str, decision: str) -> dict[str, Any]:
-    return await approve_tool_call(call_id, ApprovalIn(decision=decision, via="imessage"))
+async def _telegram_decide(call_id: str, decision: str) -> dict[str, Any]:
+    return await approve_tool_call(call_id, ApprovalIn(decision=decision, via="telegram"))
 
 
-def _imessage_conversation_title(conv_id: str) -> str | None:
+def _telegram_conversation_title(conv_id: str) -> str | None:
     row = convos.get(conv_id, with_messages=False)
     return row["title"] if row else None
 
 
-imessage_bridge = imessage.IMessageBridge(imessage.Deps(
+telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     get_settings=settings,
-    load_state=lambda: db.get_settings().get("imessageState") or {},
-    save_state=lambda st: db.set_settings({"imessageState": st}),
-    chat_db_path=os.environ.get("GRAIN_IMESSAGE_CHAT_DB") or imessage.DEFAULT_CHAT_DB,
-    runner=imessage.default_runner,
-    start_turn=_imessage_turn,
+    load_state=lambda: db.get_settings().get("telegramState") or {},
+    save_state=lambda st: db.set_settings({"telegramState": st}),
+    get_token=lambda: db.secrets.get(telegram.SECRET_NAME),
+    start_turn=_telegram_turn,
     stop=lambda conv_id: bus.stop(conv_id),
-    decide=_imessage_decide,
+    decide=_telegram_decide,
     pending_approvals=lambda: run_store.approvals(status="pending"),
     is_live=lambda call_id: (f := _approvals.get(call_id)) is not None and not f.done(),
     active_runs=lambda: bus.list(),
-    create_texts_conversation=_imessage_create_conversation,
+    create_texts_conversation=_telegram_create_conversation,
     conversation_exists=lambda conv_id: convos.get(conv_id, with_messages=False) is not None,
-    message_text=_imessage_message_text,
+    message_text=_telegram_message_text,
     app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
-    conversation_title=_imessage_conversation_title,
+    conversation_title=_telegram_conversation_title,
 ))
 
 
 @app.on_event("startup")
-async def _imessage_startup() -> None:
-    if settings().get("imessageEnabled"):
-        await imessage_bridge.start()  # resumes from the saved cursor; a fresh enable goes through reconcile
+async def _telegram_startup() -> None:
+    if settings().get("telegramEnabled") and db.secrets.get(telegram.SECRET_NAME):
+        await telegram_bridge.start()
 
 
-@app.get("/imessage/status")
-def imessage_status() -> dict[str, Any]:
-    return imessage_bridge.status()
+@app.get("/telegram/status")
+def telegram_status() -> dict[str, Any]:
+    return telegram_bridge.status()
 
 
-class IMessageTestIn(BaseModel):
-    handle: str | None = None
+class TelegramTokenIn(BaseModel):
+    token: str
 
 
-@app.post("/imessage/test")
-async def imessage_test(body: IMessageTestIn) -> dict[str, Any]:
-    res = await imessage_bridge.send_test(body.handle)
-    if res.get("error") == "not_allowlisted":
-        raise HTTPException(400, "That handle is not on the allowlist")
-    if res.get("error") == "no_self_chat":
-        raise HTTPException(400, "Pick your note-to-self chat or add your phone number to the allowlist first")
+@app.put("/telegram/token")
+async def telegram_put_token(body: TelegramTokenIn) -> dict[str, Any]:
+    token = body.token.strip()
+    if not telegram.TOKEN_RE.fullmatch(token):
+        raise HTTPException(422, "That does not look like a bot token")
+    try:
+        me = await telegram_bridge.check_token(token)
+    except telegram.TelegramError as e:
+        if e.code in (401, 404):
+            raise HTTPException(400, "Telegram rejected that token") from None
+        raise HTTPException(502, f"Could not reach Telegram: {telegram.sanitize(e.description, token)}") from None
+    db.secrets.set(telegram.SECRET_NAME, token)
+    telegram_bridge.adopt(me)
+    db.set_settings({"telegramEnabled": True})
+    await telegram_bridge.reconcile()
+    return telegram_bridge.status()
+
+
+@app.delete("/telegram/token")
+async def telegram_delete_token() -> dict[str, Any]:
+    await telegram_bridge.stop()
+    db.secrets.delete(telegram.SECRET_NAME)
+    telegram_bridge.clear()
+    return telegram_bridge.status()
+
+
+@app.post("/telegram/pairing")
+def telegram_pairing() -> dict[str, Any]:
+    if not db.secrets.get(telegram.SECRET_NAME):
+        raise HTTPException(400, "Add a bot token first")
+    telegram_bridge.issue_pairing()
+    return telegram_bridge.status()
+
+
+@app.post("/telegram/unpair")
+def telegram_unpair() -> dict[str, Any]:
+    telegram_bridge.unpair()
+    return telegram_bridge.status()
+
+
+@app.post("/telegram/test")
+async def telegram_test() -> dict[str, Any]:
+    res = await telegram_bridge.send_test()
+    if res.get("error") == "not_paired":
+        raise HTTPException(400, "Pair a Telegram chat first")
     return res
 
 
-@app.get("/imessage/self-chats")
-async def imessage_self_chats() -> dict[str, Any]:
-    """Candidate note-to-self chats, never with message text: {"chats": [{guid, handle, last_activity, source, best}]}."""
-    res = await asyncio.to_thread(imessage_bridge.self_chats)
-    if res.get("error"):
-        raise HTTPException(409, res["error"])
-    return res
+class TelegramEnabledIn(BaseModel):
+    enabled: bool
 
 
-@app.post("/imessage/open-fda")
-def imessage_open_fda() -> dict[str, bool]:
-    return {"ok": imessage.open_full_disk_access()}
+@app.post("/telegram/enabled")
+async def telegram_set_enabled(body: TelegramEnabledIn) -> dict[str, Any]:
+    db.set_settings({"telegramEnabled": body.enabled})
+    await telegram_bridge.reconcile()
+    return telegram_bridge.status()

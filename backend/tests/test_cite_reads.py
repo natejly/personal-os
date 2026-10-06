@@ -1,4 +1,4 @@
-"""Whole-source reads are citable: pinned files, read_document slices, doc_read and meeting_read line spans each get
+"""Whole-source reads are citable: pinned files, read_document slices and doc_read line spans each get
 one [n] in the reply's ledger, by character offsets into the text the viewer loads."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import tools  # noqa: E402
 from personal_os.context import context_taints  # noqa: E402
-from personal_os.app import AUTH_TOKEN, app, docs, documents, meeting_store, toolbox  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, docs, documents, toolbox  # noqa: E402
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 run = asyncio.new_event_loop().run_until_complete
@@ -69,24 +69,12 @@ def test_doc_read_cites_the_lines_as_char_offsets() -> None:
     assert body[ref["start"]:ref["end"]] == "\n".join(f"line {i}" for i in range(10, 21))
 
 
-def test_meeting_read_cites_its_part() -> None:
-    m = meeting_store.create("Standup")
-    meeting_store.patch(m["id"], {"notes": "alpha\nbeta\ngamma\ndelta"})
-    ctx: dict = {"project_id": None, "citations": []}
-    out = run(toolbox.call("meeting_read", {"meeting": m["id"], "part": "notes", "from_line": 2, "to_line": 3}, ctx))
-    ref = ctx["citations"][0]
-    assert out["cite"] == 1 and ref["source"] == "meeting" and ref["meeting_id"] == m["id"] and ref["part"] == "notes"
-    assert "alpha\nbeta\ngamma\ndelta"[ref["start"]:ref["end"]] == "beta\ngamma"
-
-
 def test_line_span() -> None:
     assert tools.line_span("a\r\nbb\nccc", 2, 3) == (3, 9)
     assert tools.line_span("a\nb", 5, 9) == (3, 3)
 
 
-def test_activity_block_of_app_names_only_does_not_taint():
-    """The monitor ships on. A block that is just app names (no Accessibility, so no titles, profile or summaries)
-    is the user's own data; one that carries a window title or a distilled summary still taints the turn."""
-    assert context_taints({"activity": "In Terminal for 3m.", "activity_foreign": False}) == []
-    assert context_taints({"activity": "In Safari - Some page title for 3m.", "activity_foreign": True}) == ["activity"]
-    assert context_taints({"activity": "legacy caller without the flag"}) == ["activity"]
+def test_only_excerpts_taint_a_turn():
+    """A pinned file's range citation is the user's own choice; a retrieved chunk is text they did not write."""
+    assert context_taints({"chunks": [{"kind": "range"}]}) == []
+    assert context_taints({"chunks": [{"kind": "range"}, {"kind": "chunk"}]}) == ["chunks"]

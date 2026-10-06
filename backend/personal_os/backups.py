@@ -250,7 +250,6 @@ grain.db            A complete SQLite snapshot (open with any SQLite tool, or re
 uploads/            Files you added to the knowledge base, as stored: uploads/<sha256>/<original name>,
                     one file per distinct content.
 doc_assets/         Images pasted into your documents, one folder per document.
-recordings/         Meeting audio you chose to keep, one folder per meeting.
 cowork/             Each desk's outputs/ folder: the deliverables it handed in.
 export/             The same content as plain text:
   conversations.md / conversations.json
@@ -386,7 +385,7 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-        for sub in ("uploads", "doc_assets", "recordings", "cowork"):
+        for sub in ("uploads", "doc_assets", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:
                 rel = f.relative_to(up).as_posix()

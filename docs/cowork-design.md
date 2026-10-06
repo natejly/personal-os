@@ -559,7 +559,7 @@ workspace = Workspace(db.data_dir)
 
 ```python
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards,
-                  sandboxes=sandboxes, docs=docs, activity=monitor,
+                  sandboxes=sandboxes, docs=docs,
                   desks=desks, plans=aplans, workspace=workspace)
 ```
 

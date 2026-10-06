@@ -874,16 +874,15 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-activity = [
+charts = [
+    { name = "matplotlib" },
+]
+mac = [
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-coreaudio", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin'" },
-]
-charts = [
-    { name = "matplotlib" },
 ]
 whistle = [
     { name = "cactus-needle" },
@@ -905,12 +904,11 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pydantic", specifier = ">=2.7" },
-    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
-    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
-    { name = "pyobjc-framework-coreaudio", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
-    { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin' and extra == 'mac'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin' and extra == 'mac'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' and extra == 'mac'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin' and extra == 'mac'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin' and extra == 'mac'", specifier = ">=10.3" },
     { name = "pypdf", specifier = ">=4.2" },
     { name = "python-docx", specifier = ">=1.1" },
     { name = "python-multipart", specifier = ">=0.0.9" },
@@ -918,7 +916,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "yt-dlp", specifier = ">=2025.1" },
 ]
-provides-extras = ["activity", "whistle", "charts"]
+provides-extras = ["mac", "whistle", "charts"]
 
 [[package]]
 name = "h11"

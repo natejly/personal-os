@@ -6,8 +6,6 @@ import Sidebar from './components/Sidebar'
 import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
-import MeetingsView from './components/MeetingsView'
-import ActivityView from './components/ActivityView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
 import CalendarView from './components/CalendarView'
@@ -269,8 +267,6 @@ export default function App(): JSX.Element {
           {view === 'calendar' && <CalendarView />}
           {view === 'mail' && <MailView />}
           {view === 'docs' && <DocsView />}
-          {view === 'meetings' && <MeetingsView />}
-          {view === 'activity' && <ActivityView />}
           {view === 'library' && <LibraryView />}
           {view === 'memory' && <MemoryPage />}
           {view === 'project' && <ProjectView />}

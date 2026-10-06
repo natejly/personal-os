@@ -1,9 +1,8 @@
 """Speech to text, swappable: on-device Speech, Whistle, the LLM proxy, whisper.cpp, or nothing.
 
 This module exists because nothing currently serves speech to text. litellm.yaml's model_list
-carries ten chat models and one embedding model and no /v1/audio/transcriptions route, while
-activity.py defaults `audio.model` to `whisper-1` and a capability probe that only checks the
-model string reports ok on every machine while every call fails. `selftest` is the fix: it
+carries chat models and one embedding model and no /v1/audio/transcriptions route, so a capability
+probe that only checks the model string would report ok on every machine while every call fails. `selftest` is the fix: it
 writes a real wav and does a real round trip, which is exactly the thing a capability probe
 cannot do.
 
@@ -41,32 +40,65 @@ os.environ.setdefault("NEEDLE_TELEMETRY", "0")
 
 BACKENDS = ("auto", "speech", "whistle", "proxy", "local", "off")
 
+# Settings key `voice`: how composer dictation is transcribed. Read through config_for, which also seeds
+# these fields from a `meetings` row left behind by an older build when no `voice` row exists yet.
+DEFAULT_CONFIG: dict[str, Any] = {
+    "sttBackend": "auto",         # auto | speech | whistle | proxy | local | off
+    "sttModel": "whisper-1",      # the model name the proxy backend asks /v1/audio/transcriptions for
+    "whisperModelPath": "",       # ggml weights for local; "" = the first *.bin under <data>/models
+    "whisperVadModelPath": "",    # optional Silero ggml for whisper.cpp --vad
+    "hallucinationFilter": True,  # drop known silence phrases and repeated-word runs
+    "dictationCleanup": False,    # model pass over each clip (assist.clean_dictation)
+}
+
+
+def clean_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """DEFAULT_CONFIG overlaid with the valid fields of `raw`; anything unknown or mistyped falls back."""
+    out = dict(DEFAULT_CONFIG)
+    for key, default in DEFAULT_CONFIG.items():
+        v = raw.get(key, default)
+        if isinstance(default, bool):
+            out[key] = v if isinstance(v, bool) else default
+        elif isinstance(v, str):
+            out[key] = v.strip()[:500]
+    if out["sttBackend"] not in BACKENDS:
+        out["sttBackend"] = "auto"
+    out["sttModel"] = out["sttModel"] or DEFAULT_CONFIG["sttModel"]
+    return out
+
+
+def config_for(stored: dict[str, Any]) -> dict[str, Any]:
+    """The voice config from the full settings dict (db.get_settings())."""
+    row = stored.get("voice")
+    if not isinstance(row, dict):
+        row = stored.get("meetings")  # an older build kept these fields in its meetings config
+    return clean_config(row if isinstance(row, dict) else {})
+
 # Whistle takes one pass of at most 30 s of 16 kHz mono; longer wavs are fed in windows.
 WHISTLE_MAX_SECONDS = 30
 WHISTLE_RATE = 16000
 # Where cactus-needle keeps the 17 MB weights it downloads on first use.
 WHISTLE_WEIGHTS = Path.home() / ".cache" / "cactus-needle" / "whistle"
 WHISTLE_FIX = "cd backend && uv pip install -e '.[whistle]', then restart the app."
-# One model per process, and it is not thread-safe; the mic and system channels transcribe on
-# separate worker threads.
+# One model per process, and it is not thread-safe.
 _whistle_lock = threading.Lock()
 
 # whisper.cpp renamed its binary twice: `main` in the original tree, `whisper-cpp` in the brew
 # formula, `whisper-cli` since the examples were reorganised. Try the newest name first.
 CLI_NAMES = ("whisper-cli", "whisper-cpp", "main")
 
-# The prompt carries the tail of the previous segment so a word straddling a segment boundary is
+# The prompt carries the tail of the previous clip so a word straddling a clip boundary is
 # not mangled into two half-words. Whisper's conditioning window is 224 tokens and anything past
 # it is dropped silently, so cap the string here rather than trusting every caller to.
 MAX_PROMPT_CHARS = 896
 
 # What to do about it, in both directions, because "off" is a configuration and not a failure.
-OFF_FIX = ("Set meetings.sttBackend to 'speech' for on-device dictation, 'whistle' after "
+OFF_FIX = ("Set the transcription backend (Settings, Voice input) to 'speech' for on-device dictation, 'whistle' after "
            "installing cactus-needle, 'local' after brew install whisper-cpp and downloading a "
            "model, or 'proxy' after adding a /v1/audio/transcriptions route to litellm.yaml.")
 
-# The Speech Recognition grant is its own switch in Privacy & Security; meetings.capabilities()
-# turns this id into the pane deep link and the Grant button.
+# The Speech Recognition grant is its own switch in Privacy & Security; this id is the pane deep link
+# and the Grant button in the permissions panel.
 SPEECH_PERMISSION = "speech_recognition"
 
 MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
@@ -143,9 +175,7 @@ def resolve_backend(cfg: dict[str, Any], data_dir: Path) -> str:
         return want
     whistle = whistle_installed()
     local = bool(whisper_cli_path() and local_model_path(data_dir, cfg))
-    # Speech returns plain text with no timestamps; diarization needs timed segments, so prefer
-    # Whistle or whisper.cpp when one is installed and speaker separation is on.
-    if speech_ready() and not (cfg.get("diarize") and (whistle or local)):
+    if speech_ready():
         return "speech"
     if whistle:
         return "whistle"
@@ -161,8 +191,7 @@ def transcribe(path: Path, *, settings: dict[str, Any], cfg: dict[str, Any], dat
     it the previous tail would bias it toward repeating the last clip).
 
     `error` and `backend` are both always set: a backend that returned nothing useful still
-    reports which one tried, so the segment row can say so and `retranscribe` can replay it once
-    the user has fixed their route.
+    reports which one tried.
     """
     t0 = time.time()
     backend = resolve_backend(cfg, data_dir)
@@ -216,11 +245,10 @@ def selftest(*, settings: dict[str, Any], cfg: dict[str, Any], data_dir: Path) -
 
 
 def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
-    """The two transcription rows, in the checklist shape activity.capabilities() uses.
+    """The transcription rows: one per backend plus the active one, as {id, label, ok, detail, fix}.
 
     Read-only and offline: probing must never make a network call and never ask the OS for a
-    permission. Anything not ok carries a copy-pasteable fix, which is the invariant the
-    capability tests assert (test_activity.py:340-349).
+    permission. Anything not ok carries a copy-pasteable fix.
     """
     backend = resolve_backend(cfg, data_dir)
     model = str(cfg.get("sttModel") or "").strip()
@@ -235,7 +263,7 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
                          else "The 17 MB weights download from Hugging Face on first use."))
     if backend == "off":
         ready = False
-        detail = "Transcription is turned off; a meeting keeps your notes and produces no transcript."
+        detail = "Transcription is turned off; dictation returns nothing."
     elif backend == "speech":
         ready = speech_ok and authorized
         if not speech_ok:
@@ -258,7 +286,7 @@ def capabilities(cfg: dict[str, Any], data_dir: Path) -> list[dict[str, Any]]:
                   "self-test proves this works." if model else "No transcription model set.")
     speech_fix = ""
     if not speech_ok:
-        speech_fix = ("Install pyobjc-framework-Speech (`cd backend && uv pip install -e '.[activity]'`) "
+        speech_fix = ("Install pyobjc-framework-Speech (`cd backend && uv pip install -e '.[mac]'`) "
                       "and use a locale with an on-device speech model.")
     elif not authorized:
         speech_fix = ("Grant Speech Recognition in System Settings → Privacy & Security, or set the "
@@ -391,13 +419,8 @@ def _is_no_speech(err: str) -> bool:
 
 def _proxy(path: Path, settings: dict[str, Any], model: str,
            prompt: str) -> tuple[str, dict[str, Any], str]:
-    """The body of AudioCollector._transcribe (activity.py:872-886), with the error returned.
-
-    Two changes from the original: verbose_json plus a `prompt` carrying the tail of the previous
-    segment (the original sends no cross-chunk context at all, so every boundary can split a
-    word), and the failure comes back in the return value instead of being assigned to a
-    collector attribute that only the status line ever shows.
-    """
+    """POST the wav to /audio/transcriptions as verbose_json with an optional `prompt`; the failure comes
+    back in the return value."""
     base = str(settings.get("baseUrl") or "http://localhost:4000")
     headers = {"Authorization": f"Bearer {settings['apiKey']}"} if settings.get("apiKey") else {}
     data = {"model": model, "response_format": "verbose_json"}
@@ -425,9 +448,7 @@ def _proxy(path: Path, settings: dict[str, Any], model: str,
 def _whistle(path: Path, vocab: str = "") -> tuple[str, dict[str, Any], str]:
     """Whistle in-process via cactus-needle: text plus one timed segment per 30 s window.
 
-    The model takes at most 30 s of 16 kHz mono per pass, which every recorder segment and every
-    import clip already is (the recorder writes 16 kHz mono and imports are resegmented to it).
-    A longer wav is fed in 30 s windows with the word times shifted back onto the wav's clock.
+    The model takes at most 30 s of 16 kHz mono per pass. A longer wav is fed in 30 s windows with the word times shifted back onto the wav's clock.
     """
     try:
         import needle  # type: ignore[import-not-found]
@@ -493,7 +514,7 @@ def _local(path: Path, data_dir: Path, cfg: dict[str, Any], prompt: str = "") ->
     except subprocess.TimeoutExpired:
         return "", {}, "whisper.cpp timed out after 300s"
     finally:
-        # Both files are side effects of -oj/-otxt, not something worth leaving in recordings/.
+        # Both files are side effects of -oj/-otxt, not something worth leaving beside the clip.
         for f in (txt, js):
             with contextlib.suppress(Exception):
                 f.unlink(missing_ok=True)

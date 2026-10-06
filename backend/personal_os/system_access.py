@@ -1,6 +1,6 @@
 """System access panel: what macOS has granted this app, read without ever prompting, plus a shell self-check.
 
-GET /system/access reads TCC state (full disk, input monitoring, per-app automation), installed browsers, the file scope
+GET /system/access reads TCC state (full disk, per-app automation), installed browsers, the file scope
 (what is off limits and what asks first, from mac.py) and the claude/opencode CLIs. POST /system/shell-check runs `echo ok`
 in the home folder through the same sandboxed runner the agent's shell tool uses."""
 from __future__ import annotations
@@ -12,25 +12,31 @@ from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from . import activity, codingagents, mac, opencode, shell
+from . import codingagents, mac, macos, opencode, shell
 
 AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
 CLAUDE_INSTALL_HINT = "Install the claude CLI: npm i -g @anthropic-ai/claude-code"
 
 
+class PermissionIn(BaseModel):
+    id: str
+    browser: str = ""
+
+
 def _safe(fn: Callable[[], str]) -> str:
     try:
         return fn()
     except Exception:  # noqa: BLE001 - one broken probe must not fail the whole panel
-        return activity.UNKNOWN
+        return macos.UNKNOWN
 
 
 def _full_disk() -> str:
-    if not activity.IS_MAC:
-        return activity.UNKNOWN
-    return activity.GRANTED if activity.full_disk_access() else activity.DENIED
+    if not macos.IS_MAC:
+        return macos.UNKNOWN
+    return macos.GRANTED if macos.full_disk_access() else macos.DENIED
 
 
 @lru_cache(maxsize=8)
@@ -67,14 +73,13 @@ def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]
 
     def access() -> dict[str, Any]:
         try:
-            names = list(activity.installed_browsers())
+            names = list(macos.installed_browsers())
         except Exception:  # noqa: BLE001
             names = []
         return {
             "fullDisk": _safe(_full_disk),
-            "inputMonitoring": _safe(activity.input_monitoring_status),
-            "automation": {k: _safe(lambda b=b: activity.automation_status(b)) for k, b in AUTOMATION.items()},
-            "browsers": [{"name": n, "state": _safe(lambda n=n: activity.automation_status(activity.BROWSER_BUNDLES[n]))}
+            "automation": {k: _safe(lambda b=b: macos.automation_status(b)) for k, b in AUTOMATION.items()},
+            "browsers": [{"name": n, "state": _safe(lambda n=n: macos.automation_status(macos.BROWSER_BUNDLES[n]))}
                          for n in names],
             "scope": _safe_scope(),
             "clis": {"claude": _cli_safe(codingagents.claude_binary, CLAUDE_INSTALL_HINT),
@@ -84,6 +89,17 @@ def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]
     @r.get("/system/access")
     async def get_access() -> dict[str, Any]:
         return await asyncio.to_thread(access)
+
+    @r.post("/system/permissions/request")
+    async def permission_request(body: PermissionIn) -> dict[str, Any]:
+        """Ask macOS for one permission: the only route that can put a system dialog on screen, and it
+        exists because the user pressed Grant."""
+        return {"result": await asyncio.to_thread(macos.request_permission, body.id, body.browser)}
+
+    @r.post("/system/permissions/open")
+    def permission_open(body: PermissionIn) -> dict[str, bool]:
+        """Open the Privacy & Security pane for one permission. Opening a pane grants nothing."""
+        return {"ok": macos.open_settings(body.id)}
 
     @r.post("/system/shell-check")
     async def shell_check() -> dict[str, Any]:

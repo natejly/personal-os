@@ -61,21 +61,21 @@ test('Settings → Modules hides and shows each Today card and sidebar view', as
   // One row per view: Sidebar, Title bar or Hidden.
   const views = dialog(page).locator('h4', { hasText: 'Views' }).locator('xpath=following-sibling::div[1]').locator('.place-row')
   const names = await views.locator('b').allInnerTexts()
-  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Meetings', 'Activity', 'Health']))
+  expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Health']))
   const setAll = async (where) => {
     await openSettings(page, 'Modules')
     for (let i = 0; i < names.length; i++) await views.nth(i).getByRole('button', { name: where }).click()
     await save(page)
   }
   await setAll('Hidden')
-  expect((await api('/settings')).hiddenViews.sort()).toEqual(['activity', 'calendar', 'health', 'library', 'mail', 'meetings', 'todos'])
+  expect((await api('/settings')).hiddenViews.sort()).toEqual(['calendar', 'health', 'library', 'mail', 'todos'])
   for (const n of names) expect(await shown(n), `${n} hidden`).toBe(false)
   await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])
   for (const n of names) expect(await shown(n), `${n} shown`).toBe(true)
   expect(await page.locator('.app-switcher button[aria-label="Calendar"]').count()).toBe(0)
   // One at a time: hide it, then bring it back in the title bar.
-  for (const n of ['Library', 'Mail', 'Meetings']) {
+  for (const n of ['Library', 'Mail']) {
     await openSettings(page, 'Modules')
     await views.filter({ hasText: n }).getByRole('button', { name: 'Hidden' }).click()
     await save(page)

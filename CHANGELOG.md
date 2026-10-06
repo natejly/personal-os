@@ -2,6 +2,18 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-06
+
+### Removed
+
+- **Meetings.** The Meetings view, recorder, transcript/notes pipeline, speaker separation, audio import, doc recordings (the record button, recordings panel and recording chips in Files) and dictation into a file are gone, with their routes, `meeting_*` tools, Settings tab and Home card. A migration drops the meetings tables. Recorded audio on disk is left alone (`<data>/recordings/`); delete it by hand if you no longer want it.
+- **Activity monitor.** The Activity view, background collectors (apps, browser URLs, typing, audio), Input Monitoring use, rollups, habits and automation suggestions, `<data>/context/activity.md`, the `activity_*` tools and the activity canvas widget are gone. A migration drops the activity tables. Agent-run activity, Health activity and calendar events are unaffected.
+- **Daily digest.** It only reported meetings and app time, so it went with them.
+
+### Changed
+
+- **Voice input settings.** Composer dictation keeps working; its transcription settings (backend, model, whisper.cpp paths, hallucination filter, tidy-with-model) moved from the Meetings tab to Settings → Advanced → Voice and shortcuts, stored under `voice` and seeded once from the old meetings settings. The `activity` Python extra is now `mac`, without CoreAudio.
+
 ## Unreleased — 2026-10-03
 
 This section also catches up on work merged between 2026-10-01 and 2026-10-03 that the entries below left out.

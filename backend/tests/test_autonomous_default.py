@@ -38,8 +38,8 @@ def test_put_accepts_a_bool_and_refuses_anything_else() -> None:
 
 
 def test_migration_21_turns_it_on_for_an_existing_install_and_keeps_a_stored_value() -> None:
-    assert migrations.MIGRATIONS[-1][1] == "autonomous_by_default" and migrations.latest() == 21
-    assert [v for v, _n, _s in migrations.MIGRATIONS] == list(range(1, 22))  # consecutive, nothing edited or reordered
+    assert [n for v, n, _s in migrations.MIGRATIONS if v == 21] == ["autonomous_by_default"]
+    assert [v for v, _n, _s in migrations.MIGRATIONS] == list(range(1, migrations.latest() + 1))  # consecutive, nothing edited or reordered
 
     def at_20() -> sqlite3.Connection:
         c = sqlite3.connect(":memory:")
@@ -49,10 +49,10 @@ def test_migration_21_turns_it_on_for_an_existing_install_and_keeps_a_stored_val
         return c
 
     c = at_20()
-    assert [m[0] for m in migrations.pending(c)] == [21]
-    assert migrations.run(c) == [21]
+    assert [m[0] for m in migrations.pending(c)][0] == 21  # later steps may follow
+    assert migrations.run(c)[0] == 21
     assert json.loads(c.execute("SELECT value FROM settings WHERE key='autonomousByDefault'").fetchone()[0]) is True
-    assert migrations.current(c) == 21 and migrations.run(c) == []
+    assert migrations.current(c) == migrations.latest() and migrations.run(c) == []
 
     c = at_20()  # a value that is already stored survives
     c.execute("INSERT INTO settings(key, value) VALUES('autonomousByDefault', 'false')")

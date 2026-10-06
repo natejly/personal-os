@@ -6,7 +6,7 @@ const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ 
 
 test('every sidebar nav item opens its view and is marked current; Today brings you back', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
-    const rows = [['Files', /Files/], ['Meetings', /Meetings/], ['Library', /Library/], ['Activity', /Activity/]]
+    const rows = [['Files', /Files/], ['Library', /Library/]]
     for (const [name, h] of rows) {
       await sidebarItem(page, name).click()
       await heading(page, h)
@@ -43,14 +43,12 @@ test('app switcher icons open Lists, Calendar, Mail and the page agent; one is p
 
 test('hidden views are not in the sidebar; More modules opens Settings → Modules', async ({ grain }) => {
   const { page, api } = grain
-  // Meetings and Activity ship on; hiding them takes them out of the sidebar
-  await expect(sidebarItem(page, 'Meetings')).toHaveCount(1)
-  await expect(sidebarItem(page, 'Activity')).toHaveCount(1)
-  await api('/settings', { method: 'PUT', body: { hiddenViews: ['meetings', 'activity'] } })
+  // Library ships on; hiding it takes it out of the sidebar
+  await expect(sidebarItem(page, 'Library')).toHaveCount(1)
+  await api('/settings', { method: 'PUT', body: { hiddenViews: ['library'] } })
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await expect(sidebarItem(page, 'Meetings')).toHaveCount(0)
-  await expect(sidebarItem(page, 'Activity')).toHaveCount(0)
+  await expect(sidebarItem(page, 'Library')).toHaveCount(0)
   await page.getByRole('button', { name: /More modules/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(page.getByRole('tab', { name: /Modules/ })).toHaveAttribute('aria-selected', 'true')
@@ -209,7 +207,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
   expect(acc['Toggle Spaces']).toMatch(/Shift\+C$/)
   expect(acc['Command Palette…']).toMatch(/\+K$/)
-  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…', 'Activity']
+  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…']
   digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i}$`)))
   // no two items share an accelerator
   const seen = new Map()
@@ -230,13 +228,11 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Mail'); await heading(page, /Mail/)
   await menu(grain, 'Library'); await heading(page, /Library/)
   // A hidden view: a toast offers to turn it on instead of silently doing nothing
-  await grain.api('/settings', { method: 'PUT', body: { hiddenViews: ['meetings', 'activity'] } })
+  await grain.api('/settings', { method: 'PUT', body: { hiddenViews: ['library'] } })
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await menu(grain, 'Activity')
-  await expect(page.getByText('Activity is turned off')).toBeVisible()
-  await menu(grain, 'Meetings')
-  await expect(page.getByText('Meetings is turned off')).toBeVisible()
+  await menu(grain, 'Library')
+  await expect(page.getByText('Library is turned off')).toBeVisible()
   await menu(grain, 'Today'); await heading(page, /Today/)
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
   // Memory… opens the Memory page
@@ -311,7 +307,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       expect.soft(o.sw, `${label} body scrollWidth`).toBe(o.cw)
       expect.soft(o.dsw, `${label} html scrollWidth`).toBe(o.dcw)
     }
-    for (const n of ['Today', 'Files', 'Meetings', 'Library', 'Activity']) {
+    for (const n of ['Today', 'Files', 'Library']) {
       await sidebarItem(page, n).click()
       await check(n)
     }

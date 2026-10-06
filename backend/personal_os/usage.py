@@ -135,7 +135,7 @@ _MEMORY_KINDS = {"learn", "style", "recall_index", "graph"}
 _EMBED_KINDS = {"embedding", "embeddings", "recall_query"}
 _HELPER_KINDS = {"title", "followups", "assist", "review"}
 _VISION_KINDS = {"vision", "image"}
-_VOICE_KINDS = {"meeting-stt", "stt", "tts", "doc_recording", "meeting"}
+_VOICE_KINDS = {"stt", "tts"}
 
 
 def feature(kind: str, tag: str, model: str = "") -> str:

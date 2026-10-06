@@ -10,17 +10,13 @@ export async function rebuildIndex(docs: Docs = api.documents): Promise<Awaited<
   return docs.embedBackfill()
 }
 
-/** The retrieval switches the backend reads (retrieval.py, context.py, meeting_index.py). No hooks, so it
+/** The retrieval switches the backend reads (retrieval.py, context.py, fetch_url). No hooks, so it
  *  stays a plain function of draft + patch. */
 export default function AdvancedRetrieval({ draft, patch, models }: { draft: Settings; patch: (p: Partial<Settings>) => void; models: { id: string }[] }): JSX.Element {
   return <>
     <label className="toggle-row plain">
       <span className="toggle-text"><b>Search my Docs for context</b><small>Also look in your own Docs, not only uploaded files, when a chat pulls in documents.</small></span>
       <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => patch({ useDocsInContext: e.target.checked })} /><span className="switch" />
-    </label>
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Find meetings by meaning</b><small>Sends meeting text to the search model's provider.</small></span>
-      <input type="checkbox" checked={draft.meetingEmbeddings === true} onChange={(e) => patch({ meetingEmbeddings: e.target.checked })} /><span className="switch" />
     </label>
     <label><span className="toggle-text"><b>Search by</b><small>Keywords and meaning, or keywords only.</small></span>
       <select value={draft.retrievalMode ?? 'hybrid'} onChange={(e) => patch({ retrievalMode: e.target.value as 'hybrid' | 'bm25' })}>

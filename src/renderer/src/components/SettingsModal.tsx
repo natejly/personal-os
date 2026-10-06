@@ -28,7 +28,7 @@ import SandboxSettings from './SandboxSettings'
 import TelegramSettings from './TelegramSettings'
 import GoogleSettings from './GoogleSettings'
 import MicrosoftSettings from './MicrosoftSettings'
-import MeetingSettings from './MeetingSettings'
+import VoiceInputSettings from './VoiceInputSettings'
 import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
@@ -393,8 +393,6 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Connectors</b><small>Tools from other services, added and managed in the Library.</small></span>
                 <button className="ghost-btn" type="button" onClick={() => { useStore.getState().setLibraryTab('connectors'); setView('library'); setSettingsOpen(false) }}>Open Library</button>
               </div>
-              <h4>Meetings</h4>
-              <MeetingSettings />
               <PlannerMailSettings />
             </section>}
 
@@ -470,20 +468,6 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Suggest next questions" help="Show a few follow-up chips under replies." checked={draft.followUps !== false} onChange={(followUps) => patch({ followUps })} />
                 <Switch title="Selection toolbar" help="Explain, summarize, verify or ask about selected text." checked={draft.selectionToolbar !== false} onChange={(selectionToolbar) => patch({ selectionToolbar })} />
                 <Switch title="Summarize old messages automatically" help="When a chat gets long. Off: only when you ask (type /compact)." checked={draft.autoCompact !== false} onChange={(autoCompact) => patch({ autoCompact })} />
-                {(() => {
-                  // Settings.digest is not in the shared type yet; the backend default is {enabled: true, hour: 8}.
-                  const dg = { enabled: true, hour: 8, ...draft.digest }
-                  const set = (p: { enabled?: boolean; hour?: number }): void => patch({ digest: { ...dg, ...p } } as Partial<Settings>)
-                  return <>
-                    <Switch title="Daily digest" help="Once a day in the Agent Inbox: meetings recorded, notes waiting for review and where your time went. No notification." checked={dg.enabled} onChange={(enabled) => set({ enabled })} />
-                    <div className="setting-row">
-                      <label className="toggle-text" htmlFor="digest-hour"><b>Written at</b><small>Or at the first launch after this hour.</small></label>
-                      <select id="digest-hour" value={dg.hour} disabled={!dg.enabled} onChange={(e) => set({ hour: Number(e.target.value) })}>
-                        {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>)}
-                      </select>
-                    </div>
-                  </>
-                })()}
               </AdvGroup>
 
               <AdvGroup id="approvals" title="Approvals" {...gp}>
@@ -566,9 +550,10 @@ export default function SettingsModal(): JSX.Element {
                 {shortcut && !shortcut.ok && <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`}</p>}
                 {capShortcut && !capShortcut.ok && <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>}
                 {askShortcut && !askShortcut.ok && <p className="test-msg fail">{askShortcut.message ?? `${askShortcut.accelerator} could not be registered.`}</p>}
-                <label><span className="toggle-text"><b>Dictation key</b><small>In a file: hold to dictate, tap to keep it on.</small></span>
+                <label><span className="toggle-text"><b>Dictation key</b><small>In the chat box: hold to dictate, tap to keep it on.</small></span>
                   <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })} placeholder="Control+Alt+D" spellCheck={false} />
                 </label>
+                <VoiceInputSettings />
                 <label><span className="toggle-text"><b>Bring widgets to front</b><small>Works anywhere on your Mac: brings every detached widget to the front and back again.</small></span>
                   <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })} placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
                 </label>

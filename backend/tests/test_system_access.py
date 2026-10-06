@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import activity, codingagents, opencode, shell, system_access  # noqa: E402
+from personal_os import codingagents, macos, opencode, shell, system_access  # noqa: E402
 
 
 class _Base(unittest.TestCase):
@@ -27,9 +27,8 @@ class _Base(unittest.TestCase):
         app = FastAPI()
         app.include_router(system_access.router(lambda: self.cfg, lambda: object()))
         self.c = TestClient(app)
-        for target, val in [(activity, {"IS_MAC": True, "automation_status": lambda b: "granted",
-                                        "input_monitoring_status": lambda: "unasked", "full_disk_access": lambda: True,
-                                        "installed_browsers": lambda: ["Safari"]}),
+        for target, val in [(macos, {"IS_MAC": True, "automation_status": lambda b: "granted", "full_disk_access": lambda: True,
+                                     "installed_browsers": lambda: ["Safari"]}),
                             (codingagents, {"claude_binary": lambda: "/bin/claude"}),
                             (opencode, {"binary": lambda: None})]:
             for k, v in val.items():
@@ -45,11 +44,10 @@ class _Base(unittest.TestCase):
 class AccessTests(_Base):
     def test_shape(self) -> None:
         d = self.c.get("/system/access").json()
-        self.assertEqual(set(d), {"fullDisk", "inputMonitoring", "automation", "browsers", "scope", "clis"})
+        self.assertEqual(set(d), {"fullDisk", "automation", "browsers", "scope", "clis"})
         self.assertEqual(set(d["automation"]), {"finder", "systemEvents", "contacts", "calendar", "reminders"})
         self.assertEqual(d["fullDisk"], "granted")
-        self.assertEqual(d["inputMonitoring"], "unasked")
-        self.assertEqual(d["browsers"], [{"name": "Safari", "state": "granted"}] if "Safari" in activity.BROWSER_BUNDLES
+        self.assertEqual(d["browsers"], [{"name": "Safari", "state": "granted"}] if "Safari" in macos.BROWSER_BUNDLES
                          else d["browsers"])
         # the file scope: what is off limits and what asks first, as display strings
         self.assertEqual(set(d["scope"]), {"protected", "sensitive"})
@@ -60,17 +58,16 @@ class AccessTests(_Base):
         self.assertIn(".env files", d["scope"]["sensitive"])
 
     def test_probe_raises_is_unknown(self) -> None:
-        with mock.patch.object(activity, "input_monitoring_status", side_effect=RuntimeError("x")):
+        with mock.patch.object(macos, "automation_status", side_effect=RuntimeError("x")):
             d = self.c.get("/system/access").json()
-        self.assertEqual(d["inputMonitoring"], "unknown")
-        self.assertEqual(d["automation"]["finder"], "granted")
+        self.assertEqual(d["automation"]["finder"], "unknown")
 
     def test_fda_denied(self) -> None:
-        with mock.patch.object(activity, "full_disk_access", lambda: False):
+        with mock.patch.object(macos, "full_disk_access", lambda: False):
             self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "denied")
 
     def test_fda_unknown_off_mac(self) -> None:
-        with mock.patch.object(activity, "IS_MAC", False):
+        with mock.patch.object(macos, "IS_MAC", False):
             self.assertEqual(self.c.get("/system/access").json()["fullDisk"], "unknown")
 
     def test_cli_missing_has_hint(self) -> None:
@@ -88,6 +85,31 @@ class AccessTests(_Base):
     def test_workspace_roots_are_not_reported(self) -> None:
         self.cfg = {"workspaceRoots": ["/x"]}
         self.assertNotIn("roots", self.c.get("/system/access").json())
+
+
+class PermissionRouteTests(_Base):
+    def test_request_passes_the_id_and_browser_through(self) -> None:
+        with mock.patch.object(macos, "request_permission", return_value={"id": "automation", "state": "granted"}) as req:
+            d = self.c.post("/system/permissions/request", json={"id": "automation", "browser": "Safari"}).json()
+        req.assert_called_once_with("automation", "Safari")
+        self.assertEqual(d, {"result": {"id": "automation", "state": "granted"}})
+
+    def test_request_for_an_unknown_id_is_a_note_not_an_error(self) -> None:
+        d = self.c.post("/system/permissions/request", json={"id": "input_monitoring"}).json()["result"]
+        self.assertEqual((d["id"], d["state"], d["prompted"]), ("input_monitoring", "unknown", False))
+
+    def test_open_reports_whether_a_pane_was_opened(self) -> None:
+        with mock.patch.object(macos.subprocess, "run") as run:
+            self.assertEqual(self.c.post("/system/permissions/open", json={"id": "microphone"}).json(), {"ok": True})
+            self.assertIn("Privacy_Microphone", run.call_args[0][0][1])
+            self.assertEqual(self.c.post("/system/permissions/open", json={"id": "input_monitoring"}).json(), {"ok": False})
+
+    def test_permissions_list_never_prompts(self) -> None:
+        with mock.patch.object(macos, "permission_state", return_value="unasked"):
+            rows = macos.permissions()
+        self.assertEqual({r["id"] for r in rows},
+                         {"accessibility", "screen_recording", "microphone", "speech_recognition", "automation", "full_disk"})
+        self.assertTrue(all(r["state"] == "unasked" for r in rows))
 
 
 class ShellCheckTests(_Base):

@@ -30,7 +30,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 - Projects group chats with their own instructions, files and memories. Spaces are a desktop of live windows.
 
 ## Views and the title bar
-- Sidebar: New chat, Today, Files, then Spaces, Projects and Recents. Library, Meetings and Activity are sidebar rows too (Meetings and Activity start hidden).
+- Sidebar: New chat, Today, Files, then Spaces, Projects and Recents. Library is a sidebar row too.
 - Title bar, top right of every view: Lists, Calendar, Mail and Health. Hover any of them to see what it is for.
 - Settings -> Modules moves each view to the sidebar, the title bar, or hides it (nav placement). If a view seems missing, look there.
 - Today: the day's recap, calendar, unread mail, todos, and the Agent inbox (everything an agent left for you: approvals, desks waiting, scheduled-run proposals, review queues).
@@ -39,7 +39,7 @@ Answer from this guide. If something is not here, say so instead of guessing; po
 - New chat: Cmd+N. Model and effort pickers sit under the composer.
 - Attach: drop or paste a file. It rides on the message as a chip, and its text goes to the model up to a size cap.
 - Files: the assistant's file and shell tools work anywhere on this Mac. Grain's own data folder and app are off limits, credential stores (~/.ssh, keychains, browser cookies and passwords, .env files) ask first, and macOS-protected folders (Desktop, Documents, Downloads, Mail, Messages) need Full Disk Access in System Settings.
-- Per-chat context toggles (memory, graph, files, activity, meetings, auto-learn, tools) are in the Context panel (Ctrl+Cmd+I). It also shows exactly what was injected into the last reply.
+- Per-chat context toggles (memory, graph, files, auto-learn, tools) are in the Context panel (Ctrl+Cmd+I). It also shows exactly what was injected into the last reply.
 - Regenerate, stop, edit and resend are on each message. Cmd+F finds in the chat, Cmd+Shift+F searches all chats.
 - A face by each chat blinks while it works. Compact chats in Settings folds chat windows in Spaces to the face and one line.
 
@@ -55,7 +55,6 @@ Type / in the composer:
 ## Files
 - Cmd+4. Two sections: Notes (your own writing) and Uploads (any file up to 50 MB; Cmd+U uploads one).
 - New note: Cmd+Shift+N. Today's note: Cmd+Shift+D. Notes support markdown and LaTeX, / menu, [[wikilinks]], backlinks, an outline, folders per project, templates and full revision history.
-- Record or dictate into a note (macOS): the transcript stays apart from your text and a summary is proposed for you to accept.
 - Each note has its own chat in the Page agent panel (Cmd+I). The assistant proposes edits as diffs you accept or reject; Settings -> Tools -> File edits -> Accept all writes them straight in (still undoable from history).
 - Delete: the assistant asks first. Deleted notes go to Settings -> Trash, where you can restore them.
 - Uploads are read (text, PDF, Word), chunked and searched; the best excerpts are pulled into replies with [n] citations.
@@ -73,7 +72,7 @@ Type / in the composer:
 - Auto-learn saves memories and graph links after replies. When it sees you repeating yourself it suggests a skill, which waits for your approval.
 
 ## Spaces
-- Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, activity, face, crew).
+- Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, face, crew).
 - Add widget, or right-click the plane. Drag a chat, a Files note or a sidebar row onto it; a note becomes its own editable window.
 - Ctrl+Cmd+O pops a window out into its own OS window. Ctrl+1..9 jump between Spaces; Alt+Cmd+Left/Right moves between them; Alt+Cmd+Up is the overview; Ctrl+Cmd+N makes a Space; Ctrl+Cmd+T tidies up.
 - Lock a Space with Ctrl+Cmd+L so nothing can be rearranged. Save a layout as a preset from the Spaces bar.
@@ -111,9 +110,9 @@ Type / in the composer:
 Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard Shortcuts in the menu bar too.
 - General: Cmd+, settings, Cmd+K command palette, Cmd+/ shortcuts, Cmd+B sidebar, Cmd+I Page agent, Ctrl+Cmd+I Context panel. Cmd+= and Cmd+- zoom, Alt+Cmd+0 actual size.
 - Create: Cmd+N new chat, Cmd+Shift+N new file, Cmd+Shift+D today's file, Cmd+U upload.
-- Go to: Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory, 7 Activity. Cmd+Shift+M Meetings.
-- Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply, Cmd+Shift+P cycles plan mode.
-- Files (note editor): Cmd+S save, Cmd+Shift+B bold, Cmd+Shift+I italic, Cmd+K link, Ctrl+Cmd+M maths, Cmd+Shift+E code, Tab indent. Ctrl+Alt+D dictates (hold) or latches (tap); the chord is set in Settings -> Behavior.
+- Go to: Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory.
+- Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply, Cmd+Shift+P cycles plan mode. The mic button dictates into the message; the dictation chord (hold to talk, tap to latch) and the transcription backend are in Settings -> Behavior -> Voice input.
+- Files (note editor): Cmd+S save, Cmd+Shift+B bold, Cmd+Shift+I italic, Cmd+K link, Ctrl+Cmd+M maths, Cmd+Shift+E code, Tab indent.
 - Spaces: Cmd+Shift+C toggle Spaces, Ctrl+Cmd+N new Space, Alt+Cmd+Left/Right previous and next, Alt+Cmd+Up overview, Ctrl+1..9 jump, Ctrl+Cmd+T tidy up, Ctrl+Cmd+L lock. Esc deselects, Delete closes the selected windows, Cmd+scroll zooms, Cmd+drag moves a window from anywhere in it.
 - Windows: Cmd+W close, Cmd+M minimize, Ctrl+Cmd+O pop out, Ctrl+Cmd+Shift+O return to Space, Ctrl+Cmd+P pin on top, Ctrl+Cmd+[ and ] transparency, Alt+Cmd+G gather widgets, Alt+Cmd+F bring pop-outs to front.
 - Anywhere on your Mac (change them in Settings -> Behavior -> Shortcuts -> Advanced): Ctrl+Alt+Cmd+Space gather widgets, Cmd+Shift+Space quick capture, Alt+Space quick ask.

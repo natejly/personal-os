@@ -894,6 +894,9 @@ export interface Memory {
   source_message_id?: string | null
 }
 
+/** The message a memory was learned from, with the quoted passage (GET /memories/{id}/source). */
+export interface MemorySource { conversation_id: string; message_id: string; title: string; quote: string }
+
 /** A pending tidy-up the user can apply or dismiss (backend consolidate.py). Nothing applies by itself. */
 export interface MemoryProposal {
   id: string
@@ -958,6 +961,18 @@ export interface GraphNode {
   updated_at: number
 }
 
+/** A rebuild of the graph from existing chat messages (`/graph/backfill`). */
+export interface GraphBackfillStatus {
+  running: boolean
+  done: number
+  total: number
+  errors: number
+  started_at: number | null
+  finished_at: number | null
+  cancelled: boolean
+  project_id: string | null
+}
+
 export interface GraphEdge {
   id: string
   project_id: string | null
@@ -967,6 +982,8 @@ export interface GraphEdge {
   properties: Record<string, unknown>
   created_at: number
   fact?: string
+  confidence?: number | null
+  source_message_id?: string | null
   valid_at?: number | null
   invalid_at?: number | null
 }

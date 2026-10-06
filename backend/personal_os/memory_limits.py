@@ -60,6 +60,8 @@ TIDY_AT_KEY = "memoryTidyAt"
 # How long after an assistant reply finished an auto-learn write can land (extraction is one LLM call
 # queued behind the reply); a wider window would start guessing which reply a memory came from.
 BACKFILL_WINDOW_S = 180
+# Memory page source quote: long enough to recognise the message, short enough for one row.
+SOURCE_QUOTE_CHARS = 240
 
 # ---- Graph extraction ----
 GRAPH_MIN_CONFIDENCE = 0.6          # an extracted edge the model rates below this is dropped (guesses read as facts later)

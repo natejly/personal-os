@@ -3330,8 +3330,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          **({"review": review} if review else {})}
                 stuck = None
                 if detector is not None:
-                    if ran:
-                        detector.observe(c["name"], args, result)
+                    if ran or (c["name"] in QUESTION_TOOLS and isinstance(result, dict) and result.get("status") == "answered"):
+                        detector.observe(c["name"], args, result)  # an answered question is the user's input, not a refused call
                     else:
                         detector.skip(c["name"])  # a streak of calls that never ran ends the run like any other stuck shape
                     stuck = detector.check()

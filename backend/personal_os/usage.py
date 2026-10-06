@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from . import providers
 from .db import Database, new_id, now
 
 PRICE_TTL = 600
@@ -27,7 +28,7 @@ class Pricing:
         self._base = ""
 
     def caps(self, model: str) -> dict[str, Any]:
-        """{mode?, reasoning?, max_input_tokens?} the proxy reports for a model; {} when unknown."""
+        """{mode?, reasoning?, max_input_tokens?, max_output_tokens?} the proxy (or the Anthropic Models API) reports for a model; {} when unknown."""
         return dict(self._caps.get(model) or {})
 
     async def refresh(self, settings: dict[str, Any], force: bool = False) -> None:
@@ -41,6 +42,15 @@ class Pricing:
         self._base, self._fetched = base, time.time()
         headers = {"Authorization": f"Bearer {settings['apiKey']}"} if settings.get("apiKey") else {}
         try:
+            if providers.infer(base) == "anthropic":
+                # The Models API reports each model's output cap (max_tokens), which that provider requires on every call.
+                headers = {**headers, "x-api-key": str(settings.get("apiKey") or ""), "anthropic-version": "2023-06-01"}
+                async with httpx.AsyncClient(timeout=8) as c:
+                    r = await c.get(f"{base}/models", headers=headers, params={"limit": 1000})
+                if r.status_code < 400:
+                    self._caps = {m["id"]: {k: v for k, v in (("max_input_tokens", m.get("max_input_tokens")), ("max_output_tokens", m.get("max_tokens"))) if v}
+                                  for m in r.json().get("data", []) if m.get("id")}
+                return
             async with httpx.AsyncClient(timeout=8) as c:
                 r = await c.get(f"{base}/model/info", headers=headers)
             if r.status_code >= 400:
@@ -52,7 +62,8 @@ class Pricing:
                 if m.get("model_name"):
                     # Independent of prices: a model with no price row still reports what it can do.
                     found = {k: v for k, v in (("mode", info.get("mode")), ("reasoning", info.get("supports_reasoning")),
-                                               ("max_input_tokens", info.get("max_input_tokens"))) if v is not None}
+                                               ("max_input_tokens", info.get("max_input_tokens")),
+                                               ("max_output_tokens", info.get("max_output_tokens"))) if v is not None}
                     if found:
                         caps[m["model_name"]] = found
                 i, o = info.get("input_cost_per_token"), info.get("output_cost_per_token")
@@ -143,22 +154,6 @@ class Usage:
                 n += 1
         return n
 
-    def alert_state(self, settings: dict[str, Any]) -> dict[str, Any]:
-        """Spend today and this calendar month against settings["usageAlerts"] (0 = off). Informational only."""
-        lim = settings.get("usageAlerts") if isinstance(settings.get("usageAlerts"), dict) else {}
-        t = datetime.now()
-        starts = {"daily": t.replace(hour=0, minute=0, second=0, microsecond=0), "monthly": t.replace(day=1, hour=0, minute=0, second=0, microsecond=0)}
-        out: dict[str, Any] = {}
-        with self.db.tx() as c:
-            for k, st in starts.items():
-                spent = c.execute("SELECT COALESCE(SUM(cost),0) FROM usage_log WHERE created_at >= ?", (st.timestamp(),)).fetchone()[0]
-                try:
-                    limit = float(lim.get(k + "Cost") or 0)
-                except (TypeError, ValueError):
-                    limit = 0.0
-                out[k] = {"spent": round(spent, 6), "limit": limit, "over": limit > 0 and spent >= limit}
-        out["over"] = out["daily"]["over"] or out["monthly"]["over"]
-        return out
     def conversation(self, conv_id: str) -> dict[str, Any]:
         """Everything one chat spent, from the rows tagged with its id. A chat with no rows is a zeroed bucket."""
         with self.db.tx() as c:

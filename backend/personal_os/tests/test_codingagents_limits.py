@@ -1,7 +1,7 @@
 """Coding-session limits and the claude daemon environment (codingagents.py, shell.py pools).
 
 Run: PYTHONPATH=backend backend/.venv/bin/python -m unittest personal_os.tests.test_codingagents_limits -v
-What matters here: the OpenCode timeout comes from the setting, coding sessions have their own concurrency pool,
+What matters here: OpenCode is launched with no timeout, coding sessions have their own concurrency pool,
 and claude's PATH comes from the login shell only when no daemon runs. No process is started and the real
 ~/.claude/daemon.json is never read: every case points at a temp dir or mocks the call."""
 from __future__ import annotations
@@ -23,10 +23,10 @@ from personal_os.tests.test_codingagents import SID, CodingTestCase
 
 class Settings(unittest.TestCase):
     def test_new_keys_have_defaults_and_ranges(self) -> None:
-        for k, v in (("codingSessionTimeoutMinutes", 30), ("codingSessionMaxConcurrent", 3)):
-            self.assertEqual(llm.DEFAULT_SETTINGS[k], v)
-        self.assertEqual(limits.RANGES["codingSessionTimeoutMinutes"], (1, 1440))
+        self.assertEqual(llm.DEFAULT_SETTINGS["codingSessionMaxConcurrent"], 3)
         self.assertEqual(limits.RANGES["codingSessionMaxConcurrent"], (1, 20))
+        self.assertNotIn("codingSessionTimeoutMinutes", llm.DEFAULT_SETTINGS)
+        self.assertNotIn("codingSessionTimeoutMinutes", limits.RANGES)
 
 
 class Timeout(CodingTestCase):
@@ -40,19 +40,17 @@ class Timeout(CodingTestCase):
             await self.cs._launch_opencode(self.row(), {}, "go", False)
         return launch.call_args.kwargs
 
-    async def test_setting_minutes_become_seconds_and_the_coding_pool(self) -> None:
-        kw = await self.launched({"codingSessionTimeoutMinutes": 45, "codingSessionMaxConcurrent": 2})
-        self.assertEqual((kw["timeout"], kw["pool"], kw["max_background"]), (45 * 60, "coding", 2))
+    async def test_launch_has_no_timeout_and_uses_the_coding_pool(self) -> None:
+        kw = await self.launched({"codingSessionMaxConcurrent": 2})
+        self.assertEqual((kw["no_timeout"], kw["pool"], kw["max_background"]), (True, "coding", 2))
+        self.assertNotIn("timeout", kw)
 
-    async def test_junk_falls_back_to_the_constant(self) -> None:
-        kw = await self.launched({"codingSessionTimeoutMinutes": "soon", "codingSessionMaxConcurrent": None})
-        self.assertEqual(kw["timeout"], limits.CODING_SESSION_TIMEOUT_MINUTES * 60)
+    async def test_junk_concurrency_falls_back_to_the_constant(self) -> None:
+        kw = await self.launched({"codingSessionMaxConcurrent": None})
         self.assertEqual(kw["max_background"], limits.CODING_SESSION_MAX_CONCURRENT)
 
-    def test_timed_out_text_names_the_minutes(self) -> None:
-        _, detail = ca.map_job(SimpleNamespace(status="timed_out"), 45)
-        self.assertIn("45 minutes", detail)
-        self.assertNotIn("600", detail)
+    def test_a_running_job_stays_working(self) -> None:
+        self.assertEqual(ca.map_job(SimpleNamespace(status="running"))[0], "working")
 
 
 class Concurrency(CodingTestCase):

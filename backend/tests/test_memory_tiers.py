@@ -16,7 +16,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os import memory_limits as ml, migrations  # noqa: E402
+from personal_os import limits, memory_limits as ml, migrations  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 from personal_os.context import build_context, estimate_tokens  # noqa: E402
 from personal_os.db import Database  # noqa: E402
@@ -103,7 +103,7 @@ def test_profile_order_is_pins_then_newest_and_deterministic(env) -> None:
     assert ids == [m["id"] for m in memories.profile(None)]
 
 
-def test_profile_block_is_stable_dated_and_budgeted(env) -> None:
+def test_profile_block_is_stable_and_dated(env) -> None:
     db, memories, graph, _ = env
     t = time.mktime((2026, 3, 5, 12, 0, 0, 0, 0, -1))
     a = memories.create(None, "Prefers short replies", kind="preference")
@@ -125,24 +125,23 @@ def test_profile_block_is_stable_dated_and_budgeted(env) -> None:
     assert off["profile"] == [] and head not in off["stable_system"]
 
 
-def test_profile_budget_trim_and_window_share(env) -> None:
+def test_profile_trims_to_its_window_share(env) -> None:
     db, memories, graph, _ = env
     for i in range(30):
         memories.create(None, f"Preference number {i} " + "x" * 200, kind="preference")
-    s, u = ctx(db, memories, graph, settings={"contextBudget": {"profile": 200}})
+    s, u = ctx(db, memories, graph)
     n = u["trimmed"]["profile"]
+    cap = limits.context_shares(limits.CONTEXT_WINDOW_FALLBACK)["profile"]
     assert n > 0 and len(u["profile"]) + n == 30 and f"({n} more omitted)" in u["stable_system"]
     block = u["stable_system"].split("## Your standing preferences (from the user)\n")[1].split(f"\n({n} more")[0]
-    assert estimate_tokens("## Your standing preferences (from the user)\n" + block) <= 200
+    assert estimate_tokens("## Your standing preferences (from the user)\n" + block) <= cap
     assert [m["content"][:20] for m in u["profile"]] == [m["content"][:20] for m in memories.profile(None)[:len(u["profile"])]]
-    # The window share caps it even when the setting asks for far more (or for no limit).
-    for budget in (100000, 0):
-        _, small = ctx(db, memories, graph, settings={"contextBudget": {"profile": budget}}, window=10000)
-        cap = int(10000 * ml.PROFILE_WINDOW_SHARE)
-        assert 0 < len(small["profile"]) < 30 and small["trimmed"]["profile"] > 0
-        lines = [f"- {day(time.time())} · {m['content']}" for m in small["profile"]]
-        assert estimate_tokens("\n".join(lines)) <= cap
-    _, big = ctx(db, memories, graph, settings={"contextBudget": {"profile": 0}}, window=1_000_000)
+    # The share follows the window: a small one keeps fewer rows, a huge one keeps them all.
+    _, small = ctx(db, memories, graph, window=10000)
+    assert 0 < len(small["profile"]) < len(u["profile"]) and small["trimmed"]["profile"] > 0
+    lines = [f"- {day(time.time())} · {m['content']}" for m in small["profile"]]
+    assert estimate_tokens("\n".join(lines)) <= limits.context_shares(10000)["profile"]
+    _, big = ctx(db, memories, graph, window=1_000_000)
     assert len(big["profile"]) == 30 and "profile" not in big["trimmed"]
 
 

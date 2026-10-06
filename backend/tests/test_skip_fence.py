@@ -105,7 +105,7 @@ def test_bridge_only_fenced_call_not_approved() -> None:
 
 
 def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:
-    """In manual mode a job's bridge card is refused on the spot; a chat's wait is off the budget; bridged calls are journaled."""
+    """In manual mode a job's bridge card is refused on the spot; a chat's wait is off the meter; bridged calls are journaled."""
     cid = T.setup(None, unattendedApprovals="deny", permissionMode="manual")
     appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
     T.drive(cid, [[call(0, "t_probe")], []], run=Run(cid, appmod.run_store, kind="job"))
@@ -116,7 +116,7 @@ def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:
 
     run_ = Run(cid, appmod.run_store)
     T.drive(cid, [[call(0, "t_probe")], []], run=run_)
-    ap, budget, seen = CTX["bridge_approve"], CTX["budget"], []
+    ap, budget, seen = CTX["bridge_approve"], CTX["meter"], []
 
     async def go() -> bool:
         before = budget.paused
@@ -130,7 +130,7 @@ def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:
         seen.append(budget.paused - before)
         return ok
     check(asyncio.run(go()) is True and seen[0] == "awaiting_approval" and seen[1] >= 0.3 and run_.status == "running",
-          "bridge wait marks the run waiting and is credited back to the budget")
+          "bridge wait marks the run waiting and is credited back to the meter")
     CALLS.clear()
     asyncio.run(CTX["bridge_call"]("t_write", {"x": "j"}, CTX))
     check(CALLS == ["j"] and any(r["tool"] == "t_write" for r in appmod.run_store.executed(run_.run_id)),

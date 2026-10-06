@@ -6,7 +6,7 @@ test('every outcome has a label that says how the reply ended', () => {
   const all = ['stopped', 'rounds', 'tokens', 'time', 'cost', 'loop', 'interrupted', 'length', 'incomplete']
   for (const o of all) assert.ok(outcomeLabel(o), o)
   assert.equal(outcomeLabel('stopped'), 'Stopped')
-  assert.match(outcomeLabel('rounds') as string, /tool-round limit/)
+  for (const o of ['rounds', 'tokens', 'time', 'cost']) assert.equal(outcomeLabel(o), 'Stopped early', o)
   assert.match(outcomeLabel('length') as string, /continue/)
   assert.match(outcomeLabel('interrupted') as string, /app closed/)
 })

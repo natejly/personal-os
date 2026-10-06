@@ -624,7 +624,7 @@ def test_commands() -> None:
         reset()
         ctx = {"project_id": None, "conversation_id": appmod.convos.create(None, "t", "m")["id"], "message_id": None, "tainted": False,
                "taint_sources": [], "allowed_urls": set(), "settings": appmod.settings(), "modes": tb.effective({}, None, None), "depth": 0,
-               "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(appmod.settings()), "run": None}
+               "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(), "run": None}
         out = await tb.call("command_run", {"name": "tidy", "arguments": "my desk"}, ctx)
         check(out["instructions"] == "Tidy up my desk" and not ctx["tainted"], "a plain command returns its filled template as instructions")
         out = await tb.call("command_run", {"name": "/summarize-folder", "arguments": "~/notes"}, ctx)

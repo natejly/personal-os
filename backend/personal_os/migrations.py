@@ -349,6 +349,15 @@ def _drop_legacy_texting_keys(c: sqlite3.Connection) -> None:
     c.execute(f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_LEGACY_TEXTING_KEYS))})", _LEGACY_TEXTING_KEYS)
 
 
+BUDGET_SETTING_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subagentMaxRounds", "deskMaxTurns",
+                       "codingSessionTimeoutMinutes", "contextBudget", "skillsInlineBudget", "usageAlerts")
+
+
+def _drop_budget_settings(c: sqlite3.Connection) -> None:
+    """Round, token, time, turn and spend limits no longer exist; their stored values are dead rows."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in BUDGET_SETTING_KEYS])
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -370,6 +379,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (17, "memory_provenance_backfill", _memory_provenance_backfill),
     (18, "graph_canonical_types", _graph_canonical_types),
     (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
+    (20, "drop_budget_settings", _drop_budget_settings),
 ]
 
 

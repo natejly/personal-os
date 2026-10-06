@@ -1,6 +1,6 @@
 """deep_research: plan sub-questions, fan researchers out as read-only subagents, then reconcile one cited answer.
 
-The researchers are ordinary subagents (subagents.py), so concurrency, depth, budget roll-up and Stop all behave as
+The researchers are ordinary subagents (subagents.py), so concurrency, depth, usage roll-up and Stop all behave as
 they do for agent_spawn. This module only plans, reads their JSON reports, and writes the final answer. Sources go
 through the shared citation registry (tools._cite), so [n] chips and the sources list work unchanged. The trail
 (plan, steps, sources considered, dropped claims) rides on the tool event under `research`; the model never sees it.

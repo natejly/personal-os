@@ -1,11 +1,16 @@
 """Every tuning number the app ships with, and why. Stdlib only: nothing here imports from personal_os.
 
-llm.DEFAULT_SETTINGS takes its numeric defaults from these constants. Five settings default to 0, meaning
-"automatic": contextWindow (the model's window from the proxy, else CONTEXT_WINDOW_FALLBACK), maxToolRounds
-(stuck detection ends loops; MAX_ROUNDS_HARD is the backstop), and subagentMaxConcurrent / deskMaxLive /
-parallelReads (worker_slots()). A stored non-zero value for any key is honoured as an override, and PUT /settings
-still accepts and validates every key in RANGES, so older stored values keep loading. Readers of the five
-automatic keys go through context_window, max_rounds and slots, never the raw setting.
+There are no budgets: nothing caps a reply's rounds, tokens, cost or wall-clock time. A reply, a job, a subagent or a
+desk turn ends when the model stops calling tools, or a stuck breaker fires (REPEAT_LIMIT, TOOL_ERROR_LIMIT, the stuck
+detector, a denial streak), or the user stops it. The only clocks are hang detection (LLM_IDLE_SECONDS for a silent
+provider stream, FINAL_ROUND_SECONDS for the closing answer, SUBAGENT_STALE/TOOL_SECONDS for a child, JOB_IDLE_SECONDS
+for an unattended run) and per-request timeouts on tools.
+
+llm.DEFAULT_SETTINGS takes its numeric defaults from these constants. Four settings default to 0, meaning
+"automatic": contextWindow (the model's window from the proxy, else CONTEXT_WINDOW_FALLBACK) and subagentMaxConcurrent /
+deskMaxLive / parallelReads (worker_slots()). A stored non-zero value for any key is honoured as an override, and
+PUT /settings still accepts and validates every key in RANGES. Readers of the automatic keys go through
+context_window and slots, never the raw setting.
 """
 from __future__ import annotations
 
@@ -23,18 +28,13 @@ MICRO_KEEP = 3                     # newest tool results left intact
 MESSAGE_WINDOW_FRACTION = 0.5      # one message may fill at most this share of the window
 MCP_DEFER_ABOVE = 12               # offer connector tools through search once more than this many are ready (0 = send all)
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
-SKILLS_INLINE_BUDGET = 6000        # characters of approved skill text inlined in the system prompt
-CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000,
-                  "profile": 1000}  # tokens per retrieval block; "profile" is the always-on standing preferences (memory_limits)
+# Share of the context window each injected block may take. They match the old fixed token counts (1500, 800, 2000,
+# 800, 800, 3000, 1000, ~1500 for skills) at CONTEXT_WINDOW_FALLBACK to within 4%; the memory code reads them only through context_shares().
+CONTEXT_SHARES = {"memories": .012, "graph": .006, "chunks": .016, "activity": .006, "meetings": .006, "pinned": .023,
+                  "profile": .008, "skills": .012}
 
-# ---- Run budget ----
-RUN_TOKENS = 200_000               # per reply, prompt+completion summed over every model call (0 = none)
-RUN_SECONDS = 300                  # per reply wall clock, approvals excluded (0 = none)
-MAX_ROUNDS_HARD = 100              # backstop for one reply; stuck detection and REPEAT_LIMIT end loops long before this
-JOB_MAX_ROUNDS = 8                 # unattended runs: model/tool rounds
-JOB_RUN_TOKENS = 60_000            # unattended runs: tokens
-JOB_RUN_SECONDS = 240              # unattended runs: wall clock
-JOB_HARD_SECONDS = 1800.0          # an unattended run is abandoned after this, a backstop for a hang the budget cannot see
+# ---- Reply loop (stuck detection, no caps) ----
+JOB_IDLE_SECONDS = 1800            # an unattended run with no model or tool activity this long is stopped (hang detection, not a length cap)
 REPEAT_LIMIT = 5                   # identical tool calls in a row before a reply is stopped
 TOOL_ERROR_LIMIT = 3               # consecutive errors from one tool before the model is told to change approach
 FINAL_ROUND_SECONDS = 90.0         # a closing-answer model call still open after this long is abandoned
@@ -47,17 +47,14 @@ TOOL_READ_RETRIES = 2              # extra attempts for a read-only tool after a
 
 # ---- Agents ----
 SUBAGENT_MAX_DEPTH = 2             # how deep subagents may nest
-SUBAGENT_MAX_ROUNDS = 12           # each child's round cap (its cost is also charged to the parent)
-SUBAGENT_STALE_SECONDS = 450       # a child with no model or tool activity this long is stopped
-SUBAGENT_TOOL_SECONDS = 1200       # a child stuck inside one tool this long is stopped
+SUBAGENT_STALE_SECONDS = 450       # hang detection: a child with no model or tool activity this long is stopped
+SUBAGENT_TOOL_SECONDS = 1200       # hang detection: a child stuck inside one tool this long is stopped
 WORKFLOW_MAX_FAN_OUT = 50          # most items one fan-out step may map over
-DESK_MAX_TURNS = 12                # turns a desk runs unattended before it stops and asks
 DESK_PARK_AFTER_SECONDS = 180      # a desk waits this long on a card nobody watches before letting the run go (0 = forever)
 BROWSER_MAX_TABS = 4               # tabs per desk browser
 BROWSER_IDLE_SECONDS = 300         # an idle agent browser is closed after this
 SHELL_TIMEOUT_SECONDS = 120        # foreground shell default; a call may ask for up to 600
 SHELL_MAX_BACKGROUND = 4           # live background shell jobs at once
-CODING_SESSION_TIMEOUT_MINUTES = 30  # an OpenCode coding session is stopped after this
 CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own pool apart from SHELL_MAX_BACKGROUND
 LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
 
@@ -87,19 +84,15 @@ RETRIEVAL_MIN_SIMILARITY = 0.25    # drops vector-only hits below this similarit
 RETRIEVAL_PER_DOC_CAP = 3          # passages per document
 RETRIEVAL_CANDIDATES = 20          # candidates per ranker
 CONSOLIDATE_EVERY = 25             # propose a memory tidy-up after this many new auto memories (0 = manual only)
-VOICE_LOOP_MAX_TURNS = 20          # cap on the hands-free voice loop
+VOICE_LOOP_MAX_TURNS = 20          # hands-free safety stop: a mic left on would keep looping (not a reply budget)
 TELEGRAM_LONG_RUN_MINUTES = 3      # when a run not started from Telegram counts as long
 
 # Accepted ranges for PUT /settings (finite numbers only). The keys in AUTOMATIC also accept 0, meaning "derive it".
-AUTOMATIC = ("contextWindow", "maxToolRounds", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
+AUTOMATIC = ("contextWindow", "subagentMaxConcurrent", "deskMaxLive", "parallelReads")
 RANGES: dict[str, tuple[float, float]] = {
-    "maxToolRounds": (1, 60),
     "uiZoom": (80, 160),
-    "maxRunTokens": (0, 10_000_000),
-    "maxRunSeconds": (0, 86_400),
     "subagentMaxConcurrent": (1, 20),
     "subagentMaxDepth": (0, 3),
-    "subagentMaxRounds": (1, 60),
     "subagentStaleSeconds": (0, 86_400),
     "subagentToolSeconds": (0, 86_400),
     "fileSnapshotMaxBytes": (0, 100_000_000),
@@ -127,7 +120,6 @@ RANGES: dict[str, tuple[float, float]] = {
     "fetchCacheSeconds": (0, 86_400),
     "telegramLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
-    "codingSessionTimeoutMinutes": (1, 1440),
     "codingSessionMaxConcurrent": (1, 20),
 }
 
@@ -167,7 +159,6 @@ def slots(settings: dict[str, Any], key: str) -> int:
     return int(_pos(settings.get(key))) or worker_slots()
 
 
-def max_rounds(settings: dict[str, Any]) -> int:
-    """Rounds one reply may take: a stored maxToolRounds below MAX_ROUNDS_HARD, else MAX_ROUNDS_HARD."""
-    n = int(_pos(settings.get("maxToolRounds")))
-    return n if 0 < n < MAX_ROUNDS_HARD else MAX_ROUNDS_HARD
+def context_shares(window: int) -> dict[str, int]:
+    """Tokens each injected context block may take in a `window`-token context."""
+    return {k: int(window * r) for k, r in CONTEXT_SHARES.items()}

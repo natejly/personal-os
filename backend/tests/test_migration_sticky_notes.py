@@ -51,7 +51,7 @@ def _db(with_docs: bool = True) -> sqlite3.Connection:
 class StickyNotesIntoDocs(unittest.TestCase):
     def test_notes_become_docs_with_the_same_ids(self) -> None:
         c = _db()
-        self.assertEqual(migrations.run(c), [12, 13])
+        self.assertEqual(migrations.run(c), list(range(12, migrations.latest() + 1)))
         rows = {r["id"]: r for r in c.execute("SELECT * FROM docs")}
         self.assertEqual(set(rows), {"n1", "n2", "n3", "n4", "n5"})
         self.assertIsNone(rows["n5"]["project_id"])
@@ -112,7 +112,7 @@ class StickyNotesIntoDocs(unittest.TestCase):
     def test_no_notes_table_means_nothing_to_do(self) -> None:
         c = sqlite3.connect(":memory:", isolation_level=None)
         c.execute("PRAGMA user_version = 11")
-        self.assertEqual(migrations.run(c), [12, 13])
+        self.assertEqual(migrations.run(c), list(range(12, migrations.latest() + 1)))
         self.assertIsNone(c.execute("SELECT 1 FROM sqlite_master WHERE name='docs'").fetchone())
 
 

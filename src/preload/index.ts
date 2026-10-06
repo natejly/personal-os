@@ -69,6 +69,7 @@ const api: GrainApi = {
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),
   deskNotify: (payload) => ipcRenderer.send('desk:notify', payload),
   micAccess: () => ipcRenderer.invoke('media:mic-access'),
+  codingAttach: (id) => ipcRenderer.invoke('coding:attach', id),
   sysAccess: {
     status: () => ipcRenderer.invoke('sysaccess:status'),
     grant: (id) => ipcRenderer.invoke('sysaccess:grant', id),

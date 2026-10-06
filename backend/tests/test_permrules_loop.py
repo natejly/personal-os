@@ -63,7 +63,7 @@ def sh(i: int, command: str) -> dict[str, Any]:
 
 def setup(rules: dict[str, list[str]] | None = None, mode: str = "ask", **settings: Any) -> str:
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "workspaceRoots": [],
-                            "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
+                            "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
     appmod.convos.update(cid, {"settings": {"tools": {"shell_run": mode}}})
     RAN.clear()
@@ -205,23 +205,30 @@ def test_skip_permissions_runs_an_ask_without_a_card() -> None:
     check(permrules.lift_permission_ask("propose_plan", "ask", skip=True) == "ask", "a plan still asks")
     check(permrules.lift_permission_ask("desk_ask", "ask", skip=True) == "ask", "a question still asks")
     check(permrules.lift_permission_ask("shell_run", "off", skip=True) == "off", "off stays off")
-    check(permrules.skip_permissions_on({"skipPermissions": False}, {"skipPermissions": True}) is False, "the chat's off wins")
+    for n in ("coding_session_start", "coding_session_send"):
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external") == "on", f"{n} lifts under skip")
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external", forced=True) == "ask", f"{n} forced still asks")
+        check(permrules.lift_permission_ask(n, "ask", skip=True, danger="external", fenced=True) == "ask", f"{n} fenced still asks")
+        check(permrules.lift_permission_ask(n, "ask", skip=False, danger="external") == "ask", f"{n} asks without skip")
+        check(permrules.lift_permission_ask(n, "off", skip=True, danger="external") == "off", f"{n} off stays off")
+    check(permrules.lift_permission_ask("gmail_send", "ask", skip=True, danger="external") == "ask", "other external tools still ask")
+    check(permrules.skip_permissions_on({"skipPermissions": True}, {"permissionMode": "manual"}) is False, "a chat's own switch is legacy")
+    check(permrules.skip_permissions_on({}, {"permissionMode": "allow_all"}) is True, "only the global mode skips")
     cid = setup(skipPermissions=True)
     ev = drive(cid, [[sh(0, "make deploy")]])
-    check(len(cards(ev)) == 1 and RAN == ["make deploy"], "the global switch does not lift a shell card")
-    cid = setup(skipPermissions=True)
-    appmod.convos.update(cid, {"settings": {"skipPermissions": False}})
-    ev = drive(cid, [[sh(0, "make deploy")]], ["deny"])
-    check(len(cards(ev)) == 1 and not RAN, "this chat still asks when it turns the switch off")
-    cid = setup({"deny": ["Bash(git push *)"]}, mode="on", skipPermissions=True)
+    check(len(cards(ev)) == 1 and RAN == ["make deploy"], "manual mode ignores the legacy switch: the card still shows")
+    cid = setup(permissionMode="allow_all")
+    ev = drive(cid, [[sh(0, "make deploy")]])
+    check(not cards(ev) and RAN == ["make deploy"], "allow-all runs an uncleared shell command without a card")
+    cid = setup({"deny": ["Bash(git push *)"]}, mode="on", permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "git push origin main")]])
     check(not RAN and not cards(ev), "a deny rule still refuses")
-    cid = setup({"allow": ["Bash(rm *)"]}, mode="on", skipPermissions=True)
+    cid = setup({"allow": ["Bash(rm *)"]}, mode="on", permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "rm -rf ~")]])
     check(not RAN and "never allowed" in (results(ev)[0]["error"] or ""), "the hardline list still refuses")
-    cid = setup(skipPermissions=True, unattendedApprovals="deny")
+    cid = setup(permissionMode="allow_all", unattendedApprovals="deny")
     ev = drive(cid, [[sh(0, "make deploy")], []], run=Run(cid, None, kind="job"))
-    check(not cards(ev) and not RAN, "a scheduled job does not inherit the switch")
+    check(not cards(ev) and RAN == ["make deploy"], "a scheduled job under allow-all runs without a card")
 
 
 def test_unattended_runs_refuse_instead_of_asking() -> None:

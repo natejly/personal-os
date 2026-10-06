@@ -514,7 +514,7 @@ def _local(path: Path, data_dir: Path, cfg: dict[str, Any], prompt: str = "") ->
     except subprocess.TimeoutExpired:
         return "", {}, "whisper.cpp timed out after 300s"
     finally:
-        # Both files are side effects of -oj/-otxt, not something worth leaving in recordings/.
+        # Both files are side effects of -oj/-otxt, not something worth leaving beside the clip.
         for f in (txt, js):
             with contextlib.suppress(Exception):
                 f.unlink(missing_ok=True)

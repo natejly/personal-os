@@ -31,6 +31,23 @@ export function useStop(id: string): { stop: () => Promise<void>; busy: boolean 
   return { stop, busy }
 }
 
+/** A Claude Code session blocked on an answer: it can only be answered in its own session, so offer Terminal on a click. */
+export function NeedsYou({ c }: { c: CodingSession }): JSX.Element | null {
+  const toast = useStore((s) => s.toast)
+  if (c.status !== 'needs_you' || c.agent !== 'claude' || !c.external_id) return null
+  const open = (): void => {
+    window.os.codingAttach(c.external_id as string).then((ok) => { if (!ok) toast('Could not open Terminal', 'error') }).catch(() => toast('Could not open Terminal', 'error'))
+  }
+  return (
+    <div className="tc-hint warn">
+      <strong>This coding session is waiting for you</strong>
+      <div>It needs an answer in its own session.</div>
+      <button type="button" className="ghost-btn sm" onClick={open}>Open in Terminal</button>
+      {c.attach_hint && <div className="tc-muted small">Or run <span className="mono">{c.attach_hint}</span> yourself.</div>}
+    </div>
+  )
+}
+
 /** One live session: status, current step, where it works, a log tail, Stop while it runs, and how to answer a prompt. */
 export function CodingSessionView({ session: c }: { session: CodingSession }): JSX.Element {
   const { stop, busy } = useStop(c.id)
@@ -49,9 +66,7 @@ export function CodingSessionView({ session: c }: { session: CodingSession }): J
         )}
       </div>
       {c.detail && <div className="tc-muted small">{c.detail}</div>}
-      {c.status === 'needs_you' && c.attach_hint && (
-        <div className="tc-hint warn">Waiting in its own window: run <span className="mono">{c.attach_hint}</span> in a terminal</div>
-      )}
+      <NeedsYou c={c} />
       <Meta items={[['Folder', <span className="mono" title={c.worktree}>{c.worktree}</span>], ['Branch', c.branch ? <span className="mono">{c.branch}</span> : null]]} />
       {log && <MonoBlock text={c.log_tail} tail />}
     </div>

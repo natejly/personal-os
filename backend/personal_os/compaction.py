@@ -24,7 +24,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import llm, redact
+from . import limits, llm, redact
 from .router import concrete
 from .context import estimate_tokens
 from .db import Database, now
@@ -217,12 +217,8 @@ def note_overflow(model: str, limit: int | None, estimate_at_failure: int | None
 
 
 def window_for(cfg: dict[str, Any], model: str, known: int | None = None) -> int:
-    vals = [_int(cfg, "contextWindow", 128000)]
-    if known and known > 0:
-        vals.append(int(known))
-    if _learned.get(model):
-        vals.append(_learned[model])
-    return max(1000, min(vals))
+    """The context window in use: a stored override, else the proxy's figure, else the fallback; capped by an overflow."""
+    return limits.context_window(cfg.get("contextWindow"), known, _learned.get(model))
 
 
 class Compactor:
@@ -335,7 +331,7 @@ def bind_supported(complete: Complete, **kw: Any) -> Complete:
 
 def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[dict[str, str]], system_tokens: int,
                 window: int | None) -> bool:
-    limit = _float(cfg, "compactAt", 0.7) * (window or _int(cfg, "contextWindow", 128000))
+    limit = _float(cfg, "compactAt", 0.7) * (window or limits.context_window(cfg.get("contextWindow")))
     return bool(cfg.get("autoCompact", True) and len(rows) > _int(cfg, "compactKeepRecent", 8) + 2
                 and estimate_messages(history) + system_tokens > limit)
 
@@ -482,7 +478,7 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
         s = compactor.get(conv_id)
         hist = compactor.build_history(convos.history_rows(conv_id), s, _tainted(convos, conv_id))
         model = str(_conv(conv_id).get("model") or cfg.get("defaultModel") or "")
-        window = window_fn(cfg, model) if window_fn else _int(cfg, "contextWindow", 128000)
+        window = window_fn(cfg, model) if window_fn else limits.context_window(cfg.get("contextWindow"))
         with compactor.db.tx() as c:  # spend covers every call, including the rows the summary folded away
             spend = c.execute("SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(prompt_tokens+completion_tokens),0) AS tokens"
                               " FROM usage_log WHERE conversation_id=?", (conv_id,)).fetchone()

@@ -18,3 +18,11 @@ test('review lines say what the reviewer decided and why', () => {
   assert.equal(reviewTitle({ model: 'm', ms: 120 }), 'm · 120 ms')
   assert.equal(reviewTitle({ model: null }), undefined)
 })
+
+test('automatic review and allow-all rows are labelled plainly', () => {
+  assert.equal(decisionLabel({ decision: 'auto', scope: 'auto-review' }), 'Reviewed automatically: allowed')
+  assert.equal(decisionLabel({ decision: 'review-ask', scope: 'auto-review' }), 'Reviewed automatically: sent to you')
+  assert.equal(decisionLabel({ decision: 'deny', scope: 'auto-review' }), 'Reviewed automatically: denied')
+  assert.equal(decisionLabel({ decision: 'auto', scope: 'allow-all' }), 'Allowed (allow-all mode)')
+  assert.equal(reviewLine({ verdict: 'allow', reason: 'fine', confidence: 'high' }), 'Reviewed: allowed — fine (high confidence)')
+})

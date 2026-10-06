@@ -28,7 +28,7 @@ import type { Attention, CodingSession, RunInfo, ShipChecklist } from '@shared/t
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
-import { uploadToast, type UploadOutcome } from './lib/uploadNote'
+import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { stepZoom } from './lib/zoom'
 
@@ -62,10 +62,9 @@ export const readDocMode = (): DocMode => {
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections, one per rail entry in SettingsModal.
- *  'memory' holds the Memory panel above the learning and search-index controls.
- *  'permissions' is the one place every permission is set; 'cowork' is the Autonomy tab. */
-export type SettingsTab = 'provider' | 'memory' | 'integrations' | 'permissions' | 'workspace' | 'system' | 'cowork' | 'modules' | 'behavior' | 'data'
+/** Settings sections, one per rail entry in SettingsModal. Older ids still work in openSettings (lib/settingsTabs). */
+import { resolveTab, type AdvancedGroup, type LegacySettingsTab, type SettingsTab } from './lib/settingsTabs'
+export type { SettingsTab }
 export type { Scope, SessionStatus }
 
 /**
@@ -259,6 +258,8 @@ export interface State {
   settingsOpen: boolean
   /** The tab Settings opens on. Read once when the dialog mounts. */
   settingsTab: SettingsTab
+  /** The Advanced group to open when Settings opens on the Advanced tab. */
+  settingsGroup: AdvancedGroup | null
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   toasts: Toast[]
   /** The ⌘K command palette. */
@@ -357,7 +358,7 @@ export interface State {
   /** Open the help overlay on a section; null closes it. */
   openHelp: (section: 'shortcuts' | 'guide' | null) => void
   /** Open Settings on one tab — how the rest of the app reaches memory now. */
-  openSettings: (tab: SettingsTab) => void
+  openSettings: (tab: SettingsTab | LegacySettingsTab, group?: AdvancedGroup) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
@@ -1703,7 +1704,8 @@ export const useStore = create<State>((set, get) => {
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
-    settingsTab: 'provider',
+    settingsTab: 'model',
+    settingsGroup: null,
     projectModal: null,
     toasts: [],
     paletteOpen: false,
@@ -1893,9 +1895,9 @@ export const useStore = create<State>((set, get) => {
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
-    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'provider' } : { settingsOpen }),
+    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'model', settingsGroup: null } : { settingsOpen }),
     openHelp: (section) => set(section ? { helpOpen: true, helpSection: section } : { helpOpen: false }),
-    openSettings: (settingsTab) => set({ settingsOpen: true, settingsTab }),
+    openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
@@ -3247,6 +3249,8 @@ export const useStore = create<State>((set, get) => {
     uploadDocuments: async (files, projectId) => {
       const saved: UploadOutcome[] = []
       for (const f of Array.from(files)) {
+        const tooBig = uploadTooBig(f.size)  // refused here so a huge file is not streamed to the backend only to get a 413
+        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); continue }
         try {
           const doc = (await api.documents.upload(projectId, f)) as UploadResult
           // An older backend says nothing about readability; its files count as readable, as before.

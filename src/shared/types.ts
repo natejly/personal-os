@@ -359,14 +359,15 @@ export interface ApprovalLogEntry {
   agent: string | null
   tool: string
   args_summary: string
-  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) */
+  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) | review-ask (sent to the user) */
   decision: string
-  /** once | conversation | global | rule | plan */
+  /** once | conversation | global | rule | plan | auto-review | allow-all */
   scope: string | null
   rule: unknown
   note: string | null
   reviewer_verdict: string | null
   reviewer_reason: string | null
+  /** 'high' | 'medium' | 'low' when the automatic reviewer gave one. */
   reviewer_model: string | null
   reviewer_ms: number | null
   call_id: string | null
@@ -565,7 +566,7 @@ export interface ToolEvent {
   /** Rule context for an ask card: the suggested rules to save and whether a session grant is offered. */
   permission?: PermissionCard | null
   /** The review gate's verdict on this call; 'ask' is why a card opened. */
-  review?: { verdict: 'allow' | 'ask'; reason: string; model: string; ms: number } | null
+  review?: { verdict: 'allow' | 'ask' | 'deny'; reason: string; model: string; ms: number; confidence?: string } | null
   /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
@@ -1361,8 +1362,10 @@ export interface Settings {
   autoReviewModel?: string
   /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
   alwaysAsk?: string[]
-  /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
+  /** Legacy; the UI no longer shows it. permissionMode decides. */
   skipPermissions?: boolean
+  /** auto: a second model checks risky actions; manual: ask before each; allow_all: no checks, no cards. Default auto. */
+  permissionMode?: 'auto' | 'manual' | 'allow_all'
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */
@@ -1380,6 +1383,9 @@ export interface Settings {
   contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
+  /** Coding sessions: OpenCode stops after this many minutes (1-1440, default 30); how many run at once (1-20, default 3). */
+  codingSessionTimeoutMinutes?: number
+  codingSessionMaxConcurrent?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1785,6 +1791,8 @@ export interface GrainApi {
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
+  /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
+  codingAttach: (externalId: string) => Promise<boolean>
   /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
   sysAccess: {
     status: () => Promise<import('./systemAccess').MainStatus>

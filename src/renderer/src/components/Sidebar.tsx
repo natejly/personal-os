@@ -19,6 +19,8 @@ import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { inboxBadge } from '../lib/inboxBadge'
 import { rowButton } from '../lib/rowButton'
+import { useChatFileCountsSync } from '../lib/useChatFiles'
+import SidebarChatFiles from './SidebarChatFiles'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
@@ -134,6 +136,8 @@ export default function Sidebar(): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
+  const [chatsTab, setChatsTab] = useState<'chats' | 'files'>('chats')
+  useChatFileCountsSync()
   const [jobsOpen, setJobsOpen] = useState(true)
   const [needsOnly, setNeedsOnly] = useState(readNeeds)
   const jobs = useStore((s) => s.jobs)
@@ -335,11 +339,17 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <button className="section-toggle" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
-          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Chats
+        <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
+          {/* The Chats | Files switch beside it names the section, so the toggle carries no word of its own. */}
+          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} />
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
+        <span className="cf-seg" role="group" aria-label="Chats or files">
+          <button className={chatsTab === 'chats' ? 'on' : ''} aria-pressed={chatsTab === 'chats'} aria-label="Chat list" onClick={() => { setChatsOpen(true); setChatsTab('chats') }}>Chats</button>
+          <button className={chatsTab === 'files' ? 'on' : ''} aria-pressed={chatsTab === 'files'} aria-label="Files from personal chats" onClick={() => { setChatsOpen(true); setChatsTab('files') }}>Files</button>
+        </span>
+        {chatsTab === 'chats' && <>
         <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
           title={needsOnly ? 'Showing only what needs you or is blocked' : 'Show only what needs you'}
           onClick={() => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }}>
@@ -360,8 +370,10 @@ export default function Sidebar(): JSX.Element {
         >
           <Search size={13} />
         </button>
+        </>}
       </div>
-      {chatsOpen && (<>
+      {chatsOpen && chatsTab === 'files' && <SidebarChatFiles jump={openConversation} />}
+      {chatsOpen && chatsTab === 'chats' && (<>
       {searching && (
         <label className="search">
           <input

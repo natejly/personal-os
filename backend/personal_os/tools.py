@@ -120,6 +120,10 @@ class ToolSpec:
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
         # (args, ctx) -> True when this particular call must ask whatever the mode says (shell_run unsandboxed, or networked in a tainted run)
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the forced card is HARD: auto mode's reviewer may not lift it (counts as force_ask too)
+        self.force_card: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the run's taint comes only from this call's own subject, so it does not count as tainted here
+        self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None
 
@@ -695,6 +699,7 @@ class Toolbox:
         # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
+        self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
@@ -814,6 +819,16 @@ class Toolbox:
             out[name] = "ask" if v == "on" and spec.danger in ASK_LOCKED_DANGER and name in locked else v
         return out
 
+    def explicit(self, global_tools: dict[str, Any], project_tools: dict[str, str] | None, chat_tools: dict[str, str] | None,
+                 agent_tools: dict[str, str] | None = None) -> dict[str, str]:
+        """The modes a user set on purpose, same precedence as `effective`: {tool: on|ask|off}, defaults left out."""
+        out: dict[str, str] = {}
+        for m in (global_tools, project_tools, agent_tools, chat_tools):
+            for k, v in (m or {}).items():
+                if (n := self._norm(v)):
+                    out[k] = n
+        return out
+
     def cap_modes(self, tools: dict[str, Any]) -> dict[str, Any]:
         """A tool map as it may be stored: an ask-locked tool saved as 'on' becomes 'ask'. Names that are not built-in
         tools (connector slugs, unknown keys) pass through unchanged."""
@@ -846,6 +861,17 @@ class Toolbox:
         spec = self.specs.get(name)
         return bool(spec and spec.force_ask and spec.force_ask(args, ctx or {}))
 
+    def forces_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """A forced ask that auto mode's reviewer may not lift either."""
+        spec = self.specs.get(name)
+        return bool(spec and spec.force_card and spec.force_card(args, ctx or {}))
+
+    def tainted_for(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """ctx's taint as it counts for this call: a tool may exempt taint that only its own subject caused."""
+        ctx = ctx or {}
+        spec = self.specs.get(name)
+        return bool(ctx.get("tainted")) and not (spec and spec.taint_ok and spec.taint_ok(args, ctx))
+
     def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
         """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created). The proxy mode counts:
         an allowed host can still carry out what a tainted reply read, so it asks like the shell's allowlist does."""
@@ -869,7 +895,7 @@ class Toolbox:
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
         reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
-        if spec and mode == "on" and ctx.get("tainted") and not reviewed and (
+        if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
                 spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
@@ -941,6 +967,7 @@ class Toolbox:
                               alternative=ALTERNATIVE.get(name))
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
+            ctx.setdefault("taint_sources", []).append(name)  # every taint is sourced (Toolbox.tainted_for relies on it)
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
         return checked(name, out)
@@ -2437,6 +2464,8 @@ def _register_docs(self: Toolbox) -> None:
         # The chat's own project decides which tree it lands in, so a doc written inside a project is
         # filed under that project without the model having to be told which one it is in.
         d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
+        if self.chat_files is not None:
+            self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
         return _scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
                 "note": "Created in Files. The user can undo it from the file's revision history."})
@@ -2492,6 +2521,8 @@ def _register_docs(self: Toolbox) -> None:
             if not applied:
                 return _missing(ctx, doc)
             rev = self.docs.revision(rev["id"]) or rev
+            if self.chat_files is not None:
+                self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], applied.get("title") or d["title"], "edited", ctx.get("message_id"))
             return _scrub_strings({"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                     "note": "Written into the file. The user sees the diff in the chat and can undo it from the file's "

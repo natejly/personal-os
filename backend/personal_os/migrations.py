@@ -262,9 +262,14 @@ def sync_memories_fts(c: sqlite3.Connection, ids: list[str] | None = None) -> No
                   "AND id NOT IN (SELECT memory_id FROM memories_fts)", args)
 
 
+def _cols(c: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in c.execute(f'PRAGMA table_info("{table}")')}
+
+
 def _memories_fts_live(c: sqlite3.Connection) -> None:
     """Trashed and superseded memories kept their search rows, and some deletes left orphans: rebuild to the live set."""
-    sync_memories_fts(c)
+    if {"deleted_at", "invalid_at"} <= _cols(c, "memories") and _cols(c, "memories_fts"):
+        sync_memories_fts(c)
 
 
 def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
@@ -274,6 +279,8 @@ def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
     match; none or several is ambiguous and the memory stays unlinked, because a wrong source is worse than none.
     Finish time is the latest trace span end (epoch ms) of the reply itself, else the row's created_at. The
     auto-learn span is skipped: it is appended after the memory is written, so it always ends later."""
+    if "source_message_id" not in _cols(c, "memories") or "trace" not in _cols(c, "messages"):
+        return
     mems = c.execute("SELECT id, created_at FROM memories WHERE source='auto' "
                      "AND source_conversation_id IS NULL AND source_message_id IS NULL").fetchall()
     for mem in mems:

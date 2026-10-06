@@ -12,7 +12,8 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   needs_you) unless the caller names a permission_mode (acceptEdits, auto, dontAsk or bypassPermissions) for that one
   session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift.
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
-  has no prompt to answer: the sandbox is its boundary. The coding-session timeout (codingSessionTimeoutMinutes, 30 by default) ends it; a follow-up
+  has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
+  kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
   `--continue`s the same opencode state folder.
 
 Every change is saved and published on the app `events` topic as a `coding_session` event carrying `summary(row)`.
@@ -35,7 +36,7 @@ from typing import Any, Awaitable, Callable
 
 from . import opencode, shell
 from .db import new_id
-from .limits import CODING_SESSION_MAX_CONCURRENT, CODING_SESSION_TIMEOUT_MINUTES, LOGIN_SHELL_TIMEOUT_SECONDS
+from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
 
 AGENTS = ("claude", "opencode")
@@ -219,13 +220,11 @@ def map_claude(state: dict[str, Any]) -> tuple[str, str] | None:
     return status, shell._scrub(str(detail))[:300]
 
 
-def map_job(job: Any, timeout_minutes: int = CODING_SESSION_TIMEOUT_MINUTES) -> tuple[str, str]:
+def map_job(job: Any) -> tuple[str, str]:
     """(status, detail) for an opencode job in the shell registry."""
     st = job.status
     if st == "exited":
         return ("done", "") if job.exit_code == 0 else ("failed", f"exited with code {job.exit_code}")
-    if st == "timed_out":
-        return "failed", f"timed out after {timeout_minutes} minutes (codingSessionTimeoutMinutes); send a follow-up to continue"
     if st == "orphaned":
         return "blocked", "the app restarted while it ran; Stop ends it"
     return JOB_STATES.get(st, "working"), ""
@@ -266,12 +265,6 @@ class CodingSessions:
         with self.db.tx() as c:
             return [dict(r) for r in c.execute("SELECT * FROM coding_sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
                                                (max(1, int(limit)),)).fetchall()]
-
-    def _timeout_minutes(self) -> int:
-        try:
-            return max(1, int(self.settings().get("codingSessionTimeoutMinutes") or CODING_SESSION_TIMEOUT_MINUTES))
-        except (TypeError, ValueError):
-            return CODING_SESSION_TIMEOUT_MINUTES
 
     def _max_concurrent(self) -> int:
         try:
@@ -351,7 +344,7 @@ class CodingSessions:
         if self.seen.get(row["id"]) == (job.total, job.status):
             return row  # nothing new since the last look: skip re-parsing the buffer
         self.seen[row["id"]] = (job.total, job.status)
-        status, detail = map_job(job, self._timeout_minutes())
+        status, detail = map_job(job)
         raw = job.buf
         if job.live() and not raw.endswith("\n"):
             raw = raw[:raw.rfind("\n") + 1]  # the last line is still being written
@@ -487,7 +480,7 @@ class CodingSessions:
         ctx = {**ctx, "taint_sources": []}  # opencode's own "network" label stays off the caller's ctx; the session's label covers it
         job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"], state_key=f"coding-{row['id']}",
                                            continue_session=continue_session, model=row["model"], background=True,
-                                           timeout=self._timeout_minutes() * 60, conversation_id=f"coding:{row['id']}",
+                                           no_timeout=True, conversation_id=f"coding:{row['id']}",
                                            run_id=row.get("run_id"), notify=False, on_timeout="kill",
                                            pool="coding", max_background=self._max_concurrent())
         row["external_id"] = job.id
@@ -618,7 +611,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                               alternative="fix the cause named above, or run the task another way")
         note = ("Started. It works in the background; coding_session_status(id) reads progress. "
                 + ("If it needs a permission answer its status becomes needs_you and the user runs `claude attach <external_id>`."
-                   if agent == "claude" else f"OpenCode ends after {sessions._timeout_minutes()} minutes at most; send a follow-up to continue."))
+                   if agent == "claude" else "OpenCode runs until it finishes or coding_session_stop; send a follow-up to continue."))
         return {**summary(row), "note": note}
 
     spec = ToolSpec("coding_session_start",

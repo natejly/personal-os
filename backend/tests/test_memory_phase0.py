@@ -343,4 +343,4 @@ def test_backfill_skips_a_row_that_replaced_another(db) -> None:
 
 
 def test_memory_migrations_are_registered() -> None:
-    assert [n for _, n, _ in migrations.MIGRATIONS[-2:]] == ["memories_fts_live", "memory_provenance_backfill"]
+    assert [n for _, n, _ in migrations.MIGRATIONS[-3:-1]] == ["memories_fts_live", "memory_provenance_backfill"]

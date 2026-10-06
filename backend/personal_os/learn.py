@@ -403,7 +403,7 @@ CREATE INDEX IF NOT EXISTS idx_skills_status ON skills(status, updated_at DESC);
 SKILL_STATUSES = ("candidate", "approved", "rejected")
 MAX_SKILL_NAME = 80
 MAX_SKILL_DESCRIPTION = 300
-MAX_SKILL_PROCEDURE = 20000  # big enough for a typical published SKILL.md; past the inline budget a chat reads it on demand
+MAX_SKILL_PROCEDURE = 20000  # big enough for a typical published SKILL.md; past the skills window share a chat reads it on demand
 MAX_INJECTED_SKILLS = 12
 MAX_SKILL_REFERENCE = 20000
 MAX_SKILL_REFERENCES = 20

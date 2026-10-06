@@ -1,4 +1,4 @@
-"""A reply that hits its time limit: kept text stays, tool work gets one closing round, the reason is persisted.
+"""A reply that stopped short keeps its reason: the message outcome survives a later write, and a legacy db gains the columns.
 
 Run: PYTHONPATH=backend python backend/tests/test_partial_reply.py
 Reuses the scripted-stream harness of test_finish_reason.py.
@@ -11,32 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_finish_reason as h  # noqa: E402
-from test_finish_reason import call, check, reply  # noqa: E402
-
-from personal_os.app import TIME_STOP  # noqa: E402
-
-
-def test_timeout_after_tool_work_runs_one_closing_round() -> None:
-    done, row, _ = reply([
-        {"text": "", "calls": [call("c1")]},
-        {"text": "", "finish": "timeout"},
-        {"text": "Here is what I found."},
-    ])
-    check(len(h.SEEN) == 3, f"tool round, timed-out round, one closing round; got {len(h.SEEN)}")
-    check(any(m.get("content") == TIME_STOP for m in h.SEEN[2]), "the closing round was told it is out of time")
-    check(done["partial"] == "time" and done["outcome"] == "time" and done["error"] is None, "done says time, not an error")
-    check(row["outcome"] == "time" and row["content"] == "Here is what I found.", "persisted with the closing text")
-
-
-def test_timeout_after_text_keeps_the_text() -> None:
-    done, row, _ = reply([{"text": "Half of the answ", "finish": "timeout"}])
-    check(len(h.SEEN) == 1, "no closing round: it would restart the answer after half a sentence")
-    check(done["outcome"] == "time" and row["outcome"] == "time" and row["content"] == "Half of the answ", "the text stays, outcome time")
-
-
-def test_timeout_with_nothing_still_raises() -> None:
-    done, row, _ = reply([{"text": "", "finish": "timeout"}])
-    check(done["error"] and "time limit" in done["error"] and done["outcome"] is None, "nothing at all: today's error")
+from test_finish_reason import check  # noqa: E402
 
 
 def test_a_recorded_reason_survives_a_later_write_and_a_legacy_db_gains_the_columns() -> None:
@@ -52,10 +27,10 @@ def test_a_recorded_reason_survives_a_later_write_and_a_legacy_db_gains_the_colu
         cid = convos.create(None, "t", "m")["id"]
         am = convos.add_message(cid, "assistant", "", model="m")
         check(am["outcome"] is None and am["error_kind"] is None, "a fresh row has no outcome and no error kind")
-        convos.finish_message(am["id"], "partway", None, None, outcome="rounds", error_kind=None)
+        convos.finish_message(am["id"], "partway", None, None, outcome="length", error_kind=None)
         convos.finish_message(am["id"], "partway", None, None)  # recovery or a later rewrite: no reason given
         row = convos.get(cid)["messages"][-1]
-        check(row["outcome"] == "rounds", "a reason, once written, is not erased by a write that gives none")
+        check(row["outcome"] == "length", "a reason, once written, is not erased by a write that gives none")
         # A database from before the columns existed: the additive migration adds them and old rows read back null.
         p = Path(d) / "personal-os.db"
         with sqlite3.connect(p) as c:

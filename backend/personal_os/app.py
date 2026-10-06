@@ -346,19 +346,6 @@ def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
         return default
 
 
-_alerted: set[tuple[str, str]] = set()  # (period, day) already announced; one event each, never a timer
-
-
-def _check_usage_alert(cfg: dict[str, Any]) -> None:
-    """Evaluated only when a usage row is written. Rings the app topic once per period per day; blocks nothing."""
-    st = usage.alert_state(cfg)
-    if not st["over"]:
-        return
-    day = time.strftime("%Y-%m-%d")
-    for k in ("daily", "monthly"):
-        if st[k]["over"] and (k, day) not in _alerted:
-            _alerted.add((k, day))
-            events.publish("usage_alert", {"period": k, **st[k]})
 # One message may fill at most this share of the context window: past it the row would be replayed
 # on every later turn (the first user message always survives compaction) and the chat is unusable.
 MESSAGE_WINDOW_FRACTION = limits.MESSAGE_WINDOW_FRACTION
@@ -387,7 +374,6 @@ def _record_usage(ev: dict[str, Any]) -> None:
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
                      cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning,
                      tag=str(ev.get("tag") or ""), round=ev.get("round"))
-        _check_usage_alert(cfg)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -805,7 +791,7 @@ def get_settings() -> dict[str, Any]:
 
 
 # The numeric settings with a control in the UI; every key in limits.RANGES is still validated on PUT.
-USER_EDITABLE = ("uiZoom", "maxRunTokens", "maxRunSeconds")
+USER_EDITABLE = ("uiZoom",)
 NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {k: limits.RANGES[k] for k in USER_EDITABLE}
 
 
@@ -1528,16 +1514,12 @@ def _today_hint() -> str:
             "Use this for dates; do not compute weekdays in code. Calendar times are local: YYYY-MM-DDTHH:MM, no offset.")
 
 
-BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
-               "Write the best final answer you can from what you already have, and say in one line what is still missing.")
-TIME_STOP = ("Out of budget (time): no further tool calls will run. "
-             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
                "or say in one line what you did and what is still missing.")
-SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
-              "Make at most one or two more tool calls, then write the final answer.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
              "Answer with what you already have, and say in one line what you could not finish.")
+CUT_STOP = ("The model's output limit cut this call short, so it was not executed. "
+            "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
             "send a smaller call or split the content")
 REPEAT_LIMIT = limits.REPEAT_LIMIT
@@ -1546,17 +1528,11 @@ TOOL_ERROR_LIMIT = limits.TOOL_ERROR_LIMIT
 
 # Run kinds that may not complete an outward-facing side effect. A scheduled job proposes; the user executes.
 PROPOSAL_ONLY_KINDS = ("job",)
-# Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
-# interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
 # A model call that is still open after this long while writing the closing answer is abandoned.
 EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was sent without one."
 FINAL_ROUND_SECONDS = limits.FINAL_ROUND_SECONDS
-# Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
-JOB_HARD_SECONDS = limits.JOB_HARD_SECONDS
-JOB_BUDGET = {"maxToolRounds": limits.JOB_MAX_ROUNDS, "maxRunTokens": limits.JOB_RUN_TOKENS, "maxRunSeconds": limits.JOB_RUN_SECONDS}
-# What one job may tighten for itself. Never maxToolRounds: the round cap stays fixed for every unattended run.
-# No cost key: cost is reported, never a limit.
-JOB_BUDGET_KEYS = ("maxRunTokens", "maxRunSeconds")
+# An unattended run with no model or tool activity this long is stopped (see _run_chat_job): hang detection, never a length cap.
+JOB_IDLE_SECONDS = limits.JOB_IDLE_SECONDS
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
             "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
@@ -1569,106 +1545,28 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "you need from the user). Give every claim its evidence: a URL, a time, or an id.")
 
 
-_DESK_CAPS = ("deskMaxTurns", "deskMaxLive")
-
-
-def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str, Any]:
-    """A desk's budget: the user's settings, which a desk may tighten and never loosen.
-
-    Not to be confused with `_caps` below, which bounds one reply of an unattended run. These bound
-    the whole desk, across turns. 0 = unlimited, so it loses to any positive limit.
-    """
-    out = {k: cfg.get(k, llm.DEFAULT_SETTINGS[k]) for k in _DESK_CAPS}
-    for key, src in (("deskMaxTurns", "maxTurns"),):
-        want = (override or {}).get(src)
-        if want is None:
-            continue
-        try:
-            want = float(want)
-        except (TypeError, ValueError):
-            continue
-        have = float(out[key] or 0)
-        if want > 0 and (have <= 0 or want < have):
-            out[key] = want
-    out["deskMaxTurns"] = int(out["deskMaxTurns"] or 0)
-    out["deskMaxLive"] = limits.slots(cfg, "deskMaxLive")
-    return out
-
-
-def _caps(cfg: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
-    """`cfg` with each cap applied downward: a stricter user setting wins, and 0 (unlimited) loses to the cap."""
-    return {**cfg, **{k: (cap if not (cur := _num(cfg, k)) else min(cur, cap)) for k, cap in caps.items()}}
-
-
-def _job_caps(cfg: dict[str, Any], job_budget: Any) -> dict[str, Any]:
-    """The caps of one job run: JOB_BUDGET, then the job's own budget, both only downward. Re-clamped at use, so a
-    row edited behind the API's back still cannot loosen anything; a key outside JOB_BUDGET_KEYS or a value that is
-    not a positive number is ignored (0 would read as "unlimited" to _caps)."""
-    own = job_budget if isinstance(job_budget, dict) else {}
-    tight = {k: min(float(v), JOB_BUDGET[k]) for k, v in own.items() if k in JOB_BUDGET_KEYS
-             and isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0}
-    return _caps(_caps(cfg, JOB_BUDGET), tight)
-
-
 def proposal_only(run: Run | None) -> bool:
     return run is not None and run.kind in PROPOSAL_ONLY_KINDS
 
 
-def _num(cfg: dict[str, Any], key: str) -> float:
-    """`cfg[key]` as a non-negative finite number; anything else is the shipped default (0 for job caps)."""
-    v = cfg.get(key)
-    try:
-        f = float(v) if v is not None and not isinstance(v, bool) else math.nan
-    except (TypeError, ValueError):
-        f = math.nan
-    if not math.isfinite(f) or f < 0:
-        return float(llm.DEFAULT_SETTINGS.get(key) or 0)
-    return f
+class RunMeter:
+    """What one reply has used: rounds, tokens, cost and elapsed time (approval waits excluded). Display only; nothing reads it as a limit."""
 
-
-class Budget:
-    """Rounds / tokens / wall-clock for one reply (cost is tracked, never a limit). 0 on any axis means unlimited; approval waits do not count."""
-
-    def __init__(self, cfg: dict[str, Any]):
-        # A junk value already stored (from before PUT /settings validated) falls back to the default
-        # instead of raising on every reply.
-        self.max_rounds = limits.max_rounds(cfg)
-        self.max_tokens = int(_num(cfg, "maxRunTokens"))
-        self.max_seconds = _num(cfg, "maxRunSeconds")
+    def __init__(self) -> None:
         self.t0, self.paused = time.monotonic(), 0.0
         self.rounds = self.tokens = 0
         self.cost = 0.0
-        self.nudged = False
 
     def add(self, pt: int, ct: int, cost: float | None) -> None:
         self.tokens += pt + ct
-        self.cost += cost or 0.0  # an unpriced model simply does not use the cost axis
+        self.cost += cost or 0.0  # an unpriced model simply adds nothing to the cost
 
     def elapsed(self) -> float:
         return time.monotonic() - self.t0 - self.paused
 
-    def _ratios(self) -> dict[str, float]:
-        return {k: v / lim for k, v, lim in (("rounds", self.rounds, self.max_rounds), ("tokens", self.tokens, self.max_tokens),
-                                             ("time", self.elapsed(), self.max_seconds)) if lim > 0}
-
-    def fraction(self) -> float:
-        return max(self._ratios().values(), default=0.0)
-
-    def exceeded(self) -> str | None:
-        return next((k for k, r in self._ratios().items() if r >= 1.0), None)
-
-    def arm_deadline(self, floor: float = 5.0, cap: float | None = None) -> None:
-        """Bound the next provider stream by what is left of the wall-clock budget (llm.stream_deadline), so a hung
-        provider cannot outlive maxRunSeconds. Unlimited (0) leaves it unbounded unless `cap` says otherwise."""
-        left = self.max_seconds - self.elapsed() if self.max_seconds > 0 else None
-        if cap is not None:
-            left = cap if left is None else min(left, cap)
-        llm.stream_deadline.set(None if left is None else time.monotonic() + max(left, floor))
-
     def snapshot(self) -> dict[str, Any]:
-        """What agent_runs.budget stores: the limits and how much of each the run has used."""
-        return {"max_rounds": self.max_rounds, "max_tokens": self.max_tokens, "max_seconds": self.max_seconds,
-                "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
+        """What agent_runs.budget stores (the column keeps its old name): how much the run has used."""
+        return {"rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
 
 
@@ -1851,7 +1749,7 @@ def _stream_cancel(stop: asyncio.Event, steers: list[dict[str, Any]] | None, run
 async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None,
                        run: Run | None = None) -> AsyncIterator[tuple[str, Any]]:
     """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse.
-    `run` (when there is one) gets the durable side: approval rows, run status, budget snapshots, the idempotency journal."""
+    `run` (when there is one) gets the durable side: approval rows, run status, usage snapshots, the idempotency journal."""
     conv = convos.get(conv_id)
     if not conv:
         yield "error", {"message": "Conversation not found"}
@@ -1998,7 +1896,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         prior = prior[:last_u]
     rq = retrieval_query(prior, user_text)
     doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
-    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # also caps the profile block
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # every context block is a share of it
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
@@ -2052,8 +1950,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         compact_span = tracer.start("compact", "Compact history", {"kind": "history"}, parent=cspan)
         tracer.end(compact_span, {k: cinfo[k] for k in ("tokens_before", "tokens_after", "summarized")})
 
-    # Everything between creating the assistant row and the reply loop can raise (connector lookup, schemas, plans,
-    # budget). Without this the row stays blank with no error and its _active entry leaks.
+    # Everything between creating the assistant row and the reply loop can raise (connector lookup, schemas, plans).
+    # Without this the row stays blank with no error and its _active entry leaks.
     am: dict[str, Any] = {}
     try:
         am = pre_am or regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
@@ -2191,9 +2089,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                       "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
             decision = "deny"
             # The wait is the user's time, not the run's: off the wall clock, and the run shows as waiting.
-            budget, waited_from = tool_ctx.get("budget"), time.time()
-            if budget is not None:
-                run.budget = budget.snapshot()
+            meter, waited_from = tool_ctx.get("meter"), time.time()
+            if meter is not None:
+                run.budget = meter.snapshot()
             run.set_status("awaiting_approval")
             try:
                 while not fut.done():
@@ -2215,8 +2113,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 decision = fut.result() if fut.done() else "deny"
             finally:
                 _approvals.pop(uid, None)
-                if budget is not None:
-                    budget.paused += time.time() - waited_from
+                if meter is not None:
+                    meter.paused += time.time() - waited_from
                 run.set_status("running")
             allowed = decision != "deny"
             run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
@@ -2312,7 +2210,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if desk_id:
                     m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
             if desk_id:
-                m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
+                m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own autonomy)
                 m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
             # Past toolDeferAbove the model gets the core tools, what earlier searches loaded and tool_search; the
             # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
@@ -2417,8 +2315,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if routed:  # the line under the reply until text arrives; the chosen model's tag stays on the finished message
             yield "status", {"id": am["id"], "kind": "route", "model": model, "why": routed[1]}
 
-        budget = Budget(_job_caps(cfg, conv["settings"].get("job_budget")) if proposal_only(run) else cfg)
-        tool_ctx["budget"] = budget  # children are charged to it
+        meter = RunMeter()
+        tool_ctx["meter"] = meter  # children add their usage to it
         partial: str | None = None
         last_sig: str | None = None
         repeats = 0
@@ -2581,7 +2479,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 await toolbox.shell.kill_conversation(conv_id)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
-            """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+            """Closing answer after a breaker stop: one tool-free call, abandoned if it hangs past FINAL_ROUND_SECONDS."""
             nonlocal notice
             _reinject_plan()
             # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
@@ -2593,7 +2491,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
-            budget.arm_deadline(cap=FINAL_ROUND_SECONDS)  # the closing answer is exempt from the budget, not from a hang
+            llm.stream_deadline.set(time.monotonic() + FINAL_ROUND_SECONDS)
             # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
             # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
@@ -2616,6 +2514,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         notice = EFFORT_DROPPED_NOTICE
                 if steers:
                     break
+            llm.stream_deadline.set(None)
             tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
                               "output_chars": len("".join(buf[start:]))},
                        error="Stopped by user" if stop.is_set() else None)
@@ -2690,7 +2589,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     run_user_texts.append(um["content"])
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
-                # the work it asks for. Budget and round count are the run's and stay.
+                # the work it asks for. The meter is the run's and stays.
                 if partial == "loop":
                     partial = None
                 repeats, last_sig, stuck_hits, stop_text = 0, None, 0, None
@@ -2700,7 +2599,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     detector.obs.clear()
 
             _round += 1
-            budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
+            meter.rounds = _round - 1  # rounds already completed, for display
             round_start = len(buf)
             end: dict[str, Any] = {}
             # Old tool results shrink to stubs once the context passes a quarter of the window (`microAt`). Earlier
@@ -2724,7 +2623,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
-            budget.arm_deadline()
             async for ev in _stream_round():
                 if stop.is_set():
                     break
@@ -2756,17 +2654,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
             ensure_unique_call_ids(calls, seen_call_ids)
-            if end.get("finish_reason") == "timeout":
-                # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
-                # A reply that already ran tools has something to close out with (see below), so it does not raise.
-                if not "".join(buf).strip() and not any(m.get("role") == "tool" for m in messages):
-                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise 'Time limit per reply' in Settings → Tools.")
-                partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
+            meter.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
             if run is not None:
-                run.budget = budget.snapshot()
+                run.budget = meter.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
@@ -2783,15 +2675,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     calls = []
                     error, error_kind = "The provider filtered this reply. Try rephrasing.", "content_filter"
                     break
-                if fr == "timeout":
-                    calls = []
-                    if not round_text and any(m.get("role") == "tool" for m in messages):
-                        messages.append({"role": "system", "content": TIME_STOP})
-                        async for chunk in _final_round():
-                            yield chunk
-                        if steers and not stop.is_set():
-                            continue
-                    break  # partial is already "time"; text that was written stays as it is
                 if fr == "length" and not calls:
                     if "".join(buf).strip():
                         partial = "length"
@@ -2801,13 +2684,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if inc:
                     calls = []
-                    if not round_text and quiet_retries == 0 and not budget.exceeded():
+                    if not round_text and quiet_retries == 0:
                         quiet_retries = 1  # a counted round: the usage above was already charged
                         continue
                     partial = "incomplete"
                     break
                 if not calls and not desk_id and not "".join(buf).strip():
-                    if quiet_retries == 0 and not budget.exceeded():
+                    if quiet_retries == 0:
                         quiet_retries = 1
                         messages.append({"role": "system", "content": EMPTY_NUDGE})
                         continue
@@ -2838,31 +2721,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     partial = "length"
                     messages.append(turn)
                     for c in calls:
-                        messages.append({"role": "tool", "tool_call_id": c["id"],
-                                         "content": BUDGET_STOP.format(axis="the model's output limit")})
+                        messages.append({"role": "tool", "tool_call_id": c["id"], "content": CUT_STOP})
                     async for chunk in _final_round():
                         yield chunk
                     if steers and not stop.is_set():
                         continue
                     break
-            over = budget.exceeded()
-            if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
-                    and plans.covers(run.run_id, [(c["name"], c["_args"]) for c in calls], desk_id=run.desk_id)):
-                # Every call here is a step the user approved. The budget that ran out was spent drafting that
-                # plan, so refusing now would turn the approval into a dead end. The next round is still checked.
-                # Never a desk: a desk carries its remaining steps into a chained turn instead (_should_chain).
-                over = None
-            if over:
-                # Out of budget: never drop the pending calls silently — answer each one, then let the model close out.
-                partial = over
-                messages.append(turn)
-                for c in calls:
-                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": BUDGET_STOP.format(axis=over)})
-                async for chunk in _final_round():
-                    yield chunk
-                if steers and not stop.is_set():
-                    continue
-                break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
             # Read-only agent_spawn calls of this round start together; never in plan mode or when every change cards.
@@ -3018,7 +2882,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 # MCP tools are external by construction but are not in Toolbox.specs, so proposes()
                 # cannot see them. A scheduled run must still record them instead of calling them.
-                # A 'propose' desk files its external calls the same way, without a job's budget or hint.
+                # A 'propose' desk files its external calls the same way, without a job's hint.
                 proposing = mode != "off" and run is not None and (
                     (proposal_only(run) and (toolbox.proposes(c["name"]) or mcp_is(c["name"])))
                     or (autonomy == "propose" and danger == "external"))
@@ -3191,7 +3055,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                     and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
                         if not mine:
                             log.warning("approval %s was already on file for another call; only a live answer will count", uid)
-                        run.budget = budget.snapshot()
+                        run.budget = meter.snapshot()
                         run.set_status("awaiting_approval")
                     awaiting = {"id": uid, "name": c["name"], "arguments": args, "result_preview": "", "duration_ms": 0,
                                 "error": None, "pending": True, "needs_approval": True, "forced": forced}
@@ -3292,7 +3156,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                               "".join(rbuf).strip() or None)
                         convos.touch(conv_id)
                         if run is not None:
-                            run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
+                            run.partial, run.cost, run.rounds = partial, meter.cost, meter.rounds
                         yield "parked", {"message_id": am["id"], "call_id": uid, "name": c["name"]}
                         # Persist the reply with its card still pending, so the transcript keeps a
                         # card the user can answer after a reload; then end like any other reply,
@@ -3306,7 +3170,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         convos.finish_message(am["id"], text, None, used, tool_events, tracer.spans, reasoning)
                         convos.touch(conv_id)
                         if run is not None:
-                            run.partial, run.cost, run.rounds = None, budget.cost, budget.rounds
+                            run.partial, run.cost, run.rounds = None, meter.cost, meter.rounds
                         yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
@@ -3323,7 +3187,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          plan_id=(approved_plan or {}).get("plan_id")
                                          if (approved_plan or {}).get("status") == "approved" else None,
                                          question="" if c["name"] in QUESTION_TOOLS else None)
-                    budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
+                    meter.paused += time.time() - approval_t0  # approval waits are the user's time, not the run's
                     t0 = time.time()  # don't count waiting time as tool time
                     if decision in ("allow", "allow_host") and forced:
                         _approve_url(tool_ctx, args, decision == "allow_host")
@@ -3551,9 +3415,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if steers and not stop.is_set():
                     continue
                 break
-            if not budget.nudged and budget.fraction() >= 0.6:
-                budget.nudged = True
-                messages.append({"role": "system", "content": SOFT_NUDGE.format(pct=int(budget.fraction() * 100))})
     except asyncio.CancelledError:
         # Shutdown or a dropped task, not a user Stop: persist what was written and re-raise.
         text = "".join(buf).strip()
@@ -3601,7 +3462,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if run is not None:
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.
-        run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
+        run.partial, run.cost, run.rounds = partial, meter.cost, meter.rounds
     yield "done", {"id": am["id"], "error": error, "context_used": cite_slim(used), "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
@@ -3721,16 +3582,26 @@ def _settle_regenerate(run: Run, failure: str | None) -> None:
 
 
 async def _run_job(run: Run, body: ChatIn) -> None:
-    """An unattended run is _run_chat under a hard ceiling, so a hung tool or provider cannot hold it open forever."""
+    """An unattended run is _run_chat under an idle watchdog: a run that publishes nothing for JOB_IDLE_SECONDS (no model
+    or tool activity, and not waiting on an approval) is hung and is stopped. A long healthy run is never cut."""
+    task = asyncio.ensure_future(_run_chat(run, body))
     try:
-        await asyncio.wait_for(_run_chat(run, body), JOB_HARD_SECONDS)
-    except asyncio.TimeoutError:
-        raise RuntimeError(f"This scheduled run was stopped after {int(JOB_HARD_SECONDS // 60)} minutes without finishing.") from None
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=min(10.0, max(JOB_IDLE_SECONDS / 4, 0.05)))
+            if done:
+                return task.result()
+            if run.status != "awaiting_approval" and time.monotonic() - run.last_active >= JOB_IDLE_SECONDS:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise RuntimeError(f"This scheduled run was stopped after {int(JOB_IDLE_SECONDS // 60)} minutes with no model or tool activity.")
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
 
 
 async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
     """A desk turn is an ordinary reply with run.desk_id set. Returns the settled desk row; the
-    supervisor decides whether to chain. Everything autonomous about it — the loop, the budget, the
+    supervisor decides whether to chain. Everything autonomous about it — the loop, the meter, the
     breakers, the approval pause — is _chat_stream's, unchanged."""
     rt = DeskRuntime(desks, desk_id)
     partial: str | None = None
@@ -3744,7 +3615,7 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
                 run.message_id = data.get("id")
             if event == "parked":
                 # A parked turn returns without a `done`, but it did spend: count it, or a desk that keeps
-                # parking never runs out of budget.
+                # parking is still a turn in its tally.
                 desks.charge(desk_id, run.cost, 1)
             if event == "done" and not data.get("segment"):
                 # A steered reply closes its current segment with its own `done` and keeps going;
@@ -3794,29 +3665,18 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
     return settled
 
 
-BUDGET_STOPS = ("rounds", "tokens", "time")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
-
-
 def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str | None:
-    """Which turn follows this one: "continue", "nudge", or None (settle). Both decision points -
-    the run's final `done` and the supervisor after the run ends - call this on the same row, so they
-    cannot disagree.
+    """Which turn follows this one: "nudge" or None (settle). Both decision points - the run's final `done`
+    and the supervisor after the run ends - call this on the same row, so they cannot disagree.
 
-    continue: any per-reply budget stop (with or without a plan) in a turn that made progress - consumed
-    a plan step or ran a tool without error. The progress guard is what stops a desk burning turns
-    re-reading the same file. nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more
-    turn tells the model to finish or ask, never two in a row. Caps hold for both."""
-    caps = _desk_caps(settings(), desk.get("budget"))
-    turns = caps["deskMaxTurns"]
+    nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more turn tells the model to finish or
+    ask, never two in a row. That is the only chain, so a desk turn ends by stuck detection, its own
+    desk_done / desk_ask, or the user."""
     # claim_run puts a desk with no plan into `planning` whatever its autonomy, and only a plan-autonomy desk
     # is actually held in plan mode (see _chat_stream); an ask/propose desk works from its first turn.
     live = desk.get("status") == "working" or (desk.get("status") == "planning" and desk.get("autonomy") != "plan")
-    if not (live and not run.stop.is_set() and not error and not run.error
-            # 0 means unlimited, the same reading _caps gives it.
-            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)):
+    if not (live and not run.stop.is_set() and not error and not run.error):
         return None
-    if run.partial in BUDGET_STOPS:
-        return "continue" if (run.steps_consumed > 0 or run.tool_ok > 0) else None
     if run.partial is None and not str(run.input.get("content") or "").startswith(DESK_NUDGE):
         return "nudge"
     return None
@@ -4941,7 +4801,7 @@ async def _recover_runs() -> None:
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------
-# A job fire is a chat run in its own conversation, with kind='job', so it gets the journal, the budget snapshot
+# A job fire is a chat run in its own conversation, with kind='job', so it gets the journal, the usage snapshot
 # and the idempotency journal for free — and proposal_only() for free with them.
 LATE_NOTICE = ("[This run was scheduled for {due}, and is only starting now, at {fired} — {late} late{skipped}. "
                "Say so in one line at the top of your report, and re-check anything time-sensitive rather than "
@@ -5011,7 +4871,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     """One fire: a fresh conversation, then the ordinary chat runner over the job's prompt.
 
     Fresh each time on purpose. A morning brief that replayed its own back catalogue every day would get slower,
-    dearer and worse at the actual job; one fire, one transcript, one tight budget.
+    dearer and worse at the actual job; one fire, one transcript.
     """
     if job.get("target") == "desk":
         return await _launch_desk_job(job, fire)
@@ -5032,8 +4892,6 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
         if ag is None:
             raise RuntimeError("The agent this routine belongs to no longer exists")
         conv_settings["agent"] = ag["name"]
-    if job.get("budget"):
-        conv_settings["job_budget"] = job["budget"]  # read by the runner, which clamps it again (_job_caps)
     if fire.get("mail") or fire.get("event"):
         # The prompt carries senders, subjects or event text the user did not write: taint the transcript from its first
         # turn, so a later turn continued from the Inbox still forces a card over a standing grant.
@@ -5094,7 +4952,7 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
     capped = _over_live_cap()
     out = await _create_desk(DeskIn(brief=_job_prompt(job, fire), title=f"{job['name']} · {_stamp(due)}",
                                     project_id=job["project_id"], autonomy=job.get("desk_autonomy") or "plan",
-                                    budget=job.get("desk_budget"), start=not capped))
+                                    start=not capped))
     desk_id = out["desk"]["id"]
     convos.update(out["conversation_id"], {"settings": {"jobId": job["id"], "jobDueAt": due}})
     run_id = out.get("run_id")
@@ -5142,7 +5000,7 @@ class JobIn(BaseModel):
     watch_dir: str | None = Field(default=None, max_length=1000)
     # When a run is worth an OS notification (job_history.notify_events).
     notify: Literal["problems", "always", "never"] = "problems"
-    # None = the default model / JOB_BUDGET as is. budget can only tighten JOB_BUDGET (_check_job_budget).
+    # None = the default model. `budget` and `desk_budget` are accepted from older clients and ignored.
     model: str | None = Field(default=None, max_length=200)
     budget: dict[str, Any] | None = None
     # kind='mail': a Gmail search; a matching thread that is new or has a new message fires one run.
@@ -5175,7 +5033,7 @@ class JobPatch(BaseModel):
     watch_dir: str | None = Field(default=None, max_length=1000)
     notify: Literal["problems", "always", "never"] | None = None
     model: str | None = Field(default=None, max_length=200)  # an explicit null resets to the default model
-    budget: dict[str, Any] | None = None  # an explicit null resets to JOB_BUDGET
+    budget: dict[str, Any] | None = None  # accepted and ignored
     mail_query: str | None = Field(default=None, max_length=500)
     calendar_query: str | None = Field(default=None, max_length=300)
     calendar_id: str | None = Field(default=None, max_length=300)
@@ -5285,15 +5143,6 @@ async def _check_job_model(model: str | None) -> None:
         raise HTTPException(422, f"Unknown model: {model}")
 
 
-def _check_job_budget(budget: dict[str, Any] | None) -> None:
-    """Tighten-only: each key one of JOB_BUDGET_KEYS, each value above 0 and no more than JOB_BUDGET's."""
-    for k, v in (budget or {}).items():
-        if k not in JOB_BUDGET_KEYS:
-            raise HTTPException(422, f"'{k}' is not a job budget setting (only {', '.join(JOB_BUDGET_KEYS)})")
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= JOB_BUDGET[k]:
-            raise HTTPException(422, f"{k} must be a number above 0 and at most {JOB_BUDGET[k]:g}")
-
-
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
@@ -5334,20 +5183,19 @@ async def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir,
                     mail_query=body.mail_query, calendar_query=body.calendar_query)
     _check_allowed_tools(body.allowed_tools)
-    _check_job_budget(body.budget)
     await _check_job_model(body.model)
     _check_target(body.target, body.desk_autonomy, body.allowed_tools)
     _check_agent(body.agent_id, body.target)
     job = jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
-                       model=body.model or None, budget=body.budget or None,
+                       model=body.model or None,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None,
                        mail_query=body.mail_query.strip() if body.kind == "mail" and body.mail_query else None,
                        calendar_query=body.calendar_query.strip() if body.kind == "calendar" and body.calendar_query else None,
                        calendar_id=body.calendar_id or None, minutes_before=body.minutes_before,
                        only_on_change=body.only_on_change,
-                       target=body.target, desk_autonomy=body.desk_autonomy, desk_budget=body.desk_budget,
+                       target=body.target, desk_autonomy=body.desk_autonomy,
                        agent_id=body.agent_id or None)
     scheduler.nudge()  # re-read the earliest slot now: the loop may be mid-way through a 60 s nap past this job's time
     return job
@@ -5355,7 +5203,7 @@ async def create_job(body: JobIn) -> dict[str, Any]:
 
 @app.patch("/jobs/{id}")
 async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_unset=True)
+    patch = body.model_dump(exclude_unset=True, exclude={"budget", "desk_budget"})  # old clients still send them
     if patch.get("target", "") is None:
         patch.pop("target")
     if "project_id" in patch:
@@ -5372,7 +5220,6 @@ async def update_job(id: str, body: JobPatch) -> dict[str, Any]:
         patch["allowed_tools"] = None
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
-    _check_job_budget(patch.get("budget"))
     await _check_job_model(patch.get("model"))
     _check_target(merged.get("target") or "run", merged.get("desk_autonomy"), merged.get("allowed_tools"))
     _check_agent(merged.get("agent_id"), merged.get("target"))
@@ -5405,7 +5252,7 @@ def delete_job(id: str) -> dict[str, bool]:
 
 @app.post("/jobs/{id}/run")
 async def run_job_now(id: str, test: bool = False) -> dict[str, Any]:
-    """Fire a job by hand, disabled or not. It is still a job run: proposal-only, on the job budget. The schedule
+    """Fire a job by hand, disabled or not. It is still a job run: proposal-only. The schedule
     is untouched, so the next cron slot still fires on its own. `test=1` labels the run "test" in the inbox and the
     history; like any manual run it is never retried and never counts toward the failure streak."""
     job = jobs.get(id)
@@ -5469,7 +5316,7 @@ def job_runs_csv(id: str, limit: int = 200) -> Response:
 
 @app.post("/jobs/{id}/dry_run")
 async def dry_run_job(id: str) -> dict[str, Any]:
-    """Preview a job: the same prompt on the same budget with every tool that is not read-only switched off, and a
+    """Preview a job: the same prompt with every tool that is not read-only switched off, and a
     line telling the model to describe rather than do. Still a job run, so proposal-only; with nothing outward
     available it makes no proposals. Hidden from the inbox's "while you were away" and never counted as a failure."""
     job = _known_job(id)
@@ -5930,7 +5777,7 @@ async def _jobs_shutdown() -> None:
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
-    return {**usage.report(days), "alerts": usage.alert_state(cfg), "prices": pricing.table(cfg)}
+    return {**usage.report(days), "prices": pricing.table(cfg)}
 
 
 @app.get("/conversations/{id}/usage")
@@ -9067,7 +8914,7 @@ class DeskIn(BaseModel):
     title: str | None = None
     project_id: str | None = None
     autonomy: str = "plan"
-    budget: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None  # accepted from older clients and ignored
     start: bool = True
     inputs: list[DeskInputRef] = []
 
@@ -9081,7 +8928,7 @@ class DeskPatch(BaseModel):
     autonomy: str | None = None
     project_id: str | None = None
     archived: bool | None = None
-    budget: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None  # accepted from older clients and ignored
     clear_project: bool = False
 
 
@@ -9199,7 +9046,7 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
     conv = convos.create(pid, _title_from(body.title or brief), cfg["defaultModel"])
     try:
         desk = desks.create(conversation_id=conv["id"], brief=brief, title=(body.title or "").strip(),
-                            project_id=pid, autonomy=body.autonomy or "plan", budget=body.budget,
+                            project_id=pid, autonomy=body.autonomy or "plan",
                             origin_conversation_id=origin)
     except ValueError as e:
         convos.delete(conv["id"])        # the conversation exists only to hold this desk's transcript
@@ -9251,10 +9098,10 @@ def _desk_on_chat(body: DeskIn) -> dict[str, Any]:
     desk = desks.by_conversation(cid)
     try:
         if desk:
-            desk = desks.update(desk["id"], {"autonomy": body.autonomy, "budget": body.budget or {}, "archived": False}) or desk
+            desk = desks.update(desk["id"], {"autonomy": body.autonomy, "archived": False}) or desk
         else:
             desk = desks.create(conversation_id=cid, brief=brief, title=conv["title"], project_id=conv["project_id"],
-                                autonomy=body.autonomy, budget=body.budget)
+                                autonomy=body.autonomy)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     if inputs:

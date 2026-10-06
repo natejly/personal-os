@@ -157,7 +157,7 @@ def review_task(brief: str, summary: str, files: list[str]) -> str:
 
 async def run_review(tb: Any, ctx: dict[str, Any], task: str) -> str | None:
     """The reviewer's report text, or None when no review could run in this context. Reuses the subagent machinery
-    (concurrency cap, parent budget, read-only role), so it is as bounded as any agent_spawn."""
+    (concurrency cap, read-only role), so it is as bounded as any agent_spawn."""
     sub = getattr(tb, "subagents", None)
     if sub is None or int(ctx.get("depth") or 0) > 0 or not ctx.get("run_id"):
         return None

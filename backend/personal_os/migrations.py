@@ -318,6 +318,15 @@ def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
             c.execute("UPDATE memories SET source_conversation_id=?, source_message_id=? WHERE id=?", (conv, um[0], mem[0]))
 
 
+BUDGET_SETTING_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subagentMaxRounds", "deskMaxTurns",
+                       "codingSessionTimeoutMinutes", "contextBudget", "skillsInlineBudget", "usageAlerts")
+
+
+def _drop_budget_settings(c: sqlite3.Connection) -> None:
+    """Round, token, time, turn and spend limits no longer exist; their stored values are dead rows."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in BUDGET_SETTING_KEYS])
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -337,6 +346,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (15, "memories_expires_at", _memories_expires_at),
     (16, "memories_fts_live", _memories_fts_live),
     (17, "memory_provenance_backfill", _memory_provenance_backfill),
+    (18, "drop_budget_settings", _drop_budget_settings),
 ]
 
 

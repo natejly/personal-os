@@ -52,7 +52,7 @@ async function showOutput(f: ChatFile, chat: string): Promise<void> {
 /**
  * Does what a click on a row means (see rowAction). `jump` opens the chat, which a side-panel file needs when the
  * click came from the sidebar (the canvas passes its own); null means the chat is already on screen.
- * A project file no chat touched has no chat to open: a note opens in the editor, an upload in the project's Files tab.
+ * A project file no chat touched has no chat to open: a note opens in the editor, an upload in the project's Artifacts tab.
  */
 export async function openChatFile(f: ChatFile, jump: ((conversationId: string) => void) | null = (id) => void useStore.getState().selectChat(id)): Promise<void> {
   const s = useStore.getState()
@@ -64,7 +64,7 @@ export async function openChatFile(f: ChatFile, jump: ((conversationId: string) 
       case 'jump-to-chat': return
       case 'open-doc': return await s.openDoc(f.ref)
       case 'open-upload': {
-        if (!chat) return f.project_id ? s.openProject(f.project_id, 'files') : undefined
+        if (!chat) return f.project_id ? s.openProject(f.project_id, 'artifacts') : undefined
         const d = await api.documents.get(f.ref)
         if (d.text) s.openShow(chat, { kind: 'markdown', title: f.name, source: d.text })
         else s.openFiles('uploads')

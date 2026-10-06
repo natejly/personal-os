@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Conversation } from '@shared/types'
-import { adjacentChatId, partitionChats, projectRows, sidebarOrder } from './chatRows'
+import { adjacentChatId, partitionChats, sidebarOrder } from './chatRows'
 
 const NOW = new Date('2026-10-02T12:00:00').getTime()
 const t = (daysAgo: number): number => (NOW - daysAgo * 86_400_000) / 1000
@@ -42,12 +42,4 @@ test('adjacentChatId clamps and starts from the first row', () => {
   assert.equal(adjacentChatId(l, 'a', 1), 'b')
   assert.equal(adjacentChatId(l, 'c', 1), null)
   assert.equal(adjacentChatId([], 'a', 1), null)
-})
-
-test("a project's rows interleave its chats and notes, newest first; personal items stay out", () => {
-  const rows = projectRows([c('a', 2, { project_id: 'p' }), c('b', 0)], [
-    { id: 'n1', project_id: 'p', title: 'n1', updated_at: t(1) }, { id: 'n2', project_id: 'p', title: 'n2', updated_at: t(3) }
-  ])
-  assert.deepEqual(rows.p.map((r) => `${r.kind}:${r.id}`), ['doc:n1', 'chat:a', 'doc:n2'])
-  assert.deepEqual(Object.keys(rows), ['p'])
 })

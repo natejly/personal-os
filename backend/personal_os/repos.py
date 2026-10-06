@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
+from .migrations import sync_memories_fts
 
 
 ALL = "__all__"  # sentinel: every scope (used by the library views)
@@ -718,7 +719,7 @@ class Memories:
                     raise ValueError("Memory content cannot be empty")
                 c.execute("UPDATE memories SET content=?, updated_at=? WHERE id=?", (patch["content"].strip(), now(), id))
                 c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
-                c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (patch["content"].strip(), id))
+                sync_memories_fts(c, [id])  # re-adds it only if live: editing a trashed or superseded row must not make it searchable
             if "kind" in patch and patch["kind"]:
                 c.execute("UPDATE memories SET kind=? WHERE id=?", (patch["kind"], id))
             if "pinned" in patch and patch["pinned"] is not None:

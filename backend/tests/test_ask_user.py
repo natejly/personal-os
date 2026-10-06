@@ -136,6 +136,21 @@ def test_an_answer_on_the_card_comes_back_as_the_result() -> None:
     assert res["answer"] == "Neither, use C" and "choice" not in res, res
 
 
+def test_a_run_of_answered_questions_is_never_called_stuck() -> None:
+    """An answered question returns without the tool body running; five in a row is a conversation, not refused calls."""
+    qs = [json.dumps({"question": f"Question number {i}?"}) for i in range(6)]
+    ROUNDS.extend([{"tool_calls": [{"id": f"q{i}", "name": "ask_user", "arguments": q}]} for i, q in enumerate(qs)] + [["thanks"]])
+    _, rid = start()
+    for i in range(6):
+        row = wait_until(lambda i=i: next((r for r in store.approvals("pending", run_id=rid) if r["call_id"].endswith(f"q{i}")), None),
+                         f"card {i}")
+        j("POST", f"/approvals/{row['call_id']}", {"decision": "allow", "note": f"answer {i}"})
+    assert finished(rid)["status"] == "done"
+    told = [m["content"] for r in SEEN for m in r if m["role"] == "tool"]
+    assert told and not [c for c in told if "[stuck_notice]" in c or "keeps getting stuck" in c], "no stuck text reached the model"
+    assert SEEN[-1][-1]["role"] == "tool" and json.loads(SEEN[-1][-1]["content"])["answer"] == "answer 5"
+
+
 def test_approved_without_an_answer_is_no_answer() -> None:
     ROUNDS.extend([ask(), ["ok"]])
     _, rid = start()

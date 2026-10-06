@@ -32,10 +32,10 @@ export default function ExportMenu({ title, content, projectId = null }: { title
     const name = printFilename(title)
     try {
       const r = await window.os.print.exportPdf(title || 'Untitled', stripAiFences(content), name, mode)
-      if (!r) return
+      if (!r) return // null: the save sheet was cancelled
       if (typeof r === 'string') {
         const saved = r.split(/[/\\]/).pop() ?? name
-        toast(`Saved to Downloads: ${saved}`, 'info', { label: 'Show in Finder', run: () => void window.os.data.fileAction(r, 'reveal') })
+        toast(`Saved ${saved}`, 'info', { label: 'Show in Finder', run: () => void window.os.data.fileAction(r, 'reveal') })
       }
       else await uploadDocuments([new File([new Uint8Array(r)], name, { type: 'application/pdf' })], projectId)
     } catch (e) {

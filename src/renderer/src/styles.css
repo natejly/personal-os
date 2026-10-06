@@ -1475,6 +1475,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-group-rows { display: flex; flex-direction: column; gap: 4px; padding: 0 0 6px 14px; }
 .tool-group-rows > .tool-event { border: 0; background: transparent; }
 .tool-err { padding: 0 10px 6px 30px; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-review { padding: 0 10px 6px 30px; font-size: 11px; }
+.approval-history-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.approval-history-filters input, .approval-history-filters select { flex: 1 1 120px; min-width: 0; }
 .tool-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Not while it waits for approval: that row already says "needs approval", and nothing is running. */
 .tool-event.pending:not(.awaiting) .tool-name::after { content: ' running…'; font-weight: 400; color: var(--text-faint); }

@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, CODING_SESSION_TIMEOUT_MINUTES, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, CONTEXT_BUDGET, DESK_MAX_TURNS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, IMESSAGE_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, RUN_SECONDS, RUN_TOKENS, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SKILLS_INLINE_BUDGET, SUBAGENT_MAX_DEPTH, SUBAGENT_MAX_ROUNDS, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, CODING_SESSION_TIMEOUT_MINUTES, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, CONTEXT_BUDGET, DESK_MAX_TURNS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, RUN_SECONDS, RUN_TOKENS, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SKILLS_INLINE_BUDGET, SUBAGENT_MAX_DEPTH, SUBAGENT_MAX_ROUNDS, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -283,14 +283,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
                   "query": "newer_than:14d -category:promotions -category:social"},
-    # Text Grain from your own phone (imessage.py). Off until switched on; only the listed handles are heard.
-    "imessageEnabled": False,
-    "imessageHandles": [],
-    "imessageConversationId": None,  # None: a "Texts" conversation Grain makes on first use
-    "imessageNotifyLongRuns": False,  # also text approvals and finish notices for runs that were not started by text
-    "imessageLongRunMinutes": IMESSAGE_LONG_RUN_MINUTES,
-    "imessageSelfChatGuid": None,  # the confirmed note-to-self chat (from /imessage/self-chats); None: no chat is treated as self
-    "imessageReplyMarker": "🌾 ",  # prefixed to every text Grain sends; the self chat skips rows that start with it
+    # Text Grain from your own phone over a Telegram bot (telegram.py). Off until a token is saved and a chat is paired.
+    "telegramEnabled": False,
+    "telegramNotifyLongRuns": False,  # also send approvals and finish notices for runs that were not started from Telegram
+    "telegramLongRunMinutes": TELEGRAM_LONG_RUN_MINUTES,
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},

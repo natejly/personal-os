@@ -14,9 +14,9 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import codingagents, imessage, macos, opencode, shell
+from . import codingagents, macos, opencode, shell
 
-AUTOMATION = {"messages": "com.apple.MobileSMS", "finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
+AUTOMATION = {"finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
 CLAUDE_INSTALL_HINT = "Install the claude CLI: npm i -g @anthropic-ai/claude-code"
 
@@ -36,15 +36,7 @@ def _safe(fn: Callable[[], str]) -> str:
 def _full_disk() -> str:
     if not macos.IS_MAC:
         return macos.UNKNOWN
-    if macos.full_disk_access():
-        return macos.GRANTED
-    try:
-        imessage._open_ro(imessage.DEFAULT_CHAT_DB).close()
-        return macos.GRANTED
-    except imessage.NeedsFullDiskAccess:
-        return macos.DENIED
-    except Exception:  # noqa: BLE001 - e.g. no Messages database on this Mac
-        return macos.DENIED
+    return macos.GRANTED if macos.full_disk_access() else macos.DENIED
 
 
 @lru_cache(maxsize=8)

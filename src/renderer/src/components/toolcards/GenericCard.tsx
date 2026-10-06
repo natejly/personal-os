@@ -3,6 +3,8 @@ import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDis
 import ApprovalRules from '../ApprovalRules'
 import { ArgList, RawDetails, ResultBlock } from './parts'
 import { useStore } from '../../store'
+import ToolBadges from '../connectors/ToolBadges'
+import { connectorName } from '../connectors/catalog'
 import './toolcards.css'
 
 /**
@@ -33,6 +35,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
   onWhy?: () => void
 }): JSX.Element {
   const d = describeCall(event.name, event.arguments)
+  const connector = connectorName(event.name, event.mcp)
   // A doc tool names its doc by id; show the title the user knows it by.
   const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
   const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
@@ -49,6 +52,11 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
             {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
           : 'This acts outside the app.'}
       </div>
+      {connector && (
+        <div className="tc-origin small muted">
+          From connector <b>{connector}</b> <ToolBadges readOnly={event.mcp?.read_only} destructive={event.mcp?.destructive} />
+        </div>
+      )}
       <ArgList rows={argRows(args)} />
       <ApprovalRules event={event} conversationId={conversationId} decide={decide} />
     </div>

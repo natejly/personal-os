@@ -9,6 +9,7 @@ backend/**/__pycache__
 backend/*.egg-info
 .env
 data/
+!backend/personal_os/data/
 
 # build info
 *.tsbuildinfo

@@ -284,7 +284,10 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   the procedures it can be asked to repeat; **Agents**, roles with their own
   face, instructions, tools and skills (describe one and the model drafts it; you
   edit and approve); **Automations**, which holds workflows (multi-step jobs you
-  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
+  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox. Install them
+  from a curated catalog, search the official MCP Registry, or import the servers you already set up in
+  Claude Desktop, Claude Code or Cursor. Every connector tool asks by default, grants are bound to the
+  tool's schema, and keys live in the Keychain. See [docs/connectors.md](docs/connectors.md).
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -841,6 +844,8 @@ docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
+docs/connectors.md  Connectors: MCP catalog, import, security model, writing your own
+examples/mcp/       Two small example MCP servers (Python, TypeScript)
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
 docs/digest.md      The quiet daily digest in the Agent Inbox

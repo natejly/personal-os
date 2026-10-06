@@ -8,6 +8,7 @@ This section also catches up on work merged between 2026-10-01 and 2026-10-03 th
 
 ### Changed
 
+- **No todo calendar mirror; one plan card.** Todos no longer copy onto a Google calendar. Google Tasks sync stays, and events the mirror already created stay on the "Grain Todos" calendar (the planner still puts Focus blocks there). The chat and desk plan cards are now one card.
 - **Docs on Spaces.** A doc from the Files tree or a project group drags onto a space (the plane or a space row in the sidebar) and opens as a `doc` window that edits it in place with the same autosave as Files; **Add widget → Doc** lists recent docs or makes a new one.
 - **The Web window is gone.** The in-app browser widget, its sidebar row, the link-drop that opened one and the Electron `<webview>` plumbing were removed; no window enables `webviewTag` any more.
 - **Boards are now todos.** Todos has a board view (columns by status or by list) next to the list view; the Boards page, the `board_*` tools and the board canvas window are gone, and `todo_add`, `todo_update` and `todo_list` take `list_name` and `status`. A migration turns each existing board into a list and each card into a todo (title, notes, due date, priority, labels as tags, project, order and done state kept). The old tables are kept as `legacy_*`. Per-card agent claims and leases were dropped.

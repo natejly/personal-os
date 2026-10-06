@@ -119,23 +119,22 @@ test('pause and resume from the strip', async ({ grain }) => {
   expect(realErrors(grain)).toEqual([])
 })
 
-test('the Work autonomously menu: needs a chat first, sets autonomy and limits, and autonomy changes later', async ({ grain }) => {
+test('the Work autonomously menu: arms a draft, sets autonomy on a chat, and autonomy changes later', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   const { page } = grain
   await newChat(page)
-  await expect(page.getByRole('button', { name: /Work autonomously/ })).toBeDisabled() // nothing to work on yet
+  await expect(page.getByRole('button', { name: /Work autonomously/ })).toBeEnabled() // a draft can be armed before its first message
   llm.push({ text: 'Noted.' })
   await say(page, 'Summarise the thing')
   await expect(page.locator('.msg.assistant').last()).toContainText('Noted.', { timeout: 60_000 })
   const [chat] = await grain.api('/conversations?include_desks=true')
   llm.push({ calls: [{ name: 'desk_ask', args: { question: 'Hold on?' } }] })
-  await turnOn(page, 'Ask as it goes', 3)
+  await turnOn(page, 'Ask as it goes')
   await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   const id = await deskOf(grain, chat.id)
   const d = await grain.api(`/cowork/desks/${id}`)
   expect(d).toMatchObject({ autonomy: 'ask', conversation_id: chat.id })
-  expect(d.budget.maxTurns).toBe(3)
   expect(d.brief).toBe('Summarise the thing') // the chat's own ask is the brief
   // change autonomy while it works: takes effect on its next turn
   await page.getByRole('button', { name: /Autonomous: Ask as it goes/ }).click()

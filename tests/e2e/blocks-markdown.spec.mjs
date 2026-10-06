@@ -142,8 +142,8 @@ test.describe('code and tables', () => {
     expect(realErrors(grain)).toEqual([])
   })
 
-  test('a 1000-row table renders in a scroller', async ({ grain }) => {
-    const page = await start(grain)
+  const tableRendersOnce = (settings) => async ({ grain }) => {
+    const page = await start(grain, settings)
     const rows = Array.from({ length: 1000 }, (_, i) => `| r${i} | ${i} | ${i * 2} |`).join('\n')
     await reply(page, `| name | a | b |\n|---|---|---|\n${rows}`)
     const t = last(page).locator('.md-table-scroll table')
@@ -151,7 +151,10 @@ test.describe('code and tables', () => {
     await expect(t.locator('tbody tr')).toHaveCount(1000)
     await expect(t.locator('tbody tr').last()).toContainText('r999')
     expect(realErrors(grain)).toEqual([])
-  })
+  }
+  test('a 1000-row table renders in a scroller', tableRendersOnce())
+  // A streamed reply in a desk chat once repeated rows in the DOM until the chat was reopened.
+  test('a 1000-row table renders in a scroller in a desk chat', tableRendersOnce({ autonomousByDefault: true }))
 })
 
 test.describe('sanitising', () => {

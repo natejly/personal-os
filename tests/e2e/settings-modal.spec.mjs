@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { TABS, dialog, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
+import { TABS, dialog, openAdvanced, openSettings, closeSettings, save, setWindowSize } from './helpers/home.mjs'
 
 const benign = (e) => /ResizeObserver|Autofocus|favicon/i.test(e)
 const noErrors = (grain) => expect(grain.consoleErrors.filter((e) => !benign(e))).toEqual([])
@@ -17,11 +17,11 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
     await page.waitForTimeout(250)
   }
   // Arrow keys walk the rail.
-  await dialog(page).getByRole('tab', { name: 'Data' }).focus()
+  await dialog(page).getByRole('tab', { name: 'Advanced' }).focus()
   await page.keyboard.press('ArrowDown')
-  await expect(dialog(page).getByRole('tab', { name: 'Provider & cost' })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog(page).getByRole('tab', { name: 'Model' })).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('End')
-  await expect(dialog(page).getByRole('tab', { name: 'Data' })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog(page).getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
   await closeSettings(page)
   expect(bad).toEqual([])
   noErrors(grain)
@@ -40,40 +40,32 @@ test('Voice input settings act at once and persist through /voice/config', async
 
 test('toggles and fields persist through PUT /settings and survive relaunch', async ({ grain }) => {
   const { page, api } = grain
-  // Behavior
-  await openSettings(page, 'Behavior')
+  // Advanced groups
+  await openAdvanced(page, 'Assistant behaviour')
+  await dialog(page).getByLabel('Standing instructions').fill('Always answer in haiku.')
+  await field(page, 'Name new chats').setChecked(false, { force: true })
+  await openAdvanced(page, 'Desks and background')
   await field(page, 'Notify me about chats').setChecked(false, { force: true })
   await field(page, 'Notify me about scheduled jobs').setChecked(false, { force: true })
-  await dialog(page).getByLabel('Global system prompt').fill('Always answer in haiku.')
-  await field(page, 'Dictation chord').fill('Control+Alt+K')
-  await dialog(page).locator('summary', { hasText: 'Advanced' }).click()
+  await openAdvanced(page, 'Voice and shortcuts')
+  await field(page, 'Dictation key').fill('Control+Alt+K')
+  await openAdvanced(page, 'Developer')
   await field(page, 'Developer tools').setChecked(true, { force: true })
-  // Memory
-  await dialog(page).getByRole('tab', { name: 'Memory' }).click()
-  await field(page, 'Auto-learn').setChecked(false, { force: true })
-  await field(page, 'Auto-title chats').setChecked(false, { force: true })
-  await field(page, 'Learn how you write').setChecked(false, { force: true })
-  await field(page, 'Hybrid memory search').setChecked(false, { force: true })
-  await dialog(page).getByPlaceholder('Same as the default model').fill('mock-chat-2')
-  await field(page, 'Context window').fill('64000')
-  await field(page, 'Keep recent messages verbatim').fill('12')
-  // Tools
-  await dialog(page).getByRole('tab', { name: 'Permissions' }).click()
-  await field(page, 'Dangerously skip permissions').setChecked(true, { force: true })
+  await openAdvanced(page, 'Memory and search')
+  await field(page, 'Learn from chats').setChecked(false, { force: true })
+  await field(page, 'Learn how I write').setChecked(false, { force: true })
+  await field(page, 'Smarter memory search').setChecked(false, { force: true })
+  await openAdvanced(page, 'Approvals')
   await dialog(page).getByRole('button', { name: 'Accept all', exact: true }).click()
-  await field(page, 'Plan mode for new chats').selectOption('auto')
-  // Autonomy
-  await dialog(page).getByRole('tab', { name: 'Autonomy' }).click()
-  await field(page, 'Max tool rounds per reply').fill('17')
-  // Integrations
-  await dialog(page).getByRole('tab', { name: 'Integrations' }).click()
-  await field(page, 'Hold for').fill('100')
-  await field(page, 'SearXNG URL').fill('http://localhost:8080')
-  // Provider
-  await dialog(page).getByRole('tab', { name: 'Provider & cost' }).click()
-  await field(page, 'Default chat model').fill('mock-chat-2')
-  await field(page, 'Daily spend alert, dollars').fill('3')
-  await field(page, 'Monthly spend alert, dollars').fill('40')
+  await field(page, 'Plan first').selectOption('auto')
+  await openAdvanced(page, 'Files and web')
+  await field(page, 'Your own search server').fill('http://localhost:8080')
+  await openAdvanced(page, 'Mail, calendar and plans')
+  await field(page, 'Hold outgoing email so I can undo').setChecked(false, { force: true })
+  // Model
+  await dialog(page).getByRole('tab', { name: 'Model' }).click()
+  await field(page, 'Chat model').fill('mock-chat-2')
+  await field(page, 'Helper model').fill('mock-chat-2')
   await save(page)
 
   const check = async () => {
@@ -81,35 +73,44 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
     expect(s).toMatchObject({
       chatNotify: false, notifyJobs: false, systemPrompt: 'Always answer in haiku.', dictationChord: 'Control+Alt+K', devTools: true,
       autoLearn: false, autoTitle: false, learnStyle: false, hybridRetrieval: false, extractionModel: 'mock-chat-2',
-      contextWindow: 64000, compactKeepRecent: 12, skipPermissions: true, docEditMode: 'apply', planMode: 'auto', maxToolRounds: 17,
-      searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
+      docEditMode: 'apply', planMode: 'auto', searxngUrl: 'http://localhost:8080', defaultModel: 'mock-chat-2'
     })
-    expect(s.gmailSendHold.seconds).toBe(100)
-    expect(s.usageAlerts).toMatchObject({ dailyCost: 3, monthlyCost: 40 })
+    expect(s.gmailSendHold.enabled).toBe(false)
   }
   await check()
 
   const p2 = await grain.relaunch()
   await check()
-  await openSettings(p2, 'Behavior')
-  await expect(field(p2, 'Notify me about chats')).not.toBeChecked()
-  await expect(dialog(p2).getByLabel('Global system prompt')).toHaveValue('Always answer in haiku.')
-  await dialog(p2).getByRole('tab', { name: 'Memory' }).click()
-  await expect(field(p2, 'Context window')).toHaveValue('64000')
-  await dialog(p2).getByRole('tab', { name: 'Autonomy' }).click()
-  await expect(field(p2, 'Max tool rounds per reply')).toHaveValue('17')
-  await dialog(p2).getByRole('tab', { name: 'Permissions' }).click()
+  await openAdvanced(p2, 'Assistant behaviour')
+  await expect(field(p2, 'Name new chats')).not.toBeChecked()
+  await expect(dialog(p2).getByLabel('Standing instructions')).toHaveValue('Always answer in haiku.')
+  await openAdvanced(p2, 'Approvals')
   await expect(dialog(p2).getByRole('button', { name: 'Accept all', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await dialog(p2).getByRole('tab', { name: 'Provider & cost' }).click()
-  await expect(field(p2, 'Default chat model')).toHaveValue('mock-chat-2')
+  await dialog(p2).getByRole('tab', { name: 'Model' }).click()
+  await expect(field(p2, 'Chat model')).toHaveValue('mock-chat-2')
+  await closeSettings(p2)
+  noErrors(grain)
+})
+
+test('the permission mode saves at once and survives relaunch', async ({ grain }) => {
+  const { page, api } = grain
+  await openSettings(page, 'Permissions')
+  const modes = dialog(page).getByRole('radiogroup', { name: 'Permission mode' })
+  await expect(modes.getByRole('radio', { name: /^Manual/ })).toHaveAttribute('aria-checked', 'true')
+  await modes.getByRole('radio', { name: /^Auto/ }).click()
+  await expect.poll(async () => (await api('/settings')).permissionMode).toBe('auto')
+  await closeSettings(page)
+  const p2 = await grain.relaunch()
+  await openSettings(p2, 'Permissions')
+  await expect(dialog(p2).getByRole('radiogroup', { name: 'Permission mode' }).getByRole('radio', { name: /^Auto/ })).toHaveAttribute('aria-checked', 'true')
   await closeSettings(p2)
   noErrors(grain)
 })
 
 test('dirty modal asks before discarding; Esc answers the question', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Behavior')
-  await dialog(page).getByLabel('Global system prompt').fill('draft only')
+  await openAdvanced(page, 'Assistant behaviour')
+  await dialog(page).getByLabel('Standing instructions').fill('draft only')
   await page.keyboard.press('Escape')
   await expect(dialog(page).getByText('Discard unsaved changes?')).toBeVisible()
   await page.keyboard.press('Escape') // keep editing
@@ -124,55 +125,27 @@ test('dirty modal asks before discarding; Esc answers the question', async ({ gr
 test('invalid values are clamped or rejected without breaking the modal', async ({ grain }) => {
   const { page, api } = grain
   const before = await api('/settings')
-  await openSettings(page, 'Autonomy')
-  // maxToolRounds: 0, negative, huge, blank all clamp in the form.
-  let cur = before.maxToolRounds
-  for (const [v, want] of [['0', () => cur], ['-5', () => cur], ['999', () => 60], ['', () => cur], ['2.6', () => 3]]) {
-    await field(page, 'Max tool rounds per reply').fill(v)
+  // A number field clamps in the form: 0 and blank fall back to the default, negative and huge values stop at the ends.
+  // (Each value differs from the one saved before it, or Save stays disabled.)
+  const rounds = 'Delegate after this many tool rounds'
+  for (const [v, want] of [['999', 20], ['-5', 1], ['0', 2], ['2.6', 3], ['', 2]]) {
+    await openAdvanced(page, 'Desks and background')
+    await field(page, rounds).fill(v)
     await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)
-    cur = (await api('/settings')).maxToolRounds
-    expect(cur, `rounds ${v}`).toBe(want())
-    await openSettings(page, 'Autonomy')
+    expect((await api('/settings')).delegationAfterRounds, `rounds ${v}`).toBe(want)
   }
-  // Out-of-range context window: the backend refuses (422), the modal stays open with the draft.
-  await dialog(page).getByRole('tab', { name: 'Memory' }).click()
-  await field(page, 'Context window').fill('5')
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(dialog(page)).toBeVisible()
-  await expect(page.getByText(/contextWindow must be between/)).toBeVisible()
-  await field(page, 'Context window').fill('99999999')
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(dialog(page)).toBeVisible()
-  await field(page, 'Keep recent messages verbatim').fill('99999')
-  await field(page, 'Context window').fill('')
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(dialog(page)).toBeVisible()
-  expect((await api('/settings')).contextWindow).toBe(before.contextWindow)
-  // Blank context window and valid keep-recent save as defaults.
-  await field(page, 'Keep recent messages verbatim').fill('')
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(dialog(page)).toHaveCount(0)
-  const s = await api('/settings')
-  expect(s.contextWindow).toBe(128000)
-  expect(s.compactKeepRecent).toBe(8)
-
-  // Negative spend alerts clamp to 0 in the form.
-  await openSettings(page, 'Provider & cost')
-  await field(page, 'Daily spend alert, dollars').fill('-4')
-  await expect(field(page, 'Daily spend alert, dollars')).toHaveValue('0')
-  await closeDirty(page)
-
-  // The API refuses what the form cannot produce.
+  // The API refuses what the form cannot produce, and the context window the form no longer offers still has a range.
   for (const body of [
-    { maxToolRounds: -1 }, { maxToolRounds: 1e12 }, { maxToolRounds: 'x' }, { contextWindow: null },
+    { contextWindow: 5 }, { contextWindow: 99999999 }, { contextWindow: null }, { compactKeepRecent: 99999 }, { delegationAfterRounds: 'x' },
     { systemPrompt: null }, { tools: 'x' }, { sandboxRuntime: 'rm -rf' }, { retrievalMode: 'zzz' }, { planMode: 5 }
   ]) {
     const r = await api('/settings', { method: 'PUT', body, raw: true })
     expect(r.status, JSON.stringify(body)).toBeGreaterThanOrEqual(400)
     expect(r.status).toBeLessThan(500)
   }
-  expect((await api('/settings')).maxToolRounds).toBe(3)
+  expect((await api('/settings')).contextWindow).toBe(before.contextWindow)
+  expect((await api('/settings')).delegationAfterRounds).toBe(2)
   // Unknown keys are ignored.
   await api('/settings', { method: 'PUT', body: { nonsense: 1 } })
   expect((await api('/settings')).nonsense).toBeUndefined()
@@ -188,10 +161,10 @@ async function closeDirty(page) {
 
 test('empty model and garbage base URL do not break the modal or the app', async ({ grain }) => {
   const { page, api } = grain
-  await openSettings(page, 'Provider & cost')
-  await field(page, 'Default chat model').fill('')
-  await field(page, 'Base URL').fill('not a url ::: %%')
-  const known = (e) => /status of 50[0-9]/.test(e) // the unreachable provider's 502 on /models
+  await openSettings(page, 'Model')
+  await field(page, 'Chat model').fill('')
+  await field(page, 'Provider address').fill('not a url ::: %%')
+  const known = (e) => /status of (50[0-9]|422)/.test(e) // the unreachable provider's 502 on /models, the refused address's 422
   await dialog(page).getByRole('button', { name: /Test connection/ }).click()
   await expect(dialog(page).locator('.test-msg')).toBeVisible({ timeout: 20_000 })
   await expect(dialog(page).locator('.test-msg')).toHaveClass(/fail/)
@@ -203,15 +176,15 @@ test('empty model and garbage base URL do not break the modal or the app', async
   expect(typeof s.baseUrl).toBe('string')
   if (await dialog(page).count()) await closeDirty(page)
   // The app still renders and can be reopened.
-  await openSettings(page, 'Provider & cost')
+  await openSettings(page, 'Model')
   await closeDirty(page)
   expect(grain.consoleErrors.filter((e) => !benign(e) && !known(e))).toEqual([])
 })
 
 test('model list comes from the provider and leaves the embedding model out of chat choices', async ({ grain }) => {
   const { page } = grain
-  await openSettings(page, 'Provider & cost')
-  await expect(dialog(page).getByRole('tab', { name: 'Provider & cost' })).toBeVisible()
+  await openSettings(page, 'Model')
+  await expect(dialog(page).getByRole('tab', { name: 'Model' })).toBeVisible()
   await expect.poll(async () => page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))).toEqual(expect.arrayContaining(['mock-chat', 'mock-chat-2']))
   const values = await page.locator('#model-options option').evaluateAll((os) => os.map((o) => o.value))
   expect(values).not.toContain('mock-embed')
@@ -224,7 +197,7 @@ test('model list comes from the provider and leaves the embedding model out of c
 test('theme and accent apply to the document and persist', async ({ grain }) => {
   const { page, api } = grain
   const html = page.locator('html')
-  await openSettings(page, 'Behavior')
+  await openSettings(page, 'Appearance')
   await dialog(page).getByRole('radio', { name: 'Dark' }).click()
   await expect(html).toHaveAttribute('data-theme', 'dark')
   await dialog(page).getByRole('radio', { name: 'Light' }).click()
@@ -244,7 +217,7 @@ test('theme and accent apply to the document and persist', async ({ grain }) => 
   await closeDirty(page)
   await expect(html).toHaveAttribute('data-theme', saved.theme)
   // Saving keeps it, across relaunch.
-  await openSettings(page, 'Behavior')
+  await openSettings(page, 'Appearance')
   await dialog(page).getByRole('radio', { name: 'Dark' }).click()
   await swatches.nth(2).click()
   const accent = await html.getAttribute('data-accent')
@@ -292,8 +265,8 @@ test('Esc closes, the menu shortcut opens, rapid open/close leaves no duplicate 
 test('a 200 KB system prompt saves and reloads; junk in view toggles cannot brick the shell', async ({ grain }) => {
   const { page, api } = grain
   const big = 'lorem ipsum '.repeat(17_000)
-  await openSettings(page, 'Behavior')
-  await dialog(page).getByLabel('Global system prompt').fill(big)
+  await openAdvanced(page, 'Assistant behaviour')
+  await dialog(page).getByLabel('Standing instructions').fill(big)
   await save(page)
   expect((await api('/settings')).systemPrompt.length).toBe(big.length)
   // Wrong-typed or odd-shaped values for the toggles: accepted or refused, never a broken app.
@@ -302,7 +275,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   }
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
-  await openSettings(p2, 'Modules')
+  await openAdvanced(p2, 'Layout')
   await expect(dialog(p2).getByRole('group', { name: 'Where Library shows' })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)
@@ -312,7 +285,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   const { page } = grain
   await setWindowSize(grain, 820, 520)
   await page.waitForTimeout(500)
-  await openSettings(page, 'Permissions')
+  await openAdvanced(page, 'Assistant behaviour')
   const box = await dialog(page).boundingBox()
   const vp = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
   expect(box.width).toBeLessThanOrEqual(vp.w + 1)

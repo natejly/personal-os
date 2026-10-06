@@ -43,12 +43,11 @@ export async function openPanel(page, tab) {
   if (!(await panel(page).count())) await strip(page).getByRole('button', { name: 'Files, changes and review' }).click()
   if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
 }
-/** Turn autonomy on from the composer, as a user does: pick the level, optionally a turn cap, Start working. */
-export async function turnOn(page, level = 'Work and propose', turns) {
+/** Turn autonomy on from the composer, as a user does: pick the level, Start working. */
+export async function turnOn(page, level = 'Work and propose') {
   await page.getByRole('button', { name: /Work autonomously/ }).click()
   const menu = page.getByRole('dialog', { name: 'Work autonomously' })
   await menu.getByLabel(new RegExp(level)).check()
-  if (turns) await menu.locator('.desk-limits input').fill(String(turns))
   await menu.getByRole('button', { name: 'Start working' }).click()
 }
 /** The desk bound to a chat, read off its settings. */

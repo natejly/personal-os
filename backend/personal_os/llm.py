@@ -292,6 +292,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
                   "query": "newer_than:14d -category:promotions -category:social"},
+    # Text Grain from your own phone (imessage.py). Off until switched on; only the listed handles are heard.
+    "imessageEnabled": False,
+    "imessageHandles": [],
+    "imessageConversationId": None,  # None: a "Texts" conversation Grain makes on first use
+    "imessageNotifyLongRuns": False,  # also text approvals and finish notices for runs that were not started by text
+    "imessageLongRunMinutes": 3,
     # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
     "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
                 "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},

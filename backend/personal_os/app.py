@@ -27,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
+from . import imessage
 from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
@@ -207,7 +208,12 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
 run_store = RunStore(db)
 bus = RunBus(run_store)
-bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
+def _run_changed(run: Run) -> None:
+    events.publish("run_state", run.info())  # `events` is bound below; read at call time
+    imessage_bridge.on_run_change(run)  # bound near the end of this module; it never raises
+
+
+bus.on_change = _run_changed
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
 # Active chat streams so they can be aborted from the client. A Run when the reply is on the bus
@@ -747,7 +753,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "microsoftToken", "microsoftAuthPending", "modelCaps", "imessageState"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "meetings"}
@@ -804,6 +810,7 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "retrievalPerDocCap": (1, 10),
     "retrievalCandidates": (5, 50),
     "fetchCacheSeconds": (0, 86_400),
+    "imessageLongRunMinutes": (1, 1440),
 }
 
 
@@ -836,6 +843,22 @@ def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:
 HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
+def _clean_imessage_handles(v: Any) -> list[str]:
+    """Phones and emails, normalized and deduped. A group chat is allowed by its id (chat123… or a full guid)."""
+    out: list[str] = []
+    for e in v:
+        if not isinstance(e, str):
+            raise HTTPException(422, "imessageHandles must be a list of strings")
+        h = imessage.normalize_handle(e)
+        if h is None and re.fullmatch(r"chat\d+|\w+;\+;\S+", e.strip()):
+            h = e.strip()
+        if h is None:
+            raise HTTPException(422, f"imessageHandles: {e!r} is not a phone number or email")
+        if h not in out:
+            out.append(h)
+    return out
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
@@ -861,6 +884,10 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":
             clean[k] = clean_typography(v) or {}
+        elif k == "imessageHandles":
+            clean[k] = _clean_imessage_handles(v)
+        elif k == "imessageConversationId" and v is not None and not isinstance(v, str):
+            raise HTTPException(422, "imessageConversationId must be a string or null")
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
@@ -871,6 +898,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     db.set_settings(clean)
     if "sandboxRuntime" in perm:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
+    if any(k.startswith("imessage") for k in clean) and _loop is not None and not _loop.is_closed():
+        asyncio.run_coroutine_threadsafe(imessage_bridge.reconcile(), _loop)  # a sync route runs in the threadpool
     if "deskMaxLive" in clean and _loop is not None and not _loop.is_closed():
         # A raised cap frees slots no desk's ending will report; launch queued desks into them now.
         # (A sync route runs in the threadpool, and launching creates tasks on the loop.)
@@ -1405,6 +1434,7 @@ class PageContextIn(BaseModel):
 
 
 class ChatIn(BaseModel):
+    origin: Literal["imessage"] | None = None  # who sent the turn when it was not typed in the app; lands in the run's input
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
     page_context: PageContextIn | None = None
@@ -4513,6 +4543,7 @@ class ApprovalIn(BaseModel):
     # An editable tool's approval only (approval_edits.EDITABLE_TOOLS): the arguments the user wants run instead of the
     # model's. Validated against the tool's schema; what executes, is journaled and is verified is this, not the original.
     arguments: dict[str, Any] | None = None
+    via: Literal["imessage"] | None = None  # answered by text: recorded as the decider instead of "user"
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -4662,7 +4693,8 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
-    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited, rules=body.rules)
+    row = run_store.decide(call_id, body.decision, by=body.via or "user", note=None if is_plan else body.note,
+                           edited_args=edited, rules=body.rules)
     live = bool(fut and not fut.done())
     # Read off the row as it was BEFORE this decision: decide() overwrites `decided_by` with 'user'.
     was_parked = bool(pending and pending.get("parked_at"))
@@ -6359,6 +6391,7 @@ def delete_document(id: str) -> dict[str, bool]:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    await imessage_bridge.stop()  # before the runs are cancelled: a dying backend must not text "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     await title_jobs.stop()
@@ -9861,3 +9894,84 @@ async def _cowork_startup() -> None:
             _auto_resume(swept)
     except Exception:  # noqa: BLE001
         log.warning("cowork recovery failed", exc_info=True)
+
+
+# ---------------- iMessage bridge (imessage.py) ----------------
+def _imessage_message_text(message_id: str) -> str | None:
+    with db.tx() as c:
+        r = c.execute("SELECT content FROM messages WHERE id=?", (message_id,)).fetchone()
+    return r["content"] if r else None
+
+
+def _imessage_create_conversation() -> str:
+    return create_conversation(ConvIn(title="Texts"))["id"]
+
+
+async def _imessage_turn(conv_id: str, text: str) -> dict[str, Any]:
+    """A text is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
+    for _ in range(2):
+        try:
+            if bus.answering(conv_id):
+                return await steer_run(conv_id, SteerIn(content=text))
+            return await chat(conv_id, ChatIn(content=text, origin="imessage"))
+        except HTTPException as e:
+            if e.status_code != 409:
+                raise
+    raise HTTPException(409, "The conversation is busy")
+
+
+async def _imessage_decide(call_id: str, decision: str) -> dict[str, Any]:
+    return await approve_tool_call(call_id, ApprovalIn(decision=decision, via="imessage"))
+
+
+def _imessage_conversation_title(conv_id: str) -> str | None:
+    row = convos.get(conv_id, with_messages=False)
+    return row["title"] if row else None
+
+
+imessage_bridge = imessage.IMessageBridge(imessage.Deps(
+    get_settings=settings,
+    load_state=lambda: db.get_settings().get("imessageState") or {},
+    save_state=lambda st: db.set_settings({"imessageState": st}),
+    chat_db_path=os.environ.get("GRAIN_IMESSAGE_CHAT_DB") or imessage.DEFAULT_CHAT_DB,
+    runner=imessage.default_runner,
+    start_turn=_imessage_turn,
+    stop=lambda conv_id: bus.stop(conv_id),
+    decide=_imessage_decide,
+    pending_approvals=lambda: run_store.approvals(status="pending"),
+    is_live=lambda call_id: (f := _approvals.get(call_id)) is not None and not f.done(),
+    active_runs=lambda: bus.list(),
+    create_texts_conversation=_imessage_create_conversation,
+    conversation_exists=lambda conv_id: convos.get(conv_id, with_messages=False) is not None,
+    message_text=_imessage_message_text,
+    app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
+    conversation_title=_imessage_conversation_title,
+))
+
+
+@app.on_event("startup")
+async def _imessage_startup() -> None:
+    if settings().get("imessageEnabled"):
+        await imessage_bridge.start()  # resumes from the saved cursor; a fresh enable goes through reconcile
+
+
+@app.get("/imessage/status")
+def imessage_status() -> dict[str, Any]:
+    return imessage_bridge.status()
+
+
+class IMessageTestIn(BaseModel):
+    handle: str | None = None
+
+
+@app.post("/imessage/test")
+async def imessage_test(body: IMessageTestIn) -> dict[str, Any]:
+    res = await imessage_bridge.send_test(body.handle)
+    if res.get("error") == "not_allowlisted":
+        raise HTTPException(400, "That handle is not on the allowlist")
+    return res
+
+
+@app.post("/imessage/open-fda")
+def imessage_open_fda() -> dict[str, bool]:
+    return {"ok": imessage.open_full_disk_access()}

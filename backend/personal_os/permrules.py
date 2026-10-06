@@ -1066,11 +1066,8 @@ def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
 
 
 def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
-    """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
-    conv = conv_settings or {}
-    if "skipPermissions" in conv:
-        return bool(conv["skipPermissions"])
-    return bool(permissions.get(cfg or {}, "skipPermissions"))
+    """Whether approval cards are skipped: only the global Allow all mode does (a chat's own skipPermissions is legacy)."""
+    return permissions.get(cfg or {}, "permissionMode") == "allow_all"
 
 
 def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",

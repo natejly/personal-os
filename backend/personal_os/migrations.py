@@ -69,6 +69,12 @@ def _permissions_store(c: sqlite3.Connection) -> None:
     permissions.migrate(c)
 
 
+def _permission_mode(c: sqlite3.Connection) -> None:
+    """Every existing install gets permissionMode "auto" (permissions.migrate_mode); no other key changes."""
+    from . import permissions
+    permissions.migrate_mode(c)
+
+
 def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
     """Meetings and Activity now ship on. Only a bare `{"enabled": false}` row (nothing but that key, the
     stub an older whole-settings save could write) is flipped to true. Both services only ever store their
@@ -249,6 +255,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (10, "doc_comments_typography", _doc_comments_typography),
     (11, "coding_sessions", _coding_sessions),
     (12, "sticky_notes_into_docs", _sticky_notes_into_docs),
+    (13, "permission_mode", _permission_mode),
 ]
 
 

@@ -1702,7 +1702,7 @@ def _propose(run: Run, name: str, args: dict[str, Any], call_id: str, ctx: dict[
     log.info("run %s proposed %s (proposal %s)", run.run_id, name, p["id"])
     return {"proposed": True, "proposal_id": p["id"], "tool": name, "status": "pending",
             "note": f"{name} was NOT executed. "
-                    + ("This is a background run" if proposal_only(run) else "This desk only proposes outside actions")
+                    + ("This is a background run" if proposal_only(run) or run.kind in UNATTENDED_KINDS else "This desk only proposes outside actions")
                     + ", so it was recorded as a proposal in the user's Agent Inbox; they accept, edit or reject it there, "
                     "and accepting is what runs it. "
                     "Do not call it again — say in your report what you proposed."}
@@ -2041,10 +2041,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         page = used.get("page") or {}
         if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
             ctx_taints.append("page")
-        # A chat can skip approval cards (its own switch, else the global one). A job has nobody watching,
-        # so it keeps unattendedApprovals and never inherits this.
-        skip_permissions = permrules.skip_permissions_on(conv["settings"], cfg) and not (
-            run is not None and run.kind in UNATTENDED_KINDS)
+        # The global permission mode (auto | manual | allow_all) decides how every call below is gated; children inherit it.
+        pmode = autoreview.mode_of(cfg)
+        skip_permissions = pmode == "allow_all"
+        review_cache: dict[Any, Any] = {}  # this reply's reviewer allows, so an identical repeat call is not asked twice
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
             # The definition this chat speaks as: a task scheduled from here keeps running as it (schedule_task).
@@ -2060,14 +2060,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"],
-            "skip_permissions": skip_permissions,
+            "skip_permissions": skip_permissions, "permission_mode": pmode, "user_text": user_text,
+            "review_cache": review_cache,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             "run_id": run.run_id if run else None,
         }
         use_tools = conv["settings"].get("useTools", True)
-        modes = toolbox.effective(permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
-                                  persona.tool_modes if persona is not None else None) if use_tools else {}
+        _tool_maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
+                      persona.tool_modes if persona is not None else None)
+        modes = toolbox.effective(*_tool_maps) if use_tools else {}
+        explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
         if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
@@ -2093,26 +2096,59 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # What tool_search searches: exactly the held-back tools, tagged with their group so a group name matches.
         tool_ctx["tool_catalog"] = lambda: [{"slug": n, "description": sp.description, "parameters": sp.parameters, "server": sp.group}
                                             for n in sorted(tool_ctx["deferred"]) if (sp := toolbox.specs.get(n))]
+        tool_ctx["explicit_modes"] = explicit_modes  # children route on the same user-set tool modes
         tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
         bridge_n = 0
+
+        async def _review_call(name: str, args: dict[str, Any], danger: str, raw_mode: str) -> dict[str, Any]:
+            """The reviewer's look at one call: recent turns, the latest request and the conversation's first one as intent."""
+            sp = toolbox.specs.get(name)
+            recent, first = autoreview.digest(messages)
+            return await autoreview.review(
+                cfg, model, name=name, description=sp.description if sp else "", args=args, danger=danger, user_text=user_text,
+                task=first, recent=recent, mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop, conv_id=conv_id,
+                cache=review_cache)
+
+        def _log_mode(name: str, args: dict[str, Any], uid: str, decision: str, scope: str, note: str,
+                      review: dict[str, Any] | None = None) -> None:
+            """One approval_log row for a decision the permission mode made (the reviewer's, or Allow all's)."""
+            approval_log.record(db, tool=name, args=args, conversation_id=conv_id, call_id=uid, run_id=run.run_id if run else None,
+                                desk_id=desk_id or None, agent=run.kind if run else None, decision=decision, scope=scope,
+                                note=note, review=review)
 
         async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
             end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
             nonlocal bridge_n
             spec = toolbox.specs.get(name)
-            if skip_permissions and permrules.lift_permission_ask(
-                    name, "ask", skip=True, forced=forced, danger=spec.danger if spec else "external",
-                    fenced=toolbox.fs_needs_ask(name, args, tool_ctx)) == "on":
+            danger = spec.danger if spec else "external"
+            fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
+            blog = f"{am['id']}:bridgelog{bridge_n + 1}"
+            if pmode == "allow_all" and not fenced:
+                if danger != "safe":
+                    _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
+            if pmode == "auto":
+                locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
+                hard = forced and (bool(tool_ctx["tainted"]) or not locked)
+                rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
+                if rt in ("review", "review_strict"):
+                    rv = await _review_call(name, args, danger, "ask")
+                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], bool(tool_ctx["tainted"]))
+                    if out == "run":
+                        _log_mode(name, args, blog, "auto", "auto-review", "mode: auto", rv)
+                        return True
+                    _log_mode(name, args, blog, "deny" if out == "deny" else "review-ask", "auto-review", "mode: auto", rv)
+                    if out == "deny":
+                        return False
             if run is None or run.store is None:
                 return False
             bridge_n += 1
             uid = f"{am['id']}:bridge{bridge_n}"
-            spec = toolbox.specs.get(name)
             run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
                                     desk_id=run.desk_id, danger=spec.danger if spec else "external")
-            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and permissions.get(cfg, "unattendedApprovals") == "deny"):
+            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and (
+                    pmode != "manual" or permissions.get(cfg, "unattendedApprovals") == "deny")):
                 # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
                 run.store.decide(uid, "deny", by="unattended", note="no one is available to approve it in a background run")
                 return False
@@ -2865,10 +2901,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # let them through plan mode, propose-only desks and the unexpected-taint rule.
                 danger = spec.danger if spec else (MCP_DANGER if mcp_is(c["name"]) else "safe")
                 mode = _gate(c["name"], raw_mode, tool_ctx, args)
+                # What auto mode may never review away: a card forced by taint, a voided plan, the doom loop or a desk that
+                # asks as it goes (hard_forced), against an alwaysAsk / force_ask card it may lift on a confident allow (soft).
+                hard_forced = mode != raw_mode
                 # A file write outside the granted folders (or in one, once the reply read untrusted content) asks.
                 fs_ask = mode != "off" and toolbox.fs_needs_ask(c["name"], args, tool_ctx)
                 if fs_ask and mode == "on":
                     mode = "ask"
+                lockable = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(c["name"], args, tool_ctx)))
+                hard_forced = hard_forced or (lockable and bool(tool_ctx["tainted"]))
+                desk_cleared = False
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
                 forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args, tool_ctx))
@@ -2876,7 +2918,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.
                 if (c["name"] == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and desk_id
                         and shell_tool.auto_ok(args, tool_ctx, cfg, [workspace.desk_root(desk_id)])):
-                    mode = "on"
+                    mode, desk_cleared = "on", True
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
@@ -2904,12 +2946,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # consume nothing. A web fetch is included: its address can carry what was read.
                         # Checked before any claim, because a step burnt on a call the
                         # user then denies can never be reclaimed.
-                        mode, forced = "ask", True
+                        mode, forced, hard_forced = "ask", True, True
                     elif autonomy == "ask" and danger in MUTATING:
                         # 'Ask as it goes': a desk that does not plan first cards every change instead,
                         # one at a time. Forced, so the card cannot buy a standing grant that would
                         # quietly switch the mode back off.
-                        mode, forced = "ask", True
+                        mode, forced, hard_forced = "ask", True, True
                 # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
                 # An alwaysAsk tool tops out at ask (Toolbox.effective), so gate() does not turn an 'on' into a forced
@@ -2919,6 +2961,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
                 taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
                 forced = forced or taint_only
+                hard_forced = hard_forced or taint_only
                 perm = permrules.Resolution(mode, forced)
                 pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
@@ -2928,7 +2971,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode
                     if perm.kind == "doom_loop":
-                        forced, taint_only = True, False
+                        forced, taint_only, hard_forced = True, False, True
                 elif mcp_is(c["name"]) and mode != "off":
                     # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
                     perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
@@ -3000,35 +3043,60 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if perm.refusal and pre is None:
                     pre = tools.denied(c["name"], perm.refusal)
                 unattended = False
-                if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None
-                        and run.kind in UNATTENDED_KINDS and permissions.get(cfg, "unattendedApprovals") == "deny"):
-                    # Nobody is there to answer: refuse with a recorded reason rather than park a card for later.
-                    unattended = True
-                    why = "no one is available to approve it and unattendedApprovals is set to deny"
-                    pre = tools.denied(c["name"], f"refused: {why}")
-                    if run.store is not None:
-                        run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                                forced=forced, desk_id=run.desk_id, danger=danger)
-                        run.store.decide(uid, "deny", by="unattended", note=why)
+                reviewer_denied = False
+                lifted_all = False
+                review = None
+                is_background = run is not None and run.kind in UNATTENDED_KINDS
+                # Permission mode (autoreview.route). Manual leaves the gate above exactly as it settled; auto sends what is not
+                # known safe to the reviewer; allow_all lifts every card except an outside-folder write. Refusals, proposals and
+                # approved plan steps are already settled, so they never get here.
+                if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
+                    explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
+                    locked_spec = bool(spec and toolbox.ask_locked(spec))
+                    rt = autoreview.route(
+                        pmode, mode=mode, danger=danger, explicit_on=explicit == "on",
+                        # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
+                        explicit_ask=(explicit == "ask" and not locked_spec) or (mode == "ask" and perm.kind in ("rule", "external_directory")),
+                        covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
+                        hard_forced=hard_forced, soft_forced=lockable and not hard_forced, fenced=bool(fs_ask),
+                        question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
+                    if rt == "run":
+                        if mode == "ask":
+                            mode, forced = "on", False
+                        lifted_all = pmode == "allow_all" and danger != "safe"
+                    elif rt in ("review", "review_strict"):
+                        review = await _review_call(c["name"], args, danger, raw_mode)
+                        outcome = autoreview.apply(rt, review["verdict"], review["confidence"], bool(tool_ctx["tainted"]))
+                        if outcome == "run":
+                            mode, forced = "on", False
+                        elif outcome == "deny":
+                            reviewer_denied = True
+                            pre = tools.denied(c["name"], f"refused by the safety reviewer: {review['reason']}. "
+                                                          "Do not retry the same call; change approach or ask the user.")
+                            _log_mode(c["name"], args, uid, "deny", "auto-review", "mode: auto", review)
+                        else:
+                            mode, forced = "ask", forced or rt == "review_strict"
+                            _log_mode(c["name"], args, uid, "review-ask", "auto-review", "mode: auto", review)
+                # A background run never waits on a card. Manual mode keeps unattendedApprovals; in the other modes a card that
+                # survives routing becomes a proposal when the call can be one, else a recorded refusal.
+                if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None and is_background
+                        and (pmode != "manual" or permissions.get(cfg, "unattendedApprovals") == "deny")):
+                    if pmode != "manual" and (toolbox.proposes(c["name"]) or mcp_is(c["name"])):
+                        proposing, mode, forced = True, "on", False
+                    else:
+                        # Nobody is there to answer: refuse with a recorded reason rather than park a card for later.
+                        unattended = True
+                        why = ("no one is available to approve it and unattendedApprovals is set to deny" if pmode == "manual"
+                               else "it needs an approval and no one is available to give it in a background run")
+                        pre = tools.denied(c["name"], f"refused: {why}")
+                        if run.store is not None:
+                            run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                    forced=forced, desk_id=run.desk_id, danger=danger)
+                            run.store.decide(uid, "deny", by="unattended", note=why)
                 if proposal_only(run) and mode == "ask" and claimed is None and pre is None:
                     # A background run has nobody to answer a card, and only external calls can become proposals.
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
-                # Dangerously skip permissions: an ask runs. A refusal already in `pre` stays a refusal.
-                # Forced, ask-rule, external, schedules and uncleared shell cards stay (lift_permission_ask). Jobs never set the flag.
-                if skip_permissions and pre is None and not perm.refusal:
-                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True, forced=forced or perm.forced, danger=danger,
-                                                         fenced=fs_ask or perm.kind == "rule")
-                # Review gate: a call that would run without a card gets a second model's look first. An "ask" verdict
-                # always wins (over allow rules and grants alike); an unattended run only records it.
-                review = None
-                if (mode == "on" and claimed is None and pre is None and not proposing and not skip_permissions
-                        and autoreview.wants_review(permissions.get(cfg, "autoReview"), danger)):
-                    review = await autoreview.review(
-                        cfg, model, name=c["name"], description=spec.description if spec else "", args=args, user_text=user_text,
-                        mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop)
-                    if review["verdict"] == "ask" and not proposal_only(run):
-                        mode = "ask"
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
@@ -3039,12 +3107,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if not asks and pre is None and not proposing and mode != "off":
                     granted_by = (("conversation" if permrules.SESSION.covers(conv_id, perm.keys) else "rule")
                                   if pre_mode == "ask" and perm.mode == "on" else None)
-                    if claimed is not None or review or granted_by:
+                    if claimed is not None or review or granted_by or lifted_all:
                         approval_log.record(db, tool=c["name"], args=args, conversation_id=conv_id, call_id=uid,
                                             run_id=run.run_id if run else None, desk_id=desk_id or None, agent=run.kind if run else None,
                                             decision="plan" if claimed else ("always" if granted_by else "auto"),
-                                            scope="plan" if claimed else granted_by,
-                                            rule=perm.rule if granted_by == "rule" else None, review=review)
+                                            scope="plan" if claimed else (granted_by or ("auto-review" if review else "allow-all")),
+                                            rule=perm.rule if granted_by == "rule" else None,
+                                            note=None if claimed or granted_by else ("mode: auto" if review else "allowed (allow-all mode)"),
+                                            review=None if claimed or granted_by else review)
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
@@ -3333,7 +3403,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 hint = denials.note()
                 if hint and isinstance(result, dict):
                     result["permission_note"] = hint
-                denials.record(bool(perm.refusal) or unattended or (asks and decision != "allow"))
+                denials.record(bool(perm.refusal) or unattended or reviewer_denied or (asks and decision != "allow"))
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -4619,9 +4689,6 @@ def permission_grants() -> dict[str, Any]:
         chats = c.execute("SELECT id, title, json_extract(settings, '$.tools') AS tools FROM conversations "
                           "WHERE json_extract(settings, '$.tools') IS NOT NULL ORDER BY updated_at DESC").fetchall()
         projs = c.execute("SELECT id, name, tools FROM projects WHERE tools NOT IN ('', '{}') ORDER BY name").fetchall()
-        # A chat that skips its cards on its own switch, whatever the global one says.
-        skips = c.execute("SELECT id, title FROM conversations WHERE json_extract(settings, '$.skipPermissions') = 1 "
-                          "AND deleted_at IS NULL ORDER BY updated_at DESC").fetchall()
         agents = c.execute("SELECT id, name, tool_modes FROM agent_defs WHERE tool_modes NOT IN ('', '{}') ORDER BY name").fetchall()
     titles = _conversation_titles(set(session))
     cfg = settings()
@@ -4634,7 +4701,7 @@ def permission_grants() -> dict[str, Any]:
         "global": permissions.get(cfg, "tools") or {},
         "agent_overrides": [{"agent_id": r["id"], "title": r["name"], "tool": t, "mode": m}
                             for r in agents for t, m in (json.loads(r["tool_modes"] or "{}") or {}).items()],
-        "chat_skip": [{"conversation_id": r["id"], "title": r["title"]} for r in skips],
+        "chat_skip": [],  # legacy: a chat's own skipPermissions is no longer honoured; the global permissionMode decides
         "mcp": mcp_store.grants(),
         "rules": permissions.get(cfg, "permissionRules") or {"allow": [], "ask": [], "deny": []},
     }

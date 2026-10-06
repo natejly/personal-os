@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import compaction, llm, permrules, redact
+from . import approval_log, autoreview, compaction, llm, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
@@ -973,7 +973,10 @@ class Subagents:
         elif "_raw" in args:
             result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
         else:
+            pmode = ch.ctx.get("permission_mode") or autoreview.mode_of(ch.ctx.get("settings") or self.settings())
+            tainted = bool(ch.ctx.get("tainted"))
             mode = self.toolbox.gate(name, raw_mode, ch.ctx, args)
+            hard_forced = mode != raw_mode
             # The parent's gates, in the parent's order: a write outside the granted folders asks, then the
             # argument-pattern rules (deny and the hardline list refuse, ask cards, allow lifts a plain ask).
             # A child has no session of its own; the parent chat's session grants are the user's and still count.
@@ -983,18 +986,49 @@ class Subagents:
             forced = mode != raw_mode or (mode == "ask" and self.toolbox.forces_ask(name, args, ch.ctx))
             # A stored 'on' for an external tool is capped to 'ask' upstream, so mode == raw_mode here; on a
             # tainted child that ask must stay forced, or an allow rule or a session grant would lift it.
-            forced = forced or (mode == "ask" and spec.danger in ASK_LOCKED_DANGER and bool(ch.ctx.get("tainted")))
+            taint_only = mode == "ask" and spec.danger in ASK_LOCKED_DANGER and tainted
+            forced = forced or taint_only
+            lockable = bool(self.toolbox.ask_locked(spec) or self.toolbox.forces_ask(name, args, ch.ctx))
+            hard_forced = hard_forced or taint_only or (lockable and tainted)
+            pre_mode = mode
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced
-            if not perm.refusal:
-                mode = permrules.lift_permission_ask(
-                    name, mode, skip=bool(ch.ctx.get("skip_permissions")), forced=forced, danger=spec.danger,
-                    fenced=bool(fs_ask) or perm.kind == "rule")
             bad = perm.refusal or self._confine(ch, name, args)
+            if not bad and pmode != "manual" and mode != "off":
+                # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
+                explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
+                rt = autoreview.route(
+                    pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
+                    explicit_ask=(explicit == "ask" and not self.toolbox.ask_locked(spec)) or (
+                        mode == "ask" and perm.kind in ("rule", "external_directory")),
+                    covered=(pre_mode == "ask" and mode == "on") or bool(perm.rule and mode == "on"),
+                    hard_forced=hard_forced, soft_forced=lockable and not hard_forced, fenced=bool(fs_ask),
+                    question=name in permrules.STILL_ASK)
+                if rt == "run":
+                    if mode == "ask":
+                        mode, forced = "on", False
+                    if pmode == "allow_all" and spec.danger != "safe":
+                        self._log_mode(ch, uid, name, args, "auto", "allow-all", "allowed (allow-all mode)")
+                elif rt in ("review", "review_strict"):
+                    recent, _first = autoreview.digest(ch.messages)
+                    rv = await autoreview.review(
+                        ch.ctx.get("settings") or self.settings(), ch.model, name=name, description=spec.description, args=args,
+                        danger=spec.danger, user_text=str(ch.ctx.get("user_text") or ch.task), task=ch.task, recent=recent,
+                        mode=raw_mode, tainted=tainted, cancel=ch.cancel, conv_id=ch.conversation_id, cache=ch.ctx.get("review_cache"))
+                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], tainted)
+                    if out == "run":
+                        mode, forced = "on", False
+                        self._log_mode(ch, uid, name, args, "auto", "auto-review", "mode: auto", rv)
+                    elif out == "deny":
+                        bad = f"refused by the safety reviewer: {rv['reason']}. Do not retry the same call; change approach or ask the user."
+                        self._log_mode(ch, uid, name, args, "deny", "auto-review", "mode: auto", rv)
+                    else:
+                        mode, forced = "ask", forced or rt == "review_strict"
+                        self._log_mode(ch, uid, name, args, "review-ask", "auto-review", "mode: auto", rv)
             if bad:
                 result = denied(name, bad)
-            elif mode == "ask" and (unattended := self._unattended(ch)):
+            elif mode == "ask" and (unattended := self._unattended(ch, pmode)):
                 # The parent loop's two refusals: nobody is watching a background run, so never park a card.
                 decision = "deny"
                 result = denied(name, unattended)
@@ -1036,15 +1070,25 @@ class Subagents:
             return res
         return await go()
 
-    def _unattended(self, ch: Child) -> str | None:
+    def _log_mode(self, ch: Child, uid: str, name: str, args: dict[str, Any], decision: str, scope: str, note: str,
+                  review: dict[str, Any] | None = None) -> None:
+        """One approval_log row for what the permission mode decided about a child's call."""
+        if self.store is not None:
+            approval_log.record(self.store.db, tool=name, args=args, conversation_id=ch.conversation_id, call_id=uid,
+                                run_id=ch.id, desk_id=ch.desk_id, agent="subagent", decision=decision, scope=scope, note=note, review=review)
+
+    def _unattended(self, ch: Child, pmode: str = "manual") -> str | None:
         """Why a card may not open for this child (mirrors the parent loop), or None when one may."""
         if ch.ctx.get("proposal_only"):
             return "not available in a background run: it needs an approval and nobody is watching"
         run = ch.ctx.get("run")
         if run is not None and not getattr(run, "live", True):  # the parent's reply already ended
             return "not available here: it needs an approval and nobody is watching"
-        if getattr(run, "kind", None) in UNATTENDED_KINDS and (ch.ctx.get("settings") or self.settings()).get("unattendedApprovals") == "deny":
-            return "refused: no one is available to approve it and unattendedApprovals is set to deny"
+        if getattr(run, "kind", None) in UNATTENDED_KINDS:
+            if pmode != "manual":  # a child has no proposal path: a card in a background run is a refusal
+                return "refused: it needs an approval and no one is available to give it in a background run"
+            if permissions.get(ch.ctx.get("settings") or self.settings(), "unattendedApprovals") == "deny":
+                return "refused: no one is available to approve it and unattendedApprovals is set to deny"
         return None
 
     def _perm_roots(self, ch: Child) -> list[str]:

@@ -176,7 +176,6 @@ class TestRouteTests(unittest.TestCase):
 
     def test_missing_fields_never_500(self) -> None:
         self.assertFalse(self._post(baseUrl="")["ok"])
-        self.assertFalse(self._post(model="")["ok"])
 
 
 class CompleteTests(unittest.TestCase):

@@ -39,6 +39,7 @@ const ICONS: Record<string, JSX.Element> = {
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   doc_list: <PenLine size={13} />, doc_search: <PenLine size={13} />, doc_read: <PenLine size={13} />,
   doc_create: <PenLine size={13} />, doc_edit: <PenLine size={13} />, doc_delete: <Trash2 size={13} />,
+  doc_comments: <PenLine size={13} />, doc_comment_reply: <PenLine size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FileText, Files, PanelRight, X, Columns2, Eye, Pencil,
+  FileText, Files, PanelRight, X, Columns2, Eye, Pencil, BookOpen, MessageSquarePlus, Type,
   Sparkles, FolderTree, SlidersHorizontal
 } from 'lucide-react'
 import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
-import type { Doc } from '@shared/types'
+import type { Doc, DocTypography } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
@@ -26,6 +26,10 @@ import NewDocMenu from '../features/notes/NewDocMenu'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import type { SlashCommand } from '../features/notes/slash'
 import { toggleTaskAt } from '../features/notes/tasks'
+import { CommentsPanel, DocCommentFab, useDocComments } from '../features/notes/DocComments'
+import { makeAnchor } from '../features/notes/comments'
+import TypographyControls from '../features/notes/TypographyMenu'
+import { effectiveTypography, typographyStyle } from '../features/notes/typography'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
@@ -38,7 +42,17 @@ const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
   try { return parsePanelState(localStorage.getItem(PANEL_KEY)) } catch { return parsePanelState(null) }
 }
-const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', recordings: 'Recordings', links: 'Links', history: 'History' }
+const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', comments: 'Comments', recordings: 'Recordings', links: 'Links', history: 'History' }
+
+// A doc opens in the reading view; Edit is a choice remembered per doc (the edit/split/preview mode
+// stays one global preference, as before). The newest 200 ids are kept.
+const EDITING_KEY = 'grain.docs.editing'
+const readEditing = (): string[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(EDITING_KEY) ?? '[]') as unknown
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch { return [] }
+}
 
 const TREE_KEY = 'grain.docs.treeOpen'
 const treeWasOpen = (): boolean => {
@@ -50,7 +64,7 @@ const flagOn = (key: string): boolean => {
 }
 
 /** Writing-view toggles, folded into one menu so the toolbar stays quiet. */
-function ViewMenu({ children }: { children: React.ReactNode }): JSX.Element {
+function ViewMenu({ children, icon, title = 'View options', className = '' }: { children: React.ReactNode; icon?: React.ReactNode; title?: string; className?: string }): JSX.Element {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -63,8 +77,8 @@ function ViewMenu({ children }: { children: React.ReactNode }): JSX.Element {
   }, [open])
   return (
     <div className="newdoc" ref={root}>
-      <button className="icon-btn ghost" title="View options" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}><SlidersHorizontal size={14} /></button>
-      {open && <div className="notes-menu right" role="menu">{children}</div>}
+      <button className="icon-btn ghost" title={title} aria-label={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{icon ?? <SlidersHorizontal size={14} />}</button>
+      {open && <div className={`notes-menu right ${className}`} role="menu">{children}</div>}
     </div>
   )
 }
@@ -85,8 +99,9 @@ export default function DocsView(): JSX.Element {
   const { openFiles, setLibraryScope } = useStore()
   const {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc,
-    setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote
+    setDocMode, acceptRevision, rejectRevision, restoreRevision, openDailyNote, setDocTypography
   } = useStore()
+  const globalType = useStore((s) => s.settings.docTypography)
   // Select the status itself, not `liveDoc(status)`: that builds a new object on every call, and a
   // selector whose result is never identical re-renders forever the moment a recording is live.
   const meetingStatus = useStore((s) => s.meetingStatus)
@@ -116,6 +131,29 @@ export default function DocsView(): JSX.Element {
     try { localStorage.setItem(`grain.docs.${k}`, next ? '1' : '0') } catch { /* private window */ }
   }
   const [linked, setLinked] = useState(true)
+  // Reading view unless this doc was switched to Edit (⌘E, the toolbar, or a double-click on the text).
+  const [editingIds, setEditingIds] = useState<string[]>(readEditing)
+  const editing = !!activeDoc && editingIds.includes(activeDoc.id)
+  const setEditing = useCallback((on: boolean, id = activeDoc?.id): void => {
+    if (!id) return
+    setEditingIds((ids) => {
+      const next = on ? [...ids.filter((x) => x !== id), id].slice(-200) : ids.filter((x) => x !== id)
+      try { localStorage.setItem(EDITING_KEY, JSON.stringify(next)) } catch { /* private window */ }
+      return next
+    })
+  }, [activeDoc?.id])
+  useEffect(() => {
+    if (!activeDoc) return
+    const key = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'e') { e.preventDefault(); setEditing(!editing) }
+    }
+    document.addEventListener('keydown', key)
+    return () => document.removeEventListener('keydown', key)
+  }, [activeDoc, editing, setEditing])
+  // Which panes are up. The rendered pane is the reading view, and the preview beside or instead of the editor.
+  const showEditor = editing && docMode !== 'preview'
+  const showRender = !editing || docMode !== 'edit'
+  const paneKey = `${activeDoc?.id ?? ''}:${editing ? docMode : 'read'}`
   // Read by the scroll handler, so toggling the link does not hand the editor a new callback.
   const linkedRef = useRef(linked)
   linkedRef.current = linked
@@ -170,12 +208,21 @@ export default function DocsView(): JSX.Element {
   )
   const scope = activeDoc ? scopeOf(activeDoc) : ''
   const projectName = projects.find((p) => p.id === scope)?.name
-  // A doc just made by New or Today's note gets the caret, at its end, so typing can start at once.
+  // A doc just made by New or Today's note opens in Edit and gets the caret, at its end, so typing can
+  // start at once. The editor mounts on the next render, so the jump waits for it.
   useEffect(() => {
     if (!docFocusId || docFocusId !== activeDoc?.id) return
+    if (!editing) { setEditing(true); return }
     if (docMode !== 'preview') editor.current?.jumpToLine(Number.MAX_SAFE_INTEGER)
     useStore.setState({ docFocusId: null })
-  }, [docFocusId, activeDoc?.id, docMode])
+  }, [docFocusId, activeDoc?.id, docMode, editing, setEditing])
+
+  // The type in effect: the doc's own choice over the global default. Set on the pane that holds both views.
+  const type = useMemo(() => effectiveTypography(activeDoc?.typography, globalType), [activeDoc?.typography, globalType])
+  const typeStyle = useMemo(() => typographyStyle(type), [type])
+  const patchType = (patch: DocTypography): void => {
+    if (activeDoc) void setDocTypography(activeDoc.id, { ...(activeDoc.typography ?? {}), ...patch })
+  }
 
   // Linked scrolling: the preview follows the editor's fraction of the way down. Written straight to
   // the element: a scroll event per frame through state re-rendered this whole view each time.
@@ -255,12 +302,24 @@ export default function DocsView(): JSX.Element {
     }
   )
 
-  // Dictation types into the editor, so a preview-only view has nowhere to put the words.
+  // Dictation types into the editor, so a reading or preview-only view has nowhere to put the words.
   const dictatingHere = liveHere?.mode === 'dictate'
   const previewText = usePreview((s) => (dictatingHere && liveHere ? s.byId[liveHere.meetingId]?.text ?? '' : ''))
   // Hold-to-talk. Not while an assistant revision waits for review: the words would land under a diff.
   useDictationChord(docId, pending.length === 0, dictatingHere)
-  useEffect(() => { if (dictatingHere && docMode === 'preview') setDocMode('split') }, [dictatingHere, docMode, setDocMode])
+  useEffect(() => {
+    if (!dictatingHere) return
+    if (!editing) setEditing(true)
+    if (docMode === 'preview') setDocMode('split')
+  }, [dictatingHere, docMode, setDocMode, editing, setEditing])
+
+  // Comments live on the rendered text. A click on a mark opens the panel on its thread.
+  const comments = useDocComments(docId, body, previewRef, paneKey, panelOpen && panel.tab === 'comments',
+    () => setPanel({ open: true, tab: 'comments' }))
+  const commentOn = (anchor: ReturnType<typeof makeAnchor>): void => {
+    comments.startDraft(anchor)
+    setPanel({ open: true, tab: 'comments' })
+  }
 
   // A recording that starts on THIS doc opens the Recordings tab, so the live transcript is in view.
   // Seeded per doc, so merely opening a doc that is already recording does not move the panel.
@@ -273,12 +332,13 @@ export default function DocsView(): JSX.Element {
     if (liveId && prev.doc === docId && prev.id !== liveId && liveMode === 'record') setPanel({ open: true, tab: 'recordings' })
   }, [docId, liveId, liveMode, setPanel])
 
-  // An outline jump from preview-only mode switches to the split view first; the editor mounts on the
+  // An outline jump from the reading or preview-only view brings the editor up first; it mounts on the
   // next render, so the jump waits for it.
   const jumpToLine = (line: number): void => {
-    if (docMode === 'preview') {
+    if (!showEditor) {
       pendingJump.current = line
-      setDocMode('split')
+      if (!editing) setEditing(true)
+      if (docMode === 'preview') setDocMode('split')
     } else editor.current?.jumpToLine(line)
   }
   // A cited passage opened from chat: jump once its doc is the one on screen.
@@ -289,10 +349,10 @@ export default function DocsView(): JSX.Element {
     jumpToLine(docJump.line)
   }, [docJump, activeDoc?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (docMode === 'preview' || pendingJump.current === null) return
+    if (!showEditor || pendingJump.current === null) return
     editor.current?.jumpToLine(pendingJump.current)
     pendingJump.current = null
-  }, [docMode])
+  }, [showEditor])
 
   // `[[Title]]` in the preview: open the doc, or start it beside the current one. The list can be
   // narrowed by the tree search, so a filtered list is replaced by the full one before deciding "missing".
@@ -311,7 +371,7 @@ export default function DocsView(): JSX.Element {
     ? {
         view: 'docs',
         label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${oneLine(liveHere.meetingId, 80)}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${oneLine(recList, 600)}` : ''}. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${oneLine(liveHere.meetingId, 80)}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${oneLine(recList, 600)}` : ''}. ` : ''}${comments.openCount ? `${comments.openCount} open comment thread${comments.openCount === 1 ? '' : 's'} on this file: doc_comments reads them, doc_comment_reply answers in one. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this file', 'Tighten the writing', 'Pull out the action items as todos']
       }
@@ -321,7 +381,7 @@ export default function DocsView(): JSX.Element {
         detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a file for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList, comments.openCount])
 
   return (
     <main className="page docs-page">
@@ -391,12 +451,26 @@ export default function DocsView(): JSX.Element {
               />
               {(docSaving || dirty) && <span className="dr-dot doc-save-state" title={docSaving ? 'Saving…' : 'Unsaved changes'} aria-label="Unsaved changes" />}
               <span className="spacer" />
-              <div className="seg">
+              <button className={`ghost-btn xs doc-edit-toggle ${editing ? 'on' : ''}`} title={editing ? 'Back to reading (⌘E)' : 'Edit (⌘E)'} aria-pressed={editing}
+                onClick={() => setEditing(!editing)}>
+                {editing ? <><BookOpen size={13} /> Read</> : <><Pencil size={13} /> Edit</>}
+              </button>
+              {editing && <div className="seg">
                 <button className={docMode === 'edit' ? 'on' : ''} title="Editor only" onClick={() => setDocMode('edit')}><Pencil size={13} /></button>
                 <button className={docMode === 'split' ? 'on' : ''} title="Editor and preview" onClick={() => setDocMode('split')}><Columns2 size={13} /></button>
                 <button className={docMode === 'preview' ? 'on' : ''} title="Preview only" onClick={() => setDocMode('preview')}><Eye size={13} /></button>
-              </div>
-              {docMode !== 'preview' && (
+              </div>}
+              {showEditor && (
+                <button className="icon-btn ghost" title="Comment on the selected text" aria-label="Comment on the selected text" onClick={() => {
+                  const h = editor.current
+                  const sel = h?.getSelection()
+                  if (h && sel && sel.end > sel.start) commentOn(makeAnchor(h.getText(), sel.start, sel.end))
+                }}><MessageSquarePlus size={14} /></button>
+              )}
+              <ViewMenu icon={<Type size={14} />} title="Font" className="doc-type-menu">
+                <TypographyControls value={type} onChange={patchType} onReset={activeDoc.typography ? () => void setDocTypography(activeDoc.id, null) : undefined} />
+              </ViewMenu>
+              {showEditor && (
                 <ViewMenu>
                   <button role="menuitemcheckbox" aria-checked={writeFlags.focus} className="notes-menu-row" title="Dim all but the current paragraph" onClick={() => toggleFlag('focus')}>{writeFlags.focus ? '✓ ' : ''}Focus mode</button>
                   <button role="menuitemcheckbox" aria-checked={writeFlags.typewriter} className="notes-menu-row" title="Keep the caret line mid-height" onClick={() => toggleFlag('typewriter')}>{writeFlags.typewriter ? '✓ ' : ''}Typewriter scrolling</button>
@@ -429,12 +503,12 @@ export default function DocsView(): JSX.Element {
               </div>
             )}
 
-            {docMode !== 'preview' && <FormatBar editor={editor} />}
-            <div className={`doc-panes ${docMode}`}>
-              {docMode === 'split' && (
+            {showEditor && <FormatBar editor={editor} />}
+            <div className={`doc-panes ${editing ? docMode : 'read'}`} style={typeStyle}>
+              {editing && docMode === 'split' && (
                 <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />
               )}
-              {docMode !== 'preview' && (
+              {showEditor && (
                 <MarkdownEditor
                   ref={editor}
                   value={body}
@@ -454,8 +528,9 @@ export default function DocsView(): JSX.Element {
                   typewriter={writeFlags.typewriter}
                 />
               )}
-              {docMode !== 'edit' && (
-                <div className="docs-render markdown" ref={previewRef}>
+              {showRender && (
+                <div className={`docs-render markdown ${editing ? '' : 'reading'}`} ref={previewRef} title={editing ? undefined : 'Double-click to edit'}
+                  onDoubleClick={() => { if (!editing) setEditing(true) }}>
                   {body.trim()
                     ? (
                       <MarkdownPreview
@@ -469,10 +544,11 @@ export default function DocsView(): JSX.Element {
                         }}
                       />
                     )
-                    : <p className="muted">Nothing to preview yet.</p>}
+                    : <p className="muted">{editing ? 'Nothing to preview yet.' : 'Empty file. Press Edit, or double-click here, to write.'}</p>}
                 </div>
               )}
             </div>
+            <DocCommentFab fab={comments.fab} onComment={() => { if (comments.fab) commentOn(comments.fab.anchor) }} />
           </section>
         )}
 
@@ -484,6 +560,7 @@ export default function DocsView(): JSX.Element {
                   onClick={() => setPanel({ open: true, tab: t })}>
                   {PANEL_LABEL[t]}
                   {t === 'history' && pending.length > 0 && <span className="docs-panel-count">{pending.length}</span>}
+                  {t === 'comments' && comments.openCount > 0 && <span className="docs-panel-count">{comments.openCount}</span>}
                   {t === 'recordings' && liveHere && <span className="docs-panel-live" aria-label="Recording" />}
                 </button>
               ))}
@@ -491,7 +568,8 @@ export default function DocsView(): JSX.Element {
               <button className="icon-btn ghost" title="Close panel" aria-label="Close panel" onClick={() => setPanel({ ...panel, open: false })}><X size={14} /></button>
             </header>
 
-            {panel.tab === 'outline' && <DocOutline source={body} onJump={jumpToLine} activeLine={docMode === 'preview' ? undefined : caretLine} />}
+            {panel.tab === 'outline' && <DocOutline source={body} onJump={jumpToLine} activeLine={showEditor ? caretLine : undefined} />}
+            {panel.tab === 'comments' && <CommentsPanel state={comments} />}
             {panel.tab === 'recordings' && <RecordingsPanel docId={activeDoc.id} />}
             {panel.tab === 'links' && <Backlinks docId={activeDoc.id} onOpen={(id) => void openDoc(id)} />}
             {panel.tab === 'history' && (

@@ -71,6 +71,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'plan-mode', label: 'Cycle Plan Mode', keys: 'CmdOrCtrl+Shift+P', group: 'Chat', scope: 'component' },
 
   // Files (the note editor)
+  { id: 'md-toggle-edit', label: 'Edit or read', keys: 'CmdOrCtrl+E', group: 'Files', scope: 'component' },
   { id: 'md-save', label: 'Save', keys: 'CmdOrCtrl+S', group: 'Files', scope: 'component' },
   { id: 'md-bold', label: 'Bold', keys: 'CmdOrCtrl+Shift+B', group: 'Files', scope: 'component' },
   { id: 'md-italic', label: 'Italic', keys: 'CmdOrCtrl+Shift+I', group: 'Files', scope: 'component' },

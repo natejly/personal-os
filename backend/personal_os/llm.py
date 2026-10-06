@@ -208,6 +208,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "selectionToolbar": True,
     # Interface zoom, percent (80-160 in steps of 5); every window applies it as its page zoom factor.
     "uiZoom": 100,
+    # Default type for Files ({font: serif|sans|mono|book, size: px, measure: ch}); a doc can override it (docs.typography).
+    "docTypography": {},
     "responseStyle": "default",  # what a new chat starts on; see style_presets
     "responseStyleText": "",
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.

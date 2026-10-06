@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -510,7 +510,7 @@ export interface State {
   /** Open the chat a desk works in (every desk is a conversation). */
   goToDesk: (id: string) => Promise<void>
   /** Turn autonomy on for a chat: a desk binds to it and starts. Turning it off stops it and unbinds the chat. */
-  workAutonomously: (convId: string, autonomy: DeskAutonomy, budget?: DeskBudget) => Promise<void>
+  workAutonomously: (convId: string, autonomy: DeskAutonomy) => Promise<void>
   stopWorkingAutonomously: (convId: string) => Promise<void>
 
   refreshSkills: () => Promise<void>
@@ -1337,8 +1337,6 @@ export const useStore = create<State>((set, get) => {
             get().upsertCodingSession(ev.data)
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
-          } else if (ev.event === 'usage_alert') {
-            get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -1855,7 +1853,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', fastModel: '', autoRoute: false, systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', quickAskShortcut: '', dictationChord: '', tools: {}, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {}, followUps: true, microsoftClientId: '', microsoftTenant: '', pimProvider: 'google' },
     models: [],
     modelsError: null,
     tools: [],
@@ -3305,10 +3303,10 @@ export const useStore = create<State>((set, get) => {
       const convId = deskConv(id) ?? (await api.cowork.desks.get(id).catch(() => null))?.conversation_id
       if (convId) await get().selectChat(convId)
     },
-    workAutonomously: async (convId, autonomy, budget) => {
+    workAutonomously: async (convId, autonomy) => {
       set({ deskBusy: true })
       try {
-        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, budget, start: true })
+        const { desk, run_id, seq, position } = await api.cowork.desks.create({ conversation_id: convId, autonomy, start: true })
         if (position) get().toast(queuedNote(position))
         bindDesk(convId, desk.id)
         await get().refreshDesks()

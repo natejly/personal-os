@@ -39,6 +39,6 @@ test('every notifying status has a message and quiet statuses have none', () => 
   for (const s of ['awaiting_plan', 'needs_approval', 'blocked', 'interrupted', 'review', 'done', 'failed'] as DeskStatus[]) assert.ok(noticeFor(row(s))?.body, s)
   for (const s of ['draft', 'planning', 'working', 'paused', 'stopped'] as DeskStatus[]) assert.equal(noticeFor(row(s)), null, s)
   assert.match(noticeFor(row('awaiting_plan'))!.body, /has a plan to approve/)
-  assert.match(noticeFor(row('failed', { last_error: 'out of budget' }))!.body, /out of budget/)
+  assert.match(noticeFor(row('failed', { last_error: 'model unavailable' }))!.body, /model unavailable/)
   assert.equal(noticeFor(row('done'))!.deskId, 'd1')
 })

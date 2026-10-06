@@ -40,7 +40,7 @@ from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_sk
 from .embed import Embedder
 from .graph_backfill import BackfillRunning, GraphBackfill
 from .graph_learn import canonical_type, normalize_predicate
-from .graph_recall import GraphRecall
+from .graph_recall import GraphRecall, subgraph as graph_subgraph
 from .memory_index import MemoryIndex
 from .meeting_index import MeetingIndex
 from .retrieval import Retriever
@@ -6028,7 +6028,7 @@ async def _graph_hits(project_id: str | None, query: str, cfg: dict[str, Any], c
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
         vec = graph_recall.similar(project_id, qvec, memory_index.embedder.model(cfg)) if qvec is not None else {}
-        return graph_recall.subgraph(graph, project_id, query, vec)
+        return graph_subgraph(graph, project_id, query, vec)  # the module function; `graph_recall` here is the GraphRecall instance
     except Exception:  # noqa: BLE001
         log.exception("graph retrieval failed; falling back to mentions")
         return None

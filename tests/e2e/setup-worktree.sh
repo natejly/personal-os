@@ -5,10 +5,10 @@
 #   otherwise installed fresh (npm ci, uv sync). Playwright comes from PLAYWRIGHT_NODE_MODULES (a node_modules
 #   dir holding @playwright/test), else source-checkout's tests/e2e/node_modules.
 set -e
-cd "$(dirname "$0")/../.."
-SRC="${1:-}"
 fail() { print -u2 "setup-worktree: $*"; exit 1; }
-[ -z "$SRC" ] || [ -d "$SRC" ] || fail "source checkout not found: $SRC"
+SRC=""
+[ -z "${1:-}" ] || SRC="$(cd "$1" 2>/dev/null && pwd)" || fail "source checkout not found: $1"
+cd "$(dirname "$0")/../.."
 
 if [ ! -e node_modules ]; then
   if [ -n "$SRC" ]; then
@@ -27,8 +27,8 @@ if [ ! -e backend/.venv ]; then
   fi
 fi
 if [ ! -e .env ]; then
-  [ -n "$SRC" ] && [ -f "$SRC/.env" ] || fail "no .env here; pass a source checkout that has one or copy it in"
-  cp "$SRC/.env" .env
+  if [ -n "$SRC" ] && [ -f "$SRC/.env" ]; then cp "$SRC/.env" .env
+  else echo "setup-worktree: no .env (only E2E_LLM=real needs one)"; fi
 fi
 
 if [ ! -e tests/e2e/node_modules ]; then

@@ -109,7 +109,7 @@ npm run build        # the harness loads out/main/index.js
 node tests/e2e/node_modules/.bin/playwright test -c tests/e2e/playwright.config.mjs <spec-or-grep>
 ```
 
-  `tests/e2e/setup-worktree.sh` links node_modules and the venv into a fresh worktree. The harness runs the Electron window in the background by default (`GRAIN_E2E_BACKGROUND`); set `E2E_FOREGROUND=1` to watch or debug. Other knobs: `E2E_LLM=real` (use the LiteLLM proxy, slow and paid), `E2E_KEEP=1`, `E2E_WORKERS=n`, `E2E_RETRIES=n`.
+  `tests/e2e/setup-worktree.sh [source-checkout]` installs or links node_modules and the venv, links Playwright (`PLAYWRIGHT_NODE_MODULES` or the source checkout's) and builds. The harness runs the Electron window in the background by default (`GRAIN_E2E_BACKGROUND`); set `E2E_FOREGROUND=1` to watch or debug. Other knobs: `E2E_LLM=real` (use the LiteLLM proxy, slow and paid), `E2E_KEEP=1`, `E2E_WORKERS=n`, `E2E_RETRIES=n`.
 - **Mock provider directives** (`tests/e2e/mockllm.mjs`), put them in the prompt: `!!reply <text>` answers that text; `!!tool <name> <json args>` makes one tool call then answers "MOCK: tool done"; `!!slow <ms>` delays; `!!fail <status>` fails once. Anything else echoes `MOCK: <message>`.
 
 ## Driving the app programmatically

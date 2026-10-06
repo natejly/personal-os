@@ -69,6 +69,22 @@ def test_window_bounded() -> None:
     check(len(d.obs) == WINDOW == 24, "deque bounded at 24")
 
 
+def test_not_run_streak() -> None:
+    d = StuckDetector()
+    for i in range(3):
+        d.skip(f"t{i}")
+    check(d.check() is None, "3 calls that never ran is not yet a streak")
+    d.skip("t3")
+    s = d.check()
+    check(s is not None and s.pattern == "not_run", "4 calls that never ran in a row")
+    d.observe("a", {}, OK)
+    check(d.check() is None, "an executed call ends the streak")
+    for i in range(4):
+        d.skip("t")
+    d.reset()
+    check(d.check() is None, "reset clears the streak")
+
+
 # ---------------- integration ----------------
 SEEN: list[list[dict[str, Any]]] = []
 ROUNDS: list[dict[str, Any]] = []
@@ -129,6 +145,28 @@ def test_pingpong_nudged_then_stopped() -> None:
     notices = [m for r in SEEN for m in r if m["role"] == "tool" and "[stuck_notice]" in (m.get("content") or "")]
     check(len(notices) >= 1 and "stuck" in notices[0]["content"], "the model saw the notice in a tool message")
     check(len(SEEN) == len(breakers) + 1, "one tool-free final round followed the stop")
+
+
+def _never_runs(rounds: list[dict[str, Any]]) -> None:
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "delegationForce": False, "permissionMode": "manual"})
+    cid = appmod.convos.create(None, "t", "m")["id"]
+    SEEN.clear()
+    ROUNDS[:] = rounds
+    breakers = breakers_of(run_chat(cid))
+    check("stuck_nudge" in breakers and "stuck" in breakers and breakers.index("stuck_nudge") < breakers.index("stuck"),
+          "nudged, then stopped")
+    check(len(breakers) <= 12, f"ended within the threshold, ran {len(breakers)} calls")
+    check(len(SEEN) == len(breakers) + 1, "one tool-free final round followed the stop")
+
+
+def test_a_disabled_tool_called_with_varied_args_ends_stuck() -> None:
+    """doc_read fails three times, is disabled for the reply, and the model keeps calling it with new arguments."""
+    _never_runs([{"text": "", "calls": [call(f"d{i}", "doc_read", {"doc_id": f"nope{i}"})]} for i in range(60)])
+
+
+def test_a_tool_called_with_arguments_it_cannot_take_ends_stuck() -> None:
+    """The call is refused before it reaches the tool, and the arguments differ every time."""
+    _never_runs([{"text": "", "calls": [call(f"u{i}", "doc_read", {f"bogus{i}": i})]} for i in range(60)])
 
 
 def test_legacy_off_setting_is_ignored() -> None:

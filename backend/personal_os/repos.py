@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
+from .migrations import sync_memories_fts
+from .memory_limits import LEXICAL_HITS
 
 
 ALL = "__all__"  # sentinel: every scope (used by the library views)
@@ -28,6 +30,14 @@ def _scope_clause(project_id: str | None, include_global: bool = True) -> tuple[
     if include_global:
         return f"(project_id = ? OR (project_id IS NULL AND NOT {_ISOLATED_SQL}))", [project_id, project_id]
     return "project_id = ?", [project_id]
+
+
+def live_mem(alias: str = "") -> str:
+    """SQL for a live memory: not superseded, not deleted, not past its expiry. `alias` is the table alias of
+    `memories` in the query ("" for none). `now` is computed in SQL so no bind arguments are needed."""
+    p = f"{alias}." if alias else ""
+    return (f"({p}invalid_at IS NULL AND {p}deleted_at IS NULL AND "
+            f"({p}expires_at IS NULL OR {p}expires_at > (julianday('now') - 2440587.5) * 86400.0))")
 
 
 def is_isolated(db: Database, project_id: str | None) -> bool:
@@ -588,8 +598,7 @@ class Memories:
 
     def list(self, project_id: str | None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
         where, args = _scope_clause(project_id, include_global)
-        # Superseded / retracted rows (invalid_at set) are history: out of every default listing.
-        live = "" if include_invalid else " AND invalid_at IS NULL"
+        # Superseded, retracted and expired rows are history: out of every default listing.
         with self.db.tx() as c:
             if q.strip():
                 fq = fts_query(q, prefix=True)
@@ -597,12 +606,12 @@ class Memories:
                     return []
                 rows = c.execute(
                     f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.memory_id
-                        WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')}{live.replace('invalid_at', 'm.invalid_at')}
+                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND {'m.deleted_at IS NULL' if include_invalid else live_mem('m')}
                         ORDER BY bm25(memories_fts) LIMIT 100""",
                     (fq, *args),
                 ).fetchall()
             else:
-                rows = c.execute(f"SELECT * FROM memories WHERE {where} AND deleted_at IS NULL{live} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
+                rows = c.execute(f"SELECT * FROM memories WHERE {where} AND {'deleted_at IS NULL' if include_invalid else live_mem()} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
@@ -610,7 +619,7 @@ class Memories:
             return row_to_dict(c.execute("SELECT * FROM memories WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
 
     def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False,
-               provenance: dict[str, Any] | None = None) -> dict[str, Any]:
+               provenance: dict[str, Any] | None = None, expires_at: float | None = None) -> dict[str, Any]:
         content = content.strip()
         prov = provenance or {}
         with self.db.tx() as c:
@@ -618,7 +627,7 @@ class Memories:
             # double-click) each saw no row and both inserted. IMMEDIATE takes the write lock before the SELECT.
             c.execute("BEGIN IMMEDIATE")
             dup = c.execute(
-                f"SELECT id FROM memories WHERE invalid_at IS NULL AND deleted_at IS NULL AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
+                f"SELECT id FROM memories WHERE {live_mem()} AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
                 (content,) if project_id is None else (content, project_id),
             ).fetchone()
             if dup:
@@ -626,18 +635,20 @@ class Memories:
             mid = new_id()
             t = now()
             c.execute(
-                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id,expires_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (mid, project_id, content, kind, source, int(pinned), t, t, t,
-                 prov.get("conversation_id"), prov.get("message_id")),
+                 prov.get("conversation_id"), prov.get("message_id"), expires_at),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (content, mid))
         return self.get(mid)  # type: ignore[return-value]
 
     # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
     def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
-                  provenance: dict[str, Any] | None = None, keep_pinned: bool = False) -> dict[str, Any] | None:
+                  provenance: dict[str, Any] | None = None, keep_pinned: bool = False,
+                  expires_at: float | None = None) -> dict[str, Any] | None:
         """Replace a memory with a new version, keeping the old one as history. Returns the new row.
+        The new row expires at `expires_at` when given, else when the old one did.
 
         A pinned memory is user-curated: it is rewritten in place and stays valid, never archived, unless
         `keep_pinned` (the user's own edit), which versions it like any other row and pins the new one.
@@ -647,15 +658,16 @@ class Memories:
         if not old or old["invalid_at"] is not None or not new_content:
             return None
         if old["pinned"] and not keep_pinned:
-            return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {})})
+            return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {}),
+                                        **({"expires_at": expires_at} if expires_at is not None else {})})
         prov = provenance or {}
         mid, t = new_id(), now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id,expires_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (mid, old["project_id"], new_content, kind or old["kind"], source, int(bool(old["pinned"])), t, t, t,
-                 prov.get("conversation_id"), prov.get("message_id")),
+                 prov.get("conversation_id"), prov.get("message_id"), expires_at if expires_at is not None else old.get("expires_at")),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (new_content, mid))
             c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mid, old_id))
@@ -677,9 +689,12 @@ class Memories:
         m = self.get(id)
         if not m:
             return None
+        t = now()
+        # An expired row is history too: restoring it makes it live again, with no end date. A future expiry stays.
+        if m.get("expires_at") is not None and m["expires_at"] <= t:
+            m = self.update(id, {"expires_at": None}) or m
         if m["invalid_at"] is None:
             return m
-        t = now()
         with self.db.tx() as c:
             nxt = m["superseded_by"]
             if nxt:
@@ -718,13 +733,15 @@ class Memories:
                     raise ValueError("Memory content cannot be empty")
                 c.execute("UPDATE memories SET content=?, updated_at=? WHERE id=?", (patch["content"].strip(), now(), id))
                 c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
-                c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (patch["content"].strip(), id))
+                sync_memories_fts(c, [id])  # re-adds it only if live: editing a trashed or superseded row must not make it searchable
             if "kind" in patch and patch["kind"]:
                 c.execute("UPDATE memories SET kind=? WHERE id=?", (patch["kind"], id))
             if "pinned" in patch and patch["pinned"] is not None:
                 c.execute("UPDATE memories SET pinned=? WHERE id=?", (int(bool(patch["pinned"])), id))
             if "project_id" in patch:
                 c.execute("UPDATE memories SET project_id=? WHERE id=?", (patch["project_id"], id))
+            if "expires_at" in patch:  # None clears it
+                c.execute("UPDATE memories SET expires_at=? WHERE id=?", (patch["expires_at"], id))
         return self.get(id)
 
     def delete(self, id: str) -> None:
@@ -736,28 +753,49 @@ class Memories:
         """Every live pinned memory in scope: a pin is always in context, whatever the query."""
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
-            rows = c.execute(f"SELECT * FROM memories WHERE {where} AND pinned=1 AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
+            rows = c.execute(f"SELECT * FROM memories WHERE {where} AND pinned=1 AND {live_mem()} ORDER BY updated_at DESC", args).fetchall()
+        return [d for d in (row_to_dict(r) for r in rows) if d]
+
+    def matching(self, project_id: str | None, query: str, limit: int = LEXICAL_HITS, include_global: bool = True) -> list[dict[str, Any]]:
+        """Live memories that lexically match the query: FTS hits by bm25, then CJK substring hits (the tokenizer
+        indexes an unspaced run as one token), deduped. Nothing else: no pins, no recency."""
+        where, args = _scope_clause(project_id, include_global)
+        with self.db.tx() as c:
+            hits: list[Any] = []
+            fq = fts_query(query)
+            if fq:
+                hits = c.execute(
+                    f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.memory_id
+                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND {live_mem('m')} ORDER BY bm25(memories_fts) LIMIT ?""",
+                    (fq, *args, limit),
+                ).fetchall()
+            like, largs = cjk_like("content", query)
+            if like:
+                hits += c.execute(f"SELECT * FROM memories WHERE {like} AND {where} AND {live_mem()} "
+                                  "ORDER BY updated_at DESC LIMIT ?", (*largs, *args, limit)).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in hits:
+            d = row_to_dict(r)
+            if d:
+                out.setdefault(d["id"], d)
+        return list(out.values())[:limit]
+
+    def profile(self, project_id: str | None) -> list[dict[str, Any]]:
+        """The always-on standing preferences: live pinned rows and preference/instruction rows in scope, pins first
+        then newest first. Fully ordered (id last) so the prompt prefix is byte-identical turn to turn."""
+        where, args = _scope_clause(project_id)
+        with self.db.tx() as c:
+            rows = c.execute(f"SELECT * FROM memories WHERE {where} AND {live_mem()} AND (pinned=1 OR kind IN ('preference','instruction')) "
+                             "ORDER BY pinned DESC, COALESCE(valid_from, updated_at) DESC, id", args).fetchall()
         return [d for d in (row_to_dict(r) for r in rows) if d]
 
     def for_context(self, project_id: str | None, query: str, limit: int = 40) -> list[dict[str, Any]]:
         """Pinned + recent memories, plus FTS hits for the query, deduped."""
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
-            base = c.execute(f"SELECT * FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
-            hits: list[Any] = []
-            fq = fts_query(query)
-            if fq:
-                hits = c.execute(
-                    f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.memory_id
-                        WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
-                    (fq, *args),
-                ).fetchall()
-            like, largs = cjk_like("content", query)
-            if like:
-                hits += c.execute(f"SELECT * FROM memories WHERE {like} AND {where} AND invalid_at IS NULL AND deleted_at IS NULL "
-                                  "ORDER BY updated_at DESC LIMIT 15", (*largs, *args)).fetchall()
-        out: dict[str, dict[str, Any]] = {}
-        for r in [*hits, *base]:
+            base = c.execute(f"SELECT * FROM memories WHERE {where} AND {live_mem()} ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
+        out: dict[str, dict[str, Any]] = {d["id"]: d for d in self.matching(project_id, query)}
+        for r in base:
             d = row_to_dict(r)
             if d:
                 out.setdefault(d["id"], d)

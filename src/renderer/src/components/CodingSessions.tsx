@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AGENT_LABEL, codingDot, codingLive, codingStatusLabel, codingStoppable } from '../lib/codingSessions'
 import { useStore } from '../store'
-import { useStop } from './toolcards/CodingSessionCard'
+import { NeedsYou, useStop } from './toolcards/CodingSessionCard'
 import type { CodingSession } from '@shared/types'
 
 function Row({ c }: { c: CodingSession }): JSX.Element {
@@ -16,7 +16,8 @@ function Row({ c }: { c: CodingSession }): JSX.Element {
         {codingStoppable(c.status) && <button className="link" disabled={busy} onClick={() => void stop()}>Stop</button>}
       </div>
       <small className="muted">{AGENT_LABEL[c.agent]} · {codingStatusLabel(c.status)}{c.detail ? ` · ${c.detail}` : ''}</small>
-      {c.status === 'needs_you' && c.attach_hint && <small className="muted"> · run <code>{c.attach_hint}</code></small>}
+      {c.status === 'needs_you' && !(c.agent === 'claude' && c.external_id) && c.attach_hint && <small className="muted"> · run <code>{c.attach_hint}</code></small>}
+      <NeedsYou c={c} />
       {open && <pre className="ctx-prompt">{c.log_tail || '(no output yet)'}</pre>}
     </li>
   )

@@ -37,7 +37,8 @@ from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
 from . import plans, router
 from . import firecrawl, reach
 from . import mcp_search
-from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block
+from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
+from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
 from . import redact
 from . import webread
 from . import websearch
@@ -121,6 +122,10 @@ class ToolSpec:
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
         # (args, ctx) -> True when this particular call must ask whatever the mode says (shell_run unsandboxed, or networked in a tainted run)
         self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the forced card is HARD: auto mode's reviewer may not lift it (counts as force_ask too)
+        self.force_card: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
+        # (args, ctx) -> True when the run's taint comes only from this call's own subject, so it does not count as tainted here
+        self.taint_ok: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None
 
@@ -700,6 +705,7 @@ class Toolbox:
         # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
+        self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -898,6 +904,17 @@ class Toolbox:
         spec = self.specs.get(name)
         return bool(spec and spec.force_ask and spec.force_ask(args, ctx or {}))
 
+    def forces_card(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """A forced ask that auto mode's reviewer may not lift either."""
+        spec = self.specs.get(name)
+        return bool(spec and spec.force_card and spec.force_card(args, ctx or {}))
+
+    def tainted_for(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """ctx's taint as it counts for this call: a tool may exempt taint that only its own subject caused."""
+        ctx = ctx or {}
+        spec = self.specs.get(name)
+        return bool(ctx.get("tainted")) and not (spec and spec.taint_ok and spec.taint_ok(args, ctx))
+
     def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
         """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created). The proxy mode counts:
         an allowed host can still carry out what a tainted reply read, so it asks like the shell's allowlist does."""
@@ -908,6 +925,32 @@ class Toolbox:
             return bool(sb.reaches_out(ctx.get("conversation_id") or "") or net_mode(permissions.get(sb.settings(), "sandboxNetwork")) != "off")
         except Exception:  # noqa: BLE001 - unknown means assume it can reach out
             return True
+
+    def _own_words_save(self, name: str, args: dict[str, Any] | None, ctx: dict[str, Any]) -> bool:
+        """A plain save_memory (no replaces/forget) whose content the user's own words in this chat back: a chat that
+        read untrusted text cannot plant a memory the user never said, but may keep one they did."""
+        a = args if isinstance(args, dict) else {}
+        content = a.get("content")
+        return (name == "save_memory" and isinstance(content, str) and bool(content.strip())
+                and not a.get("replaces") and not a.get("forget") and self._user_backed(ctx, content))
+
+    def _user_backed(self, ctx: dict[str, Any], content: str) -> bool:
+        """At least TAINT_SAVE_MIN_OVERLAP of `content`'s words (the third-person rewrite's "User" aside) appear in one
+        message the user typed in this chat. One message, not the whole chat: words picked from several cannot be
+        stitched into something the user never said."""
+        from .context import _terms
+
+        def words(text: str) -> set[str]:  # "prefers" and "prefer" are the same word
+            return {t[:-1] if len(t) > 3 and t.endswith("s") else t for t in _terms(text)} - {"user"}
+        mine = words(content)
+        if not mine:
+            return False
+        typed = [str(ctx.get("user_text") or "")]
+        cid = ctx.get("conversation_id")
+        if cid and self.conversations is not None:
+            conv = self.conversations.get(cid) or {}
+            typed += [str(m.get("content") or "") for m in conv.get("messages") or [] if m.get("role") == "user"]
+        return max(len(mine & words(t)) for t in typed) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
 
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
         """Effective mode for one call. Untrusted content forces alwaysAsk tools, and anything that writes lasting text, to ask.
@@ -921,8 +964,8 @@ class Toolbox:
         # A doc_edit in review mode (the default) lands as a diff the user accepts or rejects: that is its card.
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
         reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
-        if spec and mode == "on" and ctx.get("tainted") and not reviewed and (
-                spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
+        if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
+                spec.danger == "network" or self.ask_locked(spec) or (name in PROMPT_WRITES and not self._own_words_save(name, args, ctx))
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args, ctx):
@@ -993,6 +1036,7 @@ class Toolbox:
                               alternative=ALTERNATIVE.get(name))
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
+            ctx.setdefault("taint_sources", []).append(name)  # every taint is sourced (Toolbox.tainted_for relies on it)
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
         return checked(name, out)
@@ -1060,8 +1104,22 @@ class Toolbox:
         R("list_documents", ToolSpec("list_documents", "List the uploaded files available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
             examples=[{}, {"offset": 50}]))
 
-        async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0, include_chats: bool = False) -> Any:
-            out = await _memories(ctx, query, offset)
+        async def search_memory(ctx: dict[str, Any], query: str = "", offset: int = 0, include_chats: bool = False,
+                                kind: str = "", since: str = "") -> Any:
+            if kind and kind not in MEMORY_KINDS:
+                return tool_error(f"Unknown kind '{kind}'.", field="kind", expected="one of " + ", ".join(sorted(MEMORY_KINDS)),
+                                  example={"query": "email", "kind": "instruction"})
+            since_ts = None
+            if since:
+                try:
+                    since_ts = datetime.strptime(since.strip(), "%Y-%m-%d").timestamp()
+                except ValueError:
+                    return tool_error(f"since '{since}' is not a date.", field="since", expected="YYYY-MM-DD",
+                                      example={"query": "trip", "since": "2026-09-01"})
+            if not (query.strip() or kind or since_ts is not None):
+                return tool_error("Give a query, or a kind or since filter to list memories.", field="query",
+                                  expected="a non-empty string", example={"query": "coffee"})
+            out = await _memories(ctx, query, offset, kind, since_ts)
             if include_chats:
                 out["conversations"] = _recall_chats(ctx, query)
             return out
@@ -1082,33 +1140,60 @@ class Toolbox:
             return [{"conversation_id": h["id"], "title": h["title"], "date": time.strftime("%Y-%m-%d", time.localtime(h["updated_at"])),
                      "excerpts": [s["text"].replace("\x02", "").replace("\x03", "") for s in h["snippets"]]} for h in hits]
 
-        async def _memories(ctx: dict[str, Any], query: str, offset: int) -> Any:
-            found = None
-            if self.memory_index is not None:
-                cfg = self.settings()
-                qvec = await self.memory_index.query_vec(cfg, query)
-                if qvec is not None:
-                    found = self.memory_index.search(ctx["project_id"], query, qvec, limit=100, settings=cfg)
-            if found is None:
+        def _day(ts: float) -> str:
+            return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+        def _noted(m: dict[str, Any]) -> float:
+            return m.get("valid_from") or m.get("created_at") or 0
+
+        async def _memories(ctx: dict[str, Any], query: str, offset: int, kind: str, since_ts: float | None) -> Any:
+            q = query.strip()
+            if q and self.memory_index is not None:
+                cfg = self.settings()  # a None vector still ranks lexically and through the graph
+                found = self.memory_index.search(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
+                                                 limit=SEARCH_HITS, settings=cfg)
+            elif q:
                 found = self.memories.list(ctx["project_id"], query)
-            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in found]
-            return _scrub_strings(page(rows, offset=offset, limit=20, key="memories"))
+            else:  # a filter-only listing, newest first
+                found = sorted(self.memories.list(ctx["project_id"]), key=_noted, reverse=True)
+            t = time.time()
+            found = [m for m in found if not (m.get("expires_at") and m["expires_at"] <= t)  # expired rows are not memory any more
+                     and (not kind or m["kind"] == kind)
+                     and (since_ts is None or _noted(m) >= since_ts)]
+            rows = []
+            for m in found:
+                row = {"id": m["id"], "content": m["content"], "kind": m["kind"], "scope": "project" if m["project_id"] else "personal"}
+                if _noted(m):
+                    row["valid_from"] = _day(_noted(m))
+                if m.get("expires_at"):
+                    row["expires_at"] = _day(m["expires_at"] - 1)  # the stored instant is the end of the last day it holds
+                conv = self.conversations.get(m["source_conversation_id"], with_messages=False) \
+                    if m.get("source_conversation_id") and self.conversations is not None else None
+                if conv:
+                    row["source"] = {"conversation_id": conv["id"], "title": conv.get("title")}
+                rows.append(row)
+            return _scrub_strings(page(rows, offset=offset, limit=SEARCH_PAGE, key="memories"))
         R("search_memory", ToolSpec("search_memory", (
-            "Search what you remember about the user (long-term memory) for a topic. Set include_chats for 'what did we "
+            "Search what you remember about the user (long-term memory) for a topic. Filter with `kind` and `since` "
+            "(YYYY-MM-DD: only memories learned on or after that date); with a filter the query may be empty to list "
+            "the newest. Each row says where it was learned when that chat still exists. Set include_chats for 'what did we "
             "discuss / decide about X' questions: it also returns matching past conversations in this scope as "
             "{conversation_id, title, date, excerpts} under `conversations`."),
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0},
-                  "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations (this project's and personal ones)"}}, ["query"]),
+                  "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations (this project's and personal ones)"},
+                  "kind": {"type": "string", "enum": sorted(MEMORY_KINDS), "description": "only memories of this kind"},
+                  "since": {"type": "string", "description": "YYYY-MM-DD: only memories learned on or after this local date"}}, ["query"]),
             search_memory, "memory",
             examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20},
-                      {"query": "pricing decision", "include_chats": True}]))
+                      {"query": "pricing decision", "include_chats": True},
+                      {"query": "", "kind": "instruction"}, {"query": "trip", "since": "2026-09-01"}]))
 
         async def save_memory(ctx: dict[str, Any], content: str = "", kind: str = "", personal: bool = False,
-                              replaces: str = "", forget: bool = False) -> Any:
+                              replaces: str = "", forget: bool = False, until: str = "", profile: bool = False) -> Any:
             # Created only on a successful write, so a refused call emits no "learned" event.
             def learned() -> dict[str, Any]:
                 return ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
-            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
+            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("user_message_id") or ctx.get("message_id")}
             isolated = is_isolated(self.memories.db, ctx.get("project_id"))
             if personal and not (replaces or forget) and isolated:
                 return tool_error("This project keeps its memory to itself, so nothing said here can be saved as personal.",
@@ -1119,7 +1204,8 @@ class Toolbox:
                     return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
                                       alternative="search_memory to find the memory's id")
                 old = self.memories.get(replaces)
-                if not old or old["invalid_at"] is not None or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id"))):
+                if (not old or old["invalid_at"] is not None or (old.get("expires_at") or 1e18) <= time.time()
+                        or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id")))):
                     return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
                                       alternative="search_memory for the memory's current id")
                 # Pinned rows are the user's own curation, as in auto-learn: the model never rewrites or drops them.
@@ -1139,25 +1225,51 @@ class Toolbox:
             if not text.strip():
                 return tool_error("content is empty.", field="content", example={"content": "User prefers dark mode"})
             kind = kind if kind in MEMORY_KINDS else ""
+            try:
+                expires = until_ts(until, datetime.now().date())
+            except ValueError as e:
+                return tool_error(f"until: {e}", field="until", expected="a date, YYYY-MM-DD, today or later",
+                                  example={"content": "User is in Lisbon until 2026-11-20", "until": "2026-11-20"})
+
+            def done(m: dict[str, Any]) -> None:
+                if profile:  # never pinned here: the UI offers "Pin to profile?" and the user decides
+                    learned().setdefault("pin_suggested", []).append(m["id"])
             if old:
-                m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov)
+                m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
                 if not m:
                     return tool_error(f"Could not update {replaces}: it is no longer current.")
                 learned().setdefault("updated", []).append(m)
+                done(m)
                 return {"updated": replaces, "saved": m["id"], "content": m["content"]}
-            m = self.memories.create(None if personal else ctx["project_id"], text, kind=kind or "fact", source="auto", provenance=prov)
+            scope = None if personal else ctx["project_id"]
+            # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
+            dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
+            if dup and dup["content"].strip().lower() != text.strip().lower():  # the same words: create() dedupes, no new version
+                m = self.memories.supersede(dup["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
+                if m:
+                    learned().setdefault("updated", []).append(m)
+                    done(m)
+                    return {"updated": dup["id"], "saved": m["id"], "content": m["content"], "merged": True}
+            m = self.memories.create(scope, text, kind=kind or "fact", source="auto", provenance=prov, expires_at=expires)
             learned()["memories"].append(m)
+            done(m)
             return {"saved": m["id"], "content": m["content"]}
-        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference or goal) for future chats. Use when the user says 'remember that…' or shares something clearly worth keeping. "
+        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference, standing instruction or goal) for future chats. Use when the user says 'remember that…', gives an always/never rule (kind instruction), or shares something clearly worth keeping. "
+                                  "Pass `until` for a fact that stops holding on a date (a trip, a temporary address); the memory then leaves search and context after that day. "
+                                  "`profile: true` marks it as a standing preference worth always having in view; the user decides whether to pin it. "
                                   "To correct a memory, pass its id from search_memory as `replaces` with the corrected content; to forget one, pass `replaces` and `forget: true`.",
             _obj({"content": {"type": "string", "description": "Third person, e.g. 'User prefers dark mode'. Write dates as absolute dates."},
-                  "kind": {"type": "string", "enum": ["fact", "preference", "goal", "note"], "description": "Defaults to fact (or the replaced memory's kind)"},
+                  "kind": {"type": "string", "enum": ["fact", "preference", "instruction", "goal", "note"], "description": "instruction = a standing always/never rule. Defaults to fact (or the replaced memory's kind)"},
                   "personal": {"type": "boolean", "description": "true = available in every chat, false = only this project. Ignored with replaces.", "default": False},
                   "replaces": {"type": "string", "description": "id of an existing memory (from search_memory) that this one corrects; the old wording stays as history"},
-                  "forget": {"type": "boolean", "description": "true = forget the memory named by replaces instead of saving content", "default": False}}, []), save_memory, "memory", "writes",
+                  "forget": {"type": "boolean", "description": "true = forget the memory named by replaces instead of saving content", "default": False},
+                  "until": {"type": "string", "description": "YYYY-MM-DD, the last day this holds; leave out for anything lasting. Relative phrases like 'tomorrow' are resolved."},
+                  "profile": {"type": "boolean", "description": "true = a standing preference the user may want pinned to their profile (never pinned by this call)", "default": False}}, []), save_memory, "memory", "writes",
             examples=[{"content": "User's daughter is called Mira", "kind": "fact", "personal": True},
                       {"content": "User prefers replies under 150 words", "kind": "preference", "personal": True},
                       {"content": "User wants the migration done before March", "kind": "goal"},
+                      {"content": "Always answer in British English", "kind": "instruction", "personal": True, "profile": True},
+                      {"content": "User is staying in Lisbon", "kind": "fact", "until": "2026-11-20"},
                       {"replaces": "mem_8c1d2e", "content": "User now lives in Lisbon"},
                       {"replaces": "mem_8c1d2e", "forget": True}]))
 
@@ -2557,6 +2669,8 @@ def _register_docs(self: Toolbox) -> None:
         # The chat's own project decides which tree it lands in, so a doc written inside a project is
         # filed under that project without the model having to be told which one it is in.
         d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
+        if self.chat_files is not None:
+            self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], d["title"], "created", ctx.get("message_id"))
         return _scrub_strings({"created": d["title"], "doc_id": d["id"], "words": d["words"],
                 "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
                 "note": "Created in Files. The user can undo it from the file's revision history."})
@@ -2612,6 +2726,8 @@ def _register_docs(self: Toolbox) -> None:
             if not applied:
                 return _missing(ctx, doc)
             rev = self.docs.revision(rev["id"]) or rev
+            if self.chat_files is not None:
+                self.chat_files.record(ctx.get("conversation_id"), "note", d["id"], applied.get("title") or d["title"], "edited", ctx.get("message_id"))
             return _scrub_strings({"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
                     "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
                     "note": "Written into the file. The user sees the diff in the chat and can undo it from the file's "

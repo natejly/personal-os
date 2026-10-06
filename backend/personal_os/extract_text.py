@@ -14,11 +14,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+from .limits import MAX_UNZIPPED_BYTES, MAX_UPLOAD_BYTES  # noqa: F401  (re-exported: app and tests read them here)
+
 MAX_INDEX_CHARS = 400_000
 MAX_PDF_PAGES = 80
-# A zip's declared uncompressed size, summed. A 180 KB docx can inflate to hundreds of MB of XML.
-MAX_UNZIPPED_BYTES = 50 * 1024 * 1024
+# MAX_UNZIPPED_BYTES (limits.py): a zip's declared uncompressed size, summed. A 180 KB docx can inflate to hundreds
+# of MB of XML. It scales with the upload cap so a legitimately large docx is still read.
 _TRUNCATED = "\n\n[Extract truncated. The full file is stored.]"
 
 TEXT_EXT = {

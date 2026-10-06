@@ -148,7 +148,8 @@ def default_timeout(settings: dict[str, Any], timeout_s: Any, background: bool) 
 async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, state_key: str, continue_session: bool = False,
                  model: str | None = None, background: bool = False, timeout: int | None = None,
                  conversation_id: str | None = None, run_id: str | None = None, notify: bool = True,
-                 on_timeout: str | None = None) -> tuple[shell.Job, dict[str, Any]]:
+                 on_timeout: str | None = None, pool: str = "shell",
+                 max_background: int | None = None) -> tuple[shell.Job, dict[str, Any]]:
     """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
     Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
     `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
@@ -172,6 +173,8 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
     env = shell.scrubbed_env(tmp)
     env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
+    # ~/.npm and ~/.cache/pip are outside the sandbox's writable paths, so package installs use the per-launch tmp dir
+    env["npm_config_cache"], env["PIP_CACHE_DIR"] = os.path.join(tmp, "npm-cache"), os.path.join(tmp, "pip-cache")
     env.update({"XDG_DATA_HOME": str(state / "data"), "XDG_CONFIG_HOME": str(state / "config"),
                 "XDG_CACHE_HOME": str(state / "cache"), "XDG_STATE_HOME": str(state / "state"),
                 "OPENCODE_CONFIG_CONTENT": config(base_url, use_model, "GRAIN_MODEL_API_KEY"),
@@ -192,7 +195,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
                                    conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
                                    run_id=run_id if run_id is not None else ctx.get("run_id"),
                                    background=bool(background), timeout=timeout, notify=notify,
-                                   max_background=int(s.get("shellMaxBackground") or 4),
+                                   max_background=max_background or int(s.get("shellMaxBackground") or 4), pool=pool,
                                    on_timeout=on_timeout or ("background" if ctx.get("desk_id") else "kill"))
     except shell.ShellError:
         shutil.rmtree(tmp, ignore_errors=True)

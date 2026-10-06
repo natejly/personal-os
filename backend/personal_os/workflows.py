@@ -802,6 +802,7 @@ class Engine:
                 state[s["id"]] = r["status"]
                 if r["status"] == "done" and self._taints(s):
                     ctx["tainted"] = True
+                    ctx.setdefault("taint_sources", []).append(f"workflow:{s['id']}")
         # Waves: every step whose dependencies are settled runs now, side by side. Validation ruled out cycles
         # and unknown needs, so the frontier only empties once every step has a state.
         while True:

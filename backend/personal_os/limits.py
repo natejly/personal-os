@@ -56,6 +56,9 @@ BROWSER_MAX_TABS = 4               # tabs per desk browser
 BROWSER_IDLE_SECONDS = 300         # an idle agent browser is closed after this
 SHELL_TIMEOUT_SECONDS = 120        # foreground shell default; a call may ask for up to 600
 SHELL_MAX_BACKGROUND = 4           # live background shell jobs at once
+CODING_SESSION_TIMEOUT_MINUTES = 30  # an OpenCode coding session is stopped after this
+CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own pool apart from SHELL_MAX_BACKGROUND
+LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt
@@ -120,6 +123,8 @@ RANGES: dict[str, tuple[float, float]] = {
     "fetchCacheSeconds": (0, 86_400),
     "imessageLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
+    "codingSessionTimeoutMinutes": (1, 1440),
+    "codingSessionMaxConcurrent": (1, 20),
 }
 
 

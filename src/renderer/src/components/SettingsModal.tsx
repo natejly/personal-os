@@ -627,6 +627,16 @@ export default function SettingsModal(): JSX.Element {
               <AdvGroup id="desks" title="Desks and background" {...gp}>
                 <CoworkSettings draft={draft} patch={patch} />
                 <CoworkAdvanced draft={draft} patch={patch} />
+                <h4>Coding sessions</h4>
+                <label className="setting-row"><span className="toggle-text"><b>How long a coding session may run</b><small>OpenCode sessions stop after this.</small></span>
+                  <span className="num-unit">
+                    <input type="number" min={1} max={1440} value={draft.codingSessionTimeoutMinutes ?? 30} onChange={(e) => patch({ codingSessionTimeoutMinutes: Math.min(1440, Math.max(1, Math.round(Number(e.target.value)) || 30)) })} />
+                    <em>minutes</em>
+                  </span>
+                </label>
+                <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
+                  <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
+                </label>
                 <h4>Browser</h4>
                 <BrowserAccess draft={draft} patch={patch} />
                 <h4>Checks and commands</h4>

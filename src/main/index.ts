@@ -20,6 +20,7 @@ import { createTray } from './tray'
 import { startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
 import { background, goBackground, reveal } from './background'
+import { attachContextMenu } from './attachContextMenu'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -78,18 +79,15 @@ function createWindow(): void {
   })
   guardNavigation(win.webContents)
 
-  // Right-click on selected text offers the same four verbs as the floating toolbar.
-  win.webContents.on('context-menu', (_e, params) => {
-    if (!params.selectionText.trim() || !win || win.isDestroyed()) return
-    const verbs = ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
+  // Right-click: spelling fixes on a misspelled word, the edit items in a field, and on selected text
+  // the same four verbs as the floating toolbar.
+  attachContextMenu(
+    win,
+    ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
       label,
       click: () => sendMenu(`selection:${label.replace('…', '').toLowerCase()}`)
     }))
-    const edit: Electron.MenuItemConstructorOptions[] = params.isEditable
-      ? [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }]
-      : [{ role: 'copy' }]
-    Menu.buildFromTemplate([...edit, { type: 'separator' }, ...verbs]).popup({ window: win })
-  })
+  )
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)

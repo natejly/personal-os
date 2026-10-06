@@ -148,14 +148,14 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.nodes.length > 0 && (
         <section>
-          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entit{ctx.nodes.length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
+          <h5><Share2 size={12} /> Graph ({ctx.nodes.filter((n) => !n.kind).length} entit{ctx.nodes.filter((n) => !n.kind).length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
           <ul>
             {ctx.edges.map((e) => {
-              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label
-              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label
-              return <li key={e.id}>{s} <em>{e.relation}</em> {t}</li>
+              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label ?? 'User'
+              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label ?? 'User'
+              return <li key={e.id}>{s} <em>{e.relation.replace(/_/g, ' ')}</em> {t}</li>
             })}
-            {ctx.nodes.filter((n) => !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
+            {ctx.nodes.filter((n) => !n.kind && !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
           </ul>
         </section>
       )}

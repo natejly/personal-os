@@ -1,4 +1,5 @@
-"""Auto-learn: after an exchange, extract memories and knowledge-graph triples with the LLM.
+"""Auto-learn: after an exchange, extract memories (and friction, skill feedback) with the LLM. The knowledge graph is
+extracted by its own call, graph_learn.learn_graph, which LearnWorker runs right after.
 
 What is worth keeping, and why (docs/research/memory-extraction.md has the sources):
 
@@ -43,7 +44,7 @@ from .trace import Tracer
 
 log = logging.getLogger("personal_os")
 
-EXTRACT_PROMPT = """You maintain a personal memory and knowledge graph for a user, so that later conversations start already knowing them and never make them repeat themselves.
+EXTRACT_PROMPT = """You maintain a personal memory for a user, so that later conversations start already knowing them and never make them repeat themselves.
 Given the latest exchange, extract what is durable and useful, keep the existing memories current, and notice friction.
 
 Return ONLY a JSON object with this shape:
@@ -51,9 +52,6 @@ Return ONLY a JSON object with this shape:
   "memories": [{"content": "...", "kind": "fact|preference|instruction|goal|note", "until": "<optional YYYY-MM-DD>"}],
   "updates": [{"id": "M3", "content": "...", "kind": "fact|preference|instruction|goal|note", "until": "<optional YYYY-MM-DD>"}],
   "forget": ["M5"],
-  "entities": [{"label": "...", "type": "person|project|organization|tool|place|concept|other"}],
-  "relations": [{"source": "<entity label>", "target": "<entity label>", "relation": "short verb phrase", "fact": "<optional: one sentence stating the relation>", "replaces": "<optional: an existing relation this one supersedes, as 'Source|relation|Target'>"}],
-  "ended": [{"source": "<entity label>", "target": "<entity label>", "relation": "relation that no longer holds"}],
   "friction": null | {"what": "<one sentence: what the user had to repeat, correct or work around>", "fix": "preference|procedure", "task": "<if fix is procedure: the repeatable task, as a one-line intent>"},
   "skill_feedback": [{"id": "S1", "outcome": "worked|failed", "change": "<if failed: which step to change and why, generalised, not this instance>"}]
 }
@@ -77,8 +75,6 @@ What to skip:
 Keeping memories current:
 - When the user contradicts, refines or restates an existing memory, return it in "updates" with that memory's id and the corrected content instead of adding a near-duplicate. Newer wins: when the user contradicts an existing memory, return it in updates with the new content.
 - Use "forget" only when the user explicitly retracts something or asks you to forget it.
-- Entities are concrete named things the user cares about (people, projects, tools, orgs, places, concepts); relations link them ("works on", "uses", "is friends with"). Never create an entity for the user themselves; facts about the user belong in memories.
-- When a relationship has ended or changed (left a job, moved, broke up), list it in "ended"; when a new relation replaces an old one, set "replaces" on the new relation. Ended relations are kept as history.
 - Convert relative dates (tomorrow, next month, this Friday) to absolute dates using today's date, given below. Keep the original wording only when no date can be inferred.
 
 Friction (the exchange cost the user effort the next one should not):
@@ -316,50 +312,6 @@ async def learn_from_exchange(
         if mem["id"] not in before:
             added_memories.append(mem)
 
-    label_to_id: dict[str, str] = {}
-    added_nodes = []
-    for e in _list(data.get("entities")):
-        label = _s(e.get("label")) if isinstance(e, dict) else _s(e)
-        if not label or label.lower() in SELF_LABELS:
-            continue
-        etype = _s(e.get("type")) if isinstance(e, dict) else ""
-        try:
-            node = graph.upsert_node(project_id, label, type=etype or "entity")
-        except Exception:
-            continue
-        label_to_id[label.lower()] = node["id"]
-        added_nodes.append(node)
-
-    added_edges = []
-    ended_edges: list[dict[str, Any]] = []
-    for r in _list(data.get("relations")):
-        if not isinstance(r, dict):
-            continue
-        s, t, rel = _s(r.get("source")), _s(r.get("target")), _s(r.get("relation"))
-        if not (s and t and rel) or s.lower() in SELF_LABELS or t.lower() in SELF_LABELS:
-            continue
-        try:
-            sid = label_to_id.get(s.lower()) or graph.upsert_node(project_id, s)["id"]
-            tid = label_to_id.get(t.lower()) or graph.upsert_node(project_id, t)["id"]
-            if sid == tid:
-                continue
-            edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=source_id,
-                                     valid_at=ts, fact=_s(r.get("fact"))[:500])
-        except Exception:  # noqa: BLE001 - one bad relation must not lose the rest
-            continue
-        added_edges.append(edge)
-        old = _edge_by_ref(graph, project_id, r.get("replaces"))
-        if old and old["id"] != edge["id"]:
-            graph.invalidate_edge(old["id"], superseded_by=edge["id"])
-            ended_edges.append(old)
-
-    for r in _list(data.get("ended")):
-        if not isinstance(r, dict):
-            continue
-        old = _edge_by_ref(graph, project_id, f"{r.get('source') or ''}|{r.get('relation') or ''}|{r.get('target') or ''}")
-        if old and graph.invalidate_edge(old["id"]):
-            ended_edges.append(old)
-
     if index is not None:
         try:
             await index.index(settings, [m["id"] for m in [*added_memories, *updated_memories]])
@@ -367,19 +319,9 @@ async def learn_from_exchange(
             log.exception("memory indexing failed")
 
     return {"memories": added_memories, "updated": updated_memories, "removed": removed_memories,
-            "nodes": added_nodes, "edges": added_edges, "superseded": superseded,
+            "nodes": [], "edges": [], "superseded": superseded,  # the graph is extracted by graph_learn.learn_graph
             "invalidated": [{"id": m["id"], "content": m["content"]} for m in removed_memories],
-            "ended": ended_edges, "friction": friction, "skill_feedback": skill_feedback}
-
-
-def _edge_by_ref(graph: Graph, project_id: str | None, ref: Any) -> dict[str, Any] | None:
-    """A live edge named as 'Source|relation|Target', or None. Never creates nodes."""
-    parts = [p.strip() for p in str(ref or "").split("|")]
-    if len(parts) != 3 or not all(parts):
-        return None
-    s, rel, t = parts
-    sn, tn = graph.find_node(project_id, s), graph.find_node(project_id, t)
-    return graph.find_edge(sn["id"], tn["id"], rel) if sn and tn else None
+            "ended": [], "friction": friction, "skill_feedback": skill_feedback}
 
 
 # ---------------- skills: procedural memory, approved by hand ----------------
@@ -818,6 +760,7 @@ class LearnWorker:
         self._alive = alive  # False for a conversation that has since been trashed: its queued job is dropped
         self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
         self.index: Any = None  # memory_index.MemoryIndex; set by app.py
+        self.graph_recall: Any = None  # graph_recall.GraphRecall; set by app.py, resolves extracted names to known entities
         self._memories = memories
         self._graph = graph
         self._set_trace = set_trace
@@ -980,6 +923,24 @@ class LearnWorker:
             out.append({"id": new["id"], "name": new["name"], "why": new["rationale"], "revises": row["id"]})
         return out
 
+    async def _learn_graph(self, job: LearnJob, learned: dict[str, Any]) -> None:
+        """The graph has its own extraction call. A failure there must not lose the memories already saved."""
+        from . import graph_learn  # lazy: graph_learn imports this module
+
+        # A graph failure is logged, not published as learn_error: the memories above are already saved and the
+        # graph is rebuildable later with the backfill, so a banner would only alarm the user about a retryable extra.
+        try:
+            g = await graph_learn.learn_graph(
+                settings=job.settings, graph=self._graph, project_id=job.project_id, user_text=job.user_text,
+                assistant_text="" if job.user_only else job.assistant_text, model=job.model,
+                message_id=job.user_message_id or job.message_id, ts=None, recall=self.graph_recall)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("graph extraction failed for %s", job.message_id)
+            return
+        learned.update(nodes=g["nodes"], edges=g["edges"], ended=g["ended"])
+
     async def _run(self, job: LearnJob) -> None:
         if self._alive is not None and not self._alive(job.conversation_id):
             return
@@ -996,6 +957,7 @@ class LearnWorker:
                 tool_events=job.tool_events, skills_in_use=job.skills_in_use,
                 user_only=job.user_only, user_message_id=job.user_message_id,
             )
+            await self._learn_graph(job, learned)
             # A skill draft needs the assistant half, which a user-only job never saw.
             learned["skill_candidates"] = [] if job.user_only else await self._suggest_skill(job, learned)
             learned["skill_revisions"] = [] if job.user_only else await self._revise_skills(job, learned)

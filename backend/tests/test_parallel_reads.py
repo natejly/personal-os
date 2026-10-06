@@ -26,7 +26,7 @@ from personal_os import llm  # noqa: E402
 from personal_os.subagents import parallel_safe  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 
-appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "alwaysAsk": ["pr_ask"]})
+appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "alwaysAsk": ["pr_ask"], "permissionMode": "manual"})  # manual: the stub tool calls must not wait on an Auto review
 LOG: list[tuple[str, str, float]] = []   # (start|end, "tool:tag", monotonic time)
 ROUNDS: list[dict[str, Any]] = []
 SEEN: list[list[dict[str, Any]]] = []

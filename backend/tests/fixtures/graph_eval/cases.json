@@ -1,0 +1,472 @@
+{
+  "_about": "Synthetic Grain exchanges for scoring knowledge-graph extraction. People, companies and projects are invented. 'User' is the implicit subject for facts about the user. A literal object (status, deadline) has object_type null. 'optional' triples are acceptable but not required: they count as neither hits nor false positives. 'aliases' maps alternative spellings to one canonical name for the scorer only. 'existing' is the graph before the exchange; 'invalidations' are existing edges that must stop holding.",
+  "cases": [
+    {
+      "id": "person_role_org",
+      "today": "2026-10-06",
+      "user": "Quick context for the vendor email: Priya Raman is the head of procurement at Northwind Logistics, she's my main contact there. Keep it short.",
+      "assistant": "Got it. Here's a short draft addressed to Priya Raman at Northwind Logistics asking for the revised freight quote.",
+      "aliases": {"priya": "priya raman", "northwind": "northwind logistics"},
+      "expected": [
+        {"subject": "Priya Raman", "predicate": "works_at", "object": "Northwind Logistics", "subject_type": "person", "object_type": "org"},
+        {"subject": "User", "predicate": "knows", "object": "Priya Raman", "object_type": "person"}
+      ],
+      "optional": []
+    },
+    {
+      "id": "manager",
+      "today": "2026-10-06",
+      "user": "My manager Dana Whitfield wants the Q4 roadmap by Friday, can you help me outline it?",
+      "assistant": "Sure. Here's a skeleton for the Q4 roadmap: goals, key bets, staffing, risks and milestones.",
+      "aliases": {"dana": "dana whitfield", "q4 roadmap": "q4 roadmap"},
+      "expected": [
+        {"subject": "User", "predicate": "reports_to", "object": "Dana Whitfield", "object_type": "person"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "knows", "object": "Dana Whitfield"},
+        {"subject": "Q4 roadmap", "predicate": "deadline", "object": "2026-10-09"},
+        {"subject": "Dana Whitfield", "predicate": "owns", "object": "Q4 roadmap"}
+      ]
+    },
+    {
+      "id": "project_repo_tech",
+      "today": "2026-10-06",
+      "user": "Some background: Atlas is my side project, a Rust CLI that syncs dotfiles between machines. The code lives at github.com/jlee/atlas and it keeps its state in SQLite.",
+      "assistant": "Thanks. Since Atlas stores state in SQLite, a migration table would be the simplest way to version the schema.",
+      "aliases": {"github.com/jlee/atlas": "jlee/atlas", "atlas cli": "atlas", "sqlite3": "sqlite"},
+      "expected": [
+        {"subject": "User", "predicate": "owns", "object": "Atlas", "object_type": "project"},
+        {"subject": "Atlas", "predicate": "uses", "object": "Rust", "subject_type": "project", "object_type": "tool"},
+        {"subject": "Atlas", "predicate": "uses", "object": "SQLite", "subject_type": "project", "object_type": "tool"},
+        {"subject": "jlee/atlas", "predicate": "part_of", "object": "Atlas", "subject_type": "repo", "object_type": "project"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "works_on", "object": "Atlas"},
+        {"subject": "User", "predicate": "owns", "object": "jlee/atlas"},
+        {"subject": "User", "predicate": "uses", "object": "Rust"}
+      ]
+    },
+    {
+      "id": "project_status_owner_deadline",
+      "today": "2026-10-06",
+      "user": "Heads up: the Helios migration is blocked until the security review clears. Marcus Lee owns it and we've committed to finishing by November 20.",
+      "assistant": "Noted. Want me to draft a status note for stakeholders explaining the security-review dependency?",
+      "aliases": {"helios": "helios migration", "marcus": "marcus lee", "nov 20": "2026-11-20"},
+      "expected": [
+        {"subject": "Helios migration", "predicate": "status", "object": "blocked", "subject_type": "project", "object_type": null},
+        {"subject": "Marcus Lee", "predicate": "owns", "object": "Helios migration", "subject_type": "person", "object_type": "project"},
+        {"subject": "Helios migration", "predicate": "deadline", "object": "2026-11-20", "subject_type": "project", "object_type": null}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "works_on", "object": "Helios migration"},
+        {"subject": "Helios migration", "predicate": "depends_on", "object": "Security review"},
+        {"subject": "User", "predicate": "knows", "object": "Marcus Lee"}
+      ]
+    },
+    {
+      "id": "tools_and_provider_preference",
+      "today": "2026-10-06",
+      "user": "For infra stuff I run everything in Docker on my laptop, and I use Fireworks for GLM inference - it's been way cheaper than anything else I tried.",
+      "assistant": "Makes sense. I'll assume Docker locally and Fireworks as the inference provider when I suggest setups.",
+      "aliases": {"fireworks ai": "fireworks", "glm models": "glm"},
+      "expected": [
+        {"subject": "User", "predicate": "uses", "object": "Docker", "object_type": "tool"},
+        {"subject": "User", "predicate": "prefers", "object": "Fireworks", "object_type": "tool"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "uses", "object": "Fireworks"},
+        {"subject": "User", "predicate": "uses", "object": "GLM"},
+        {"subject": "Fireworks", "predicate": "related_to", "object": "GLM"}
+      ]
+    },
+    {
+      "id": "moved_city",
+      "today": "2026-10-06",
+      "user": "I'm based in Lisbon now - moved from Berlin in August - so use Lisbon time for anything you schedule.",
+      "assistant": "Understood, I'll use Lisbon time (WET/WEST) from now on.",
+      "existing": {
+        "nodes": [{"name": "Berlin", "type": "place"}],
+        "edges": [{"subject": "User", "predicate": "located_in", "object": "Berlin", "since": "2025-02-01"}]
+      },
+      "aliases": {},
+      "expected": [
+        {"subject": "User", "predicate": "located_in", "object": "Lisbon", "object_type": "place"}
+      ],
+      "optional": [],
+      "invalidations": [
+        {"subject": "User", "predicate": "located_in", "object": "Berlin"}
+      ]
+    },
+    {
+      "id": "recurring_commitment",
+      "today": "2026-10-06",
+      "user": "I go climbing with the Tuesday crew every Tuesday at 7pm at Boulderhaus, so never book anything then.",
+      "assistant": "Got it, I'll keep Tuesday evenings free.",
+      "aliases": {
+        "climbing with the tuesday crew": "tuesday climbing",
+        "tuesday crew climbing": "tuesday climbing",
+        "tuesday climbing session": "tuesday climbing",
+        "weekly climbing": "tuesday climbing",
+        "climbing": "tuesday climbing",
+        "tuesday crew": "tuesday climbing",
+        "boulderhaus gym": "boulderhaus"
+      },
+      "expected": [
+        {"subject": "User", "predicate": "attends", "object": "Tuesday climbing", "object_type": "event"},
+        {"subject": "Tuesday climbing", "predicate": "located_in", "object": "Boulderhaus", "subject_type": "event", "object_type": "place"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "member_of", "object": "Tuesday climbing"}
+      ]
+    },
+    {
+      "id": "entity_specific_preference",
+      "today": "2026-10-06",
+      "user": "Use pnpm, not npm, in the Atlas repo - npm keeps mangling the lockfile.",
+      "assistant": "Switching to pnpm: run `pnpm import` to convert the lockfile, then delete package-lock.json.",
+      "existing": {
+        "nodes": [{"name": "Atlas", "type": "project"}, {"name": "jlee/atlas", "type": "repo"}],
+        "edges": [{"subject": "jlee/atlas", "predicate": "part_of", "object": "Atlas", "since": "2026-09-01"}]
+      },
+      "aliases": {"atlas repo": "jlee/atlas"},
+      "expected": [
+        {"subject": "Atlas", "predicate": "uses", "object": "pnpm", "object_type": "tool"}
+      ],
+      "optional": [
+        {"subject": "jlee/atlas", "predicate": "uses", "object": "pnpm"},
+        {"subject": "User", "predicate": "prefers", "object": "pnpm"},
+        {"subject": "User", "predicate": "uses", "object": "pnpm"},
+        {"subject": "Atlas", "predicate": "prefers", "object": "pnpm"},
+        {"subject": "jlee/atlas", "predicate": "prefers", "object": "pnpm"}
+      ]
+    },
+    {
+      "id": "status_supersede_alias",
+      "today": "2026-10-06",
+      "user": "Orion shipped to the App Store yesterday!",
+      "assistant": "Congratulations on the launch! Want help drafting the announcement post?",
+      "existing": {
+        "nodes": [{"name": "Orion app", "type": "project", "aliases": ["Orion"]}],
+        "edges": [
+          {"subject": "User", "predicate": "works_on", "object": "Orion app", "since": "2026-03-10"},
+          {"subject": "Orion app", "predicate": "status", "object": "in beta", "since": "2026-08-02"}
+        ]
+      },
+      "aliases": {"orion": "orion app", "released": "shipped", "launched": "shipped", "live": "shipped"},
+      "expected": [
+        {"subject": "Orion app", "predicate": "status", "object": "shipped", "subject_type": "project", "object_type": null}
+      ],
+      "optional": [],
+      "invalidations": [
+        {"subject": "Orion app", "predicate": "status", "object": "in beta"}
+      ]
+    },
+    {
+      "id": "employer_change",
+      "today": "2026-10-06",
+      "user": "Priya Raman just moved to Halden Freight as their COO. She's still my main contact for the shipping deal.",
+      "assistant": "Thanks for the update. I'll address future shipping-deal emails to Priya at Halden Freight.",
+      "existing": {
+        "nodes": [{"name": "Priya Raman", "type": "person"}, {"name": "Northwind Logistics", "type": "org"}],
+        "edges": [
+          {"subject": "Priya Raman", "predicate": "works_at", "object": "Northwind Logistics", "since": "2026-06-01"},
+          {"subject": "User", "predicate": "knows", "object": "Priya Raman", "since": "2026-06-01"}
+        ]
+      },
+      "aliases": {"priya": "priya raman", "halden": "halden freight"},
+      "expected": [
+        {"subject": "Priya Raman", "predicate": "works_at", "object": "Halden Freight", "subject_type": "person", "object_type": "org"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "knows", "object": "Priya Raman"}
+      ],
+      "invalidations": [
+        {"subject": "Priya Raman", "predicate": "works_at", "object": "Northwind Logistics"}
+      ]
+    },
+    {
+      "id": "alias_person",
+      "today": "2026-10-06",
+      "user": "Sam's moved over to lead the perception team at Acme, so send her the vision questions from now on.",
+      "assistant": "Noted - I'll route computer-vision questions to Samantha.",
+      "existing": {
+        "nodes": [{"name": "Samantha Ortiz", "type": "person", "aliases": ["Sam"]}, {"name": "Acme Robotics", "type": "org", "aliases": ["Acme"]}],
+        "edges": [{"subject": "Samantha Ortiz", "predicate": "works_at", "object": "Acme Robotics", "since": "2026-01-15"}]
+      },
+      "aliases": {"sam": "samantha ortiz", "sam ortiz": "samantha ortiz", "acme": "acme robotics", "perception": "perception team", "acme perception team": "perception team"},
+      "expected": [
+        {"subject": "Samantha Ortiz", "predicate": "member_of", "object": "Perception team", "subject_type": "person", "object_type": "org"}
+      ],
+      "optional": [
+        {"subject": "Perception team", "predicate": "part_of", "object": "Acme Robotics"},
+        {"subject": "Samantha Ortiz", "predicate": "owns", "object": "Perception team"},
+        {"subject": "Samantha Ortiz", "predicate": "works_on", "object": "Perception team"},
+        {"subject": "Samantha Ortiz", "predicate": "works_at", "object": "Acme Robotics"},
+        {"subject": "User", "predicate": "knows", "object": "Samantha Ortiz"}
+      ]
+    },
+    {
+      "id": "alias_tool_replace",
+      "today": "2026-10-06",
+      "user": "Our analytics service runs on PG 16 now; we dropped MySQL last sprint.",
+      "assistant": "Good move. For PG 16 you can use logical replication to keep the old reporting jobs fed during the cut-over.",
+      "existing": {
+        "nodes": [{"name": "Analytics service", "type": "project"}, {"name": "MySQL", "type": "tool"}],
+        "edges": [{"subject": "Analytics service", "predicate": "uses", "object": "MySQL", "since": "2025-11-01"}]
+      },
+      "aliases": {"pg": "postgres", "pg 16": "postgres", "postgresql": "postgres", "postgresql 16": "postgres", "postgres 16": "postgres", "analytics": "analytics service"},
+      "expected": [
+        {"subject": "Analytics service", "predicate": "uses", "object": "Postgres", "subject_type": "project", "object_type": "tool"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "works_on", "object": "Analytics service"},
+        {"subject": "Analytics service", "predicate": "depends_on", "object": "Postgres"}
+      ],
+      "invalidations": [
+        {"subject": "Analytics service", "predicate": "uses", "object": "MySQL"}
+      ]
+    },
+    {
+      "id": "dependency",
+      "today": "2026-10-06",
+      "user": "The billing service can't deploy until the auth gateway is upgraded - billing calls it for every token check.",
+      "assistant": "Then the gateway upgrade is on the critical path. Want me to add it as a blocker on the billing release checklist?",
+      "aliases": {"billing": "billing service", "auth gateway service": "auth gateway"},
+      "expected": [
+        {"subject": "Billing service", "predicate": "depends_on", "object": "Auth gateway", "subject_type": "project", "object_type": "project"}
+      ],
+      "optional": [
+        {"subject": "Billing service", "predicate": "status", "object": "blocked"},
+        {"subject": "User", "predicate": "works_on", "object": "Billing service"},
+        {"subject": "Billing service", "predicate": "uses", "object": "Auth gateway"}
+      ]
+    },
+    {
+      "id": "go_to_person",
+      "today": "2026-10-06",
+      "user": "Tomás from the Lisbon office is my go-to for anything Kubernetes.",
+      "assistant": "Good to know - I'll suggest checking with Tomás on Kubernetes questions.",
+      "aliases": {"tomas": "tomás"},
+      "expected": [
+        {"subject": "User", "predicate": "knows", "object": "Tomás", "object_type": "person"}
+      ],
+      "optional": [
+        {"subject": "Tomás", "predicate": "located_in", "object": "Lisbon office"},
+        {"subject": "Tomás", "predicate": "located_in", "object": "Lisbon"},
+        {"subject": "Tomás", "predicate": "works_at", "object": "Lisbon office"},
+        {"subject": "Tomás", "predicate": "related_to", "object": "Kubernetes"},
+        {"subject": "Tomás", "predicate": "uses", "object": "Kubernetes"}
+      ]
+    },
+    {
+      "id": "family_place",
+      "today": "2026-10-06",
+      "user": "My sister Ana lives in Porto - I visit her most months, so flights to OPO are a regular thing for me.",
+      "assistant": "Noted. I can watch for good fares to Porto if you like.",
+      "aliases": {"opo": "porto"},
+      "expected": [
+        {"subject": "User", "predicate": "knows", "object": "Ana", "object_type": "person"},
+        {"subject": "Ana", "predicate": "located_in", "object": "Porto", "subject_type": "person", "object_type": "place"}
+      ],
+      "optional": []
+    },
+    {
+      "id": "board_membership",
+      "today": "2026-10-06",
+      "user": "I'm on the board of the Riverside Food Co-op; we meet the first Monday of every month.",
+      "assistant": "Thanks. I'll treat first-Monday evenings as busy.",
+      "aliases": {"riverside co-op": "riverside food co-op", "riverside food coop": "riverside food co-op", "riverside board meeting": "riverside food co-op board meeting", "board meeting": "riverside food co-op board meeting", "co-op board meeting": "riverside food co-op board meeting", "monthly board meeting": "riverside food co-op board meeting"},
+      "expected": [
+        {"subject": "User", "predicate": "member_of", "object": "Riverside Food Co-op", "object_type": "org"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "attends", "object": "Riverside Food Co-op board meeting"},
+        {"subject": "Riverside Food Co-op board meeting", "predicate": "part_of", "object": "Riverside Food Co-op"}
+      ]
+    },
+    {
+      "id": "user_employer",
+      "today": "2026-10-06",
+      "user": "For context, I work at Brightline Health as a staff engineer on the data platform team.",
+      "assistant": "Thanks - that helps me pitch answers at the right level.",
+      "aliases": {"brightline": "brightline health", "data platform": "data platform team"},
+      "expected": [
+        {"subject": "User", "predicate": "works_at", "object": "Brightline Health", "object_type": "org"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "member_of", "object": "Data platform team"},
+        {"subject": "Data platform team", "predicate": "part_of", "object": "Brightline Health"},
+        {"subject": "User", "predicate": "works_on", "object": "Data platform team"}
+      ]
+    },
+    {
+      "id": "repo_owner",
+      "today": "2026-10-06",
+      "user": "Kai Nakamura maintains the brightline/ingest repo - it's the pipeline that feeds our warehouse.",
+      "assistant": "Got it. For ingest questions I'll point you to Kai.",
+      "existing": {
+        "nodes": [{"name": "Brightline Health", "type": "org"}],
+        "edges": [{"subject": "User", "predicate": "works_at", "object": "Brightline Health", "since": "2026-05-01"}]
+      },
+      "aliases": {"kai": "kai nakamura", "ingest": "brightline/ingest", "ingest repo": "brightline/ingest"},
+      "expected": [
+        {"subject": "Kai Nakamura", "predicate": "owns", "object": "brightline/ingest", "subject_type": "person", "object_type": "repo"}
+      ],
+      "optional": [
+        {"subject": "Kai Nakamura", "predicate": "works_at", "object": "Brightline Health"},
+        {"subject": "brightline/ingest", "predicate": "part_of", "object": "Brightline Health"},
+        {"subject": "Kai Nakamura", "predicate": "works_on", "object": "brightline/ingest"},
+        {"subject": "User", "predicate": "knows", "object": "Kai Nakamura"}
+      ]
+    },
+    {
+      "id": "recruiter_contact",
+      "today": "2026-10-06",
+      "user": "Draft a reply to Lena Fischer saying I can't make Thursday. She's the recruiter at Pinecrest Talent I've been talking to.",
+      "assistant": "Here's a draft: \"Hi Lena, unfortunately Thursday no longer works for me - could we find another time next week?\"",
+      "aliases": {"lena": "lena fischer", "pinecrest": "pinecrest talent"},
+      "expected": [
+        {"subject": "Lena Fischer", "predicate": "works_at", "object": "Pinecrest Talent", "subject_type": "person", "object_type": "org"},
+        {"subject": "User", "predicate": "knows", "object": "Lena Fischer", "object_type": "person"}
+      ],
+      "optional": []
+    },
+    {
+      "id": "stepped_off_project",
+      "today": "2026-10-06",
+      "user": "I've stepped off Project Nimbus, it's fully Ravi's now.",
+      "assistant": "Understood. I'll stop including Nimbus in your weekly summaries.",
+      "existing": {
+        "nodes": [{"name": "Project Nimbus", "type": "project", "aliases": ["Nimbus"]}],
+        "edges": [{"subject": "User", "predicate": "works_on", "object": "Project Nimbus", "since": "2026-02-01"}]
+      },
+      "aliases": {"nimbus": "project nimbus"},
+      "expected": [
+        {"subject": "Ravi", "predicate": "owns", "object": "Project Nimbus", "subject_type": "person", "object_type": "project"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "knows", "object": "Ravi"},
+        {"subject": "Ravi", "predicate": "works_on", "object": "Project Nimbus"}
+      ],
+      "invalidations": [
+        {"subject": "User", "predicate": "works_on", "object": "Project Nimbus"}
+      ]
+    },
+    {
+      "id": "deadline_moved",
+      "today": "2026-10-06",
+      "user": "Helios migration got pushed - the new deadline is December 4.",
+      "assistant": "Updated. That gives you about eight weeks from today.",
+      "existing": {
+        "nodes": [{"name": "Helios migration", "type": "project"}],
+        "edges": [{"subject": "Helios migration", "predicate": "deadline", "object": "2026-11-20", "since": "2026-09-15"}]
+      },
+      "aliases": {"helios": "helios migration", "dec 4": "2026-12-04", "december 4": "2026-12-04"},
+      "expected": [
+        {"subject": "Helios migration", "predicate": "deadline", "object": "2026-12-04", "subject_type": "project", "object_type": null}
+      ],
+      "optional": [],
+      "invalidations": [
+        {"subject": "Helios migration", "predicate": "deadline", "object": "2026-11-20"}
+      ]
+    },
+    {
+      "id": "manager_change",
+      "today": "2026-10-06",
+      "user": "Reorg news: as of this week I report to Omar Haddad instead of Dana.",
+      "assistant": "Thanks for letting me know. Should I update the weekly status recipients to Omar?",
+      "existing": {
+        "nodes": [{"name": "Dana Whitfield", "type": "person", "aliases": ["Dana"]}],
+        "edges": [{"subject": "User", "predicate": "reports_to", "object": "Dana Whitfield", "since": "2026-01-10"}]
+      },
+      "aliases": {"dana": "dana whitfield", "omar": "omar haddad"},
+      "expected": [
+        {"subject": "User", "predicate": "reports_to", "object": "Omar Haddad", "object_type": "person"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "knows", "object": "Omar Haddad"},
+        {"subject": "User", "predicate": "knows", "object": "Dana Whitfield"}
+      ],
+      "invalidations": [
+        {"subject": "User", "predicate": "reports_to", "object": "Dana Whitfield"}
+      ]
+    },
+    {
+      "id": "calendar_preference",
+      "today": "2026-10-06",
+      "user": "Always put meetings in Google Calendar, not my Outlook one - I'm phasing Outlook out.",
+      "assistant": "Will do - Google Calendar only from now on.",
+      "aliases": {"gcal": "google calendar", "outlook calendar": "outlook"},
+      "expected": [
+        {"subject": "User", "predicate": "prefers", "object": "Google Calendar", "object_type": "tool"}
+      ],
+      "optional": [
+        {"subject": "User", "predicate": "uses", "object": "Google Calendar"}
+      ]
+    },
+    {
+      "id": "neg_chitchat",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "haha thanks, that's perfect. have a good evening!",
+      "assistant": "You too! Enjoy your evening.",
+      "expected": []
+    },
+    {
+      "id": "neg_generic_concept",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "Can you explain how gradient descent works in machine learning? Keep it short.",
+      "assistant": "Gradient descent nudges a model's parameters a small step against the gradient of the loss, repeating until the loss stops falling.",
+      "expected": []
+    },
+    {
+      "id": "neg_assistant_itself",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "You're Grain, right? Which model are you running on today?",
+      "assistant": "Yes, I'm Grain. This chat is using deepseek-v4-flash through your local proxy.",
+      "expected": []
+    },
+    {
+      "id": "neg_tool_names",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "Use web_search to find three recent articles about battery recycling, then save_memory the best one.",
+      "assistant": "I found three articles; the most thorough is a long-read on lithium recovery rates. Saved it.",
+      "expected": []
+    },
+    {
+      "id": "neg_one_off_task",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "Rename report_final_v2.docx to report_final.docx and move it into the Q3 folder.",
+      "assistant": "Done - report_final.docx is now in Q3.",
+      "expected": []
+    },
+    {
+      "id": "neg_assistant_only_facts",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "what's on my calendar tomorrow?",
+      "assistant": "Tomorrow you have a 10:00 sync with Rafael Gomez from Vantage Labs and a dentist appointment at 15:30 in Alfama.",
+      "expected": []
+    },
+    {
+      "id": "neg_third_party_news",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "I read that Initech is acquiring Vandelay Industries. What do you think it means for the logistics market?",
+      "assistant": "If the deal closes, Vandelay's import network would give Initech a much larger freight footprint.",
+      "expected": []
+    },
+    {
+      "id": "neg_weather_lookup",
+      "today": "2026-10-06",
+      "negative": true,
+      "user": "What's the weather looking like in Tokyo this weekend?",
+      "assistant": "Mostly sunny, highs around 24°C on Saturday with a chance of showers on Sunday afternoon.",
+      "expected": []
+    }
+  ]
+}

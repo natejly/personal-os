@@ -26,8 +26,9 @@ instructions, files, memories and graph.
 ```
 
 Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
-every view; Meetings and Activity ship hidden. Settings → Modules puts any of
-them in the sidebar, in the title bar, or out of sight. Bars are 40 px and
+every view; Meetings and Activity are shown too (showing a view records
+nothing). Settings → Modules puts any of them in the sidebar, in the title bar,
+or out of sight. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
 ## How to use
@@ -130,7 +131,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Image generation.** `generate_image` makes pictures with the model chosen under
   Settings → Model(s) → Image model (any provider that exposes an OpenAI-compatible
   `/images/generations` endpoint). Results are saved in Uploads and shown in the chat;
-  the tool asks first by default (change it under Settings → Tools).
+  the tool asks first by default (change it under Settings → Permissions).
   After a reply, up to three follow-up questions appear as chips under it
   (Settings > Memory, Follow-up suggestions): click one to fill the composer,
   Shift-click to send.
@@ -150,13 +151,13 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   calendar delete, trash or move a file, run a shortcut, install a Python
   package and schedule a task. Override modes globally, per project, or per
   chat.
-  The optional **Review gate** (Settings → Tools) has a second model read a
+  The optional **Review gate** (Settings → Permissions) has a second model read a
   risky call that would run unasked and turn it into an approval card, showing
   its reason. Its "ask" always wins, over allow rules and grants alike; an
   unreadable answer or an error asks too, safe tools are never reviewed, and a
   background run only records the verdict. Off by default. Web search retries a failed key, then falls back to keyless engines
   rather than failing. Fetching a URL after the reply read untrusted content
-  asks once; the card can also add the host to Settings → Tools → Allowed hosts.
+  asks once; the card can also add the host to Settings → Permissions → Allowed hosts.
   Hovering a tool row or a title-bar app button shows what it does. Tool calls
   render inline with arguments, results and timing, and every reply carries an
   execution trace.
@@ -192,7 +193,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     a note, or delete one after asking (undo from Settings → Trash). Each note
     has its own chat in the Page agent panel (⌘I). By default its edits are *proposed*: each one arrives as a diff you
     accept or reject, so you can point a model at prose you care about.
-    Settings → Tools → **File edits** → *Accept all* writes them straight
+    Settings → Permissions → **File edits** → *Accept all* writes them straight
     in instead, still showing the diff and still undoable from the history.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. Export menu → *Export as PDF…* typesets the note (maths,
@@ -215,7 +216,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
+- **Activity monitor** (macOS, on by default, records only what macOS has
+  granted). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text
   you type, microphone and system audio — summarizes it every few minutes, and
   writes the result to `context/activity.md`, which is fed back into chats so the
@@ -236,8 +238,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   keeps coming back, a calendar block around your real focus window. Suggestions
   are proposals: the common action opens a chat pre-loaded with the request rather
   than acting, "not now" hides one for a week, and dismissing one is permanent.
-- **Meetings** (macOS, opt-in, off by default; the view starts hidden, turn it
-  on in Settings → Modules). A notepad that listens: type
+- **Meetings** (macOS, on by default; nothing records until you consent on the
+  first Record). A notepad that listens: type
   during a call while the recorder captures it natively (AVAudioEngine and, on
   macOS 14.2+, a Core Audio tap for the far side of the call), segments
   transcribe in the background, and afterwards the enhance pass proposes your
@@ -552,7 +554,8 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Memory, Integrations, Meetings, Tools, Modules, Behavior, Data |
+| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Meetings, Data |
+| ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
 A view turned off in Settings → Modules keeps its shortcut, which then offers
@@ -719,7 +722,8 @@ from character counts and the row is flagged `estimated`.
 
 ## Activity monitor
 
-Off by default. Turn it on in the **Activity** panel (⌘7), where each signal is a
+On by default, but a signal that needs a macOS grant stays off until you grant it
+in the **Activity** panel (⌘7), where each signal is a
 separate switch with a plain description of what it records — or flip **Record
 everything** for one switch that records everything, with the redaction and
 “never record” filters down. Turning that mode off restores the settings it
@@ -743,7 +747,8 @@ Full design, privacy model, API and limits:
 
 ## Meetings
 
-Also off by default, and a separate switch from the activity monitor. Open the
+On by default and a separate switch from the activity monitor; calendar
+detection runs, recording waits for your consent. Open the
 **Meetings** view (⌘⇧M), pick a microphone, and press **Test** before you rely on
 it. On-device Speech is the default when macOS has granted it; otherwise a
 default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so the
@@ -796,6 +801,9 @@ docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
+docs/digest.md      The quiet daily digest in the Agent Inbox
+docs/permissions.md Permissions: the one store, its migration, the one Settings tab
+docs/help.md        In-app help and the shortcut registry
 ```
 
 ## Roadmap

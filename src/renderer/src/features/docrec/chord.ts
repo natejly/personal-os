@@ -4,7 +4,9 @@
  * feeds it key events and does what the returned action says.
  */
 
-export const DEFAULT_CHORD = 'Control+Alt+D'
+import { shortcut } from '@shared/shortcuts'
+
+export const DEFAULT_CHORD = shortcut('dictation').keys
 /** A press shorter than this is a tap and latches dictation on. */
 export const TAP_MS = 250
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
+import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
 import { useDocRec } from '../features/docrec/store'
 import { mailWatchLines } from '../lib/todayCards'
 import { hasModelKey } from '../lib/modelLabel'
@@ -165,11 +166,11 @@ function MeetingsCard(): JSX.Element {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
-/** One disconnected state for every Google card, so each says what it would show and offers the fix. */
-function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => void }): JSX.Element {
+/** One disconnected state for every account-backed card, so each says what it would show and offers the fix. */
+function ConnectAccount({ who, what, onConnect }: { who: string; what: string; onConnect: () => void }): JSX.Element {
   return (
     <p className="muted widget-connect">
-      Connect Google to see {what} here. <button className="link" onClick={onConnect}>Connect</button>
+      Connect {who} to see {what} here. <button className="link" onClick={onConnect}>Connect</button>
     </p>
   )
 }
@@ -179,7 +180,11 @@ export default function HomeView(): JSX.Element {
   const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
   const allTodos = useStore((s) => s.todos)
+  // Tasks and Drive always come from Google; calendar and mail from the active provider (`pim`).
   const google = useStore((s) => s.google)
+  const pim = useStore(pimStatus)
+  const pimName = useStore(pimLabel)
+  const provider = useStore(pimProvider)
   const tasksSync = useStore((s) => s.tasksSync)
   const { refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, openSettings, refreshRecap, openMemory, toast } = useStore()
   const recap = useStore((s) => s.recap)
@@ -229,10 +234,10 @@ export default function HomeView(): JSX.Element {
 
   const brief = async (): Promise<void> => {
     newChat(null)
-    // Without Google there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
-    await send(google?.connected
+    // Without an account there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
+    await send(pim?.connected
       ? 'Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.'
-      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting Google in Settings adds them. Be concise and use headers.')
+      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting ${pimName} in Settings adds them. Be concise and use headers.')
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
   const rescanMail = async (): Promise<void> => {
@@ -258,16 +263,22 @@ export default function HomeView(): JSX.Element {
 
   // Until the dashboard answers, a card has nothing to count: saying "No projects yet." would be a guess.
   const pending = d === null ? <p className="muted">{settled ? 'Could not load.' : 'Loading…'}</p> : null
-  const connect = (): void => openSettings('integrations')
-  // Without Google, four cards would each say the same "Connect Google" line. One strip says it once
-  // and the cards stay out of the way until they have something to show.
+  const connect = (): void => openSettings(PIM_SETTINGS_TAB)
+  // Without an account, several cards would each say the same "Connect …" line. One strip per account says it
+  // once and the cards stay out of the way until they have something to show.
   const googleOff = google !== null && !google.connected
-  const wantsGoogle = ['calendar', 'inbox', 'plan', 'gtasks', 'drive'].some(on)
-  /** What a Google card says instead of its rows: still loading, not connected, or its own error. */
-  const googleGate = (what: string, error: string | undefined): JSX.Element | null => {
-    if (!google?.connected) return (google === null && pending) || <ConnectGoogle what={what} onConnect={connect} />
+  const pimOff = pim !== null && !pim.connected
+  const strips = provider === 'google'
+    ? [{ who: 'Google', off: googleOff, keys: ['calendar', 'inbox', 'plan', 'gtasks', 'drive'], what: 'your calendar, unread mail, tasks and recent Drive files' }]
+    : [{ who: pimName, off: pimOff, keys: ['calendar', 'inbox', 'plan'], what: 'your calendar and unread mail' },
+       { who: 'Google', off: googleOff, keys: ['gtasks', 'drive'], what: 'Google Tasks and recent Drive files' }]
+  /** What an account card says instead of its rows: still loading, not connected, or its own error. */
+  const gate = (status: typeof google, who: string, what: string, error: string | undefined): JSX.Element | null => {
+    if (!status?.connected) return (status === null && pending) || <ConnectAccount who={who} what={what} onConnect={connect} />
     return pending ?? (error ? <p className="msg-error">{error}</p> : null)
   }
+  const googleGate = (what: string, error: string | undefined): JSX.Element | null => gate(google, 'Google', what, error)
+  const pimGate = (what: string, error: string | undefined): JSX.Element | null => gate(pim, pimName, what, error)
 
   usePageContext(() => ({
     view: 'home',
@@ -314,7 +325,7 @@ export default function HomeView(): JSX.Element {
               </>
             )}
           </div>
-          <button className="primary-btn" onClick={() => void brief()} title={google?.connected ? undefined : 'Todos only. Connect Google in Settings to add mail and calendar.'}><Sparkles size={14} /> Brief me</button>
+          <button className="primary-btn" onClick={() => void brief()} title={pim?.connected ? undefined : `Todos only. Connect ${pimName} in Settings to add mail and calendar.`}><Sparkles size={14} /> Brief me</button>
         </div>
         <AppSwitcher />
       </header>
@@ -348,19 +359,19 @@ export default function HomeView(): JSX.Element {
             {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
-        {googleOff && wantsGoogle && (
-          <section className="home-connect">
-            <p><b>Connect Google</b> to see your calendar, unread mail, tasks and recent Drive files here.</p>
-            <button className="ghost-btn" onClick={connect}>Connect Google</button>
+        {strips.filter((x) => x.off && x.keys.some(on)).map((x) => (
+          <section key={x.who} className="home-connect">
+            <p><b>Connect {x.who}</b> to see {x.what} here.</p>
+            <button className="ghost-btn" onClick={connect}>Connect {x.who}</button>
           </section>
-        )}
+        ))}
         <div className="widgets">
-          {on('calendar') && !googleOff && <section className="widget">
-            <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}<button className="link small" onClick={() => setView('calendar')}>View all</button></header>
-            {googleGate('your calendar', d?.errors.calendar) ?? (events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
+          {on('calendar') && !pimOff && <section className="widget">
+            <header><Calendar size={14} /> Calendar {pim?.connected && <span className="muted small">next 48h</span>}<button className="link small" onClick={() => setView('calendar')}>View all</button></header>
+            {pimGate('your calendar', d?.errors.calendar) ?? (events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
-                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm" aria-label={`Open “${e.summary}” in Google Calendar`}><ExternalLink size={11} /></a>}</li>
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm" aria-label={`Open “${e.summary}” in calendar`}><ExternalLink size={11} /></a>}</li>
                 ))}
                 {laterEvents.length > 0 && <li className="ev-sep">Tomorrow</li>}
                 {laterEvents.map((e) => (
@@ -374,9 +385,9 @@ export default function HomeView(): JSX.Element {
 
           {on('health') && HealthCard && <HealthCard data={d} />}
 
-          {on('inbox') && !googleOff && <section className="widget">
-            <header><Mail size={14} /> Mail inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
-            {googleGate('unread mail', d?.errors.gmail) ?? ((d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+          {on('inbox') && !pimOff && <section className="widget">
+            <header><Mail size={14} /> Mail inbox {pim?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            {pimGate('unread mail', d?.errors.gmail) ?? ((d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
                   <li key={m.id} {...rowButton(() => void askAboutEmail(m.id, m.subject))} title="Ask the assistant about this email">
@@ -397,9 +408,9 @@ export default function HomeView(): JSX.Element {
             {mailWatchLines(d.mail_watch).length === 0 ? <p className="muted">Nothing waiting.</p> : mailWatchLines(d.mail_watch).map((l) => <p key={l}>{l}</p>)}
           </section>}
 
-          {on('plan') && !googleOff && <section className="widget">
+          {on('plan') && !pimOff && <section className="widget">
             <header><Calendar size={14} /> Day plan {(d?.planner_blocks?.length ?? 0) > 0 && <span className="muted small">proposed</span>}</header>
-            {!google?.connected ? <ConnectGoogle what="a proposed day plan" onConnect={connect} />
+            {!pim?.connected ? <ConnectAccount who={pimName} what="a proposed day plan" onConnect={connect} />
               : <PlannerPanel initial={d?.planner_blocks} onApplied={() => void refreshDashboard()} />}
           </section>}
 

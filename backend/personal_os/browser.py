@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import fsx, mac, redact, tools
+from . import fsx, mac, permissions, redact, tools
 from .tools import ToolSpec, UrlBlocked, _obj, tool_error
 from .workspace import WorkspaceError
 
@@ -86,7 +86,7 @@ def register(tb: Any) -> None:
         return tb.settings()
 
     def available() -> bool:
-        return bool(settings().get("browserEnabled", True)) and mac.page_bridge.has("browser")
+        return bool(permissions.get(settings(), "browserEnabled")) and mac.page_bridge.has("browser")
 
     def desk_root(ctx: dict[str, Any]) -> Path | None:
         ws, did = getattr(tb, "workspace", None), ctx.get("desk_id")
@@ -162,13 +162,13 @@ def register(tb: Any) -> None:
 
     # ---------------- navigation ----------------
     def host_allowed(url: str) -> bool:
-        extra = {h for h in (str(x).strip().lower().lstrip(".") for x in (settings().get("browserAllowlist") or ())) if h}
+        extra = {h for h in (str(x).strip().lower().lstrip(".") for x in (permissions.get(settings(), "browserAllowlist") or ())) if h}
         host = (urllib.parse.urlsplit(url).hostname or "").lower()
         return any(host == e or host.endswith("." + e) for e in extra)
 
     async def browser_open(ctx: dict[str, Any], url: str, new_tab: bool = False) -> Any:
         cfg = settings()
-        merged = {**cfg, "fetchAllowlist": [*(cfg.get("fetchAllowlist") or []), *(cfg.get("browserAllowlist") or [])]}
+        merged = {**cfg, "fetchAllowlist": [*(permissions.get(cfg, "fetchAllowlist") or []), *(permissions.get(cfg, "browserAllowlist") or [])]}
         try:
             cur, host = tools._check_url(url, {**ctx, "tainted": False}, merged)  # SSRF and scheme rules, no taint rule
             await tools._resolve(host)

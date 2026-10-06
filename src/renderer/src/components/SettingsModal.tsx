@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mic, Wrench, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mic, ShieldCheck, Bot, PanelsTopLeft, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
@@ -18,7 +18,7 @@ import { AlwaysAsk, ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
-import CoworkSettings, { CoworkAdvanced } from './CoworkSettings'
+import CoworkSettings, { BrowserAccess, CoworkAdvanced, DeskGates, ShellNetwork } from './CoworkSettings'
 import RunSafetySettings from './RunSafetySettings'
 import SandboxSettings from './SandboxSettings'
 import GoogleSettings from './GoogleSettings'
@@ -43,7 +43,8 @@ const GROUPS: { label: string; tabs: { id: Tab; label: string; icon: LucideIcon 
     label: 'Assistant',
     tabs: [
       { id: 'provider', label: 'Provider & cost', icon: Cpu },
-      { id: 'tools', label: 'Tools', icon: Wrench },
+      { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
+      { id: 'cowork', label: 'Autonomy', icon: Bot },
       { id: 'memory', label: 'Memory', icon: Brain }
     ]
   },
@@ -547,15 +548,53 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'meetings' && <section>
               <h3>Meetings</h3>
               <MeetingSettings />
+              {(() => {
+                // Settings.digest is not in the shared type yet; the backend default is {enabled: true, hour: 8}.
+                const dg = { enabled: true, hour: 8, ...draft.digest }
+                const set = (p: { enabled?: boolean; hour?: number }): void => patch({ digest: { ...dg, ...p } } as Partial<Settings>)
+                return <>
+                  <h3>Daily digest</h3>
+                  <label className="toggle-row plain">
+                    <span className="toggle-text"><b>Daily digest in the Agent Inbox</b><small>Once a day: meetings recorded, notes waiting for review, where your time in apps went, and any permission that is keeping Meetings or Activity from working. No notification, no badge.</small></span>
+                    <input type="checkbox" checked={dg.enabled} onChange={(e) => set({ enabled: e.target.checked })} /><span className="switch" />
+                  </label>
+                  <div className="setting-row">
+                    <label className="toggle-text" htmlFor="digest-hour"><b>Written at</b><small>Or at the first launch after this hour.</small></label>
+                    <select id="digest-hour" value={dg.hour} disabled={!dg.enabled} onChange={(e) => set({ hour: Number(e.target.value) })}>
+                      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{`${String(h).padStart(2, '0')}:00`}</option>)}
+                    </select>
+                  </div>
+                </>
+              })()}
             </section>}
 
-            {tab === 'tools' && <section>
-              <h3>Tools</h3>
+            {tab === 'permissions' && <section className="permissions-tab">
+              <h3>Permissions</h3>
+              <p className="muted">Everything that decides whether the assistant acts, asks first or is refused, in one place. A chat, agent or project can narrow or widen a tool for itself (chat beats agent beats project beats this page); a deny rule and Always ask beat all of them.</p>
+              <h4>Tool access</h4>
               <p className="muted"><b>On</b> runs automatically, <b>Ask</b> pauses the reply for your approval, <b>Off</b> hides the tool. Tools that act outside the app (email, calendar, Google Tasks, local files) run on a plain yes unless they are listed under Always ask.</p>
+              <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
+              <h4>Always ask</h4>
+              <p className="muted">These show a card every time, whatever a chat or project says, and a card never grants one for good. Anything that reads untrusted content (mail, the web) first also has to ask before one runs. Keep what you cannot take back here.</p>
+              <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
+              <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
+              <GrantsPanel draft={draft} patch={patch} />
+              <h4>Run safety</h4>
+              <RunSafetySettings draft={draft} patch={patch} />
+              <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
+              <h4>Shell and sandbox network</h4>
+              <ShellNetwork draft={draft} patch={patch} />
+              <SandboxSettings draft={draft} patch={patch} />
+              <h4>Browser</h4>
+              <BrowserAccess draft={draft} patch={patch} />
+              <h4>Desks</h4>
+              <DeskGates draft={draft} patch={patch} />
+              <h4>Skip permissions</h4>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, ordinary tools run without an approval card. A deny rule still refuses, and these still ask: ask rules, the tools under Always ask, shell commands, writes outside granted folders, calls made after untrusted content, repeated calls, a plan and a desk question. Scheduled jobs and other unattended runs never skip: a call that would still ask is refused by default. A chat can turn this off for itself.</small></span>
                 <input type="checkbox" checked={!!draft.skipPermissions} onChange={(e) => patch({ skipPermissions: e.target.checked })} /><span className="switch" />
               </label>
+              <h4>File edit mode</h4>
               <div className="setting-row">
                 <span className="toggle-text"><b>File edits</b><small>Every change the assistant makes to a file shows as a diff in the chat. Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the file's history.</small></span>
                 <div className="seg" role="group" aria-label="File edits">
@@ -563,16 +602,7 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
                 </div>
               </div>
-              <h4>Always ask</h4>
-              <p className="muted">These show a card every time, whatever a chat or project says, and a card never grants one for good. Anything that reads untrusted content (mail, the web) first also has to ask before one runs. Keep what you cannot take back here.</p>
-              <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
-              <h4>Tool permissions</h4>
-              <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
-              <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
-              <GrantsPanel draft={draft} patch={patch} />
-              <RunSafetySettings draft={draft} patch={patch} />
-              <WorkspaceRoots value={draft.workspaceRoots ?? []} onChange={(workspaceRoots) => patch({ workspaceRoots })} />
-              <h4>Planning and limits</h4>
+              <h4>Plan mode default</h4>
               <label className="setting-row"><span className="toggle-text"><b>Plan mode for new chats</b><small>A chat can change its own with ⌘⇧P.</small></span>
                 <select value={draft.planMode ?? 'off'} onChange={(e) => patch({ planMode: e.target.value as Settings['planMode'] })}>
                   <option value="off">Off: act straight away</option>
@@ -580,12 +610,14 @@ export default function SettingsModal(): JSX.Element {
                   <option value="always">Always: every turn drafts a plan you approve first</option>
                 </select>
               </label>
+            </section>}
+
+            {tab === 'cowork' && <section>
+              <h3 id="cowork-settings">Autonomy</h3>
+              <p className="muted">Limits for chats working autonomously: each works on its task in its own folder. What they may do without asking is under Permissions.</p>
               <label className="setting-row"><span className="toggle-text"><b>Max tool rounds per reply</b><small>Between 1 and 60.</small></span>
                 <input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} />
               </label>
-              <SandboxSettings draft={draft} patch={patch} />
-              <h3 id="cowork-settings">Autonomy</h3>
-              <p className="muted">Limits and reach for chats working autonomously: each works on its task in its own folder.</p>
               <CoworkSettings draft={draft} patch={patch} />
               <details className="modal-free">
                 <summary>Advanced</summary>
@@ -723,7 +755,7 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" onClick={() => void saveEarly({ uiZoom: 100 })}>Reset</button>
                 </div>
               </div>
-              <h4>Shortcuts</h4>
+              <h4>Shortcuts <button type="button" className="link-btn" onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} Change it under Advanced below. The menubar icon gathers them too.</p>
               )}

@@ -78,7 +78,7 @@ from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
 from .presets import CanvasPresets
 from . import resume
-from . import permrules
+from . import permissions, permrules
 from . import egress
 from . import shell as shell_tool
 from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
@@ -256,16 +256,18 @@ def _seed_settings_from_env() -> None:
 
 _seed_settings_from_env()
 
-_MODULES_DEFAULT = 4
-_DEFAULT_OFF_VIEWS = ("meetings", "activity")
+_MODULES_DEFAULT = 5
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-_DEFAULT_OFF_HOME = ("meetings",)
+# Stamp 5 shows Meetings and Activity once (and the Meetings card on Today). Every earlier stamp hid them by
+# default and nothing recorded an explicit hide, so a stored hide is read as that default; a hide made after
+# stamp 5 is the user's and stays. Showing a view records nothing.
+_SHOWN_AT_5 = ("meetings", "activity")
 
 
 def _seed_hidden_modules() -> None:
-    """Hide the views that ship off. A later stamp only adds the views new in that stamp, so one the user turned back on stays on."""
+    """Apply what a new stamp shows. Each stamp runs once, so a view the user hides afterwards stays hidden."""
     stored = db.get_settings()
     current = stored.get("modulesDefault") or 0
     if current == _MODULES_DEFAULT:
@@ -273,18 +275,13 @@ def _seed_hidden_modules() -> None:
     hidden = list(stored["hiddenViews"]) if isinstance(stored.get("hiddenViews"), list) else list(
         llm.DEFAULT_SETTINGS["hiddenViews"]
     )
-    # Stamp 1 applied Library, Cowork and Meetings. Stamp 2 added Activity.
-    # A later stamp must not put a view back that the user has since shown.
-    add = ("activity",) if current == 1 else (() if current >= 2 else _DEFAULT_OFF_VIEWS)
-    for v in add:
-        if v not in hidden:
-            hidden.append(v)
     if current < 4:
         hidden = [v for v in hidden if v not in _SHOWN_AT_4]
     widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
-    if not current:
-        for k in _DEFAULT_OFF_HOME:
-            widgets.setdefault(k, False)
+    if current < 5:
+        hidden = [v for v in hidden if v not in _SHOWN_AT_5]
+        if widgets.get("meetings") is False:
+            del widgets["meetings"]
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
 
 
@@ -292,11 +289,15 @@ _seed_hidden_modules()
 
 
 def settings() -> dict[str, Any]:
-    out = {**llm.DEFAULT_SETTINGS, **db.get_settings()}
-    if not out.get("workspaceRoots"):  # the one place every shell/file/subagent consumer reads roots from
+    """Defaults < stored rows, with the permissions store (permissions.py) both nested under `permissions` and flattened
+    to the top level, so a reader that still does cfg.get("tools") sees the same value as permissions.get(cfg, "tools")."""
+    stored = db.get_settings()
+    perms = permissions.load(stored)
+    if not perms["workspaceRoots"]:  # the one place every shell/file/subagent consumer reads roots from
         with contextlib.suppress(OSError):
-            out["workspaceRoots"] = [mac.default_workspace()]
-    return out
+            perms["workspaceRoots"] = [mac.default_workspace()]
+    return {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
+            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
 
 
 jobs = Jobs(db)
@@ -644,7 +645,7 @@ def _with_folder(cfg: dict[str, Any], folder: str | None) -> dict[str, Any]:
     """`cfg` with `folder` granted first among the workspace roots (a no-op without one)."""
     if not folder:
         return cfg
-    return {**cfg, "workspaceRoots": [folder, *[r for r in (cfg.get("workspaceRoots") or []) if r != folder]]}
+    return {**cfg, "workspaceRoots": [folder, *[r for r in (permissions.get(cfg, "workspaceRoots") or []) if r != folder]]}
 
 
 def _conv_cfg(cfg: dict[str, Any], conv_id: str | None) -> dict[str, Any]:
@@ -661,7 +662,7 @@ FOLDER_HINT = ("## Working folder\nThe user bound this chat to `{path}`. shell_r
 
 def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
     """Folders a shell or file call counts as inside: the granted roots plus the active desk's workspace."""
-    roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+    roots = [r for r in (permissions.get(cfg, "workspaceRoots") or []) if isinstance(r, str) and r]
     if desk_id:
         roots.append(str(workspace.desk_root(desk_id)))
     return roots
@@ -799,9 +800,6 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "retrievalCandidates": (5, 50),
     "fetchCacheSeconds": (0, 86_400),
 }
-SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
-# An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
-IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?$")
 
 
 def _check_numeric_setting(key: str, value: Any) -> int | float:
@@ -822,32 +820,28 @@ def _rule_tool_known(r: permrules.Rule) -> None:
         raise ValueError(f"unknown tool {r.tool!r} in {r.text!r}")
 
 
-def _check_permission_rules(v: Any) -> dict[str, list[str]]:
-    """The permissionRules setting: three lists of well-formed rule strings, nothing else."""
-    if not isinstance(v, dict):
-        raise HTTPException(422, "permissionRules must be {allow, ask, deny}")
-    out: dict[str, list[str]] = {}
-    for key in ("allow", "ask", "deny"):
-        items = v.get(key) or []
-        if not isinstance(items, list):
-            raise HTTPException(422, f"permissionRules.{key} must be a list")
-        try:
-            parsed = [permrules.parse_rule(str(t)) for t in items]
-            for r in parsed:
-                _rule_tool_known(r)
-            out[key] = list(dict.fromkeys(r.text for r in parsed))
-        except ValueError as e:
-            raise HTTPException(422, str(e)) from e
-    return out
+def _check_permissions(patch: dict[str, Any]) -> dict[str, Any]:
+    """Permission keys as they may be stored (permissions.validate), or 422 with the reason."""
+    try:
+        return {k: permissions.validate(k, v, cap_modes=toolbox.cap_modes, rule_check=_rule_tool_known) for k, v in patch.items()}
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
-HOST_LIST_SETTINGS = {"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"}
+HOST_LIST_SETTINGS = set(permissions.HOST_LISTS)
 
 
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
              if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS and k not in SETTINGS_READ_ONLY}
+    # Permission keys go to the one store, nested ({"permissions": {...}}) or top-level as the renderer has always sent
+    # them; a top-level key wins, since a client that sends both sends the nested copy it read, unchanged.
+    nested = patch.get(permissions.KEY) or {}
+    if not isinstance(nested, dict):
+        raise HTTPException(422, "permissions must be an object")
+    perm = _check_permissions({**{k: v for k, v in nested.items() if k in permissions.KEYS},
+                               **{k: clean.pop(k) for k in list(clean) if k in permissions.KEYS}})
     for k, v in clean.items():
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
@@ -856,58 +850,19 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             # (A secret takes null to clear it; its own check below.)
             # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
-        elif k == "permissionRules":
-            clean[k] = _check_permission_rules(v)
-        elif k == "tools":
-            # Coerced, not refused: a legacy stored 'on' comes back in every later save of the whole map.
-            clean[k] = toolbox.cap_modes(v)
         elif k == "pimProvider" and v not in ("google", "microsoft"):
             raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
-        elif k == "unattendedApprovals" and v not in ("ask", "deny"):
-            raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
-        elif k == "autoReview" and v not in autoreview.LEVELS:
-            raise HTTPException(422, "autoReview must be 'off', 'risky' or 'all-writes'")
-        elif k == "alwaysAsk":
-            if not all(isinstance(x, str) for x in v):
-                raise HTTPException(422, "alwaysAsk must be a list of tool names")
-            clean[k] = list(dict.fromkeys(v))
-        elif k in HOST_LIST_SETTINGS:
-            # Bare hostnames only, the rule the egress proxy matches by: a URL, wildcard, IP or lone TLD stored
-            # here would be ignored at best and widen an allowlist at worst.
-            hosts: list[str] = []
-            for e in v:
-                h = egress.normalize_entry(e.strip().lstrip(".") if isinstance(e, str) else e)  # ".x.com" = "x.com"
-                if h is None:
-                    raise HTTPException(422, f"{k}: {e!r} is not a hostname (no scheme, path, wildcard or IP address)")
-                if h not in hosts:
-                    hosts.append(h)
-            clean[k] = hosts
-        elif k == "sandboxRuntime" and v not in SANDBOX_RUNTIMES:
-            # The value is run as a program: only a known container CLI, never whatever resolves on PATH.
-            raise HTTPException(422, f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}")
-        elif k == "sandboxImage" and v and not IMAGE_REF.match(v):  # empty = the default image
-            raise HTTPException(422, "sandboxImage must be an image reference such as python:3.12-slim")
-        elif k == "sandboxNetwork" and v not in ("off", "proxy", "open"):
-            raise HTTPException(422, "sandboxNetwork must be 'off', 'proxy' or 'open'")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
-        elif k == "workspaceRoots":
-            if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
-                raise HTTPException(422, "workspaceRoots must be a list of folders")
-            # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
-            # would refuse is rejected here rather than stored and then silently ignored. The home folder itself is refused too.
-            for root in v:
-                try:
-                    mac.allowed_root(root)
-                except mac.LocalPathError as e:
-                    raise HTTPException(422, f"{root} cannot be a workspace folder: {e}") from e
     for k in SECRET_SETTINGS:
         if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
             del clean[k]
         elif k in clean and clean[k] is not None and not isinstance(clean[k], str):
             raise HTTPException(422, f"{k} must be a string or null")
+    if perm:
+        permissions.save(db, perm)
     db.set_settings(clean)
-    if "sandboxRuntime" in clean:
+    if "sandboxRuntime" in perm:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     if "deskMaxLive" in clean and _loop is not None and not _loop.is_closed():
         # A raised cap frees slots no desk's ending will report; launch queued desks into them now.
@@ -949,7 +904,7 @@ class ProjectPatch(BaseModel):
 def list_tools() -> dict[str, Any]:
     """Available tools + the global on/off map (missing = on)."""
     cfg = settings()
-    modes = toolbox.effective(cfg.get("tools") or {}, None, None)
+    modes = toolbox.effective(permissions.get(cfg, "tools") or {}, None, None)
     return {"tools": toolbox.list(), "modes": modes}
 
 
@@ -1862,7 +1817,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             attachments=bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
             prior_tools=bool(last_asst and last_asst.get("tool_events")),
             effort=str(conv["settings"].get("effort") or "default"),
-            plan_mode=str(conv["settings"].get("planMode") or cfg.get("planMode") or "off") in ("auto", "always"),
+            plan_mode=str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off") in ("auto", "always"),
             fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
         model = routed[0]
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
@@ -2071,7 +2026,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "run_id": run.run_id if run else None,
         }
         use_tools = conv["settings"].get("useTools", True)
-        modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
+        modes = toolbox.effective(permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
                                   persona.tool_modes if persona is not None else None) if use_tools else {}
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
@@ -2117,7 +2072,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             spec = toolbox.specs.get(name)
             run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
                                     desk_id=run.desk_id, danger=spec.danger if spec else "external")
-            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and permissions.get(cfg, "unattendedApprovals") == "deny"):
                 # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
                 run.store.decide(uid, "deny", by="unattended", note="no one is available to approve it in a background run")
                 return False
@@ -2199,7 +2154,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Plan mode in an ordinary chat: the toggle's setting, the chat's own over the global default.
         # 'always' drafts from the first round; 'auto' flips `planning` on at the first consequential call
         # (see the gate). Either way a plan approved in this reply ends it, as it does for a desk.
-        chat_plan_mode = "" if desk else str(conv["settings"].get("planMode") or cfg.get("planMode") or "off")
+        chat_plan_mode = "" if desk else str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off")
         if chat_plan_mode == "always":
             planning = True
         # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
@@ -2271,8 +2226,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _desk_manual_text() -> str:
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
-            net = ("open" if cfg.get("shellNetwork") else
-                   "allowlist" if cfg.get("shellRegistryAccess", True) or cfg.get("shellAllowedDomains") else "off")
+            net = ("open" if permissions.get(cfg, "shellNetwork") else
+                   "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
             try:
                 inputs = workspace.inputs(desk_id) if desk_id else []
             except WorkspaceError:
@@ -2358,7 +2313,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         tool_errors: dict[str, int] = {}
         warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
         detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
-        perm_rules = permrules.load_rules(cfg.get("permissionRules"))
+        perm_rules = permrules.load_rules(permissions.get(cfg, "permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
         stuck_hits = 0
         stop_text: str | None = None
@@ -3005,7 +2960,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     pre = tools.denied(c["name"], perm.refusal)
                 unattended = False
                 if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None
-                        and run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+                        and run.kind in UNATTENDED_KINDS and permissions.get(cfg, "unattendedApprovals") == "deny"):
                     # Nobody is there to answer: refuse with a recorded reason rather than park a card for later.
                     unattended = True
                     why = "no one is available to approve it and unattendedApprovals is set to deny"
@@ -3027,7 +2982,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # always wins (over allow rules and grants alike); an unattended run only records it.
                 review = None
                 if (mode == "on" and claimed is None and pre is None and not proposing and not skip_permissions
-                        and autoreview.wants_review(cfg.get("autoReview"), danger)):
+                        and autoreview.wants_review(permissions.get(cfg, "autoReview"), danger)):
                     review = await autoreview.review(
                         cfg, model, name=c["name"], description=spec.description if spec else "", args=args, user_text=user_text,
                         mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop)
@@ -3241,7 +3196,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             mcp_store.set_grant(c["name"], "on", "global")
                         else:
                             # Re-read for the same reason: the Settings page may have changed the map during the wait.
-                            db.set_settings({"tools": {**(settings().get("tools") or {}), c["name"]: "on"}})
+                            permissions.update(db, lambda cur: {"tools": {**(cur["tools"] or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
                     if standing:
@@ -4524,9 +4479,8 @@ def _approve_url(ctx: dict[str, Any], args: dict[str, Any], keep_host: bool) -> 
         return
     tools._allow_url(ctx, url)
     if keep_host and (host := egress.normalize_entry(urllib.parse.urlsplit(url.strip()).hostname or "")):
-        have = list(settings().get("fetchAllowlist") or [])
-        if host not in have:
-            db.set_settings({"fetchAllowlist": [*have, host]})
+        permissions.update(db, lambda cur: {} if host in (cur["fetchAllowlist"] or [])
+                           else {"fetchAllowlist": [*(cur["fetchAllowlist"] or []), host]})
 
 
 class ApprovalIn(BaseModel):
@@ -4601,6 +4555,10 @@ def permission_grants() -> dict[str, Any]:
         chats = c.execute("SELECT id, title, json_extract(settings, '$.tools') AS tools FROM conversations "
                           "WHERE json_extract(settings, '$.tools') IS NOT NULL ORDER BY updated_at DESC").fetchall()
         projs = c.execute("SELECT id, name, tools FROM projects WHERE tools NOT IN ('', '{}') ORDER BY name").fetchall()
+        # A chat that skips its cards on its own switch, whatever the global one says.
+        skips = c.execute("SELECT id, title FROM conversations WHERE json_extract(settings, '$.skipPermissions') = 1 "
+                          "AND deleted_at IS NULL ORDER BY updated_at DESC").fetchall()
+        agents = c.execute("SELECT id, name, tool_modes FROM agent_defs WHERE tool_modes NOT IN ('', '{}') ORDER BY name").fetchall()
     titles = _conversation_titles(set(session))
     cfg = settings()
     return {
@@ -4609,10 +4567,23 @@ def permission_grants() -> dict[str, Any]:
                            for r in chats for t, m in (json.loads(r["tools"] or "{}") or {}).items()],
         "project_overrides": [{"project_id": r["id"], "title": r["name"], "tool": t, "mode": m}
                               for r in projs for t, m in (json.loads(r["tools"] or "{}") or {}).items()],
-        "global": cfg.get("tools") or {},
+        "global": permissions.get(cfg, "tools") or {},
+        "agent_overrides": [{"agent_id": r["id"], "title": r["name"], "tool": t, "mode": m}
+                            for r in agents for t, m in (json.loads(r["tool_modes"] or "{}") or {}).items()],
+        "chat_skip": [{"conversation_id": r["id"], "title": r["title"]} for r in skips],
         "mcp": mcp_store.grants(),
-        "rules": cfg.get("permissionRules") or {"allow": [], "ask": [], "deny": []},
+        "rules": permissions.get(cfg, "permissionRules") or {"allow": [], "ask": [], "deny": []},
     }
+
+
+@app.delete("/permissions/agent/{def_id}")
+def revoke_agent_grant(def_id: str, tool: str) -> dict[str, Any]:
+    """Drop one tool's mode from an agent's own map, so it inherits again. The Grants list only offers 'on' rows here."""
+    row = agent_defs.get(def_id)
+    if not row or tool not in (row.get("tool_modes") or {}):
+        raise HTTPException(404, "No such agent grant")
+    agent_defs.set_scope(row["id"], {"tool_modes": {k: v for k, v in row["tool_modes"].items() if k != tool}})
+    return {"ok": True}
 
 
 @app.delete("/permissions/session/{conv_id}")
@@ -4708,15 +4679,18 @@ def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]
     """Append the rules a card offered (possibly edited) to permissionRules.allow. Raises 400 on a bad rule."""
     cfg = settings()
     if texts is None:
-        texts = permrules.evaluate(row["tool"], row["args"], permrules.load_rules(cfg.get("permissionRules")),
+        texts = permrules.evaluate(row["tool"], row["args"], permrules.load_rules(permissions.get(cfg, "permissionRules")),
                                    roots=_perm_roots(cfg, row.get("desk_id"))).suggestions
     try:
         rules = permrules.validate_saved_rules(row["tool"], row["args"], texts)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    cur = {k: list((cfg.get("permissionRules") or {}).get(k) or []) for k in ("allow", "ask", "deny")}
-    cur["allow"] += [r for r in rules if r not in cur["allow"]]
-    db.set_settings({"permissionRules": cur})
+
+    def add(perms: dict[str, Any]) -> dict[str, Any]:
+        cur = {k: list((perms["permissionRules"] or {}).get(k) or []) for k in ("allow", "ask", "deny")}
+        cur["allow"] += [r for r in rules if r not in cur["allow"]]
+        return {"permissionRules": cur}
+    permissions.update(db, add)
     return rules
 
 
@@ -4740,7 +4714,7 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
             return {"ok": False, "error": str(e)}
     cfg = settings()
     args = {"command": body.command, **body.args} if body.command is not None else body.args
-    v = permrules.evaluate(body.tool, args, permrules.load_rules(cfg.get("permissionRules")), roots=_perm_roots(cfg, body.desk_id))
+    v = permrules.evaluate(body.tool, args, permrules.load_rules(permissions.get(cfg, "permissionRules")), roots=_perm_roots(cfg, body.desk_id))
     return {"action": v.action or "none", "hardline": v.hardline, "reason": v.refusal, "rule": v.rule, "kind": v.kind,
             "subjects": v.subjects, "suggestions": v.suggestions, "external": v.external}
 
@@ -5325,7 +5299,7 @@ def _checked_edit(tool: str, args: dict[str, Any], desk_id: str | None = None) -
     except approval_edits.EditError as e:
         raise HTTPException(400, str(e)) from e
     cfg = settings()
-    perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(cfg.get("permissionRules")),
+    perm = permrules.resolve(tool, edited, "ask", True, rules=permrules.load_rules(permissions.get(cfg, "permissionRules")),
                              roots=_perm_roots(cfg, desk_id))
     if perm.refusal:
         raise HTTPException(403, f"{tool}: {perm.refusal}")
@@ -5439,6 +5413,43 @@ def _inbox_runs(hours: float, limit: int, include_dry: int) -> list[dict[str, An
     return runs
 
 
+def _digest_gaps() -> list[tuple[str, dict[str, str]]]:
+    """Setup gaps that quietly switch part of an on-by-default module off, each with the one place that fixes it."""
+    if not activity.IS_MAC:
+        return []
+    gaps: list[tuple[str, dict[str, str]]] = []
+    if meeting_svc.config().get("enabled") and activity.microphone_status() in (activity.DENIED, activity.UNASKED):
+        gaps.append(("Microphone not granted, so meetings will not record.",
+                     {"label": "Meetings settings", "settings": "meetings"}))
+    if monitor.config().get("enabled") and not activity.accessibility_trusted():
+        gaps.append(("Accessibility not granted, so Activity sees app names only: no window titles or typing rhythm.",
+                     {"label": "Activity permissions", "view": "activity"}))
+    return gaps
+
+
+_digest_checked = 0.0
+
+
+def _maybe_digest() -> str | None:
+    """Write today's digest if it is due. Read-driven (GET /inbox), so it costs nothing while nobody looks; checked
+    at most every 10 minutes, since a day with nothing to say writes no row and would otherwise stay due."""
+    global _digest_checked
+    from . import digest as digest_mod
+    cfg, t = digest_mod.config(settings()), time.time()
+    if not cfg["enabled"] or t - _digest_checked < 600:
+        return None
+    _digest_checked = t
+    if not digest_mod.due(t, cfg["hour"], digest_mod.last_at(run_store, t)):
+        return None
+    since = t - 86400
+    recorded = sum(1 for m in meeting_store.list(status="ready", limit=200, include_docs=True)
+                   if float(m.get("ended_at") or 0) >= since)
+    apps = digest_mod.app_seconds(monitor.store.recent(limit=20000, since=since, kinds=["focus"]))
+    body, links = digest_mod.assemble(recorded=recorded, notes_pending=meeting_store.pending_count(), apps=apps,
+                                      gaps=_digest_gaps())
+    return digest_mod.write(run_store, body, links, t) if body else None
+
+
 @app.get("/inbox")
 def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
@@ -5447,6 +5458,10 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     whose late-fire notice, failure and counts all come from the journal — the reply text is shown as the body, but
     nothing about the entry is parsed out of it.
     """
+    try:
+        _maybe_digest()
+    except Exception:  # noqa: BLE001 - a digest that cannot be built must not blank the inbox
+        log.exception("inbox: daily digest failed")
     pending_approvals = []
     for a in _untrashed(run_store.approvals("pending", limit=100)):
         row = run_store.get(a["run_id"]) if a["run_id"] else None
@@ -5484,6 +5499,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0), "seen": r["run_id"] in seen,
+            "links": fire.get("links") or [],  # the daily digest's fix-it links; job runs have none
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
     paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],

@@ -61,12 +61,39 @@ def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
     c.execute("UPDATE settings SET value = ? WHERE key = 'activity'", (json.dumps(cfg),))
 
 
+def _permissions_store(c: sqlite3.Connection) -> None:
+    """The ~22 top-level permission keys (tools, alwaysAsk, permissionRules, ...) fold into one versioned
+    `permissions` row and are deleted (permissions.py). A fresh database gets {"version": 1}; defaults fill the rest."""
+    from . import permissions
+    permissions.migrate(c)
+
+
+def _meetings_activity_defaults(c: sqlite3.Connection) -> None:
+    """Meetings and Activity now ship on. Only a bare `{"enabled": false}` row (nothing but that key, the
+    stub an older whole-settings save could write) is flipped to true. Both services only ever store their
+    FULL config, and only on a user action: a Start/Stop, the consent notice, or any edit in their panels.
+    So a full row with `enabled: false` - even one equal to the defaults, which is what Stop leaves behind -
+    is a user who was in there and left it off, and it stays off. A missing row needs nothing: the new
+    default applies on read. Neither switch records on its own; consent and OS permissions still gate that."""
+    import json
+    for key in ("activity", "meetings"):
+        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        try:
+            cfg = json.loads(row[0]) if row else None
+        except ValueError:
+            continue
+        if cfg == {"enabled": False}:
+            c.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps({"enabled": True}), key))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
     (3, "boards_into_todos", _boards_into_todos),
     (4, "activity_record_everything_keys", _activity_record_everything_keys),
+    (5, "permissions_store", _permissions_store),
+    (6, "meetings_activity_defaults", _meetings_activity_defaults),
 ]
 
 

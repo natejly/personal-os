@@ -107,10 +107,15 @@ Type / in the composer:
 - Modules: which views appear and where. Voice and Memory live under Memory. Usage shows spend, tokens and calls. Integrations holds Google and connectors. Compact chats and Trash are here too.
 
 ## Keyboard shortcuts
-- Cmd+N new chat, Cmd+K command palette, Cmd+, settings, Cmd+B sidebar, Cmd+I Page agent, Ctrl+Cmd+I Context panel.
-- Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory, 7 Activity. Cmd+Shift+M Meetings.
-- Cmd+Shift+[ and ] previous and next chat. Cmd+F find, Cmd+Shift+F search chats.
-- Cmd+Shift+C Spaces; the Spaces shortcuts are above.
+Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard Shortcuts in the menu bar too.
+- General: Cmd+, settings, Cmd+K command palette, Cmd+/ shortcuts, Cmd+B sidebar, Cmd+I Page agent, Ctrl+Cmd+I Context panel. Cmd+= and Cmd+- zoom, Alt+Cmd+0 actual size.
+- Create: Cmd+N new chat, Cmd+Shift+N new file, Cmd+Shift+D today's file, Cmd+U upload.
+- Go to: Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory, 7 Activity. Cmd+Shift+M Meetings.
+- Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply, Cmd+Shift+P cycles plan mode.
+- Files (note editor): Cmd+S save, Cmd+Shift+B bold, Cmd+Shift+I italic, Cmd+K link, Ctrl+Cmd+M maths, Cmd+Shift+E code, Tab indent. Ctrl+Alt+D dictates (hold) or latches (tap); the chord is set in Settings -> Behavior.
+- Spaces: Cmd+Shift+C toggle Spaces, Ctrl+Cmd+N new Space, Alt+Cmd+Left/Right previous and next, Alt+Cmd+Up overview, Ctrl+1..9 jump, Ctrl+Cmd+T tidy up, Ctrl+Cmd+L lock. Esc deselects, Delete closes the selected windows, Cmd+scroll zooms, Cmd+drag moves a window from anywhere in it.
+- Windows: Cmd+W close, Cmd+M minimize, Ctrl+Cmd+O pop out, Ctrl+Cmd+Shift+O return to Space, Ctrl+Cmd+P pin on top, Ctrl+Cmd+[ and ] transparency, Alt+Cmd+G gather widgets, Alt+Cmd+F bring pop-outs to front.
+- Anywhere on your Mac (change them in Settings -> Behavior -> Shortcuts -> Advanced): Ctrl+Alt+Cmd+Space gather widgets, Cmd+Shift+Space quick capture, Alt+Space quick ask.
 
 ## When something fails
 - A tool reports not verified: the write was not confirmed on read-back. Look at the item itself before trusting it.

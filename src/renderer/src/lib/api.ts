@@ -206,6 +206,9 @@ export const api = {
   /** Revoke 'allow for this chat session': one key, or all of the chat's keys when `key` is omitted. */
   revokeSessionGrant: (convId: string, key?: string) =>
     req<{ ok: boolean; keys: string[] }>(`/permissions/session/${encodeURIComponent(convId)}${key ? `?key=${encodeURIComponent(key)}` : ''}`, { method: 'DELETE' }),
+  /** Drop one tool from an agent's own mode map, so it inherits again. */
+  revokeAgentGrant: (agentId: string, tool: string) =>
+    req<{ ok: boolean }>(`/permissions/agent/${encodeURIComponent(agentId)}?tool=${encodeURIComponent(tool)}`, { method: 'DELETE' }),
   /** Answered approvals, the latest decision first. */
   decidedApprovals: (limit = 50) => req<PendingApproval[]>(`/approvals?status=decided&order=desc&limit=${limit}`),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */

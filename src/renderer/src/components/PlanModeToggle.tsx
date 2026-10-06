@@ -58,7 +58,8 @@ export default function PlanModeToggle({ conversationId }: { conversationId?: st
     <button
       className={`composer-ctl plan-mode ${mode}`}
       aria-pressed={mode !== 'off'}
-      title={`${LABEL[mode]} (⌘⇧P)`}
+      data-inherited={convMode === null || undefined}
+      title={`${LABEL[mode]} (⌘⇧P). ${convMode === null ? `Following the default in Settings → Permissions (${globalMode}).` : `Set for this chat; the default in Settings → Permissions is ${globalMode}.`}`}
       onClick={() => cycle.current()}
     >
       <ListChecks size={13} /> Plan{mode === 'off' ? '' : `: ${mode}`}

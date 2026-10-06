@@ -17,6 +17,10 @@ export default function AutonomyToggle({ conversationId }: { conversationId?: st
   const desk = useChatDesk(deskId)
   const busy = useStore((s) => s.deskBusy)
   const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
+  // The global desk permissions every autonomous chat inherits (Settings → Permissions → Desks).
+  const shellAuto = useStore((s) => s.settings.deskShellAuto !== false)
+  const doneGate = useStore((s) => s.settings.deskDoneGate !== false)
+  const openSettings = useStore((s) => s.openSettings)
   const { workAutonomously, stopWorkingAutonomously, patchDesk } = useStore()
   const [open, setOpen] = useState(false)
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('plan')
@@ -58,6 +62,10 @@ export default function AutonomyToggle({ conversationId }: { conversationId?: st
               </label>
             ))}
           </div>
+          <p className="muted small">
+            From Settings: sandboxed commands in its folder {shellAuto ? 'run without asking' : 'ask first'}; finishing checks {doneGate ? 'on' : 'off'}.{' '}
+            <button type="button" className="link small" onClick={() => { setOpen(false); openSettings('permissions') }}>Change</button>
+          </p>
           {!on && (
             <label className="desk-limits">Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={turns} onChange={(e) => setTurns(e.target.value)} /></label>
           )}

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Download, Eye, Globe, Plus, Sparkles, Trash2, Undo2, Upload, Video, X } from 'lucide-react'
 import { useStore } from '../store'
 import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
 import { PRESET_KIND_LABEL, SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import ProjectChip from './ProjectChip'
+import TeachTaskPanel from './TeachTaskPanel'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
 import { debounceLatest, LINT_DELAY_MS, skillDisclosure } from '../lib/skillLint'
@@ -43,6 +44,7 @@ const SOURCE_LABEL: Record<Skill['source'], string> = {
   induced: 'learned from a chat',
   proposed: 'suggested by the assistant',
   user: 'written by you',
+  teach: 'taught from a screen recording',
   builtin: 'built into Grain'
 }
 
@@ -163,6 +165,7 @@ export default function SkillsPanel(): JSX.Element {
   const [mdText, setMdText] = useState('')
   const [mdUrl, setMdUrl] = useState('')
   const [browsing, setBrowsing] = useState(false)
+  const [teaching, setTeaching] = useState(false)
   const [fetching, setFetching] = useState<string | null>(null) // the preset (or URL) being imported
   const [form, setForm] = useState({ name: '', description: '', procedure: '' })
   const formFindings = useSkillLint(form, adding)
@@ -234,7 +237,7 @@ export default function SkillsPanel(): JSX.Element {
 
   const importPreset = (p: SkillPreset): Promise<boolean> => importFrom({ url: p.url }, p.name)
 
-  const empty = skills.length === 0 && !adding && !importing && !browsing
+  const empty = skills.length === 0 && !adding && !importing && !browsing && !teaching
 
   return (
     <div className="library-panel">
@@ -246,11 +249,13 @@ export default function SkillsPanel(): JSX.Element {
             <button className="primary-btn" aria-expanded={adding} onClick={() => setAdding(!adding)}><Plus size={14} /> New skill</button>
             <button className={`ghost-btn${importing ? ' on' : ''}`} aria-expanded={importing} onClick={() => setImporting(!importing)}><Upload size={14} /> Import skill file</button>
             <button className={`ghost-btn${browsing ? ' on' : ''}`} aria-expanded={browsing} onClick={() => setBrowsing(!browsing)}><Globe size={14} /> Popular skills</button>
+            <button className={`ghost-btn${teaching ? ' on' : ''}`} aria-expanded={teaching} onClick={() => setTeaching(!teaching)}><Video size={14} /> Teach a task</button>
             <button className={`ghost-btn${preview ? ' on' : ''}`} aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
           </div>
           <p className="muted small">A skill is a way of doing a task. It stays off until you approve it. In a chat, type <code>/skill</code> to use one on purpose.</p>
         </div>
       )}
+      {teaching && <TeachTaskPanel onClose={() => setTeaching(false)} />}
       {browsing && (
         <div className="skill-body standalone">
           <p className="muted small">
@@ -340,6 +345,7 @@ export default function SkillsPanel(): JSX.Element {
             <button className="primary-btn" onClick={() => setAdding(true)}><Plus size={14} /> New skill</button>
             <button className="ghost-btn" onClick={() => setImporting(true)}><Upload size={14} /> Import skill file</button>
             <button className="ghost-btn" onClick={() => setBrowsing(true)}><Globe size={14} /> Popular skills</button>
+            <button className="ghost-btn" onClick={() => setTeaching(true)}><Video size={14} /> Teach a task</button>
           </div>
         </div>
       )}

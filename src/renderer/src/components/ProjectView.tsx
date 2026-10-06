@@ -1,37 +1,31 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Doc } from '@shared/types'
-import { MessageSquarePlus, Pencil, FileText, FolderX, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
-import { useStore, useProject } from '../store'
+import { MessageSquarePlus, Pencil, Files, FolderX, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
+import { useStore, useProject, type ProjectTab } from '../store'
 import { dragProps } from '../canvas/dnd'
 import { rowButton } from '../lib/rowButton'
 import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
-import DocumentsView from './DocumentsView'
+import ProjectFiles from './ProjectFiles'
 import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
-import { api } from '../lib/api'
-import { projectRows } from '../lib/chatRows'
+import { useProjectFileCount } from '../lib/useChatFiles'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
-
-type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
 
 export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
-  const { newChat, selectChat, deleteChat, openDoc, setProjectModal, updateProject, loadScope, setView } = useStore()
-  const [tab, setTab] = useState<Tab>('chats')
+  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView } = useStore()
+  const tab = useStore((s) => s.projectTab)
+  const setTab = (t: ProjectTab): void => useStore.setState({ projectTab: t })
+  const fileCount = useProjectFileCount(id)
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
-  // Fetched per project rather than read from `docs`, which a search in the Files view narrows.
-  const [notes, setNotes] = useState<Doc[]>([])
-  const storeDocs = useStore((s) => s.docs)
-  const rows = useMemo(() => projectRows(conversations, notes)[id] ?? [], [conversations, notes, id])
+  const rows = useMemo(() => conversations.filter((c) => c.project_id === id), [conversations, id])
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
-  useEffect(() => { void api.docs.list(id).then(setNotes).catch(() => undefined) }, [id, storeDocs])
 
   usePageContext(() => (project
     ? {
@@ -65,13 +59,12 @@ export default function ProjectView(): JSX.Element {
       </main>
     )
   }
-  const convById = Object.fromEntries(conversations.map((c) => [c.id, c]))
   const st = project.stats
 
-  const TABS: { key: Tab; label: string; icon: JSX.Element; n?: number }[] = [
-    { key: 'chats', label: 'Chats & files', icon: <MessageSquare size={14} />, n: rows.length },
+  const TABS: { key: ProjectTab; label: string; icon: JSX.Element; n?: number }[] = [
+    { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: rows.length },
+    { key: 'files', label: 'Files', icon: <Files size={14} />, n: fileCount },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
-    { key: 'knowledge', label: 'Uploads', icon: <FileText size={14} />, n: st?.documents },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
   ]
 
@@ -104,25 +97,19 @@ export default function ProjectView(): JSX.Element {
           {rows.length === 0 && (
             <div className="empty-state">
               <MessageSquare size={28} />
-              <h2>No chats or files yet</h2>
+              <h2>No chats yet</h2>
               <p>A chat started here follows this project&apos;s instructions and can use its knowledge and memory.</p>
               <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
             </div>
           )}
           <div className="chat-rows">
-            {rows.map((r) => r.kind === 'doc' ? (
-              <div key={`d${r.id}`} className="chat-row" {...rowButton(() => void openDoc(r.id))}>
-                <FileText size={14} />
-                <span className="chat-row-title">{r.title}</span>
-                <span className="muted small">Note · {new Date(r.at * 1000).toLocaleDateString()}</span>
-              </div>
-            ) : (
-              <div key={`c${r.id}`} className="chat-row" {...rowButton(() => void selectChat(r.id))}
-                {...dragProps({ kind: 'conversation', id: r.id, label: r.title, projectId: id })}>
+            {rows.map((c) => (
+              <div key={c.id} className="chat-row" {...rowButton(() => void selectChat(c.id))}
+                {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                 <MessageSquare size={14} />
-                <span className="chat-row-title"><ChatPulse conversationId={r.id} />{r.title}</span>
-                <span className="muted small">{convById[r.id]?.model} · {new Date(r.at * 1000).toLocaleDateString()}</span>
-                <button className="icon-btn ghost danger" aria-label={`Delete chat: ${r.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(r.id) }}><Trash2 size={13} /></button>
+                <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
+                <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
+                <button className="icon-btn ghost danger" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
               </div>
             ))}
           </div>
@@ -136,7 +123,7 @@ export default function ProjectView(): JSX.Element {
           <p className="muted small">Saved when you click away.</p>
         </div>
       )}
-      {tab === 'knowledge' && <DocumentsView projectId={id} />}
+      {tab === 'files' && <ProjectFiles key={id} projectId={id} />}
       {tab === 'memory' && <MemoryPanel projectId={id} />}
     </main>
   )

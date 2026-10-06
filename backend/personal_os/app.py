@@ -819,6 +819,13 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "pimProvider" and v not in ("google", "microsoft"):
             raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
+        elif k == "baseUrl":
+            try:
+                clean[k] = providers.check_base_url(v)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+        elif k == "provider" and v is not None and (not isinstance(v, str) or not providers.get(v)):
+            raise HTTPException(422, f"Unknown provider {v!r}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":

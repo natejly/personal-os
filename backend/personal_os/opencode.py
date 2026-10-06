@@ -57,10 +57,13 @@ def endpoint(settings: dict[str, Any]) -> tuple[str, str, str] | None:
 def allow_hosts(base_url: str) -> list[str]:
     """What the sandbox lets opencode connect to besides loopback: https anywhere (a remote model endpoint, and
     opencode's provider catalog on a cold cache), plus a local endpoint on a non-standard scheme or port."""
-    u = urlparse(base_url)
-    host = (u.hostname or "").lower()
+    try:
+        u = urlparse(base_url)
+        host, port = (u.hostname or "").lower(), u.port
+    except ValueError:  # an unparsable address has no local port to allow
+        return ["*:443"]
     if host in ("localhost", "127.0.0.1", "::1"):
-        return [f"localhost:{u.port or (443 if u.scheme == 'https' else 80)}", "*:443"]
+        return [f"localhost:{port or (443 if u.scheme == 'https' else 80)}", "*:443"]
     return ["*:443"]
 
 

@@ -36,14 +36,16 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, TextIO
 
 import anyio
 from anyio.abc import TaskGroup
 from mcp import ClientSession, Implementation, StdioServerParameters, stdio_client
+from mcp.client.sse import sse_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-from . import mac, mcp_drift, redact
+from . import mac, mcp_drift, mcp_path, redact
 from .vision import MAX_FILE_BYTES
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
@@ -63,6 +65,21 @@ CALL_GRACE = 5.0           # slack on the caller's own wait, so the supervisor t
 BACKOFF_BASE = 1.0
 BACKOFF_MAX = 60.0
 SPAWN_ATTEMPTS = 4         # a command that cannot be spawned is a config error, not a blip
+
+SSE_CONNECT_TIMEOUT = 10.0   # HTTP timeout for the SSE handshake and each message POST
+SSE_READ_TIMEOUT = 300.0     # silence on the event stream longer than this ends the connection; the heartbeat pings well inside it
+
+# Resources and prompts a server advertises are listed for the UI and capped: a server cannot make this unbounded.
+MAX_RESOURCES = 100
+MAX_PROMPTS = 50
+MAX_URI_CHARS = 2000         # a resource URI the model passes in
+MAX_FIELD_CHARS = 300        # one resource/prompt description or name, as kept on the supervisor
+LIST_TIMEOUT = 8.0           # each of resources/list and prompts/list; a slow one is skipped, never awaited past this
+# Not a legal MCP tool name (":" is outside the name charset), so no server can ever export a tool that collides with it.
+READ_RESOURCE_TOOL = "grain:read_resource"
+READ_RESOURCE_DESCRIPTION = ("Read a resource (a file, record or document) this server exposes. Call it without a uri to list the "
+                             "available resources and their URIs, then call it again with the uri you want.")
+READ_RESOURCE_SCHEMA = {"type": "object", "properties": {"uri": {"type": "string", "description": "URI of the resource to read; leave empty to list them."}}}
 
 STDERR_LINES = 200
 STDERR_LINE_CHARS = 400
@@ -90,6 +107,10 @@ class McpError(RuntimeError):
 
 class McpUnavailable(McpError):
     """The server is not connected: disabled, failed, or still coming up."""
+
+
+class McpMissingCommand(McpUnavailable):
+    """A stdio command that is not installed. Retrying cannot help, so the supervisor stops after the first attempt."""
 
 
 class McpTimeout(McpError):
@@ -148,15 +169,27 @@ async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_
     if config.transport == "stdio":
         if not config.command.strip():
             raise McpUnavailable("no command configured")
-        params = StdioServerParameters(command=config.command, args=config.args, env=config.env or None, cwd=config.cwd or None)
+        # The Dock-launched app has a bare PATH. The server's own PATH wins when it sets one; otherwise it gets the user's.
+        env = dict(config.env)
+        if not env.get("PATH"):
+            env["PATH"] = await asyncio.to_thread(mcp_path.user_path)  # spawns a login shell once: off the event loop
+        command = mcp_path.resolve(config.command, env)
+        if command is None:
+            raise McpMissingCommand(mcp_path.missing_message(config.command))
+        params = StdioServerParameters(command=command, args=config.args, env=env, cwd=config.cwd or None)
         async with stdio_client(params, errlog=err.file) as streams:
             yield streams
         return
-    if config.transport != "http":
-        raise McpUnavailable(f"{config.transport} servers are not supported yet")
+    if config.transport not in ("http", "sse"):
+        raise McpUnavailable(f"{config.transport} servers are not supported")
     if not config.url.strip():
         raise McpUnavailable("no URL configured")
     auth = oauth.provider(config.id, config.url, redirect_uri, sign_in) if oauth else None
+    if config.transport == "sse":
+        async with sse_client(config.url, headers=config.headers or None, timeout=SSE_CONNECT_TIMEOUT,
+                              sse_read_timeout=SSE_READ_TIMEOUT, auth=auth) as streams:
+            yield streams
+        return
     async with create_mcp_http_client(headers=config.headers or None, auth=auth) as http:
         async with streamable_http_client(config.url, http_client=http) as streams:
             yield streams
@@ -345,7 +378,33 @@ def _result_dict(result: Any) -> dict[str, Any]:
 def tool_export(tool: Any) -> dict[str, Any]:
     """One `mcp.types.Tool` in the shape McpServers.sync_tools wants."""
     return {"name": tool.name, "description": tool.description or "", "parameters": tool.input_schema or {},
-            "danger": MCP_DANGER, "annotations": tool.annotations.model_dump(mode="json") if tool.annotations else {}}
+            "danger": MCP_DANGER,  # wire-format (camelCase) hints, as the server sent them
+            "annotations": tool.annotations.model_dump(mode="json", by_alias=True, exclude_none=True) if tool.annotations else {}}
+
+
+def read_resource_export() -> dict[str, Any]:
+    """The synthetic tool that reads a server's resources. A tool like any other from here on: namespaced slug, 'ask'
+    by default, drift-tracked, taint-forced. Its text is fixed so a growing resource list never changes its hash."""
+    return {"name": READ_RESOURCE_TOOL, "description": READ_RESOURCE_DESCRIPTION, "parameters": READ_RESOURCE_SCHEMA,
+            "danger": MCP_DANGER, "annotations": {"readOnlyHint": True}}
+
+
+def _short(value: Any) -> str:
+    return str(value or "")[:MAX_FIELD_CHARS]
+
+
+def resource_view(r: Any) -> dict[str, str]:
+    return {"uri": _short(r.uri), "name": _short(r.name), "description": _short(r.description), "mime_type": _short(r.mime_type)}
+
+
+def prompt_view(p: Any) -> dict[str, Any]:
+    return {"name": _short(p.name), "description": _short(p.description),
+            "arguments": [{"name": _short(a.name), "required": bool(a.required)} for a in (p.arguments or [])]}
+
+
+def _resource_result(contents: list[Any]) -> Any:
+    """ReadResourceResult.contents in the shape _result_dict already shapes (text inline, blobs saved to media)."""
+    return SimpleNamespace(content=[SimpleNamespace(type="resource", resource=c) for c in contents], is_error=False)
 
 
 class _Supervisor:
@@ -364,6 +423,9 @@ class _Supervisor:
         self.server_info: dict[str, Any] = {}
         self.stderr: list[str] = []
         self.tool_slugs: list[str] = []
+        self.resources: list[dict[str, str]] = []
+        self.prompts: list[dict[str, Any]] = []
+        self._reads_resources = False  # the server lists resources, so grain:read_resource is offered
         self._queue: asyncio.Queue[_Call] = asyncio.Queue()
         self._inflight: set[_Call] = set()
         self._ready = asyncio.Event()
@@ -415,6 +477,10 @@ class _Supervisor:
                     # Retrying cannot help until the user signs in; sign-in restarts this supervisor.
                     self._set_status("error", "sign-in required")
                     break
+                if _is_missing_command(exc):
+                    # Not installed is not transient: say what to install and stop, no retry loop.
+                    self._set_status("error", str(_first(exc)))
+                    break
                 self._set_status("error", _describe(exc))
                 if _is_spawn_failure(exc) and self.attempts >= SPAWN_ATTEMPTS:
                     self._set_status("error", f"{_describe(exc)} (giving up; fix the command and restart it)")
@@ -450,6 +516,7 @@ class _Supervisor:
                     self.server_info = {"name": init.server_info.name, "version": init.server_info.version,
                                         "protocol": init.protocol_version, "instructions": init.instructions or ""}
                     err.drain()
+                    await self._discover(session, init.capabilities)
                     self._register(listing.tools)
                     self._set_status("ready")
                     self._ready.set()
@@ -462,6 +529,25 @@ class _Supervisor:
         finally:
             self._err = None
             err.close()
+
+    async def _discover(self, session: ClientSession, caps: Any) -> None:
+        """List resources and prompts when the server advertises them. Best effort: a failure leaves the list empty."""
+        self.resources, self.prompts = [], []
+        if getattr(caps, "resources", None):
+            with contextlib.suppress(Exception), anyio.fail_after(LIST_TIMEOUT):
+                self.resources = [resource_view(r) for r in (await session.list_resources()).resources[:MAX_RESOURCES]]
+        # An SDK server advertises the capability even with nothing to read, so the tool needs at least one listed resource.
+        self._reads_resources = bool(self.resources)
+        if getattr(caps, "prompts", None):
+            with contextlib.suppress(Exception), anyio.fail_after(LIST_TIMEOUT):
+                self.prompts = [prompt_view(p) for p in (await session.list_prompts()).prompts[:MAX_PROMPTS]]
+
+    async def _read_resource(self, session: ClientSession, uri: str) -> Any:
+        """grain:read_resource. No uri lists what there is (the tool's text is fixed, see read_resource_export)."""
+        if not uri.strip():
+            lines = [f"{r['uri']}  {r['name']}" + (f" - {r['description']}" if r["description"] else "") for r in self.resources]
+            return SimpleNamespace(content=[SimpleNamespace(text="\n".join(lines) or "this server lists no resources")], is_error=False)
+        return _resource_result((await session.read_resource(uri.strip()[:MAX_URI_CHARS])).contents)
 
     async def _on_message(self, message: Any) -> None:
         # Only flag it: re-listing here would block the session's receive loop.
@@ -505,7 +591,10 @@ class _Supervisor:
         self._inflight.add(call)
         try:
             with anyio.fail_after(call.timeout):
-                result = await session.call_tool(call.name, call.arguments, read_timeout_seconds=call.timeout)
+                if call.name == READ_RESOURCE_TOOL:
+                    result = await self._read_resource(session, str(call.arguments.get("uri") or ""))
+                else:
+                    result = await session.call_tool(call.name, call.arguments, read_timeout_seconds=call.timeout)
         except TimeoutError:
             # The call is abandoned, not waited on: the caller gets an error now. Whether the
             # server itself is wedged is a separate question, answered by an immediate ping.
@@ -581,6 +670,8 @@ class _Supervisor:
     # ---------- bookkeeping ----------
     def _register(self, tools: list[Any]) -> None:
         exported = [tool_export(t) for t in tools]
+        if self._reads_resources:
+            exported.append(read_resource_export())
         synced = self.store.sync_tools(self.config.id, exported)
         for slug in synced["added"] + synced["changed"]:  # scan what is new or changed; a new fail-level finding withholds the tool
             try:
@@ -603,7 +694,8 @@ class _Supervisor:
         return {"server_id": self.config.id, "slug": self.config.slug, "name": self.config.name,
                 "status": self.status, "detail": self.detail, "attempts": self.attempts,
                 "running": bool(self._task and not self._task.done()), "ready": self._ready.is_set(),
-                "server_info": self.server_info, "tools": list(self.tool_slugs), "stderr": self.tail_stderr()}
+                "server_info": self.server_info, "tools": list(self.tool_slugs), "stderr": self.tail_stderr(),
+                "resources": list(self.resources), "prompts": list(self.prompts)}
 
 
 def _needs_auth(exc: BaseException) -> bool:
@@ -611,6 +703,15 @@ def _needs_auth(exc: BaseException) -> bool:
     if inner:
         return any(_needs_auth(e) for e in inner)
     return isinstance(exc, McpNeedsAuth) or (exc.__cause__ is not None and _needs_auth(exc.__cause__))
+
+
+def _first(exc: BaseException) -> BaseException:
+    inner = getattr(exc, "exceptions", None)
+    return _first(inner[0]) if inner else exc
+
+
+def _is_missing_command(exc: BaseException) -> bool:
+    return isinstance(_first(exc), McpMissingCommand)
 
 
 def _is_spawn_failure(exc: BaseException) -> bool:
@@ -700,8 +801,8 @@ class McpClient:
         if self.oauth is None:
             raise McpUnavailable("OAuth is not configured")
         config = _config_from(self.store, server_id)
-        if config is None or config.transport != "http":
-            raise McpUnavailable("only remote (http) servers sign in")
+        if config is None or config.transport not in ("http", "sse"):
+            raise McpUnavailable("only remote (http or sse) servers sign in")
 
         async def run(s: SignIn) -> None:
             err = _Stderr([])
@@ -779,7 +880,7 @@ class McpClient:
         except BaseException as exc:  # noqa: BLE001 - a probe reports failure, it does not raise
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            out["error"] = _describe(exc)
+            out["error"] = str(_first(exc)) if _is_missing_command(exc) else _describe(exc)
         finally:
             err.close()
             out["stderr"] = list(err.lines)

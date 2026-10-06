@@ -983,7 +983,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'reasoning':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'tool_decision':

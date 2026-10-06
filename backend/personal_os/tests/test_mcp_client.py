@@ -332,9 +332,10 @@ class TestMisbehaviour(StubCase):
     async def test_a_command_that_cannot_start_gives_up_instead_of_spinning(self) -> None:
         server = self.store.create_server("Broken", command="/nonexistent/mcp-server")
         await self.client.start()
-        await self.until(lambda: "giving up" in self.store.server(server["id"])["status_detail"],
-                         20.0, "the spawn failure to be reported")
+        await self.until(lambda: "not found" in self.store.server(server["id"])["status_detail"],
+                         20.0, "the missing command to be reported")
         self.assertEqual(self.store.server(server["id"])["status"], "error")
+        self.assertEqual(self.client.status(server["id"])[0]["attempts"], 1, "a command that is not installed is not retried")
         with self.assertRaises(McpUnavailable):
             await self.client.call("mcp__broken__anything", {})
 
@@ -349,12 +350,13 @@ class TestMisbehaviour(StubCase):
                          "a slow server is not a misconfigured one; it keeps being retried")
         await self.until(lambda: self.client.status(server["id"])[0]["attempts"] >= 2, 20.0, "a second attempt")
 
-    async def test_sse_is_refused_and_http_needs_a_url(self) -> None:
-        probe = await self.client.probe({"transport": "sse", "url": "https://example.com"})
+    async def test_unknown_transports_are_refused_and_remote_ones_need_a_url(self) -> None:
+        probe = await self.client.probe({"transport": "carrier-pigeon", "url": "https://example.com"})
         self.assertFalse(probe["ok"])
         self.assertIn("not supported", probe["error"])
-        probe = await self.client.probe({"transport": "http", "url": ""})
-        self.assertIn("no URL", probe["error"])
+        for transport in ("http", "sse"):
+            probe = await self.client.probe({"transport": transport, "url": ""})
+            self.assertIn("no URL", probe["error"])
 
 
 def _free_port() -> int:

@@ -68,7 +68,17 @@ their own instructions, knowledge files, memories and graph.
     a labelled fence that tells the model it is reference material — it cannot
     grant permissions or override instructions, and tool approvals still apply.
     Revoke or edit one at any time; a per-chat *Procedures* toggle turns the
-    whole block off.
+    whole block off. Writing one is tooled: say what it is for and the model
+    drafts the steps for you to edit (nothing is saved until you save it), a
+    lint reads the draft as you type — flagging an invented tool name, this
+    week's dates and addresses, a missing trigger line — and *Show what the
+    assistant sees* prints the real injected block. The lint's one blocking
+    class is text claiming authority ("without asking", "ignore your
+    instructions"): a procedure that says what the assistant is *allowed* to do
+    cannot be approved, and cannot be edited into a live one either. In a chat,
+    `skill_draft` and `skill_revise` let the assistant write a procedure down
+    for you — only ever as a candidate, and a revision to an approved skill is
+    forked beside it rather than written into the text that is in use.
   - *Connectors* — MCP servers, whose tools join the toolbox under namespaced
     names (`mcp__<server>__<tool>`) that can never shadow a built-in. Test a
     launch config before saving it: Grain connects once, lists the tools, scans

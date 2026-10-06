@@ -1498,6 +1498,39 @@ textarea:focus-visible,
 .row-actions button.small:disabled { opacity: 0.5; }
 .row-actions .primary-btn.small { border-color: transparent; }
 
+/* The lint, under the editor. An error is the only thing that stops an approval, so it is the only
+   thing coloured like a refusal; a warning is advice and stays quiet. */
+.skill-findings { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.skill-findings li { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: 12px; border: 1px solid var(--border); }
+.skill-findings li > div { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.skill-findings li > svg { flex: 0 0 auto; margin-top: 1px; }
+.skill-findings li b { font-weight: 500; }
+.skill-findings li code { font-size: 11px; padding: 2px 5px; border-radius: 4px; background: var(--bg-input); color: var(--text-muted); align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.skill-findings li small { line-height: 1.5; }
+.skill-findings li .tag { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.skill-findings li.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.skill-findings li.error > svg { color: var(--danger); }
+.skill-findings li.warn { background: color-mix(in srgb, var(--warn) 6%, transparent); }
+.skill-findings li.warn > svg { color: var(--warn); }
+.row-actions .blocked { color: var(--danger); }
+
+/* Drafting from intent, and the preview of the real injected block. */
+.draft-row { display: flex; align-items: center; gap: 8px; }
+.draft-row input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; outline: 0; color: var(--text); font: inherit; }
+.draft-row input:focus { border-color: var(--accent); }
+.draft-row button.small { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 7px 11px; border-radius: 8px; border: 1px solid var(--border-strong); white-space: nowrap; }
+.draft-row button.small:disabled { opacity: 0.5; }
+
+.skill-preview-box { display: flex; flex-direction: column; gap: 8px; }
+.skill-preview-box .add-row { align-items: center; gap: 10px; }
+.skill-preview-box button.small { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border-strong); }
+.skill-preview-box label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.skill-injected {
+  margin: 0; padding: 12px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+  font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; line-height: 1.6; color: var(--text-muted);
+}
+
 .mcp-server { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
 .mcp-server.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .mcp-server.ready { border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }

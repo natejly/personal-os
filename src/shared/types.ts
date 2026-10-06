@@ -233,6 +233,10 @@ export interface ShowItem {
   name?: string
   mime?: string
   size?: number
+  /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
+  documentId?: string
+  /** An upload only: the original bytes were kept (false = just the extracted text is left). */
+  hasOriginal?: boolean
   /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */
   pane?: 'left' | 'right'
 }
@@ -1012,6 +1016,8 @@ export interface Document {
   pinned?: number
   preview?: string
   text?: string
+  /** The uploaded bytes are still stored; false for rows from before originals were kept. */
+  has_original?: boolean
 }
 
 /** POST /documents: the stored row plus what the server could make of the file. */

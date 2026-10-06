@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { actionLabel, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, type ChatFile } from './chatFiles'
+import { actionLabel, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, uploadTarget, type ChatFile } from './chatFiles'
 
 const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: Partial<ChatFile> = {}): ChatFile => ({
   id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, chat_count: 1, pinned: false, created_at: at, missing: false, rel: null, ...over
@@ -61,4 +61,11 @@ test('rowAction: kind decides, coding and missing go to the chat', () => {
   assert.equal(rowAction({ kind: 'local', missing: false }), 'open-local')
   assert.equal(rowAction({ kind: 'coding', missing: false }), 'jump-to-chat')
   assert.equal(rowAction({ kind: 'local', missing: true }), 'jump-to-chat')
+})
+
+test('uploadTarget: the side panel with a chat, the standalone viewer without', () => {
+  assert.equal(uploadTarget('c1'), 'panel')
+  assert.equal(uploadTarget(null), 'viewer')
+  assert.equal(uploadTarget(undefined), 'viewer')
+  assert.equal(uploadTarget(''), 'viewer')
 })

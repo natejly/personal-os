@@ -11,7 +11,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import learn  # noqa: E402
+from personal_os import graph_learn, learn  # noqa: E402
 from personal_os.context import build_context  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories  # noqa: E402
@@ -44,10 +44,21 @@ def test_relative_dates_become_absolute_or_drop(monkeypatch: Any) -> None:
 
 
 def test_edge_fact_valid_at_and_context(monkeypatch: Any) -> None:
-    reply = {"entities": [{"label": "Acme"}, {"label": "Bea"}],
-             "relations": [{"source": "Acme", "target": "Bea", "relation": "employs", "fact": "Bea joined Acme as designer"}]}
+    reply = {"entities": [{"name": "Acme", "type": "org"}, {"name": "Bea", "type": "person"}],
+             "triples": [{"subject": "Bea", "predicate": "works_at", "object": "Acme", "label": "Bea joined Acme as designer",
+                          "confidence": 0.9}]}
+    seen: list[Any] = []
+
+    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
+        seen.extend(messages)
+        return json.dumps(reply)
+
+    monkeypatch.setattr(graph_learn.llm, "complete", fake)
     with tempfile.TemporaryDirectory() as tmp:
-        db, out = _learn(reply, monkeypatch, tmp)
+        db = Database(tmp)
+        out = asyncio.run(graph_learn.learn_graph(settings={}, graph=Graph(db), project_id=None, user_text="My designer Bea joined Acme",
+                                                  assistant_text="ok", model="m", ts=TS))
+        assert "Today is Friday, 2026-10-02" in seen[0]["content"]
         e = out["edges"][0]
         assert e["fact"] == "Bea joined Acme as designer" and e["valid_at"] == TS
         system, _ = build_context(memories=Memories(db), graph=Graph(db), documents=Documents(db), project=None, project_id=None,

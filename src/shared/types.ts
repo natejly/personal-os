@@ -44,7 +44,7 @@ export interface Citation {
 export interface ContextUsed {
   project: { id: string; name: string } | null
   memories: { id: string; content: string; project_id: string | null }[]
-  nodes: { id: string; label: string; type: string }[]
+  nodes: { id: string; label: string; type: string; kind?: 'self' | 'value' }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
   /** Every source the reply may cite. `n` is its citation number ("[n]"); absent on messages saved before citations. */
   chunks: Citation[]

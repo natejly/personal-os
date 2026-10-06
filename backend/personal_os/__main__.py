@@ -56,6 +56,7 @@ def main() -> None:
     from .logs import register_secret, setup_logging
 
     register_secret(os.environ.get("PERSONAL_OS_AUTH_TOKEN"))
+    register_secret(os.environ.get("FIRECRAWL_API_KEY"))
     setup_logging()
     # log_config=None: uvicorn's own dictConfig would give its loggers private handlers and cut them off from the
     # redacting file handler on the root logger.

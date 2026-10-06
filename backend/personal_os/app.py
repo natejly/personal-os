@@ -760,6 +760,7 @@ def public_settings() -> dict[str, Any]:
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
+    out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
     out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
     return out
 

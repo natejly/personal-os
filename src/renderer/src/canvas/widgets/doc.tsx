@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ExternalLink, FilePen } from 'lucide-react'
+import { ExternalLink, FilePen, Pencil, BookOpen } from 'lucide-react'
 import type { FullDoc } from '@shared/types'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import MarkdownEditor from '../../components/MarkdownEditor'
+import MarkdownPreview from '../../components/MarkdownPreview'
+import DocFind from '../../components/DocFind'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const SAVE_MS = 700
 
 /**
- * One Files doc, edited in place. The same autosave the Files view uses (`api.docs.save` with the
+ * One Files doc, read as rendered markdown by default, with a per-window toggle (`config.edit`) to the raw editor. The same autosave the Files view uses (`api.docs.save` with the
  * base revision), but on this window's own copy: the Files view's single active-doc state stays
  * untouched, so a doc can be open there and here at once. A stale base is rebased when the server
  * body still starts with ours; anything else shows as 'Not saved' with a Retry.
  */
-function DocWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
+function DocWidget({ window: win, live, onConfig, onTitle }: WidgetProps): JSX.Element {
   const id = win.ref_id ?? ''
+  const editing = win.config.edit === true
+  const renderRef = useRef<HTMLDivElement>(null)
+  const renderRoot = useCallback(() => renderRef.current, [])
   const [doc, setDoc] = useState<FullDoc | null>(null)
   const [body, setBody] = useState('')
   const [error, setError] = useState('')
@@ -94,6 +99,12 @@ function DocWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     void st.openDoc(id)
   }
 
+  // Switching to the rendered view unmounts the editor, so an unsaved body is written first.
+  const toggleEdit = (): void => {
+    if (editing && pending.current !== null) save(pending.current)
+    onConfig({ edit: !editing })
+  }
+
   return (
     <div className="widget">
       <div className="widget-bar">
@@ -104,9 +115,18 @@ function DocWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
             <button className="link" onClick={() => { setSaveError(''); if (pending.current !== null) save(pending.current) }}>Retry</button>
           </span>
         ) : pending.current !== null && <span className="widget-meta">saving…</span>}
+        <button className="widget-chip" title={editing ? 'Show rendered' : 'Edit raw'} aria-label={editing ? 'Show rendered' : 'Edit raw'} aria-pressed={editing} onClick={toggleEdit}>
+          {editing ? <BookOpen size={11} /> : <Pencil size={11} />}
+        </button>
         <button className="widget-chip" title="Open in Files" aria-label="Open in Files" onClick={openInFiles}><ExternalLink size={11} /></button>
       </div>
-      {doc && (
+      {doc && !editing && (
+        <div className="docs-render markdown widget-doc-render" ref={renderRef}>
+          <DocFind scope={renderRef} textRoot={renderRoot} />
+          {body.trim() ? <MarkdownPreview source={body} /> : <p className="muted">Empty</p>}
+        </div>
+      )}
+      {doc && editing && (
         <MarkdownEditor
           value={body}
           onChange={(v) => { pending.current = v; setBody(v) }}

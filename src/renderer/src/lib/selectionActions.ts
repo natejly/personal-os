@@ -42,3 +42,26 @@ export function selectionMessage(verb: Exclude<SelectionVerb, 'ask'>, quote: str
 export function askDraft(quote: string): string {
   return `${DATA_NOTE}\n\n${fenceQuote(truncateQuote(quote))}\n\n`
 }
+
+/** A sent message split around the quote it carries: the task or question, the quoted text, whatever followed. */
+export interface QuotedMessage { before: string; quote: string; after: string }
+
+/**
+ * The inverse of `selectionMessage` / `askDraft`, so the user's bubble can show the quote as a quote instead of the raw
+ * fence the model gets. Recognises only that shape: the data note, a blank line, a fence of N backticks on its own line,
+ * and the first later line of exactly N backticks. Anything else is null and renders as plain text.
+ */
+export function parseQuotedMessage(content: string): QuotedMessage | null {
+  const at = content.indexOf(`${DATA_NOTE}\n\n`)
+  if (at < 0 || (at > 0 && !content.slice(0, at).endsWith('\n\n'))) return null
+  const body = content.slice(at + DATA_NOTE.length + 2)
+  const open = /^(`{3,})\n/.exec(body)
+  if (!open) return null
+  const fence = open[1]
+  const lines = body.slice(open[0].length).split('\n')
+  const end = lines.indexOf(fence)
+  if (end < 0) return null
+  const after = lines.slice(end + 1)
+  if (after.length > 0 && after[0] !== '') return null
+  return { before: content.slice(0, at).trim(), quote: lines.slice(0, end).join('\n'), after: after.join('\n').trim() }
+}

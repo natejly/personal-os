@@ -553,7 +553,7 @@ kbd {
   margin-top: 2px;
 }
 .msg.assistant .avatar { background: var(--accent-solid); color: var(--on-accent); }
-.msg .avatar.face-avatar { background: none; width: 30px; height: 30px; margin-top: 0; }
+.msg .avatar.face-avatar { background: none; width: 38px; height: 38px; margin-top: 0; }
 .avatar.face-avatar .face { width: 100%; height: 100%; }
 .face { flex: none; display: block; }
 .bubble { min-width: 0; flex: 1; }
@@ -575,6 +575,12 @@ kbd {
 }
 .msg.user { flex-direction: row-reverse; }
 .user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+/* A quoted selection in the user's bubble: set off from the task text, rendered as markdown. */
+.user-quote { margin: 6px 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--border-strong); color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+.user-quote > .markdown > :first-child { margin-top: 0; }
+.user-quote > .markdown > :last-child { margin-bottom: 0; }
+.user-quote:first-child { margin-top: 0; }
+.user-quote:last-child { margin-bottom: 0; }
 .msg-actions {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
   min-height: 24px; margin-top: 0; opacity: 0; transition: opacity 0.15s;
@@ -620,10 +626,10 @@ kbd {
 .jump-latest:hover { background: var(--hover); }
 .jump-count { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
 .regen-row.followup-chips { flex-wrap: wrap; margin-top: 0; }
-.regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 38px; margin-top: -10px; }
+.regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 46px; margin-top: -10px; }
 .variant-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .variant-switcher .icon-btn:disabled { opacity: 0.35; cursor: default; }
-.run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 38px; font-size: 13px; color: var(--text-muted); }
+.run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 46px; font-size: 13px; color: var(--text-muted); }
 
 .msg.user.pending .user-bubble { opacity: 0.6; }
 /* Files on a message or waiting in the composer: one chip per file, the name cut with an ellipsis. */
@@ -2722,6 +2728,10 @@ select:focus-visible {
 .find-hint { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 ::highlight(chat-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
 ::highlight(chat-find-current) { background-color: var(--accent-solid); color: #fff; }
+.doc-find { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; width: fit-content; max-width: calc(100% - 16px); margin: 8px 8px 6px auto; padding: 4px 6px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.doc-find input { flex: 0 1 200px; min-width: 0; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; color: var(--text); outline: 0; }
+::highlight(doc-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
+::highlight(doc-find-current) { background-color: var(--accent-solid); color: #fff; }
 /* A message jumped to from a memory's source. */
 @keyframes msg-flash { from { background: color-mix(in srgb, var(--accent) 30%, transparent); } to { background: transparent; } }
 .msg.msg-flash { border-radius: 8px; animation: msg-flash 1.8s ease-out; }

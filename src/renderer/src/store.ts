@@ -1,4 +1,5 @@
 import { routineDraftFrom, type RoutineDraft } from './lib/routine'
+import { hexToHue, PROJECT_TONE } from './lib/projectHue'
 import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
@@ -3725,11 +3726,21 @@ export const useNowText = (convId?: string): string | null =>
     const id = sess?.streaming?.answering ? sess.streaming.messageId : null
     return id ? nowText(sess!.conversation.messages?.find((m) => m.id === id), sess!.subagents) : null
   })
-/** The face a chat wears: its agent's (name and colour) when it was opened on one, else its own id. */
-export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings'> | null | undefined): { name: string; hue?: number } => {
+/**
+ * The face a chat wears. A chat in a project wears the project's colour (hue and tone, shape still from its own id)
+ * so the project's chats read as one family and match its dot; that wins over an agent's hue. Otherwise the agent's
+ * (name and colour) when it was opened on one, else its own id.
+ */
+export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings' | 'project_id'> | null | undefined): { name: string; hue?: number; tone?: number } => {
   const agent = conv?.settings?.agent
-  const hue = useStore((s) => agent ? (s.agentDefs.custom.find((d) => d.name === agent) ?? s.agentDefs.builtin.find((d) => d.name === agent))?.hue : null)
+  const agentHue = useStore((s) => agent ? (s.agentDefs.custom.find((d) => d.name === agent) ?? s.agentDefs.builtin.find((d) => d.name === agent))?.hue : null)
+  const color = useStore((s) => (conv?.project_id ? s.projects.find((p) => p.id === conv.project_id)?.color : undefined))
+  const projectHue = color ? hexToHue(color) : null
   const name = agent || (conv?.id ?? '')
-  // One object per (name, hue): MessageView is memo'd on shallow props, so a fresh object each render would undo that.
-  return useMemo(() => (hue != null ? { name, hue } : { name }), [name, hue])
+  const id = conv?.id ?? ''
+  // One object per input: MessageView is memo'd on shallow props, so a fresh object each render would undo that.
+  return useMemo(() => {
+    if (projectHue != null) return { name: id, hue: projectHue, tone: PROJECT_TONE }
+    return agentHue != null ? { name, hue: agentHue } : { name }
+  }, [name, id, agentHue, projectHue])
 }

@@ -11,6 +11,7 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
@@ -267,7 +268,7 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
  *  `browserSession`: the agent browser this transcript drives, passed only to its latest reply that used the browser. */
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
-export type ChatFace = { name: string; hue?: number }
+export type ChatFace = { name: string; hue?: number; tone?: number }
 
 const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
   const [editing, setEditing] = useState(false)
@@ -291,13 +292,13 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <div className="user-text">{message.content}</div>}</div>
+            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <UserText content={message.content} />}</div>
           )
         ) : (
           <div className="msg-body">
@@ -400,11 +401,24 @@ export function AttachmentChips({ files }: { files?: Attachment[] | null }): JSX
   )
 }
 
+/** A user message's text. A quoted block (see `parseQuotedMessage`) shows as a quote rendered as markdown, not as its raw fence. */
+function UserText({ content }: { content: string }): JSX.Element {
+  const q = useMemo(() => parseQuotedMessage(content), [content])
+  if (!q) return <div className="user-text">{content}</div>
+  return (
+    <>
+      {q.before && <div className="user-text">{q.before}</div>}
+      <blockquote className="user-quote"><div className="markdown"><MarkdownPreview source={q.quote} /></div></blockquote>
+      {q.after && <div className="user-text">{q.after}</div>}
+    </>
+  )
+}
+
 export function PendingUserMessage({ text, attachments }: { text: string; attachments?: Attachment[] }): JSX.Element {
   return (
     <div className="msg user pending" aria-busy="true">
       <div className="avatar"><User size={14} /></div>
-      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <div className="user-text">{text}</div>}</div></div>
+      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <UserText content={text} />}</div></div>
     </div>
   )
 }

@@ -71,7 +71,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
                 <div key={c.id} className="widget-row" role="button" tabIndex={0}
                   onClick={() => void openWindow('chat', c.id)}
                   {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
-                  <ChatPulse conversationId={c.id} />
+                  <ChatPulse conv={c} />
                   <span className="grow widget-title">{c.title}</span>
                   <span className="widget-meta">{new Date(c.updated_at * 1000).toLocaleDateString()}</span>
                 </div>

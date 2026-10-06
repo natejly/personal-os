@@ -340,6 +340,15 @@ def _graph_canonical_types(c: sqlite3.Connection) -> None:
         c.execute("UPDATE kg_edges SET relation=?, fact=? WHERE id=?", (pred, fact or label or ("" if spelled else rel.strip()), eid))
 
 
+_LEGACY_TEXTING_KEYS = ("imessageEnabled", "imessageHandles", "imessageSelfChatGuid", "imessageReplyMarker",
+                        "imessageConversationId", "imessageNotifyLongRuns", "imessageLongRunMinutes", "imessageState")
+
+
+def _drop_legacy_texting_keys(c: sqlite3.Connection) -> None:
+    """Texting moved to Telegram: the retired bridge's stored settings are dead weight."""
+    c.execute(f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_LEGACY_TEXTING_KEYS))})", _LEGACY_TEXTING_KEYS)
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -360,6 +369,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (16, "memories_fts_live", _memories_fts_live),
     (17, "memory_provenance_backfill", _memory_provenance_backfill),
     (18, "graph_canonical_types", _graph_canonical_types),
+    (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
 ]
 
 

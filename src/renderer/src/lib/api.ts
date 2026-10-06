@@ -16,7 +16,7 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, IMessageSelfChat, IMessageStatus, SandboxStatus, ShellJobInfo, ShellJobTail,
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
   TeachDraft, TeachRecording
 } from '@shared/types'
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
@@ -194,10 +194,13 @@ export const api = {
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
   sandboxes: () => req<SandboxStatus>('/sandboxes'),
-  imessageStatus: () => req<IMessageStatus>('/imessage/status'),
-  imessageTest: (handle?: string) => req<{ ok: boolean; error?: string; to?: 'self_chat' | 'handle' }>('/imessage/test', { method: 'POST', body: json(handle ? { handle } : {}) }),
-  imessageSelfChats: () => req<{ chats: IMessageSelfChat[] }>('/imessage/self-chats'),
-  imessageOpenFda: () => req<{ ok: boolean }>('/imessage/open-fda', { method: 'POST' }),
+  telegramStatus: () => req<TelegramStatus>('/telegram/status'),
+  telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
+  telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
+  telegramNewCode: () => req<TelegramStatus>('/telegram/pairing', { method: 'POST' }),
+  telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
+  telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
+  telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),
   resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),

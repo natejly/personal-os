@@ -37,7 +37,6 @@ export function parseOsascript(code: number | null, stderr: string): AccessState
 }
 
 export const AUTOMATION_TARGETS = {
-  messages: { app: 'Messages', script: 'tell application "Messages" to get name' },
   finder: { app: 'Finder', script: 'tell application "Finder" to get name of startup disk' },
   systemEvents: { app: 'System Events', script: 'tell application "System Events" to get name of first process' },
   contacts: { app: 'Contacts', script: 'tell application "Contacts" to count people' },
@@ -81,7 +80,7 @@ export interface Cli { path: string | null; version: string | null; hint: string
 export interface BackendAccess {
   fullDisk: AccessState
   inputMonitoring: AccessState
-  automation: { messages: AccessState; finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
+  automation: { finder: AccessState; systemEvents: AccessState; contacts: AccessState; calendar: AccessState; reminders: AccessState }
   browsers: { name: string; state: AccessState }[]
   roots: { roots: string[]; defaulted: boolean }
   clis: { claude: Cli; opencode: Cli }
@@ -98,9 +97,8 @@ export function buildRows(main: MainStatus, backend: BackendAccess | null, probe
     row('camera', 'Camera', 'Photos and video you choose to capture.', main.camera, 'native', PANE_URLS.camera),
     row('screen', 'Screen Recording', 'The Activity monitor and teach-by-showing.', main.screen, 'pane', PANE_URLS.screen),
     row('accessibility', 'Accessibility', 'Reading the frontmost window and Mac actions.', main.accessibility, 'native', PANE_URLS.accessibility),
-    row('fullDisk', 'Full Disk Access', 'Lets Grain and the coding agents it starts read and write workspace folders on your Desktop, in Documents or Downloads, plus Mail and Messages data.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
+    row('fullDisk', 'Full Disk Access', 'Lets Grain and the coding agents it starts read and write workspace folders on your Desktop, in Documents or Downloads, plus Mail data.', backend?.fullDisk, 'pane', PANE_URLS.fullDisk),
     row('inputMonitoring', 'Input Monitoring', 'Keystroke counts for the Activity monitor.', backend?.inputMonitoring, 'native', PANE_URLS.inputMonitoring),
-    row('automation:messages', 'Automation: Messages', 'Sending iMessage replies.', a?.messages, 'native', PANE_URLS.automation),
     row('automation:finder', 'Automation: Finder', 'Mac actions you ask for.', a?.finder, 'native', PANE_URLS.automation),
     row('automation:systemEvents', 'Automation: System Events', 'Mac actions you ask for.', a?.systemEvents, 'native', PANE_URLS.automation),
     ...(backend?.browsers ?? []).map((b) =>

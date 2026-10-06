@@ -35,7 +35,7 @@ export function WorkspaceRoots(): JSX.Element {
   return (
     <div className="workspace-roots">
       <h3>Workspace folders</h3>
-      <p className="muted">Folders the assistant, every chat, project, agent, desk, workflow, scheduled run, iMessage conversation and coding session may work in without asking again. They must be inside your home folder. ~/Grain is used while the list is empty.</p>
+      <p className="muted">Folders the assistant, every chat, project, agent, desk, workflow, scheduled run, Telegram conversation and coding session may work in without asking again. They must be inside your home folder. ~/Grain is used while the list is empty.</p>
       {defaulted && <p className="muted small">Using ~/Grain until you add a folder.</p>}
       {value.length > 0 && (
         <ul className="plain-list">

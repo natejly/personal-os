@@ -25,7 +25,7 @@ export interface NavEntry {
  */
 const SHELL: NavEntry[] = [
   { view: 'meetings', description: 'Record and transcribe meetings, with summaries and action items', label: 'Meetings', icon: <Mic size={15} />, place: 'sidebar', order: 20 },
-  { view: 'library', description: 'Skills, connectors and everything Grain made for you', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
+  { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, place: 'sidebar', order: 40 },
   { view: 'activity', description: 'What you did on this Mac, and the habits it suggests automating', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity', place: 'sidebar', order: 50 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', place: 'apps', order: 110 },
   { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, place: 'apps', order: 120 }

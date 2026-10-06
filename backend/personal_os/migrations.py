@@ -130,6 +130,31 @@ def _ship_checklists(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_ship_checklists_job ON ship_checklists(job_id, created_at)")
 
 
+def _doc_comments_typography(c: sqlite3.Connection) -> None:
+    """Comments on a doc (docs.py): a thread row anchors to a quoted span of the rendered text with ~32 chars of
+    context either side plus the offset it was made at, so it can be found again after the text moves; a reply
+    row carries the thread's id in parent_id and no anchor. `resolved` lives on the thread row.
+    `docs.typography` is the per-doc font choice as JSON ({font, size, measure}); NULL follows the global default.
+    On a fresh database `docs` is created later by Docs.__init__, whose column loop adds the same column."""
+    c.execute("""CREATE TABLE IF NOT EXISTS doc_comments (
+      id TEXT PRIMARY KEY,
+      doc_id TEXT NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+      parent_id TEXT,
+      author TEXT NOT NULL DEFAULT 'user',
+      body TEXT NOT NULL DEFAULT '',
+      quote TEXT NOT NULL DEFAULT '',
+      prefix TEXT NOT NULL DEFAULT '',
+      suffix TEXT NOT NULL DEFAULT '',
+      offset_hint INTEGER NOT NULL DEFAULT 0,
+      resolved INTEGER NOT NULL DEFAULT 0,
+      created_at REAL NOT NULL,
+      updated_at REAL NOT NULL)""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_doc_comments_doc ON doc_comments(doc_id, created_at)")
+    if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docs'").fetchone():
+        if "typography" not in {r[1] for r in c.execute("PRAGMA table_info(docs)")}:
+            c.execute("ALTER TABLE docs ADD COLUMN typography TEXT")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -141,6 +166,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (7, "approval_history", _approval_history),
     (8, "teach_recordings", _teach_recordings),
     (9, "ship_checklists", _ship_checklists),
+    (10, "doc_comments_typography", _doc_comments_typography),
 ]
 
 

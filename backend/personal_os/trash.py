@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from .db import Database, now
-from .docs import Docs
+from .docs import Docs, drop_doc_windows
 from .todos import Todos
 from .workspace import Workspace, WorkspaceError
 
@@ -68,6 +68,8 @@ class Trash:
         t = now()
         with self.db.tx() as c:
             hit = c.execute(f"UPDATE {table} SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (t, id)).rowcount
+            if kind == "doc" and hit:
+                drop_doc_windows(c, [id])
             if kind != "project" or not hit:
                 return bool(hit)
             for ct in CHILD_TABLES:

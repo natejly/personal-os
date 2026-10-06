@@ -106,6 +106,7 @@ export async function launchSupervised({ settings = {} } = {}) {
     PERSONAL_OS_API_KEY: 'mock-key',
     PERSONAL_OS_DEFAULT_MODEL: 'mock-chat',
     PERSONAL_OS_EXTRACTION_MODEL: 'mock-chat',
+    FIRECRAWL_API_KEY: '', // e2e never calls the live web provider
     PYTHONPATH: join(ROOT, 'backend')
   }
   delete env.ELECTRON_RUN_AS_NODE
@@ -114,6 +115,10 @@ export async function launchSupervised({ settings = {} } = {}) {
   delete env.PERSONAL_OS_DATA_DIR
   const executablePath = join(ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim())
   const app = await electron.launch({ executablePath, args: [join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT, timeout: 90_000 })
+  // downloads land in the profile, never the real Downloads folder
+  const dl = join(profile, 'downloads')
+  mkdirSync(dl, { recursive: true })
+  await app.evaluate(({ app: a }, d) => a.setPath('downloads', d), dl)
   const page = await app.firstWindow({ timeout: 90_000 })
   page.setDefaultTimeout(15_000)
   const consoleErrors = []

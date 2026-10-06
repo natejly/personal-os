@@ -20,3 +20,10 @@ export function formatHandle(h: string): string {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(h)
   return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : h
 }
+
+export const DEFAULT_REPLY_MARKER = '🌾 '
+
+/** The marker the backend will use: blank or whitespace-only falls back to the default. */
+export function replyMarker(s: string | null | undefined): string {
+  return s && s.trim() ? s : DEFAULT_REPLY_MARKER
+}

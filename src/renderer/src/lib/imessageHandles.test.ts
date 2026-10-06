@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatHandle, normalizeHandle } from './imessageHandles'
+import { DEFAULT_REPLY_MARKER, formatHandle, normalizeHandle, replyMarker } from './imessageHandles'
 
 test('phones normalize to +digits, US numbers get +1', () => {
   assert.equal(normalizeHandle('(555) 123-4567'), '+15551234567')
@@ -18,4 +18,9 @@ test('formatHandle prettifies +1 numbers only', () => {
   assert.equal(formatHandle('+15551234567'), '+1 (555) 123-4567')
   assert.equal(formatHandle('+442079460958'), '+442079460958')
   assert.equal(formatHandle('a@b.co'), 'a@b.co')
+})
+
+test('replyMarker falls back to the default when blank', () => {
+  for (const blank of [undefined, null, '', '   ']) assert.equal(replyMarker(blank), DEFAULT_REPLY_MARKER)
+  assert.equal(replyMarker('🤖 '), '🤖 ')
 })

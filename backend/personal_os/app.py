@@ -1480,6 +1480,9 @@ Maths renders when written inline as `$...$` and as a display block with `$$` on
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
 The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
 
+# Always on, every path (chats, desks, subagents, scheduled jobs, drafts, iMessage): static, so it sits in the cached prefix.
+NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
+
 # Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
 PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
 TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
@@ -2364,7 +2367,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What each connected server said about its own tools at initialize, for servers with a tool offered this
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
-        hints = (RENDER_HINT, tools_hint, PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
+        hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint, PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
                  _agents_hint(modes), JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",

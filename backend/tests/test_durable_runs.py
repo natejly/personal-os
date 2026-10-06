@@ -187,7 +187,7 @@ def test_approval_row_lifecycle() -> None:
     assert a["decision"] is None and a["decided_at"] is None
     active = [r for r in j("GET", "/runs") if r["run_id"] == rid]
     assert active and active[0]["status"] == "awaiting_approval" and active[0]["live"] is True
-    assert store.get(rid)["budget"]["max_rounds"] >= 0, "the budget snapshot is stored with the status change"
+    assert store.get(rid)["budget"]["rounds"] >= 0, "the usage snapshot is stored with the status change"
 
     j("POST", f"/approvals/{a['call_id']}", {"decision": "sideways"}, expect=400)
     res = j("POST", f"/approvals/{a['call_id']}", {"decision": "allow"})

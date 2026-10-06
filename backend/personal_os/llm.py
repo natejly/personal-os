@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, CODING_SESSION_TIMEOUT_MINUTES, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, CONTEXT_BUDGET, DESK_MAX_TURNS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, RUN_SECONDS, RUN_TOKENS, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SKILLS_INLINE_BUDGET, SUBAGENT_MAX_DEPTH, SUBAGENT_MAX_ROUNDS, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -24,8 +24,8 @@ log = logging.getLogger("personal_os.llm")
 UsageListener = Callable[[dict[str, Any]], None]
 _usage_listeners: list[UsageListener] = []
 usage_context: ContextVar[dict[str, Any]] = ContextVar("usage_context", default={})
-# Absolute time.monotonic() by which the current reply's stream must be over (the run's wall-clock budget). A
-# context var rather than a parameter so every caller of stream_chat keeps its signature; None = no limit.
+# Absolute time.monotonic() by which the current stream must be over; set only around a closing-answer call (a hang
+# bound, not a reply cap). A context var rather than a parameter so every caller of stream_chat keeps its signature.
 stream_deadline: ContextVar[float | None] = ContextVar("stream_deadline", default=None)
 
 
@@ -127,7 +127,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "navPlacement": {},
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 5,
-    "maxToolRounds": 0,  # 0 = automatic: limits.MAX_ROUNDS_HARD; a stored lower value is a cap
     "snapshotsEnabled": True,
     # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
     # user message, so the provider's prefix cache survives (context.layout_messages).
@@ -150,43 +149,28 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "toolDeferAbove": TOOL_DEFER_ABOVE,
     # Put the notes each connected MCP server sends at initialize into the prompt (fenced, scanned, capped).
     "mcpServerNotes": True,
-    # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
-    "skillsInlineBudget": SKILLS_INLINE_BUDGET,
-    # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the
-    # lowest-ranked trailing items are dropped and the block says how many. `pinned` covers pinned documents.
-    "contextBudget": dict(CONTEXT_BUDGET),
-    # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
-    "maxRunTokens": RUN_TOKENS,
-    "maxRunSeconds": RUN_SECONDS,
     # Provider resilience (retry/backoff section below). Retries only happen before a reply's first token;
     # llmIdleSeconds is how long a stream may go without a byte before it is abandoned with a clear error.
     "llmRetries": LLM_RETRIES,
     "llmIdleSeconds": LLM_IDLE_SECONDS,  # a reasoning model can think a long while before its first token
     # Retention (retention.py): days of history kept in tables that only ever grow. User content is never pruned.
     "retainUsageDays": RETAIN_USAGE_DAYS,
-    # Informational spend alerts across runs, $ per day / calendar month; 0 = off. Never stops a run.
-    "usageAlerts": {"dailyCost": 0, "monthlyCost": 0},
     "retainTraceDays": RETAIN_TRACE_DAYS,
     "retainToolResultDays": RETAIN_TOOL_RESULT_DAYS,
     "retainApprovalDays": RETAIN_APPROVAL_DAYS,
-    # Cowork desks. A desk runs bounded turns unattended, so both axes are caps on the whole
-    # desk rather than on one reply; 0 means unlimited. deskMaxLive bounds how many
-    # desks may be running at once, which is the cap the user actually feels.
+    # Cowork desks. deskMaxLive bounds how many desks may be running at once.
     # How long a desk waits on a card nobody is watching before letting the run go. The card stays
     # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
     "parkAfterSeconds": DESK_PARK_AFTER_SECONDS,
-    "deskMaxTurns": DESK_MAX_TURNS,
     "deskMaxLive": 0,  # 0 = automatic (limits.worker_slots); a non-zero value overrides
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.
     "deskAutoResume": False,
-    # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
-    # each one's own round cap (its cost is also charged to the reply that spawned it). A child with no
-    # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
-    # is stopped and returns what it had.
+    # Subagents (subagents.py): how many may run at once across the app and how deep they may nest. Hang
+    # detection: a child with no model or tool activity for subagentStaleSeconds, or stuck inside one tool for
+    # subagentToolSeconds, is stopped and returns what it had.
     "subagentMaxConcurrent": 0,  # 0 = automatic (limits.worker_slots); a non-zero value overrides
     "subagentMaxDepth": SUBAGENT_MAX_DEPTH,
-    "subagentMaxRounds": SUBAGENT_MAX_ROUNDS,
     "subagentStaleSeconds": SUBAGENT_STALE_SECONDS,
     "subagentToolSeconds": SUBAGENT_TOOL_SECONDS,
     # Workflows (workflows.py): the most items one fan-out step may map over.
@@ -237,7 +221,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
     "shellTimeoutSec": SHELL_TIMEOUT_SECONDS,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": SHELL_MAX_BACKGROUND,     # live background jobs at once
-    "codingSessionTimeoutMinutes": CODING_SESSION_TIMEOUT_MINUTES,  # an OpenCode coding session is stopped after this
     "codingSessionMaxConcurrent": CODING_SESSION_MAX_CONCURRENT,    # live coding sessions at once (own pool)
     # The model view_image sends pictures to. Empty = the chat model, when the provider says it reads images.
     "visionModel": "",
@@ -876,6 +859,17 @@ def _model_slug(model: str) -> str:
 caps_lookup: Callable[[str], dict[str, Any]] = lambda _m: {}
 
 
+def requires_max_tokens(settings: dict[str, Any]) -> bool:
+    """Only the Anthropic API refuses a request without max_tokens. Nothing else gets the field."""
+    return providers.infer(settings.get("baseUrl")) == "anthropic"
+
+
+def output_cap(settings: dict[str, Any], model: str) -> int | None:
+    """The max_tokens to send: the model's own output maximum for a provider that requires the field, else None.
+    Never a number of ours; a model whose maximum is unknown goes without."""
+    return int(caps_lookup(model).get("max_output_tokens") or 0) or None if requires_max_tokens(settings) else None
+
+
 def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
     """Whether the model takes a reasoning level: False for the Kimi K2 family, else what the proxy reports (None = unknown)."""
     if _model_slug(model).startswith("kimi-k2"):
@@ -1062,6 +1056,8 @@ async def stream_chat(
         body["reasoning_effort"] = wired
     if fast and supports_service_tier(settings):
         body["service_tier"] = "priority"
+    if cap := output_cap(settings, model):
+        body["max_tokens"] = cap
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
@@ -1222,12 +1218,12 @@ async def stream_chat(
     if incomplete:  # the connection died mid-reply: a half-received tool call must not run
         calls = {}
     tool_calls = _finish_calls(calls)
-    # Reasoning is billed as completion tokens, so it counts toward cost and the run budget. A call Stop or the deadline
-    # ended before any response is not billed at all: the estimate would charge the budget for a prompt nobody answered.
+    # Reasoning is billed as completion tokens, so it counts toward cost and the run meter. A call Stop or the deadline
+    # ended before any response is not billed at all: the estimate would count a prompt nobody answered.
     p_chars, c_chars = (len(json.dumps(messages)) if sent else 0), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
     if sent:
         _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
-    # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
+    # usage_est is always present: this route often omits `usage` on streamed replies, and the meter cannot run on None.
     end: dict[str, Any] = {"type": "end", "finish_reason": finish, "tool_calls": tool_calls, "usage": usage,
                            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
     if dropped:
@@ -1322,6 +1318,8 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
     if wired:
         body["reasoning_effort"] = wired
+    if cap := output_cap(settings, model):
+        body["max_tokens"] = cap
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         try:
             r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)

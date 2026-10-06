@@ -27,7 +27,7 @@ Click an agent in Library → Agents.
 - **Routines**: its jobs, with the enabled switch, next run, run history and Run now.
   "New routine…" creates a job bound to the agent. A routine runs as the agent
   (its prompt, skills, boundaries, notes and tool settings) and is an ordinary job
-  run: proposal-only, on the job budget. A routine whose agent was deleted stops
+  run: proposal-only. A routine whose agent was deleted stops
   with an error instead of running without its limits. A task scheduled with
   `schedule_task` from the agent's own chat joins its routines.
 - **Skills**: which approved skills it carries.

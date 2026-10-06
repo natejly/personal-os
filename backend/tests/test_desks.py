@@ -112,8 +112,8 @@ def test_create() -> None:
 
 
 def test_update_and_list() -> None:
-    d = fresh(brief="budget desk", budget={"maxTurns": 3})
-    check(d["budget"] == {"maxTurns": 3}, "the budget round-trips")
+    d = fresh(brief="legacy desk", budget={"maxTurns": 3})
+    check(d["budget"] == {"maxTurns": 3}, "the legacy budget column still round-trips (nothing reads it)")
     upd = desks.update(d["id"], {"budget": {"maxTurns": 5}})
     check(upd["budget"] == {"maxTurns": 5}, "budget merges rather than replaces")
     upd = desks.update(d["id"], {"title": "Renamed", "status": "done", "cost": 99})
@@ -264,11 +264,11 @@ def test_settle() -> None:
     d = fresh()
     desks.claim_run(d["id"], ("draft",))
     desks.set_status(d["id"], "working")
-    check(desks.settle(d["id"], partial="rounds", stopped=False, error=None, chain=True)["status"] == "working",
+    check(desks.settle(d["id"], partial="length", stopped=False, error=None, chain=True)["status"] == "working",
           "a turn the supervisor will chain leaves the desk working")
-    check(desks.settle(d["id"], partial="rounds", stopped=False, error=None)["status"] == "review",
-          "a budget-window stop with no chain lands in review")
-    check(desks.get(d["id"])["status_reason"] == "budget", "…with the reason the UI shows")
+    check(desks.settle(d["id"], partial="length", stopped=False, error=None)["status"] == "review",
+          "a reply the provider cut short, with no chain, lands in review")
+    check(desks.get(d["id"])["status_reason"] == "cut_short", "…with the reason the UI shows")
 
     d2 = fresh()
     desks.set_status(d2["id"], "working")

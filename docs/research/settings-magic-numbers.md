@@ -4,6 +4,52 @@ Audit date 2026-10-06, branch `worktree-settings-simplify` (base `ec906933`). Re
 
 Three goals: (1) few plain Settings sections plus ONE collapsed Advanced area, (2) no user-facing magic numbers: derive them or centralize them in a new `backend/personal_os/limits.py`, (3) one `permissionMode` (`auto` | `manual` | `allow_all`) replacing `skipPermissions` / `autoReview` / `unattendedApprovals` in the UI.
 
+## Removed budgets (supersedes every budget, cap and spend-alert entry below)
+
+Branch `worktree-remove-budgets`. Grain has no budgets any more: nothing caps a reply's rounds, tokens, cost or wall-clock time. The only things that stop work are **stuck detection** (`REPEAT_LIMIT`, `TOOL_ERROR_LIMIT`, `stuck.StuckDetector`, `permrules.DenialStreak`), **hang detection** and **per-request timeouts**. The tables below are the audit as it stood before this change; where they describe a budget, this section wins.
+
+What replaced the numbers:
+
+| New | Value | Where | Meaning |
+|---|---|---|---|
+| `JOB_IDLE_SECONDS` | 1800 | `limits.py`, `app._run_job` | An unattended run that published no model or tool event for this long (and is not waiting on an approval) is cancelled and failed with "stopped after N minutes with no model or tool activity". Hang detection, not a length cap: a long healthy job is never cut. `Run.last_active` is stamped on every publish and status change. |
+| `CONTEXT_SHARES` | memories .012, graph .006, chunks .016, activity .006, meetings .006, pinned .023, profile .008, skills .012 | `limits.py` | Share of the model's context window each injected block may take. They match the old fixed token counts (1500, 800, 2000, 800, 800, 3000, 1000, ~1500 for skills) at the 128k fallback to within 4%. |
+| `context_shares(window)` | `int(window * share)` per block | `limits.py` | The single hook memory and context code use (`context.build_context` reads it once per turn). A 8k window gets 96 memory tokens, a 1M window gets 12000. Pinned files take `shares["pinned"] * 4` characters in all, a third of that per file. Approved skills are inlined while their text fits `shares["skills"]`, else the manifest is sent. |
+
+What was removed (old value, where it lived):
+
+| Removed | Old value | Lived in |
+|---|---|---|
+| `maxToolRounds` / `MAX_ROUNDS_HARD` / `limits.max_rounds()` | 25 default (1-60), hard backstop 100 | `limits.py`, `llm.DEFAULT_SETTINGS`, `app.Budget` |
+| `maxRunTokens` / `RUN_TOKENS` | 200 000 per reply | same |
+| `maxRunSeconds` / `RUN_SECONDS` | 300 s per reply, approvals excluded | same |
+| `JOB_MAX_ROUNDS`, `JOB_RUN_TOKENS`, `JOB_RUN_SECONDS`, `app.JOB_BUDGET`, `_job_caps`, `_check_job_budget` | 8 rounds, 60 000 tokens, 240 s | `limits.py`, `app.py` |
+| `JOB_HARD_SECONDS` | 1800 s wall clock (`asyncio.wait_for`) | replaced by the idle watchdog (`JOB_IDLE_SECONDS`) |
+| Per-job `budget` and `desk_budget` fields | tighten-only overrides of the job caps | still accepted on the API and ignored; the columns stay in the schema and are never written |
+| `subagentMaxRounds` / `SUBAGENT_MAX_ROUNDS` | 12 per child (1-60) | `limits.py`, `subagents.py` |
+| Per-agent `steps` (agent definition frontmatter and column) | 1-60 round cap per definition | ignored when parsing; stored values are never read |
+| `PARENT_RESERVE`, the `cost_cap` and `max_steps` child exits | children stopped at 60% of the parent's tokens or time; "charged to the parent" accounting | `subagents.py`; usage still rolls up for display |
+| `deskMaxTurns` / `DESK_MAX_TURNS`, desk `budget {maxTurns}` | 12 turns, tightenable per desk | `limits.py`, `app._desk_caps`, `_chain_kind` |
+| `BUDGET_STOPS` ("rounds", "tokens", "time" partials), `BUDGET_STOP`, `TIME_STOP`, the 60% `SOFT_NUDGE` | stop texts and a nudge when 60% of a budget was used | `app.py` |
+| `Budget.arm_deadline` for the main stream | bounded the provider stream by what was left of `maxRunSeconds` | `llm.stream_deadline` is now set only around the closing answer (`FINAL_ROUND_SECONDS`) |
+| `codingSessionTimeoutMinutes` / `CODING_SESSION_TIMEOUT_MINUTES` | 30 min (1-1440) | `limits.py`, `codingagents.py`; OpenCode now launches with no timeout. App shutdown already SIGTERM/SIGKILLs every shell job group, Stop ends a session, and a session a crash orphaned is recorded `orphaned` with a kill; the timeout's watcher lived in the backend process, so it never reaped crash orphans anyway. |
+| `contextBudget` | memories 1500, graph 800, chunks 2000, activity 800, meetings 800, pinned 3000, profile 1000 tokens | `llm.DEFAULT_SETTINGS`; now `CONTEXT_SHARES` |
+| `skillsInlineBudget` / `SKILLS_INLINE_BUDGET` | 6000 characters | now `CONTEXT_SHARES["skills"]` |
+| `memory_limits.PROFILE_WINDOW_SHARE` | 0.02 | now `CONTEXT_SHARES["profile"]` (.008) |
+| `usageAlerts`, `usage.alert_state`, `GET /usage` `alerts`, the `usage_alert` event | $/day and $/month notices | usage and cost reporting stay |
+
+Migration 20 `drop_budget_settings` deletes the stored `maxToolRounds`, `maxRunTokens`, `maxRunSeconds`, `subagentMaxRounds`, `deskMaxTurns`, `codingSessionTimeoutMinutes`, `contextBudget`, `skillsInlineBudget` and `usageAlerts` rows. `PUT /settings` already ignores keys that are not in `DEFAULT_SETTINGS`, so an old client sending them gets 200 and nothing is stored. Old run rows can still carry `partial` values `rounds`, `tokens`, `time`, `cost` and a `budget` snapshot with `max_*` keys; readers (`resume.py`, `job_history._timed_out`) tolerate them.
+
+Kept on purpose (not reply budgets):
+
+- `VOICE_LOOP_MAX_TURNS` (20): the hands-free voice loop is a safety stop, because a microphone left on would otherwise keep a chat looping with nobody there.
+- `FILE_SNAPSHOT_BUDGET_MB` and the `RETAIN_*` days: disk retention, not run limits.
+- `LLM_IDLE_SECONDS`, `FINAL_ROUND_SECONDS`, `SUBAGENT_STALE_SECONDS`, `SUBAGENT_TOOL_SECONDS`, `SHELL_TIMEOUT_SECONDS`, `REVIEW_TIMEOUT_SECONDS`: hang detection and per-request timeouts.
+- `MAX_UPLOAD_MB`, the zip-bomb guard, concurrency limits (`deskMaxLive`, `subagentMaxConcurrent`, `SUBAGENT_MAX_DEPTH`, `CODING_SESSION_MAX_CONCURRENT`), retrieval and browser limits.
+- The one `max_tokens` the app sends itself is the connection probe in `setup.py` (`max_tokens: 1`, falling back to `max_completion_tokens: 16`): a key and connection check, not a reply. Without it a reasoning model thinks at length and the probe's timeout reports a false failure.
+
+`max_tokens` on replies: never a number Grain picks. `llm.stream_chat` and `llm.complete` send it only when the provider requires it (`llm.requires_max_tokens`: the base URL host is the Anthropic API) and the model's own maximum output is known. `usage.Pricing` captures it as `max_output_tokens` from the proxy's `/model/info` (`model_info.max_output_tokens`) or, for the Anthropic API, from `GET {base}/models` (`max_tokens`). Every other provider gets no field.
+
 ## 0. Findings that change the plan
 
 | # | Finding | Evidence | Consequence |

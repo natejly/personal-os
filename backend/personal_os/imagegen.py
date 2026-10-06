@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import io
 import re
 import time
@@ -15,8 +14,7 @@ from typing import Any
 
 import httpx
 
-from . import llm, redact
-from .db import new_id
+from . import blobs as blob_store, llm, redact
 from .extract_text import safe_upload_name
 
 TIMEOUT_S = 180.0
@@ -92,8 +90,6 @@ def register(tb: Any) -> None:
         llm._emit_usage(str(s["imageModel"]), "image", {"prompt_tokens": None, "completion_tokens": len(blobs)}, int((time.time() - t0) * 1000), 0, 0)
         from PIL import Image
         pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
-        uploads = tb.documents.db.data_dir / "uploads"
-        uploads.mkdir(parents=True, exist_ok=True)
         saved: list[dict[str, Any]] = []
         shown: list[dict[str, Any]] = []
         for i, data in enumerate(blobs):
@@ -108,9 +104,8 @@ def register(tb: Any) -> None:
             im.save(buf, "PNG")
             png = buf.getvalue()
             name = safe_upload_name(f"{_slug(prompt)}-{i + 1}.png" if len(blobs) > 1 else f"{_slug(prompt)}.png")
-            dest = uploads / f"{new_id()}-{name}"
-            dest.write_bytes(png)
-            row = tb.documents.create(pid, name, "image/png", len(png), str(dest), "", content_hash=hashlib.sha256(png).hexdigest())
+            dest, digest = blob_store.store(tb.documents.db.data_dir, name, png)
+            row = tb.documents.create(pid, name, "image/png", len(png), str(dest), "", content_hash=digest)
             saved.append({"doc_id": row["id"], "path": str(dest), "width": im.width, "height": im.height})
             shown.append({"name": name, "mime": "image/png", "bytes": len(png), "data": "data:image/png;base64," + base64.b64encode(png).decode("ascii")})
         if not saved:

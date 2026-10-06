@@ -19,11 +19,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from . import blobs
 from .db import Database, now
 from .docs import Docs, drop_doc_windows
 from .migrations import sync_memories_fts
@@ -162,9 +162,8 @@ class Trash:
                     paths.append(r["path"])
                 c.execute("DELETE FROM chunks_fts WHERE document_id=?", (did,))
                 c.execute("DELETE FROM documents WHERE id=?", (did,))
-        for p in paths:
-            with contextlib.suppress(OSError):
-                Path(p).unlink()
+        for p in paths:  # after the commit: a blob shared with a surviving row (live or trashed) stays
+            blobs.release(self.db, p)
 
     def _purge_project(self, id: str) -> None:
         with self.db.tx() as c:

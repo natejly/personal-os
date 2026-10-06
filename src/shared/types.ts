@@ -55,7 +55,7 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
   profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
-  /** Items dropped per section because it hit its token budget (contextBudget). */
+  /** Items dropped per section because it hit its share of the model's context window. */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
   tools_deferred?: number
@@ -226,6 +226,10 @@ export interface ShowItem {
   name?: string
   mime?: string
   size?: number
+  /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
+  documentId?: string
+  /** An upload only: the original bytes were kept (false = just the extracted text is left). */
+  hasOriginal?: boolean
   /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */
   pane?: 'left' | 'right'
 }
@@ -700,7 +704,7 @@ export interface ToolEvent {
   edited_arguments?: Record<string, unknown> | null
 }
 
-/** Why a reply stopped early: a budget axis, or the repetition breaker. */
+/** Why a reply stopped early. `rounds`, `tokens`, `time` and `cost` only appear on rows stored by an older version. */
 export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
 export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact'
@@ -999,6 +1003,8 @@ export interface Document {
   pinned?: number
   preview?: string
   text?: string
+  /** The uploaded bytes are still stored; false for rows from before originals were kept. */
+  has_original?: boolean
 }
 
 /** POST /documents: the stored row plus what the server could make of the file. */
@@ -1463,15 +1469,12 @@ export interface Settings {
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
-  maxToolRounds: number
   /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
   mcpDeferAbove?: number
   /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
   toolDeferAbove?: number
   /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
   mcpServerNotes?: boolean
-  /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
-  skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
   embeddingModel?: string
   /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
@@ -1504,13 +1507,7 @@ export interface Settings {
   compactKeepRecent?: number
   microKeep?: number
   microAt?: number
-  /** Per-reply budgets; 0 means unlimited. */
-  /** Token budget per context section (0 = unlimited): memories, graph, chunks, pinned. */
-  contextBudget?: Record<string, number>
-  maxRunTokens?: number
-  maxRunSeconds?: number
-  /** Coding sessions: OpenCode stops after this many minutes (1-1440, default 30); how many run at once (1-20, default 3). */
-  codingSessionTimeoutMinutes?: number
+  /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
@@ -1581,10 +1578,6 @@ export interface Settings {
   githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
-  /** Informational spend alerts in $ (0 = off); never stops a run. */
-  usageAlerts?: { dailyCost: number; monthlyCost: number }
-  /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
-  deskMaxTurns?: number
   deskMaxLive?: number
   /** Relaunch desks a restart interrupted mid-turn. Never one with an unknown-outcome call or a pending card. Off by default. */
   deskAutoResume?: boolean
@@ -1664,7 +1657,6 @@ export interface UsageReport {
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
   by_tag: (UsageBucket & { tag: string })[]
-  alerts?: { daily: { spent: number; limit: number; over: boolean }; monthly: { spent: number; limit: number; over: boolean }; over: boolean }
   prices: Record<string, ModelPrice>
 }
 
@@ -1742,7 +1734,6 @@ export type BackgroundEvent =
   /** The learn worker re-read a scope's writing samples into a new voice profile. */
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
-  | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A run's answering / status state moved: lets every window know about a reply it did not start. */
@@ -1976,7 +1967,6 @@ export type PlanDecision = 'approve' | 'edit' | 'reject'
 
 
 
-export interface DeskBudget { maxTurns?: number }
 /** Something the user hands a desk: a doc, an uploaded document, or a local file under the home folder. */
 export type DeskInputRef = { kind: 'doc'; id: string } | { kind: 'document'; id: string } | { kind: 'path'; path: string }
 
@@ -2002,7 +1992,6 @@ export interface Desk {
   workspace: string
   turn: number
   cost: number
-  budget: DeskBudget
   last_error: string | null
   archived: boolean
   /** Derived: the status is in DESK_LIVE. */
@@ -2464,20 +2453,12 @@ export interface Job {
   watch_dir: string | null
   /** The model this job's runs use. null = the default model. */
   model: string | null
-  /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
-  budget: JobBudget | null
   /** 'desk': each fire opens a desk with `prompt` as its brief, instead of a proposal-only chat run. */
   target: 'run' | 'desk'
   /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
   desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
-  desk_budget: Record<string, number> | null
   /** The agent definition this routine runs as (its prompt, skills, boundaries and tool overrides). null = plain. */
   agent_id?: string | null
-}
-
-export interface JobBudget {
-  maxRunTokens?: number
-  maxRunSeconds?: number
 }
 
 export type JobNotifyMode = 'problems' | 'always' | 'never'
@@ -2853,7 +2834,6 @@ export interface AgentDef {
   name: string
   description: string
   model: string | null
-  steps: number | null
   tools: string[]
   /** Approved skill names folded into its prompt. */
   skills: string[]
@@ -2875,7 +2855,7 @@ export interface AgentDef {
 }
 export interface BuiltinAgent { name: string; description: string; tools: string[]; hue: number | null }
 /** The editable fields of a definition: what the editor holds and what a draft returns. */
-export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'steps' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
+export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
   & Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes'>>
 /** The fields that ride beside the definition text (PATCH /agents/defs/{id}/scope keeps the approval). */
 export type AgentScope = Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes' | 'skills'>>

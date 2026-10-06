@@ -1,4 +1,4 @@
-"""Subagents: bounded child agents the main loop can fan work out to (agent_spawn / agent_wait / agent_stop).
+"""Subagents: child agents the main loop can fan work out to (agent_spawn / agent_wait / agent_stop).
 
 A child is a durable run (kind='subagent', parent_run_id) with its own short reply loop, built here
 rather than carved out of app._chat_stream: it has no history, no auto-learn, no plan mode and no
@@ -14,7 +14,9 @@ The rules the rest of the app relies on:
     parent history.
   - what comes back is the child's final text, capped and wrapped as untrusted data, and the
     transcript stays behind a handle. Taint reaches the parent through the tools' `taints` flag.
-  - the child's budget counts against the parent's: every model call is charged up the chain.
+  - a child's tokens and cost are forwarded up the chain for display only. Nothing caps its rounds: it ends when it stops
+    calling tools, a stuck breaker fires (repeated identical calls, repeated refusals, the stuck detector), it hangs
+    (subagentStaleSeconds / subagentToolSeconds), or the user stops it.
   - approval cards a child raises are published on the parent run's stream, labelled with the child.
 """
 from __future__ import annotations
@@ -32,6 +34,7 @@ from typing import Any, Callable
 from . import approval_log, autoreview, compaction, limits, llm, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
+from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 from .working import escape_tags
 
@@ -40,7 +43,6 @@ log = logging.getLogger(__name__)
 RESULT_CHARS = 6000
 MAX_TASK_CHARS = 20_000
 ROUND_PARALLEL = 8
-PARENT_RESERVE = 0.6  # share of the parent run's tokens / cost / time children may use up
 GROUP = "agents"
 
 # ---- what a child may ever hold ------------------------------------------------------------------
@@ -102,7 +104,6 @@ class RoleDef:
     prompt: str
     tools: tuple[str, ...]
     model: str | None = None
-    steps: int | None = None
     hidden: bool = False
     builtin: bool = True
     id: str | None = None
@@ -143,9 +144,9 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
 def parse_def(text: str) -> dict[str, Any]:
-    """A definition is markdown: `---` frontmatter (name, description, model, steps, tools, skills, hue, hidden), then the prompt.
+    """A definition is markdown: `---` frontmatter (name, description, model, tools, skills, hue, hidden), then the prompt. A `steps` line from older definitions is ignored.
 
-    -> {'name', 'description', 'model', 'steps', 'tools', 'skills', 'hue', 'hidden', 'body'}; raises ValueError with a readable line.
+    -> {'name', 'description', 'model', 'tools', 'skills', 'hue', 'hidden', 'body'}; raises ValueError with a readable line.
     """
     lines = (text or "").replace("\r\n", "\n").lstrip("﻿").split("\n")
     if not lines or lines[0].strip() != "---":
@@ -169,14 +170,6 @@ def parse_def(text: str) -> dict[str, Any]:
         raise ValueError("name must be lowercase letters, digits, - or _ (max 40)")
     if name in BUILTIN_ROLES:
         raise ValueError(f"{name!r} is a built-in agent")
-    steps: int | None = None
-    if fm.get("steps"):
-        try:
-            steps = int(fm["steps"])
-        except ValueError as e:
-            raise ValueError("steps must be a whole number") from e
-        if not 1 <= steps <= 60:
-            raise ValueError("steps must be between 1 and 60")
     hue: int | None = None
     if fm.get("hue"):
         try:
@@ -186,7 +179,7 @@ def parse_def(text: str) -> dict[str, Any]:
     body = "\n".join(lines[end + 1:]).strip()
     if not body:
         raise ValueError("the definition needs a prompt after the frontmatter")
-    return {"name": name, "description": fm.get("description", "")[:300], "model": fm.get("model") or None, "steps": steps,
+    return {"name": name, "description": fm.get("description", "")[:300], "model": fm.get("model") or None,
             "tools": _csv(fm.get("tools", "")), "skills": _csv(fm.get("skills", "")), "hue": hue,
             "hidden": fm.get("hidden", "").lower() in ("1", "true", "yes"), "body": body}
 
@@ -203,8 +196,6 @@ def def_text(f: dict[str, Any]) -> str:
     fm = [f"name: {f['name']}", f"description: {f.get('description') or ''}"]
     if f.get("model"):
         fm.append(f"model: {f['model']}")
-    if f.get("steps"):
-        fm.append(f"steps: {f['steps']}")
     if f.get("hue") is not None:
         fm.append(f"hue: {int(f['hue']) % 360}")
     if f.get("tools"):
@@ -339,16 +330,16 @@ class AgentDefs:
             if clash and clash["id"] != def_id:
                 raise ValueError(f"an agent named {f['name']!r} already exists")
             if def_id and c.execute("SELECT 1 FROM agent_defs WHERE id=?", (def_id,)).fetchone():
-                c.execute("UPDATE agent_defs SET name=?, description=?, body=?, model=?, steps=?, tools=?, skills=?, hue=?, hidden=?, approved=0, "
+                c.execute("UPDATE agent_defs SET name=?, description=?, body=?, model=?, tools=?, skills=?, hue=?, hidden=?, approved=0, "
                           "updated_at=? WHERE id=?",
-                          (f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
+                          (f["name"], f["description"], f["body"], f["model"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
                            int(f["hidden"]), t, def_id))
                 rid = def_id
             else:
                 rid = "ag_" + new_id()
-                c.execute("INSERT INTO agent_defs(id, name, description, body, model, steps, tools, skills, hue, hidden, approved, created_at, updated_at) "
-                          "VALUES(?,?,?,?,?,?,?,?,?,?,0,?,?)",
-                          (rid, f["name"], f["description"], f["body"], f["model"], f["steps"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
+                c.execute("INSERT INTO agent_defs(id, name, description, body, model, tools, skills, hue, hidden, approved, created_at, updated_at) "
+                          "VALUES(?,?,?,?,?,?,?,?,?,0,?,?)",
+                          (rid, f["name"], f["description"], f["body"], f["model"], json.dumps(f["tools"]), json.dumps(f["skills"]), f["hue"],
                            int(f["hidden"]), t, t))
         return (self.set_scope(rid, scope) if scope else self.get(rid)) or {}
 
@@ -368,7 +359,7 @@ class AgentDefs:
         row = self.get(name)
         if not row or not row["approved"]:
             return None
-        return RoleDef(row["name"], row["description"], row["body"], tuple(row["tools"]), row["model"], row["steps"],
+        return RoleDef(row["name"], row["description"], row["body"], tuple(row["tools"]), row["model"],
                        row["hidden"], builtin=False, id=row["id"], hue=row.get("hue"), skills=tuple(row["skills"]),
                        boundaries=row["boundaries"], notes=row["notes"], workspace=row["workspace"], tool_modes=row["tool_modes"])
 
@@ -376,7 +367,7 @@ class AgentDefs:
 # ---- accounting ------------------------------------------------------------------------------------
 
 class Meter:
-    """Tokens and cost for one child, forwarded to whatever paid for it (the parent's Budget, or another Meter)."""
+    """Tokens and cost for one child, forwarded up to the run's RunMeter (or another Meter) for display. Never a limit."""
 
     def __init__(self, parent: Any = None) -> None:
         self.parent = parent
@@ -447,7 +438,6 @@ class Child:
     desk_id: str | None
     ctx: dict[str, Any]
     modes: dict[str, str]
-    steps: int
     meter: Meter
     roots: tuple[Path, ...] = ()
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -471,6 +461,13 @@ class Child:
     transcript_id: str | None = None
     started: float = field(default_factory=time.time)
     steers: list[str] = field(default_factory=list)   # user messages sent straight to this child, folded in at its next round
+    # Stuck detection, the same helpers the main reply loop uses.
+    detector: StuckDetector = field(default_factory=StuckDetector)
+    denials: permrules.DenialStreak = field(default_factory=permrules.DenialStreak)
+    last_sig: str | None = None
+    repeats: int = 0
+    stuck_hits: int = 0
+    stuck_stop: str = ""            # set when a breaker ends tool use: what to tell the model
 
     @property
     def label(self) -> str:
@@ -690,20 +687,17 @@ class Subagents:
                     modes.pop(n, None)
         cfg = ctx.get("settings") or self.settings()
         model = str(a.get("model") or role.model or ctx.get("model") or cfg.get("defaultModel") or "")
-        steps = self._int("subagentMaxRounds")
-        if role.steps:
-            steps = min(steps, role.steps)
         cid = "sa_" + new_id()
         cctx = {**ctx, "depth": depth + 1, "agent_run_id": cid, "modes": modes, "tainted": bool(ctx.get("tainted")),
                 "taint_sources": list(ctx.get("taint_sources") or []), "allowed_urls": set(ctx.get("allowed_urls") or ()),
                 "_round_spawn": {}, "_round_done": {}, "learned": None}
         cctx.pop("plan_changed", None)
-        meter = Meter(ctx.get("budget"))
-        cctx["budget_parent"] = ctx.get("budget_parent") or ctx.get("budget")  # the root's Budget, for its caps and clock
-        cctx["budget"] = meter
+        meter = Meter(ctx.get("meter"))
+        cctx["meter_root"] = ctx.get("meter_root") or ctx.get("meter")  # the root's RunMeter, whose clock approval waits pause
+        cctx["meter"] = meter
         ch = Child(id=cid, parent_id=parent_id, role=role, task=task[:MAX_TASK_CHARS], model=model, depth=depth + 1,
                    conversation_id=ctx.get("conversation_id"), message_id=ctx.get("message_id"), desk_id=ctx.get("desk_id"),
-                   ctx=cctx, modes=modes, steps=max(1, steps), meter=meter, roots=roots, background=bool(a.get("background")))
+                   ctx=cctx, modes=modes, meter=meter, roots=roots, background=bool(a.get("background")))
         cctx["agent"] = ch.label
         ch.messages = self._seed(ch, cfg, prior_msgs)
         if self.store is not None:
@@ -749,7 +743,6 @@ class Subagents:
             roots = [ln for r in ch.roots if (ln := _one_line(r, 300))]
             if roots:
                 parts.append("## Writable folders\n" + "\n".join(f"- {r}" for r in roots) + "\nYou may not write anywhere else.")
-        parts.append(f"You have at most {ch.steps} tool rounds. If you run out, you will be asked to summarize progress and what remains.")
         return [{"role": "system", "content": "\n\n".join(parts)}, {"role": "user", "content": ch.task}]
 
     def _load_transcript(self, run_id: str) -> list[dict[str, Any]] | None:
@@ -801,16 +794,6 @@ class Subagents:
         finally:
             await self._finish(ch)
 
-    @staticmethod
-    def _parent_spent(b: Any) -> bool:
-        """Children are charged to the parent's budget; they stop once PARENT_RESERVE of it is used so the parent
-        keeps room to read their reports and finish the job instead of being cut off the moment they return."""
-        try:
-            ratios = b._ratios()
-        except Exception:  # noqa: BLE001 - a budget without ratios only has the hard cap
-            return False
-        return any(ratios.get(k, 0.0) >= PARENT_RESERVE for k in ("tokens", "time"))
-
     def _check(self, ch: Child) -> None:
         if ch.halt_reason:
             raise _Halt(ch.halt_reason)
@@ -818,9 +801,6 @@ class Subagents:
         run = ch.ctx.get("run")
         if (stop is not None and stop.is_set()) or (run is not None and not run.live):
             raise _Halt("interrupted")
-        b = ch.ctx.get("budget_parent")
-        if b is not None and (b.exceeded() in ("tokens", "time") or self._parent_spent(b)):
-            raise _Halt("cost_cap")
 
     async def _model_round(self, ch: Child, schemas: list[dict[str, Any]], final: bool = False) -> tuple[str, dict[str, Any]]:
         cfg = ch.ctx.get("settings") or self.settings()
@@ -848,7 +828,9 @@ class Subagents:
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
         schemas = self.toolbox.schemas(ch.modes)
-        for rnd in range(1, ch.steps + 1):
+        rnd = 0
+        while True:
+            rnd += 1
             self._check(ch)
             if ch.steers:  # the user spoke to this child: their words land before the next model turn
                 ch.messages.extend({"role": "user", "content": t} for t in ch.steers)
@@ -879,25 +861,22 @@ class Subagents:
                                 "tool_calls": [{"id": c["id"], "type": "function",
                                                 "function": {"name": c["name"] or "invalid_tool",
                                                              "arguments": self._echo_args(c)}} for c in calls]})
-            if rnd == ch.steps:
-                # Out of steps with calls still pending: answer each, then ask for one tool-free summary.
-                for c in calls:
-                    ch.messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps({"error": "step limit reached; not run"})})
+            await self._run_calls(ch, calls)
+            if ch.stuck_stop:
                 await self._summarize(ch, schemas)
                 return
-            await self._run_calls(ch, calls)
-        await self._summarize(ch, schemas)  # unreachable in practice: the last round returns above
 
     async def _summarize(self, ch: Child, schemas: list[dict[str, Any]]) -> None:
-        ch.state, ch.exit_reason = "partial", "max_steps"
+        """After a stuck breaker: one tool-free message saying what was done and what is left."""
+        ch.state, ch.exit_reason = "partial", "stuck"
         if ch.halt_reason:
             raise _Halt(ch.halt_reason)
-        ch.messages.append({"role": "system", "content": "You are out of tool rounds. Do not call tools. In one message, summarize what "
+        ch.messages.append({"role": "system", "content": "Tool use has stopped. Do not call tools. In one message, summarize what "
                                                          "you have done and found so far, and what remains unfinished."})
         try:
             text, _ = await self._model_round(ch, schemas, final=True)
         finally:
-            ch.messages.pop()  # the 'out of tool rounds' line: a resumed child must not inherit it
+            ch.messages.pop()  # the 'tool use has stopped' line: a resumed child must not inherit it
         if text:
             ch.text = text
             ch.messages.append({"role": "assistant", "content": text})
@@ -961,13 +940,20 @@ class Subagents:
         name = c["name"]
         ch.calls += 1
         self._check(ch)
+        sig = call_key(name, args)
+        ch.repeats = ch.repeats + 1 if sig == ch.last_sig else 1
+        ch.last_sig = sig
+        if ch.repeats >= limits.REPEAT_LIMIT and not ch.stuck_stop:
+            ch.stuck_stop = f"{name} has been called with identical arguments {limits.REPEAT_LIMIT} times in a row, so tool use is stopping."
+        if ch.stuck_stop:  # every call still gets an answer, but nothing more runs
+            return json.dumps({"error": f"{ch.stuck_stop} Answer with what you already have, and say in one line what you could not finish."})
         uid = f"{ch.id}:{c['id']}"
         spec = self.toolbox.specs.get(name)
         raw_mode = ch.modes.get(name, "off")
         t0 = time.time()
         self._set_now(ch, _now_line(name, args))
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
-        decision, result = "allow", None
+        decision, result, ran = "allow", None, False
         if spec is None or raw_mode == "off":
             result = denied(name, "not available to this subagent")
         elif "_raw" in args:
@@ -992,7 +978,8 @@ class Subagents:
             hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
             pre_mode = mode
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
-                                     roots=self._perm_roots(ch), conv=ch.conversation_id)
+                                     roots=self._perm_roots(ch), conv=ch.conversation_id,
+                                     doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args)
             if not bad and pmode != "manual" and mode != "off":
@@ -1048,19 +1035,33 @@ class Subagents:
                 try:
                     await self._snapshot_before(ch, name, args)
                     result = await self._call(ch, name, args, uid, spec)
+                    ran = True
                 finally:
                     ch.ctx["fs_outside_ok"] = False
                     ch.touch(in_tool=False)
         err = result.get("error") if isinstance(result, dict) else None
         if isinstance(result, dict):
             result.pop("images", None)
+            if hint := ch.denials.note():
+                result["permission_note"] = hint
+        ch.denials.record(not ran and spec is not None and raw_mode != "off" and "_raw" not in args)
+        nudge = ""
+        if ran:
+            ch.detector.observe(name, args, result)
+            if stuck := ch.detector.check():
+                ch.stuck_hits += 1
+                if ch.stuck_hits == 1:
+                    ch.detector.obs.clear()  # a fresh run at it; the same shape again ends tool use
+                    nudge = "\n\n[stuck_notice] " + STUCK_NUDGE.format(detail=stuck.detail)
+                else:
+                    ch.stuck_stop = stuck.detail
         preview = summarize_result(result)
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
                                        "duration_ms": int((time.time() - t0) * 1000)})
         if self.results is not None and ch.conversation_id:
-            return self.results.for_model(ch.conversation_id, ch.message_id, name, result)
+            return self.results.for_model(ch.conversation_id, ch.message_id, name, result) + nudge
         blob = redact.scrub_command_output(json.dumps(result, default=str, ensure_ascii=False))
-        return blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]"
+        return (blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]") + nudge
 
     async def _call(self, ch: Child, name: str, args: dict[str, Any], uid: str, spec: ToolSpec) -> Any:
         async def go() -> Any:
@@ -1153,9 +1154,9 @@ class Subagents:
             self.approvals.pop(uid, None)
         waited = time.time() - t0
         ch.meter.paused += waited
-        b = ch.ctx.get("budget_parent")
+        b = ch.ctx.get("meter_root")
         if b is not None and hasattr(b, "paused"):
-            b.paused += waited  # a slow approval must not blow the parent's wall clock
+            b.paused += waited  # the user's time is not the run's
         ch.touch()
         if self.store is not None:
             self.store.update(ch.id, status="running")
@@ -1184,12 +1185,11 @@ class Subagents:
                 ch.transcript_id = self.results.store(ch.conversation_id, ch.message_id, "agent_transcript", blob,
                                                       {"type": "transcript", "agent": ch.id})["id"]
             self._emit(ch, "transcript", {"messages": ch.messages})
-            status = "error" if ch.state == "error" else ("done" if ch.exit_reason in ("completed", "max_steps", "cost_cap") else "interrupted")
+            status = "error" if ch.state == "error" else ("done" if ch.exit_reason in ("completed", "stuck") else "interrupted")
             self._emit(ch, "done", {"state": ch.state, "exit_reason": ch.exit_reason, "text": ch.text[:2000]})
             if self.store is not None:
                 self.store.update(ch.id, status=status, error=ch.error, ended_at=time.time(), last_seq=ch.seq,
-                                  budget={"rounds": ch.rounds, "tokens": ch.meter.tokens, "cost": round(ch.meter.cost, 6),
-                                          "max_rounds": ch.steps})
+                                  budget={"rounds": ch.rounds, "tokens": ch.meter.tokens, "cost": round(ch.meter.cost, 6)})
         except Exception:  # noqa: BLE001 - the tape must not take the result with it
             log.warning("could not record subagent %s", ch.id, exc_info=True)
         ch.finished.set()
@@ -1197,7 +1197,7 @@ class Subagents:
 
     def report(self, ch: Child) -> dict[str, Any]:
         text = redact.scrub_command_output(ch.text)
-        truncated = ch.exit_reason == "max_steps"
+        truncated = ch.exit_reason == "stuck"
         capped = len(text) > RESULT_CHARS
         out: dict[str, Any] = {"agent_id": ch.id, "role": ch.role.name, "state": ch.state, "exit_reason": ch.exit_reason,
                                "rounds": ch.rounds, "cost": round(ch.meter.cost, 6),

@@ -1,14 +1,14 @@
-"""Subagents: bounded children the main loop fans work out to (subagents.py, agent_spawn / agent_wait / agent_stop).
+"""Subagents: children the main loop fans work out to (subagents.py, agent_spawn / agent_wait / agent_stop).
 
 Everything runs offline against a scripted llm.stream_chat. The claims worth a test:
   - a child's tools are the role's, narrowed, and never more than the parent has; a tool that asks for the
     parent asks for the child; nothing a definition names widens that;
-  - depth, concurrency and budget are caps that hold (the spawn count in a round, the app-wide count, the
-    parent's own budget being charged);
+  - depth and concurrency are caps that hold (the spawn count in a round, the app-wide count); nothing caps a
+    child's rounds, and its usage only rolls up to the parent's meter for display;
   - several read-only spawns in one round run side by side, through the real reply loop;
   - the report comes back wrapped as untrusted data and taints the parent;
   - background spawn then wait, stop cascades and still returns partial output, a stale child is stopped;
-  - at its step limit a child is forced into one tool-free summary;
+  - a child that repeats one call is stopped by the stuck breaker and made to write one tool-free summary;
   - a child's approval card rides the parent's stream and decides the call;
   - writers never share a root; user-authored definitions are inert until approved;
   - desk_start always asks and only ever creates a plan-mode desk.
@@ -47,7 +47,7 @@ def check(cond: Any, label: str) -> None:
 
 
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds",
+DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth",
                                                   "subagentStaleSeconds", "subagentToolSeconds")}
 DEFAULTS["permissionMode"] = "manual"  # the gates below are the manual ones; the mode tests set their own
 
@@ -119,7 +119,7 @@ def mkctx(conv_id: str, modes: dict[str, str] | None = None, **extra: Any) -> di
     cfg = appmod.settings()
     return {"project_id": None, "conversation_id": conv_id, "message_id": None, "tainted": False, "taint_sources": [],
             "allowed_urls": set(), "settings": cfg, "modes": modes if modes is not None else appmod.toolbox.effective({}, None, None),
-            "depth": 0, "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(cfg),
+            "depth": 0, "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(),
             "run": None, **extra}
 
 
@@ -250,7 +250,7 @@ def test_identical_spawns_dedupe() -> None:
     check(b.get("duplicate") and b["agent_id"] == a["agent_id"], "the repeat is answered with the first result, marked as such")
 
 
-def test_budget_rollup() -> None:
+def test_usage_rollup() -> None:
     reset()
     prev = appmod.pricing.cost
     appmod.pricing.cost = lambda cfg, model, pt, ct, *a, **k: (pt + ct) / 1000.0
@@ -259,24 +259,22 @@ def test_budget_rollup() -> None:
                             {"text": "done", "usage": {"prompt_tokens": 100, "completion_tokens": 50}}]
         ctx = mkctx(new_conv())
         out = run(appmod.toolbox.call("agent_spawn", {"task": "spend"}, ctx))
-        check(abs(ctx["budget"].cost - 0.3) < 1e-9 and ctx["budget"].tokens == 300, "the child's cost and tokens land on the parent's budget")
+        check(abs(ctx["meter"].cost - 0.3) < 1e-9 and ctx["meter"].tokens == 300, "the child's cost and tokens land on the parent's meter")
         check(out["state"] == "completed", "it ended")
     finally:
         appmod.pricing.cost = prev
 
 
-def test_children_leave_the_parent_headroom() -> None:
-    """Children are charged to the parent, so they stop at 60% of its budget rather than 100%: the parent must still
-    have room to read their reports and finish."""
+def test_a_child_is_not_cut_by_the_parents_usage() -> None:
+    """No share of the parent's tokens or time is reserved: a big child runs to its own end."""
     reset()
     pctx = mkctx(new_conv())
-    pctx["budget"].max_tokens = 1000
+    pctx["meter"].tokens = 10_000_000
     SCRIPTS["hog"] = [{"text": "partial notes", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 700, "completion_tokens": 150}},
-                      {"text": "never", "calls": [call("c2", "current_time", {})]}]
+                      {"text": "all of it", "usage": {"prompt_tokens": 700, "completion_tokens": 150}}]
     out = run(appmod.toolbox.call("agent_spawn", {"task": "hog"}, pctx))
-    check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "a child stops once it has used 60% of the parent's tokens")
-    check(pctx["budget"].exceeded() is None and pctx["budget"].tokens == 850, "the parent is left under its hard cap with room to answer")
-    check("partial notes" in out["report"], "its partial report still comes back")
+    check(out["exit_reason"] == "completed" and out["state"] == "completed", "the child finished however much was already spent")
+    check(pctx["meter"].tokens == 10_000_000 + 1700, "its usage still rolls up for display")
 
 
 # ---- the report ------------------------------------------------------------------------------------
@@ -359,15 +357,16 @@ def test_stale_child_is_stopped() -> None:
     check(time.time() - t0 < 5, "without waiting for the hung call")
 
 
-def test_step_limit_forces_a_summary() -> None:
-    reset(subagentMaxRounds=2)
-    SCRIPTS["loop"] = [{"text": "r1", "calls": [call("a", "current_time", {})]},
-                       {"text": "r2", "calls": [call("b", "current_time", {})]},
-                       {"text": "Done: 2 checks. Remaining: the rest."}]
-    out = run(appmod.toolbox.call("agent_spawn", {"task": "loop"}, mkctx(new_conv())))
+def test_a_repeating_child_is_stopped_and_summarises() -> None:
+    reset()
+    n = limits.REPEAT_LIMIT
+    SCRIPTS["loop"] = [{"text": f"r{i}", "calls": [call(f"a{i}", "current_time", {})]} for i in range(n)] \
+        + [{"text": "Done: 1 check. Remaining: the rest."}]
+    # A third identical call raises a card nobody can answer here: it is refused, and the count still reaches the limit.
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "loop"}, mkctx(new_conv(), proposal_only=True)))
     kid = [s for s in SEEN if s["child"]]
-    check(out["state"] == "partial" and out["exit_reason"] == "max_steps" and out.get("truncated") is True, "at its step limit: partial, max_steps, truncated")
-    check(len(kid) == 3 and kid[-1]["tool_choice"] == "none", "one extra tool-free turn is made")
+    check(out["state"] == "partial" and out["exit_reason"] == "stuck" and out.get("truncated") is True, "the stuck breaker: partial, stuck, truncated")
+    check(len(kid) == n + 1 and kid[-1]["tool_choice"] == "none", "one extra tool-free turn is made")
     check("Remaining" in out["report"], "the summary is the report")
     check('truncated="true"' in out["report"], "the wrapper says so")
 
@@ -736,7 +735,8 @@ def test_definitions_need_approval() -> None:
     reset()
     text = "---\nname: summarizer\ndescription: Short summaries\nsteps: 3\ntools: read_local_file, search_documents, save_memory\n---\nSummarize in three bullets."
     f = sa.parse_def(text)
-    check(f["name"] == "summarizer" and f["steps"] == 3 and f["tools"] == ["read_local_file", "search_documents", "save_memory"], "frontmatter parses")
+    check(f["name"] == "summarizer" and "steps" not in f and f["tools"] == ["read_local_file", "search_documents", "save_memory"], "frontmatter parses")
+    check(sa.parse_def(text.replace("steps: 3", "steps: 999"))["name"] == "summarizer", "an old steps line is ignored, never validated")
     for bad in ("no frontmatter", "---\nname: Bad Name\n---\nx", "---\nname: researcher\n---\nx", "---\nname: ok\n---\n"):
         try:
             sa.parse_def(bad)
@@ -754,7 +754,7 @@ def test_definitions_need_approval() -> None:
     check(out["state"] == "completed", "once approved it runs")
     check(set(offered) == {"read_local_file", "search_documents"}, "its tool list is applied, and the blocked memory writer is not granted")
     check(any("Summarize in three bullets" in m["content"] for m in next(s for s in SEEN if s["child"])["messages"] if m["role"] == "system"), "its body is the prompt")
-    edited = appmod.agent_defs.save(text.replace("steps: 3", "steps: 4"), row["id"])
+    edited = appmod.agent_defs.save(text.replace("Short summaries", "Shorter summaries"), row["id"])
     check(edited["approved"] is False, "editing withdraws the approval")
     check(appmod.agent_defs.role("summarizer") is None, "and the edited definition is inert again")
     appmod.agent_defs.delete(row["id"])
@@ -996,7 +996,7 @@ def test_pinned_notes_cannot_open_a_section() -> None:
         ch = sa.Child(
             id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
             depth=1, conversation_id=None, message_id=None, desk_id=None,
-            ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(),
+            ctx={"project_id": "proj"}, modes={}, meter=sa.Meter(),
             roots=(Path("/tmp/work\n\n## System"),),
         )
         msgs = mgr._seed(ch, {}, None)
@@ -1016,7 +1016,7 @@ def test_a_token_in_resumed_history_is_stripped() -> None:
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="follow up", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+        ctx={}, modes={}, meter=sa.Meter(),
     )
     prior = [
         {"role": "user", "content": "first task"},
@@ -1033,7 +1033,7 @@ def test_a_token_in_a_subagent_report_is_stripped() -> None:
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+        ctx={}, modes={}, meter=sa.Meter(),
     )
     ch.text = f"found {pat} in the file"
     ch.state = "completed"
@@ -1058,7 +1058,7 @@ def test_a_token_in_a_pinned_note_is_stripped() -> None:
         ch = sa.Child(
             id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
             depth=1, conversation_id=None, message_id=None, desk_id=None,
-            ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(), roots=(),
+            ctx={"project_id": "proj"}, modes={}, meter=sa.Meter(), roots=(),
         )
         system = mgr._seed(ch, {}, None)[0]["content"]
     finally:
@@ -1072,7 +1072,7 @@ def test_a_token_in_a_child_tool_result_is_stripped() -> None:
     ch = sa.Child(
         id="c-token", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={"settings": appmod.settings()}, modes={"current_time": "on"}, steps=3, meter=sa.Meter(), roots=(),
+        ctx={"settings": appmod.settings()}, modes={"current_time": "on"}, meter=sa.Meter(), roots=(),
     )
 
     async def fake_call(_ch: Any, _name: str, _args: dict[str, Any], _uid: str, _spec: Any) -> dict[str, str]:
@@ -1097,7 +1097,7 @@ def test_a_token_in_a_subagent_root_is_stripped() -> None:
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(), roots=(Path(root).resolve(),),
+        ctx={}, modes={}, meter=sa.Meter(), roots=(Path(root).resolve(),),
     )
     msg = mgr._confine(ch, "write_local_file", {"path": f"/tmp/{pat}.txt"})
     check(msg is not None and pat not in msg and "[github-pat]" in msg, "a token in a confined path is stripped")
@@ -1122,7 +1122,7 @@ def test_settings_and_routes() -> None:
             check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
     check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 0 and limits.slots(llm.DEFAULT_SETTINGS, "subagentMaxConcurrent") >= 2
           and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
-          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
+          and "subagentMaxRounds" not in llm.DEFAULT_SETTINGS, "the specified defaults")
     reset()
     store = appmod.run_store
     store.create("parent_r", None, "chat")
@@ -1141,7 +1141,7 @@ def test_settings_and_routes() -> None:
 def test_now_change_publishes_a_subagent_event() -> None:
     run = FakeRun()
     ch = sa.Child(id="sa_x", parent_id="", role=sa.BUILTIN_ROLES["researcher"], task="t", model="m", depth=1, conversation_id="c",
-                  message_id="m1", desk_id=None, ctx={"run": run}, modes={}, steps=3, meter=sa.Meter(None))
+                  message_id="m1", desk_id=None, ctx={"run": run}, modes={}, meter=sa.Meter(None))
     mgr._set_now(ch, "thinking")
     check(run.events and run.events[-1][0] == "subagent" and run.events[-1][1]["now"] == "thinking" and run.events[-1][1]["message_id"] == "m1", "a now change is published")
     mgr._set_now(ch, "fetch_url x")

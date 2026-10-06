@@ -22,7 +22,6 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
   const desk = useChatDesk(deskId)
   const approvals = useStore((s) => (desk ? s.sessions[desk.conversation_id]?.pendingApprovals ?? 0 : 0))
   const position = useStore((s) => (desk?.status === 'queued' ? queuePositions(s.desks).get(deskId) : undefined))
-  const maxTurns = useStore((s) => s.settings.deskMaxTurns ?? 12)
   const { startDesk, pauseDesk, resumeDesk, stopDesk } = useStore()
   useTick(Boolean(desk?.live))
   if (!desk) return null
@@ -32,7 +31,7 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
       <Face name={desk.id} status={desk.status} size={18} title={STATUS_LABEL[desk.status]} />
       <b className="desk-strip-status">{STATUS_LABEL[desk.status]}</b>
       {detail && <span className="desk-strip-detail">{detail}</span>}
-      <span className="desk-strip-meta">turn {desk.turn}/{desk.budget.maxTurns ?? maxTurns} · {fmtDur(deskElapsed(desk))}</span>
+      <span className="desk-strip-meta">turn {desk.turn} · {fmtDur(deskElapsed(desk))}</span>
       {approvals > 0 && <span className="desk-badge ask" title={`${approvals} waiting on your approval`}>{approvals}</span>}
       {desk.unseen > 0 && <span className="desk-badge" title={`${desk.unseen} need${desk.unseen === 1 ? 's' : ''} you`}>{desk.unseen}</span>}
       <span className="spacer" />

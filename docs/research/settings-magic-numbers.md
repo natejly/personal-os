@@ -38,7 +38,7 @@ What was removed (old value, where it lived):
 | `memory_limits.PROFILE_WINDOW_SHARE` | 0.02 | now `CONTEXT_SHARES["profile"]` (.008) |
 | `usageAlerts`, `usage.alert_state`, `GET /usage` `alerts`, the `usage_alert` event | $/day and $/month notices | usage and cost reporting stay |
 
-Migration 18 `drop_budget_settings` deletes the stored `maxToolRounds`, `maxRunTokens`, `maxRunSeconds`, `subagentMaxRounds`, `deskMaxTurns`, `codingSessionTimeoutMinutes`, `contextBudget`, `skillsInlineBudget` and `usageAlerts` rows. `PUT /settings` already ignores keys that are not in `DEFAULT_SETTINGS`, so an old client sending them gets 200 and nothing is stored. Old run rows can still carry `partial` values `rounds`, `tokens`, `time`, `cost` and a `budget` snapshot with `max_*` keys; readers (`resume.py`, `job_history._timed_out`) tolerate them.
+Migration 19 `drop_budget_settings` deletes the stored `maxToolRounds`, `maxRunTokens`, `maxRunSeconds`, `subagentMaxRounds`, `deskMaxTurns`, `codingSessionTimeoutMinutes`, `contextBudget`, `skillsInlineBudget` and `usageAlerts` rows. `PUT /settings` already ignores keys that are not in `DEFAULT_SETTINGS`, so an old client sending them gets 200 and nothing is stored. Old run rows can still carry `partial` values `rounds`, `tokens`, `time`, `cost` and a `budget` snapshot with `max_*` keys; readers (`resume.py`, `job_history._timed_out`) tolerate them.
 
 Kept on purpose (not reply budgets):
 

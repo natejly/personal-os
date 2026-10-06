@@ -341,19 +341,19 @@ OLD_KEYS = ("maxToolRounds", "maxRunTokens", "maxRunSeconds", "subagentMaxRounds
             "codingSessionTimeoutMinutes", "contextBudget", "skillsInlineBudget", "usageAlerts")
 
 
-def test_migration_18_drops_the_budget_settings() -> None:
+def test_migration_drops_the_budget_settings() -> None:
     d = Path(tempfile.mkdtemp(prefix="nobudgets-mig-"))
     db = Database(d)
     db.set_settings({**{k: 5 for k in OLD_KEYS}, "uiZoom": 110})
     path = next(d.glob("*.db"))
     con = sqlite3.connect(path)
-    con.execute("PRAGMA user_version = 17")
+    con.execute("PRAGMA user_version = 18")
     con.commit()
-    assert migrations.run(con) == [18]
+    assert migrations.run(con) == [19]
     left = {r[0] for r in con.execute("SELECT key FROM settings")}
     con.close()
     assert not left & set(OLD_KEYS) and "uiZoom" in left
-    assert [n for v, n, _ in migrations.MIGRATIONS if v == 18] == ["drop_budget_settings"]
+    assert [n for v, n, _ in migrations.MIGRATIONS if v == 19] == ["drop_budget_settings"]
 
 
 def test_put_settings_accepts_old_budget_keys_and_stores_nothing() -> None:

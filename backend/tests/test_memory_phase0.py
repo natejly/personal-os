@@ -32,9 +32,7 @@ def db():
         yield Database(tmp)
 
 
-REPLY = {"memories": [{"content": "User prefers short emails", "kind": "preference"}],
-         "entities": [{"label": "Priya", "type": "person"}, {"label": "Acme", "type": "organization"}],
-         "relations": [{"source": "Priya", "target": "Acme", "relation": "works at"}]}
+REPLY = {"memories": [{"content": "User prefers short emails", "kind": "preference"}]}
 
 
 def _extract(db: Database, monkeypatch: Any, reply: dict[str, Any] = REPLY, **kw: Any) -> tuple[dict[str, Any], list[Any]]:
@@ -63,7 +61,6 @@ def test_user_only_withholds_the_reply_and_cites_the_user_message(db, monkeypatc
         assert gone not in prompt
     assert out["memories"][0]["source_message_id"] == "u1"
     assert out["memories"][0]["source_conversation_id"] == "c1"
-    assert [e["source_message_id"] for e in out["edges"]] == ["u1"]
 
 
 # ---- 2. the ordinary path is unchanged ----
@@ -72,13 +69,11 @@ def test_normal_exchange_still_shows_the_reply(db, monkeypatch) -> None:
     prompt = seen[0][1]["content"]
     assert "Assistant replied" in prompt and "SECRET-ASSISTANT-TEXT" in prompt and "withheld" not in prompt
     assert out["memories"][0]["source_message_id"] == "u1"
-    assert [e["source_message_id"] for e in out["edges"]] == ["u1"]
 
 
 def test_without_a_user_message_id_the_reply_is_cited(db, monkeypatch) -> None:
     out, _ = _extract(db, monkeypatch)
     assert out["memories"][0]["source_message_id"] == "a1"
-    assert [e["source_message_id"] for e in out["edges"]] == ["a1"]
 
 
 # ---- 3. a user-only job drafts no skill ----
@@ -105,6 +100,28 @@ def test_user_only_job_never_drafts_a_skill(db, monkeypatch) -> None:
     assert payload["user_message_id"] == "u1" and payload["message_id"] == "a1"
     assert payload["skill_candidates"] == [] and payload["skill_revisions"] == []
     assert payload["friction"]["fix"] == "procedure"  # still reported, just never drafted into a skill
+
+
+def test_graph_extraction_gets_the_user_text_and_cites_the_user_message(db, monkeypatch) -> None:
+    from personal_os import graph_learn
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **k: Any) -> str:
+        return json.dumps({"memories": []})
+
+    async def fake_graph(**kw: Any) -> dict[str, Any]:
+        calls.append(kw)
+        return {"nodes": [], "edges": [], "ended": []}
+
+    monkeypatch.setattr(learn.llm, "complete", fake_complete)
+    monkeypatch.setattr(graph_learn, "learn_graph", fake_graph)
+    worker = learn.LearnWorker(memories=Memories(db), graph=Graph(db), set_trace=lambda *_: None, publish=lambda *_: None)
+    for user_only, mid in ((True, "u1"), (False, None)):
+        asyncio.run(worker._run(learn.LearnJob(conversation_id="c1", message_id="a1", project_id=None, user_text="my sister Ana",
+                                               assistant_text="REPLY", model="m", settings={}, spans=[],
+                                               user_only=user_only, user_message_id=mid)))
+    assert [(c["assistant_text"], c["message_id"]) for c in calls] == [("", "u1"), ("REPLY", "a1")]
 
 
 # ---- 4. the tidy-up counter is derived, so a relaunch keeps it ----
@@ -343,4 +360,5 @@ def test_backfill_skips_a_row_that_replaced_another(db) -> None:
 
 
 def test_memory_migrations_are_registered() -> None:
-    assert [n for _, n, _ in migrations.MIGRATIONS[-3:-1]] == ["memories_fts_live", "memory_provenance_backfill"]
+    names = [n for _, n, _ in migrations.MIGRATIONS]
+    assert names.index("memories_fts_live") + 1 == names.index("memory_provenance_backfill")

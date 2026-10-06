@@ -36,7 +36,7 @@ function innerScrollsUp(target: EventTarget | null, root: HTMLElement): boolean 
 export function useStickToBottom(
   scrollRef: RefObject<HTMLDivElement>,
   opts: { resetKey: unknown; tailUserId: string | null; rows?: number }
-): { stick: boolean; unseen: number; jump: () => void } {
+): { stick: boolean; unseen: number; jump: () => void; release: () => void } {
   const stickRef = useRef(true)
   const prevTop = useRef(0)
   const rows = opts.rows ?? 0
@@ -108,5 +108,6 @@ export function useStickToBottom(
     }
   }, [scrollRef, opts.resetKey, setStickBoth, toBottom])
 
-  return { stick, unseen, jump }
+  const release = useCallback(() => setStickBoth(false), [setStickBoth])
+  return { stick, unseen, jump, release }
 }

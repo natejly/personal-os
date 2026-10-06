@@ -16,6 +16,7 @@ import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
 import LibraryView from './components/LibraryView'
+import MemoryPage from './components/MemoryPage'
 import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
@@ -28,7 +29,6 @@ import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { BackendBanner } from './components/BackendStatus'
-import { AllowAllBanner } from './components/PermissionMode'
 import BackendFailed from './components/BackendFailed'
 import Onboarding from './components/onboarding/Onboarding'
 import { useOnboarding } from './components/onboarding/onboardingStore'
@@ -270,6 +270,7 @@ export default function App(): JSX.Element {
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
           {view === 'library' && <LibraryView />}
+          {view === 'memory' && <MemoryPage />}
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}
@@ -280,7 +281,6 @@ export default function App(): JSX.Element {
       {projectModal && <ProjectModal />}
       {openSubagentId && <SubagentPanel id={openSubagentId} />}
       <BackendBanner />
-      <AllowAllBanner />
       {wizardOpen && <Onboarding />}
       <DeskNotifier />
       <JobNotifier />

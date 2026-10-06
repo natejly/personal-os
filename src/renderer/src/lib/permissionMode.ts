@@ -17,3 +17,9 @@ export function modeOf(s: { permissionMode?: unknown } | null | undefined): Perm
 export const needsConfirm = (from: PermissionMode, to: PermissionMode): boolean => to === 'allow_all' && from !== 'allow_all'
 
 export const pillLabel = (m: PermissionMode): string => MODES.find((x) => x.id === m)?.pill ?? 'Auto'
+
+/** Hover text and accessible name for the composer pill. Under Allow everything the red pill is the only cue, so it says so. */
+export const pillTitle = (m: PermissionMode): string =>
+  m === 'allow_all'
+    ? 'Dangerously allow all is on: Grain acts without asking. Click to change it in Settings.'
+    : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`

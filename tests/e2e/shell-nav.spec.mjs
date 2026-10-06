@@ -239,10 +239,9 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await expect(page.getByText('Meetings is turned off')).toBeVisible()
   await menu(grain, 'Today'); await heading(page, /Today/)
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
-  // Memory… opens Settings → Memory; Knowledge Graph… on the graph
+  // Memory… opens the Memory page
   await menu(grain, 'Memory…')
-  await expect(page.getByRole('dialog').getByRole('tab', { name: /Memory|Knowledge/ }).first()).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.locator('.memory-page')).toBeVisible()
   await menu(grain, 'Settings…')
   await expect(page.getByRole('dialog').getByRole('tab').first()).toBeVisible()
   await page.keyboard.press('Escape')

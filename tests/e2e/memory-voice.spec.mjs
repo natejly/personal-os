@@ -6,8 +6,7 @@ const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserv
 const PROFILE = { summary: 'Writes short warm notes, VOICESUM style.', guidelines: ['Open with a first name', 'GUIDELINEMARK keep it brief'], phrases: ['cheers then'], avoid: ['exclamation marks'] }
 
 async function openVoice(page) {
-  await page.locator('.settings-btn').click()
-  await page.getByRole('tab', { name: 'Memory' }).click()
+  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(page.getByRole('heading', { name: /Writing samples/ })).toBeVisible()
 }
@@ -65,8 +64,7 @@ test('voice panel: edit guidelines, phrases, never, summary; edits persist and m
   expect(s.profile.edited).toBeTruthy()
   await expect(page.getByText(/Hand-edited/)).toBeVisible()
   const p2 = await grain.relaunch()
-  await p2.locator('.settings-btn').click()
-  await p2.getByRole('tab', { name: 'Memory' }).click()
+  await p2.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
   await p2.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(p2.getByLabel('Style summary')).toHaveValue('Edited summary SUMEDIT')
   clean(grain)
@@ -166,7 +164,7 @@ test('voice panel at 820x520 with a long profile and 50 samples stays scrollable
   await shrink(grain)
   await openVoice(page)
   await expect(page.locator('.style-sample')).toHaveCount(50)
-  const over = await page.evaluate(() => { const e = document.querySelector('.settings-pane'); return e.scrollWidth - e.clientWidth })
+  const over = await page.evaluate(() => { const e = document.querySelector('.memory-page'); return e.scrollWidth - e.clientWidth })
   expect(over).toBeLessThanOrEqual(1)
   clean(grain)
 })

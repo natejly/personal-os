@@ -156,7 +156,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   its reason. Its "ask" always wins, over allow rules and grants alike; an
   unreadable answer or an error asks too, safe tools are never reviewed, and a
   background run only records the verdict. Off by default. Web search retries a failed key, then falls back to keyless engines
-  rather than failing. Fetching a URL after the reply read untrusted content
+  rather than failing. A Firecrawl key (Settings, or `FIRECRAWL_API_KEY` in `.env`) makes Firecrawl the first engine for web search and page reads, with the other engines as the fallback. Fetching a URL after the reply read untrusted content
   asks once; the card can also add the host to Settings → Permissions → Allowed hosts.
   Hovering a tool row or a title-bar app button shows what it does. Tool calls
   render inline with arguments, results and timing, and every reply carries an

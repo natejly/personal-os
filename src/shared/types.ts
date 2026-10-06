@@ -1334,6 +1334,8 @@ export interface Settings {
   followUps: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
+  /** Default type for Files; a doc with its own `typography` ignores it. */
+  docTypography?: DocTypography
   theme: 'dark' | 'light' | 'system'
   /** Pastel highlight colour. Missing on older settings rows means sage. */
   accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog'
@@ -2091,6 +2093,35 @@ export interface Doc {
   size?: number
   content?: string
   pending?: number | DocRevision[]
+  /** This doc's own type; null or absent follows Settings → docTypography. */
+  typography?: DocTypography | null
+}
+
+/** A font choice for the rendered and edit views: family, px size, and measure (line width) in ch. */
+export interface DocTypography {
+  font?: 'serif' | 'sans' | 'mono' | 'book'
+  size?: number
+  measure?: number
+}
+
+/**
+ * One row of a doc's comments. A thread row (parent_id null) anchors to `quote` in the rendered text, with
+ * ~32 chars of context either side and the offset it was made at; a reply carries its thread's id and no
+ * anchor. `resolved` is read off the thread row.
+ */
+export interface DocComment {
+  id: string
+  doc_id: string
+  parent_id: string | null
+  author: 'user' | 'agent'
+  body: string
+  quote: string
+  prefix: string
+  suffix: string
+  offset_hint: number
+  resolved: number
+  created_at: number
+  updated_at: number
 }
 
 /**

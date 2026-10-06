@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
-  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
+  AgentDef, BuiltinAgent, SubagentInfo, Desk, DeskAutonomy, DeskBudget, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, DocTypography, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting, MicrosoftStatus } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
@@ -624,6 +624,8 @@ export interface State {
   flushDoc: () => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
   setDocPin: (id: string, pinned: boolean) => Promise<void>
+  /** The doc's own font/size/measure; null clears it so it follows Settings. */
+  setDocTypography: (id: string, typography: DocTypography | null) => Promise<void>
   /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
   moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
@@ -2936,6 +2938,11 @@ export const useStore = create<State>((set, get) => {
       const d = await api.docs.patch(id, { pinned })
       set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, pinned: d.pinned, updated_at: d.updated_at } : st.activeDoc }))
       await get().refreshDocs()
+    },
+    setDocTypography: async (id, typography) => {
+      // {} clears the doc's own choice, so it follows Settings again.
+      const d = await api.docs.patch(id, { typography: typography ?? {} })
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, typography: d.typography ?? null, updated_at: d.updated_at } : st.activeDoc }))
     },
     moveDoc: async (id, scope, folder) => {
       try {

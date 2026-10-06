@@ -7,7 +7,7 @@ import type {
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
-  Doc, DocFolder, FullDoc, DocRevision,
+  Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
@@ -778,7 +778,7 @@ export const api = {
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
     save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, autosave(patch)),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string; typography?: DocTypography }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
     move: (id: string, scope: string, folder: string) =>
@@ -797,7 +797,15 @@ export const api = {
     revision: (revId: string) => req<DocRevision>(`/docs/revisions/${revId}`),
     accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/reject`, { method: 'POST' }),
-    restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' })
+    restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' }),
+    /** Comment threads and replies, flat; the panel groups them by parent_id. */
+    comments: (id: string) => req<DocComment[]>(`/docs/${id}/comments`),
+    addComment: (id: string, c: { body: string; quote: string; prefix: string; suffix: string; offset_hint: number }) =>
+      req<DocComment>(`/docs/${id}/comments`, { method: 'POST', body: json(c) }),
+    replyComment: (threadId: string, body: string) => req<DocComment>(`/docs/comments/${threadId}/replies`, { method: 'POST', body: json({ body }) }),
+    /** `body` edits the text (own comments only); `resolved` closes or reopens the whole thread. */
+    patchComment: (cid: string, patch: { body?: string; resolved?: boolean }) => req<DocComment>(`/docs/comments/${cid}`, { method: 'PATCH', body: json(patch) }),
+    deleteComment: (cid: string) => req(`/docs/comments/${cid}`, { method: 'DELETE' })
   },
   /** Recorded calls. `status`/`preflight`/`pending` are the only ones safe to poll; everything else is a user action. */
   meetings: {

@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore } from '../store'
+import { useStore, useChatTainted } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -71,6 +71,8 @@ function ApprovalRow({ a, onDesk, onChat }: {
   onChat: (conversationId: string) => void
 }): JSX.Element {
   const approveTool = useStore((s) => s.approveTool)
+  // The row only says it was forced; the chat's own mark says why, when this window has the chat loaded.
+  const tainted = useChatTainted(a.conversation_id)
   const [open, setOpen] = useState(false)
   const line = argLine(a.args)
 
@@ -80,7 +82,7 @@ function ApprovalRow({ a, onDesk, onChat }: {
         <Dot tone="needs-you" label="Waiting on your approval" />
         <span className="inbox-tool">{a.tool}</span>
         <span className="inbox-line" title={line}>{line}</span>
-        {a.forced && <span className="chip warn">untrusted content in that chat</span>}
+        {a.forced && <span className="chip warn">{tainted ? 'untrusted content in that chat' : 'asks each time'}</span>}
         <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
         {a.desk_id || OPEN_ONLY.has(a.tool) ? (
           <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}

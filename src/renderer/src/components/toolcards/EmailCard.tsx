@@ -3,7 +3,7 @@ import type { KeyboardEvent, ClipboardEvent, ReactNode } from 'react'
 import { AlertTriangle, ArrowLeft, Check, ChevronRight, ExternalLink, FileText, Mail, Paperclip, Pencil, Reply, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
 import type { PendingSend, ToolEvent, Verification } from '@shared/types'
 import { api, verificationMessage } from '../../lib/api'
-import { useStore } from '../../store'
+import { useStore, useChatTainted } from '../../store'
 import {
   clock, composeArgs, composeProblem, editedFields, gmailLink, looksMarkdown, markdownToPlain, parseAddressList,
   parseMailMessage, parseMailRows, readPreview, recipientsFromArg, senderInitial, senderName, shortTime,
@@ -222,7 +222,8 @@ function Status({ tone, icon, text, badge, right, why }: {
 
 // ---------------------------------------------------------------- the compose card
 
-function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Element {
+function ComposeCard({ event, pending, decide, rules, conversationId }: ToolCardProps): JSX.Element {
+  const tainted = useChatTainted(conversationId)
   const isSend = event.name === 'gmail_send'
   const original = event.arguments
   const account = useStore((s) => s.google?.email ?? null)
@@ -320,7 +321,7 @@ function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Elem
           <button type="button" className="mc-link-btn" disabled={off} onClick={() => setBody(markdownToPlain(body))}>Clean it up</button></div>
       )}
       {problem && (to.length > 0 || bad.length > 0 || changed.length > 0) && <div className="mc-problem" role="alert">{problem}</div>}
-      {event.forced && <div className="mc-hint">Approval is required because this chat read content from outside.</div>}
+      {event.forced && <div className="mc-hint">{tainted ? 'Approval is required because this chat read content from outside.' : 'Approval is required each time.'}</div>}
       <footer className="mc-foot">
         <button type="button" className="primary-btn sm" disabled={!!problem || off} onClick={() => void go(isSend ? 'send' : 'draft')}
           title={problem ?? (isSend ? 'Send (⌘↵)' : 'Save to Drafts (⌘↵)')}>

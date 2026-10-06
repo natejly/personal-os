@@ -169,6 +169,14 @@ test('a refetch that holds more than the stream has applied cannot replace the r
   assert.equal(mergeConversation(local, remote, true, 'other').messages?.[0].content, 'plain line 0\nplain line 1\n')
 })
 
+test('a refetch mid-reply keeps the untrusted mark the stream raised, which the stored row only gets when the run ends', () => {
+  const local = convo([msg('m1', 'x')], { settings: { tainted: true, taint_sources: ['web_fetch'] } as Conversation['settings'] })
+  const remote = convo([msg('m1', 'x')])
+  assert.deepEqual(mergeConversation(local, remote, true).settings.taint_sources, ['web_fetch'])
+  assert.equal(mergeConversation(local, remote, true).settings.tainted, true)
+  assert.ok(!mergeConversation(local, remote, false).settings.tainted, 'with nothing streaming the stored row is the truth (a cleared mark stays cleared)')
+})
+
 test('tool events and spans survive a refetch that has none of them yet', () => {
   const events = [{ id: 't1', name: 'web_search', pending: false } as unknown as ToolEvent]
   const trace = [{ id: 's1' } as unknown as Span]

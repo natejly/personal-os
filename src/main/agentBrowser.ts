@@ -166,7 +166,7 @@ function touch(s: Sess): void {
   s.lastUsed = Date.now()
   if (s.timer) clearTimeout(s.timer)
   s.timer = setTimeout(() => {
-    if (s.busy) return touch(s) // never reap mid-action
+    if (s.busy || s.visible) return touch(s) // never reap mid-action, nor a window the user has taken over (a handoff can outlast the idle limit)
     closeSession(s.name)
   }, s.idleSeconds * 1000)
   s.timer.unref()

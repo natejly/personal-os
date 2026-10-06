@@ -82,7 +82,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    Under each reply, "Used N memories" and "Learned M" chips show what it read
    and saved (with Undo), and a chat's menu has **Don't learn from this chat**.
 6. **Spaces.** ⌘⇧C opens Spaces, a desktop of live windows. Use **Add widget**
-   or right-click the plane to add a chat, lists, calendar, note, memory, graph,
+   or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
    uploads, recap, project, usage, activity, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
    its own OS window. Save a layout as a preset from the Spaces bar, and lock a
@@ -205,7 +205,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     into replies.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
-  notes, memory, graph, uploads, recap, project, usage, activity, face and crew
+  docs, memory, graph, uploads, recap, project, usage, activity, face and crew
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one

@@ -11,7 +11,6 @@ import { def as documents } from './widgets/documents'
 import { def as face } from './widgets/face'
 import { def as graph } from './widgets/graph'
 import { def as memory } from './widgets/memory'
-import { def as note } from './widgets/note'
 import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
 import { def as usage } from './widgets/usage'
@@ -26,13 +25,13 @@ export interface WidgetDef {
   icon: JSX.Element
   defaultSize: { w: number; h: number }
   minSize: { w: number; h: number }
-  /** 'minimal' = title bar with a close button only (the note) */
+  /** 'minimal' = title bar with a close button only (the face) */
   chrome: 'full' | 'minimal'
-  /** wants a status ring (chat does; a note does not) */
+  /** wants a status ring (chat does; a doc does not) */
   statusful?: boolean
   /** counts against the 6-slot concurrent-live cap: iframes, d3, pollers */
   heavy?: boolean
-  /** cannot open without a ref_id: chat, note, project */
+  /** cannot open without a ref_id: chat, project */
   needsRef?: boolean
   defaultConfig?: Record<string, unknown>
   /** drag payload kinds this widget accepts as a drop target */
@@ -69,7 +68,6 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   chat,
   todos,
   calendar,
-  note,
   memory,
   graph,
   documents,

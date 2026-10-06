@@ -73,7 +73,7 @@ Type / in the composer:
 - Auto-learn saves memories and graph links after replies. When it sees you repeating yourself it suggests a skill, which waits for your approval.
 
 ## Spaces
-- Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, activity, face, crew).
+- Cmd+Shift+C opens Spaces: a desktop of live windows (chat, lists, calendar, doc, memory, graph, uploads, recap, project, usage, activity, face, crew).
 - Add widget, or right-click the plane. Drag a chat, a Files note or a sidebar row onto it; a note becomes its own editable window.
 - Ctrl+Cmd+O pops a window out into its own OS window. Ctrl+1..9 jump between Spaces; Alt+Cmd+Left/Right moves between them; Alt+Cmd+Up is the overview; Ctrl+Cmd+N makes a Space; Ctrl+Cmd+T tidies up.
 - Lock a Space with Ctrl+Cmd+L so nothing can be rearranged. Save a layout as a preset from the Spaces bar.

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, editDoc } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -97,6 +97,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
   await mkDoc(g, { title: 'Pics', content: 'before ' })
   await openFiles(page)
   await open(page, 'Pics')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.evaluate((b64) => {
@@ -144,6 +145,7 @@ test('delete a doc: undo from the toast, then delete again and restore from Sett
   const d = await mkDoc(g, { title: 'Doomed', content: 'precious words' })
   await openFiles(page)
   await open(page, 'Doomed')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.keyboard.insertText(' unsaved tail') // deleting flushes buffered typing first
@@ -154,6 +156,7 @@ test('delete a doc: undo from the toast, then delete again and restore from Sett
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(page.locator('.doc-row', { hasText: 'Doomed' }).last()).toBeVisible()
   await open(page, 'Doomed')
+  await editDoc(page)
   await expect(body(page)).toHaveValue('precious words unsaved tail')
   expect((await g.api(`/docs/${d.id}`)).content).toBe('precious words unsaved tail')
   // again, restore through the Trash panel
@@ -204,6 +207,7 @@ test('a change made elsewhere: draft is kept, conflict toast offers Reload', asy
   const d = await mkDoc(g, { title: 'Shared', content: 'original text' })
   await openFiles(page)
   await open(page, 'Shared')
+  await editDoc(page)
   await g.api(`/docs/${d.id}`, { method: 'PUT', body: { content: 'someone else rewrote everything' } })
   await body(page).click()
   await page.keyboard.press('Meta+End')
@@ -228,6 +232,7 @@ test('a pin made while typing does not lose the typing (metadata patch bumps upd
   const d = await mkDoc(g, { title: 'Pinny', content: 'base' })
   await openFiles(page)
   await open(page, 'Pinny')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.keyboard.insertText(' typed')
@@ -249,6 +254,7 @@ test('history tab lists saves and restoring a version brings the text back', asy
   patient(g)
   await openFiles(page)
   await open(page, 'Versions')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Toggle side panel' }).click()
   await page.getByRole('tab', { name: 'History' }).click()
   page.once('dialog', (dlg) => void dlg.accept())

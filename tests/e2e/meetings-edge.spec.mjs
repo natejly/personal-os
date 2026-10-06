@@ -1,5 +1,6 @@
 import { test, expect } from './helpers/fakemic.mjs'
 import { enableModules, reload, realErrors, small } from './helpers/mah.mjs'
+import { editDoc } from './helpers/files.mjs'
 
 test.beforeEach(() => test.setTimeout(240_000))
 
@@ -59,6 +60,7 @@ test('dictation commands: new line, scratch that and stop dictation act on the e
   const { page, api, stt } = grain
   const doc = await api('/docs', { method: 'POST', body: { title: 'Command doc', content: '' } })
   await openDoc(grain, 'Command doc')
+  await editDoc(page)
   const editor = page.locator('textarea.md-input')
   await editor.click()
   await page.getByRole('button', { name: 'Recording options' }).click()
@@ -140,6 +142,7 @@ test('a recording block in the rendered doc is a chip with the recording state; 
   const { page, api } = grain
   const doc = await api('/docs', { method: 'POST', body: { title: 'Chip doc', content: '# Chip\n' } })
   await openDoc(grain, 'Chip doc')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Record', exact: true }).click()
   await expect(page.locator('.dr-bar')).toBeVisible({ timeout: 60_000 })
   await expect.poll(async () => (await api(`/docs/${doc.id}`)).content, { timeout: 30_000 }).toContain('grain-recording:')

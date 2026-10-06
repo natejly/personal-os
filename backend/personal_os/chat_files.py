@@ -162,17 +162,51 @@ class ChatFiles:
                "AND (f.kind<>'note' OR (n.id IS NOT NULL AND n.deleted_at IS NULL))")
         return (sql + " AND c.project_id IS NULL") if scope == "personal" else sql, []
 
-    def list(self, conversation_id: str | None = None, scope: str = "all", limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+    def _project(self, c: sqlite3.Connection) -> str:
+        """`WITH ... p`: one row per (project, kind, ref) across live project chats, project notes and project uploads, so a
+        file touched by several chats (or also owned directly) is one item. The newest activity supplies the action; the
+        newest chat supplies conversation_id. Bare columns beside a single MAX() take the max row's values."""
+        notes = "docs" if _has(c, "docs") else ("(SELECT NULL AS id, NULL AS title, NULL AS project_id, NULL AS created_at, "
+                                                "NULL AS updated_at, NULL AS deleted_at WHERE 0)")
+        chat_sql, _ = self._from(c, "all")
+        return f"""WITH u AS (
+          SELECT c.project_id AS pid, f.kind, f.ref, f.created_at AS ts, f.action, f.message_id,
+            coalesce(CASE f.kind WHEN 'upload' THEN d.name WHEN 'note' THEN n.title END, f.name) AS name, coalesce(d.pinned, 0) AS pinned,
+            f.conversation_id AS cid, c.title AS ctitle, f.created_at AS cts {chat_sql} AND c.project_id IS NOT NULL
+          UNION ALL
+          SELECT project_id, 'note', id, updated_at, CASE WHEN updated_at = created_at THEN 'created' ELSE 'edited' END, NULL,
+            title, 0, NULL, NULL, NULL FROM {notes} WHERE project_id IS NOT NULL AND deleted_at IS NULL
+          UNION ALL
+          SELECT project_id, 'upload', id, created_at, 'uploaded', NULL, name, pinned, NULL, NULL, NULL
+            FROM documents WHERE project_id IS NOT NULL AND deleted_at IS NULL),
+        g AS (SELECT pid, kind, ref, MAX(ts) AS created_at, action, message_id, name, pinned FROM u GROUP BY pid, kind, ref),
+        h AS (SELECT pid, kind, ref, MAX(cts), cid, ctitle, COUNT(DISTINCT cid) AS n FROM u WHERE cid IS NOT NULL GROUP BY pid, kind, ref),
+        p AS (SELECT g.kind || ':' || g.ref AS id, g.pid AS project_id, g.kind, g.ref, g.created_at, g.action, g.message_id, g.name,
+            NULL AS doc_name, NULL AS note_title, g.pinned, h.cid AS conversation_id, h.ctitle AS conversation_title,
+            coalesce(h.n, 0) AS chat_count FROM g LEFT JOIN h ON h.pid = g.pid AND h.kind = g.kind AND h.ref = g.ref)"""
+
+    def list(self, conversation_id: str | None = None, scope: str = "all", limit: int = 50, cursor: str | None = None,
+             project_id: str | None = None) -> dict[str, Any]:
         limit = max(1, min(200, int(limit)))
         with self.db.tx() as c:
+            if scope == "project":
+                where, args = "WHERE project_id=?", [project_id]
+                if cursor:
+                    ts, _, fid = cursor.partition("|")
+                    where, args = where + " AND (created_at < ? OR (created_at = ? AND id < ?))", args + [float(ts), float(ts), fid]
+                rows = c.execute(f"{self._project(c)} SELECT * FROM p {where} ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit + 1)).fetchall()
+                return self._page(rows, limit)
             sql, args = self._from(c, scope)
             if conversation_id:
                 sql, args = sql + " AND f.conversation_id=?", args + [conversation_id]
             if cursor:
                 ts, _, fid = cursor.partition("|")
                 sql, args = sql + " AND (f.created_at < ? OR (f.created_at = ? AND f.id < ?))", args + [float(ts), float(ts), fid]
-            rows = c.execute("SELECT f.*, c.title AS conversation_title, c.project_id, d.name AS doc_name, n.title AS note_title "
-                             f"{sql} ORDER BY f.created_at DESC, f.id DESC LIMIT ?", (*args, limit + 1)).fetchall()
+            rows = c.execute("SELECT f.*, c.title AS conversation_title, c.project_id, d.name AS doc_name, n.title AS note_title, "
+                             f"0 AS pinned, 1 AS chat_count {sql} ORDER BY f.created_at DESC, f.id DESC LIMIT ?", (*args, limit + 1)).fetchall()
+        return self._page(rows, limit)
+
+    def _page(self, rows: list[sqlite3.Row], limit: int) -> dict[str, Any]:
         more, rows = len(rows) > limit, rows[:limit]
         files = [f for r in rows if (f := self._shape(r)) is not None]
         nxt = f"{rows[-1]['created_at']!r}|{rows[-1]['id']}" if more else None
@@ -198,13 +232,19 @@ class ChatFiles:
                 return None
         return {"id": r["id"], "conversation_id": r["conversation_id"], "conversation_title": r["conversation_title"],
                 "project_id": r["project_id"], "kind": kind, "ref": ref, "name": name, "action": r["action"],
-                "message_id": r["message_id"], "created_at": r["created_at"], "missing": missing, "rel": rel}
+                "message_id": r["message_id"], "created_at": r["created_at"], "missing": missing, "rel": rel,
+                "pinned": bool(r["pinned"]), "chat_count": r["chat_count"]}
 
     def counts(self, scope: str = "all") -> dict[str, int]:
         with self.db.tx() as c:
             sql, args = self._from(c, scope)
             rows = c.execute(f"SELECT f.conversation_id AS cid, COUNT(*) AS n {sql} GROUP BY f.conversation_id", args).fetchall()
         return {r["cid"]: r["n"] for r in rows}
+
+    def project_counts(self) -> dict[str, int]:
+        with self.db.tx() as c:
+            rows = c.execute(f"{self._project(c)} SELECT project_id, COUNT(*) AS n FROM p GROUP BY project_id").fetchall()
+        return {r["project_id"]: r["n"] for r in rows}
 
 
 def router(cf: ChatFiles) -> Any:
@@ -226,15 +266,17 @@ def router(cf: ChatFiles) -> Any:
         return page(conversation_id=id, limit=limit)
 
     @r.get("/chat-files")
-    def all_files(scope: str = "all", limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
-        if scope not in ("personal", "all"):
-            raise HTTPException(400, "scope must be personal or all")
-        return page(scope=scope, limit=limit, cursor=cursor)
+    def all_files(scope: str = "all", limit: int = 50, cursor: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+        if scope not in ("personal", "all", "project"):
+            raise HTTPException(400, "scope must be personal, all or project")
+        if scope == "project" and not project_id:
+            raise HTTPException(400, "scope=project needs project_id")
+        return page(scope=scope, limit=limit, cursor=cursor, project_id=project_id)
 
     @r.get("/chat-files/counts")
     def file_counts(scope: str = "all") -> dict[str, Any]:
         if scope not in ("personal", "all"):
             raise HTTPException(400, "scope must be personal or all")
-        return {"counts": cf.counts(scope)}
+        return {"counts": cf.counts(scope), "projects": cf.project_counts()}
 
     return r

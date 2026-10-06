@@ -122,12 +122,12 @@ test('palette inside the Markdown editor is handed back as ⌘K (insert link)', 
 
 test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => {
   const orig = useStore.getState().settings
-  useStore.setState({ settings: { ...orig, hiddenViews: ['activity'] }, toasts: [] })
+  useStore.setState({ settings: { ...orig, hiddenViews: ['library'] }, toasts: [] })
   useStore.getState().setView('todos')
-  fire('view:activity')
+  fire('view:library')
   assert.equal(useStore.getState().view, 'todos')
   const [t] = useStore.getState().toasts
-  assert.equal(t.text, 'Activity is turned off')
+  assert.equal(t.text, 'Library is turned off')
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
   assert.equal(useStore.getState().settingsOpen, true)
@@ -230,7 +230,7 @@ test('⌘0…⌘n are contiguous, each used once, each a distinct target', async
     const d = /^CmdOrCtrl\+(\d)$/.exec(s.keys)
     return d && s.action ? [[Number(d[1]), s.action] as const] : []
   })
-  assert.equal(rows.length, 8, 'Today, Chats, Todos, Calendar, Files, Mail, Memory, Activity')
+  assert.equal(rows.length, 7, 'Today, Chats, Todos, Calendar, Files, Mail, Memory')
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
   assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')

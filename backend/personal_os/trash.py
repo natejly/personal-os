@@ -85,7 +85,7 @@ class Trash:
     @staticmethod
     def _demote(c: Any, project_id: str) -> None:
         """What the FK's ON DELETE SET NULL used to do when a project row was erased: docs, todos, notes,
-        boards, canvases, presets, meetings, jobs... drop to personal. The row now stays, so do it by hand,
+        boards, canvases, presets, jobs... drop to personal. The row now stays, so do it by hand,
         for every table that declares it rather than a list that goes stale."""
         tables = [r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
         for t in tables:

@@ -2,8 +2,8 @@
 
 Capture is the system `screencapture` binary taking one still at a time (no video decoding, no new
 dependency), each downscaled with Pillow and dropped when it is a near copy of the last kept frame.
-Beside every frame goes the frontmost app and window title from the same probes the activity monitor
-uses. An imported video is cut into the same kind of frames with `ffmpeg` when it is installed.
+Beside every frame goes the frontmost app and window title from macos.py's probes.
+An imported video is cut into the same kind of frames with `ffmpeg` when it is installed.
 
 Nothing here leaves the machine until the user presses Extract: then a handful of frames and the
 focus timeline go to the configured vision model once, and what comes back is a draft (title, goal,
@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import activity, llm, redact, vision
+from . import llm, macos, redact, vision
 from .audiocap import ffmpeg_path
 from .db import Database, new_id, now, row_to_dict
 from .learn import MAX_SKILL_DESCRIPTION, MAX_SKILL_NAME, _fence, _parse_json
@@ -261,10 +261,10 @@ class Teach:
     # ---- screen capture ----
     def start(self) -> dict[str, Any]:
         """Begin recording, or {needs_permission, state} when macOS has not granted Screen Recording."""
-        if not activity.IS_MAC:
+        if not macos.IS_MAC:
             raise TeachError("Screen recording is macOS-only. Import a video instead.")
-        state = activity.screen_recording_status()
-        if state == activity.DENIED:  # an unknown answer (no pyobjc) is let through: the OS asks on first capture
+        state = macos.screen_recording_status()
+        if state == macos.DENIED:  # an unknown answer (no pyobjc) is let through: the OS asks on first capture
             return {"needs_permission": True, "state": state}
         with self._lock:
             if self._active:
@@ -296,12 +296,12 @@ class Teach:
                 while not a["stop"].is_set() and time.time() - a["started"] < MAX_SECONDS and kept < MAX_FRAMES:
                     tick = time.time()
                     try:
-                        if activity.secure_input_active():  # a password field is focused: no picture of it
+                        if macos.secure_input_active():  # a password field is focused: no picture of it
                             a["stop"].wait(INTERVAL)
                             continue
-                        fa = activity.frontmost_app()  # (name, bundle id, pid)
+                        fa = macos.frontmost_app()  # (name, bundle id, pid)
                         app, pid = fa[0], fa[2]
-                        focus = (app, activity.focused_window_title(pid))
+                        focus = (app, macos.focused_window_title(pid))
                         frame = None
                         if self._grab(raw):
                             h = dhash(raw)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import activity, redact  # noqa: E402
+from personal_os import redact  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 
 
@@ -90,37 +90,6 @@ def test_sanitize_url() -> None:
     assert redact.sanitize_url("https://e.com/docs/getting-started") == "https://e.com/docs/getting-started"
     for bad in ("", "not a url", None, 12):
         assert redact.sanitize_url(bad) == ""  # type: ignore[arg-type]
-
-
-def test_gate_record_everything_passthrough_and_counts() -> None:
-    cfg = {"redact": True, "redactAllow": [], "redactDeny": ["falcon"], "redactThreshold": 0.4}
-    g = activity.Gate(lambda: cfg)
-    assert g.scrub("call 415-555-0134 about falcon") == "call [phone] about [redacted]"
-    assert g.counts == {"phone": 1, "custom": 1}
-    assert g.scrub_url("https://x.com/?token=1") == "https://x.com/?token=~"
-    cfg["redact"] = False
-    assert g.scrub("call 415-555-0134") == "call 415-555-0134"
-    assert g.scrub_url("https://x.com/?token=1#f") == "https://x.com/?token=1#f"
-
-
-def test_focus_close_stores_sanitized_url() -> None:
-    with tempfile.TemporaryDirectory() as d:
-        async def noop(*a, **k):
-            return ""
-        m = activity.Monitor(Database(Path(d)), lambda: {"baseUrl": "x", "apiKey": "", "defaultModel": "m", "extractionModel": ""}, noop)
-        col = activity.FocusCollector(m)
-        col._close({"app": "Safari", "bundle": "", "title": "Cb", "start": time.time() - 5,
-                    "url": "https://x.com/cb?code=ABC123&state=xyz#access_token=zzz", "key": ()})
-        rows = m.store.recent(limit=5) if hasattr(m.store, "recent") else []
-        urls = [r["url"] for r in rows if r.get("kind") == "focus"]
-        assert urls == ["https://x.com/cb?code=~&state=~"], urls
-        assert "redactions" in m.status()
-
-
-def test_redact_preview_route_helper() -> None:
-    r = activity.redact_preview({"redact": True, "redactAllow": [], "redactDeny": []}, "mail ada@example.com")
-    assert r["redacted"] == "mail [email]" and r["spans"][0]["entity"] == "email"
-    assert "text" not in r
 
 
 def test_v1_api_unchanged() -> None:

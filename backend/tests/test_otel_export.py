@@ -89,12 +89,6 @@ off = json.dumps(otel_export.to_otlp(spans, conversation_id="c", message_id="m",
 check(SECRET not in off, "no content when flag is off")
 on = json.dumps(otel_export.to_otlp(spans, conversation_id="c", message_id="m", model="m", include_content=True, content={"reply": reply, "used": {}}))
 check(SECRET in on, "content present when flag is on")
-vetoed = json.dumps(otel_export.to_otlp(spans, conversation_id="c", message_id="m", model="m", include_content=True,
-                                        content={"reply": reply, "used": {"meetings": "standup notes"}}))
-check(SECRET not in vetoed, "meetings in context vetoes content")
-vetoed2 = json.dumps(otel_export.to_otlp(spans, conversation_id="c", message_id="m", model="m", include_content=True,
-                                         content={"reply": reply, "used": {"activity": "block"}}))
-check(SECRET not in vetoed2, "activity in context vetoes content")
 
 # ---- 4. export
 sent: list[tuple[str, dict[str, str]]] = []

@@ -251,6 +251,16 @@ def _sticky_notes_into_docs(c: sqlite3.Connection) -> None:
     c.execute("DROP TABLE notes")
 
 
+def _drop_meetings_activity(c: sqlite3.Connection) -> None:
+    """The meetings recorder and the activity monitor are gone: drop their tables (child tables first; an index
+    goes with its table, and a virtual table takes its shadow tables with it). Settings rows `meetings`, `activity`
+    and `digest` are left alone: stt.config_for seeds the voice config from a legacy `meetings` row at read time."""
+    for table in ("meeting_action_items", "meeting_revisions", "meeting_segments", "meeting_vectors", "meetings_fts",
+                  "meetings", "activity_events", "activity_summaries", "activity_profile", "activity_day_stats",
+                  "activity_habits", "activity_suggestions", "activity_patterns"):
+        c.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 def _memories_expires_at(c: sqlite3.Connection) -> None:
     """Short-lived notes: a memory past `expires_at` (epoch seconds) leaves context and search but stays as history.
     NULL = no expiry."""
@@ -387,6 +397,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (19, "drop_legacy_texting_keys", _drop_legacy_texting_keys),
     (20, "drop_budget_settings", _drop_budget_settings),
     (21, "autonomous_by_default", _autonomous_by_default),
+    (22, "drop_meetings_activity", _drop_meetings_activity),
 ]
 
 

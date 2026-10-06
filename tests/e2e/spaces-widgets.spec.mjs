@@ -5,7 +5,7 @@ test.describe.configure({ timeout: 300_000 })
 
 const SIMPLE = [
   ['Lists', 'todos'], ['Calendar', 'calendar'], ['Memory', 'memory'], ['Graph', 'graph'], ['Uploads', 'documents'],
-  ['Recap', 'recap'], ['Usage', 'usage'], ['Activity', 'activity'], ['Face', 'face']
+  ['Recap', 'recap'], ['Usage', 'usage'], ['Face', 'face']
 ]
 
 async function addMenu(page) {
@@ -21,7 +21,7 @@ test('every Add-widget entry opens a window that renders without console errors'
   // the menu lists one entry per registry kind
   const menu = await addMenu(page)
   const labels = (await menu.locator('[role=menuitem]').allInnerTexts()).map((t) => t.trim())
-  for (const l of ['Chat', 'Lists', 'Calendar', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Activity', 'Doc', 'Face']) {
+  for (const l of ['Chat', 'Lists', 'Calendar', 'Memory', 'Graph', 'Uploads', 'Recap', 'Project', 'Usage', 'Doc', 'Face']) {
     expect(labels).toContain(l)
   }
   await page.keyboard.press('Escape')

@@ -47,8 +47,7 @@ export function PermissionsPanel({ compact }: { compact?: boolean }): JSX.Elemen
     const row = rows.find((r) => r.id === id)
     if (!row) return
     try {
-      if (id === 'inputMonitoring') await api.activity.requestPermission('input_monitoring')
-      else if (id === 'fullDisk') await sys?.openPane(row.pane ?? '')
+      if (id === 'fullDisk') await sys?.openPane(row.pane ?? '')
       else if (sys) {
         const r = await sys.grant(id)
         if (!alive.current) return

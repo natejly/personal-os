@@ -15,7 +15,7 @@ npm run package:x64      # Intel build
 
 1. `scripts/bundle-backend.sh [arm64|x64]` downloads the pinned CPython (tag and sha256 are constants
    at the top of the script; the download is checksum-verified and cached in `build/.cache`), runs
-   `uv pip install ./backend[activity]` into it (non-editable, with the macOS pyobjc extras), strips
+   `uv pip install ./backend[mac]` into it (non-editable, with the macOS pyobjc extras), strips
    tests, caches, unused stdlib and Google discovery documents, precompiles bytecode, and smoke-imports
    the result from a neutral directory. Output: `build/backend-bundle/` (gitignored, ~315 MB).
    Needs `uv` on the build machine only.

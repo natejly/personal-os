@@ -1,22 +1,12 @@
 # Grain reference
 
-Generated from `GET /tools` on a fresh backend (147 tools). `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, sandbox runtime, desktop bridge, activity monitor on) to be offered at all.
+Generated from `GET /tools` on a fresh backend (152 tools). `default` is the mode before any Settings, project or chat override; `locked` marks a tool in the `alwaysAsk` setting (external/schedules danger only), whose mode tops out at `ask`. A tool also needs its backing service (Google connected, sandbox runtime, desktop bridge) to be offered at all.
 
 Danger tiers (`backend/personal_os/tools.py`): `safe` read-only in-app, `writes` in-app write, `network` reads the internet, `executes` sandboxed code, `external` writes to systems outside the app, `plan` the call is itself an approval card, `schedules` books future unattended work. Default mode is `on` for every tier except `plan` (`ask`); a few tools override it (shown below).
 
 Always forced to ask in a reply that has read untrusted content (tainted): network tools, locked tools, and the lasting-text writes in `PROMPT_WRITES` (save_memory, graph_add, doc_create/edit/delete, todo_add/update/delete, skill_draft/revise/from_run, health_log, convert_document and a few more).
 
 ## Tools by group
-
-### activity
-
-| tool | danger | default | what it does |
-|---|---|---|---|
-| `activity_recent` | safe | on | What the user has actually been doing on their computer recently, from the local activity monitor: a live l... |
-| `activity_access` | safe | on | Which macOS permissions the activity monitor currently has (Accessibility, Input Monitoring, Screen Recordi... |
-| `activity_insights` | safe | on | The habits the activity monitor has noticed about how this person works, the patterns behind them, and the... |
-| `activity_report` | safe | on | Where the user's focused computer time went by category (Work/Coding, Comms, Social/Media...) over the last... |
-| `activity_pause` | external | on | Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. |
 
 ### agents
 
@@ -175,14 +165,6 @@ Always forced to ask in a reply that has read untrusted content (tainted): netwo
 |---|---|---|---|
 | `mcp_tool_search` | safe | on | Search the connected third-party (MCP) tools by keyword and load the best matches so you can call them. |
 
-### meetings
-
-| tool | danger | default | what it does |
-|---|---|---|---|
-| `meeting_list` | safe | on | List the user's meetings - the notes they took on calls, plus whatever was transcribed. |
-| `meeting_search` | safe | on | Full-text search across meeting titles, the user's notes, the enhanced notes and the transcripts, one row p... |
-| `meeting_read` | safe | on | Read one part of a meeting, as numbered lines. |
-
 ### memory
 
 | tool | danger | default | what it does |
@@ -310,8 +292,7 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New file / today's file |
 | ⌘U | Upload file |
-| ⌘0 ... ⌘7 | Today, Chats, Lists, Calendar, Files, Mail, Memory, Activity |
-| ⌘⇧M | Meetings |
+| ⌘0 ... ⌘6 | Today, Chats, Lists, Calendar, Files, Mail, Memory |
 | ⌘K | Command palette |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |

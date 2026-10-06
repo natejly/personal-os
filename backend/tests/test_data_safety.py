@@ -241,7 +241,7 @@ class BackupTests(unittest.TestCase):
         (self.d / "uploads" / "a.txt").write_text("uploaded")
         (self.d / "uploads" / ("ab" * 32)).mkdir()
         (self.d / "uploads" / ("ab" * 32) / "Report.pdf").write_text("blob")
-        for rel in ("cowork/d1/outputs/report.md", "cowork/d1/work/scratch.txt", "recordings/m1/audio.wav"):
+        for rel in ("cowork/d1/outputs/report.md", "cowork/d1/work/scratch.txt"):
             (self.d / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.d / rel).write_text("x")
         dest = self.d / "out.zip"
@@ -250,7 +250,7 @@ class BackupTests(unittest.TestCase):
             names = set(z.namelist())
             self.assertTrue({"README.txt", "grain.db", "uploads/a.txt", "uploads/" + "ab" * 32 + "/Report.pdf", "export/conversations.md",
                              "export/memories.json", "export/documents.md",
-                             "cowork/d1/outputs/report.md", "recordings/m1/audio.wav"} <= names)
+                             "cowork/d1/outputs/report.md"} <= names)
             self.assertNotIn("cowork/d1/work/scratch.txt", names)
             convs = json.loads(z.read("export/conversations.json"))
             self.assertEqual(convs[0]["messages"][0]["content"], "hi there")

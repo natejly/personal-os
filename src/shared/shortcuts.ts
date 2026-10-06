@@ -52,9 +52,6 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'view-docs', label: 'Files', keys: 'CmdOrCtrl+4', group: 'Go to', action: 'view:docs', scope: 'menu' },
   { id: 'view-mail', label: 'Mail', keys: 'CmdOrCtrl+5', group: 'Go to', action: 'view:mail', scope: 'menu' },
   { id: 'view-memory', label: 'Memory…', keys: 'CmdOrCtrl+6', group: 'Go to', action: 'view:memory', scope: 'menu' },
-  { id: 'view-activity', label: 'Activity', keys: 'CmdOrCtrl+7', group: 'Go to', action: 'view:activity', scope: 'menu' },
-  // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
-  { id: 'view-meetings', label: 'Meetings', keys: 'CmdOrCtrl+Shift+M', group: 'Go to', action: 'view:meetings', scope: 'menu' },
 
   // Chat
   { id: 'chat-prev', label: 'Previous Chat', keys: 'CmdOrCtrl+Shift+[', group: 'Chat', action: 'chat:prev', scope: 'menu' },
@@ -69,6 +66,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'stop', label: 'Stop the reply', keys: 'Escape', group: 'Chat', scope: 'component' },
   // The composer binds ⇧⌘P itself; the menu shows it without registering it.
   { id: 'plan-mode', label: 'Cycle Plan Mode', keys: 'CmdOrCtrl+Shift+P', group: 'Chat', scope: 'component' },
+  // The chord is the user's (Settings → Advanced → Voice and shortcuts); the overlay shows the live one.
+  { id: 'dictation', label: 'Dictate (hold) or latch (tap)', keys: 'Control+Alt+D', group: 'Chat', scope: 'component' },
 
   // Files (the note editor)
   { id: 'md-toggle-edit', label: 'Edit or read', keys: 'CmdOrCtrl+E', group: 'Files', scope: 'component' },
@@ -79,8 +78,6 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'md-math', label: 'Maths', keys: 'Control+Command+M', group: 'Files', scope: 'component' },
   { id: 'md-code', label: 'Code', keys: 'CmdOrCtrl+Shift+E', group: 'Files', scope: 'component' },
   { id: 'md-indent', label: 'Indent', keys: 'Tab', group: 'Files', scope: 'component' },
-  // The chord is the user's (Settings → Behavior → Shortcuts); the overlay shows the live one.
-  { id: 'dictation', label: 'Dictate (hold) or latch (tap)', keys: 'Control+Alt+D', group: 'Files', scope: 'component' },
 
   // Spaces
   { id: 'canvas-toggle', label: 'Toggle Spaces', keys: 'CmdOrCtrl+Shift+C', group: 'Spaces', action: 'canvas:toggle', scope: 'menu' },

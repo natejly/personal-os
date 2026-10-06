@@ -114,14 +114,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
     "quickAskShortcut": "Alt+Space",
-    # Hold this in the Files editor to dictate while held; a quick tap latches it on.
+    # Hold this in the chat box to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Read aloud (the platform speech engine) and the hands-free voice chat loop's safety cap.
     "ttsVoice": "",
     "ttsRate": 1.0,
     "voiceLoopMaxTurns": VOICE_LOOP_MAX_TURNS,
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
-    # Meetings / Activity ship shown; showing a view records nothing (consent and OS permissions gate that).
     "homeWidgets": {},
     "hiddenViews": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
@@ -246,15 +245,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "microsoftToken": {},
     # Which account Mail, Calendar, the mail/calendar tools, the reply tracker and the outbox use: "google" | "microsoft".
     "pimProvider": "google",
-    # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
-    # /activity/config rather than /settings so the merge is a deep one.
-    "activity": {"enabled": True},
-    # Meetings. Shape and defaults live in meetings.DEFAULT_CONFIG; patched through
-    # /meetings/config rather than /settings so the merge is a deep one.
-    "meetings": {"enabled": True},
-    # Daily digest (digest.py): one quiet Agent Inbox row a day, never an OS notification.
-    # hour: local hour of day (0-23) it is written at, or the first launch after it.
-    "digest": {"enabled": True, "hour": 8},
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
@@ -266,8 +256,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMinSimilarity": RETRIEVAL_MIN_SIMILARITY,
     # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
     "hybridRetrieval": True,
-    # Embed meeting summaries/transcripts for by-meaning meeting search (meeting_index.py). Off: it sends meeting text to the embedding provider.
-    "meetingEmbeddings": False,
     "retrievalPerDocCap": RETRIEVAL_PER_DOC_CAP,
     "retrievalCandidates": RETRIEVAL_CANDIDATES,
     # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
@@ -1348,7 +1336,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     return text
 
 
-def audio_usage(model: str, seconds: float, kind: str = "meeting-stt") -> None:
+def audio_usage(model: str, seconds: float, kind: str = "voice-stt") -> None:
     """Record transcribed audio in the usage log; duration_ms carries the audio length, not wall time.
 
     Synchronous and silent on purpose: transcription runs on worker threads, and a missing

@@ -15,7 +15,7 @@ one-line hint. Only the explainer's buttons take clicks, so pan and right-click 
 ## Windows
 
 Each window is a widget of one kind: `chat`, `todos`, `calendar`,
-`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `doc`,
+`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `doc`,
 `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
 desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a doc, a nav row) onto the plane,

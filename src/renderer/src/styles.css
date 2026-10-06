@@ -2728,6 +2728,10 @@ select:focus-visible {
 .find-hint { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 ::highlight(chat-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
 ::highlight(chat-find-current) { background-color: var(--accent-solid); color: #fff; }
+.doc-find { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; width: fit-content; max-width: calc(100% - 16px); margin: 8px 8px 6px auto; padding: 4px 6px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.doc-find input { flex: 0 1 200px; min-width: 0; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 8px; color: var(--text); outline: 0; }
+::highlight(doc-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
+::highlight(doc-find-current) { background-color: var(--accent-solid); color: #fff; }
 /* A message jumped to from a memory's source. */
 @keyframes msg-flash { from { background: color-mix(in srgb, var(--accent) 30%, transparent); } to { background: transparent; } }
 .msg.msg-flash { border-radius: 8px; animation: msg-flash 1.8s ease-out; }

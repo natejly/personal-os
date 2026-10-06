@@ -33,6 +33,30 @@ def tool(name: str, description: str = "Does a thing.", parameters: dict[str, An
             if parameters is None else parameters, **extra}
 
 
+class _Block:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _CallResult:
+    def __init__(self, content: list[Any], structured: Any = None, is_error: bool = False) -> None:
+        self.content = content
+        self.structured_content = structured
+        self.is_error = is_error
+
+
+class TestResultText(unittest.TestCase):
+    def test_a_token_in_a_tool_result_is_stripped(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        out = mcp_client._result_dict(_CallResult(
+            [_Block(f"key {pat}")], {"note": pat, "ok": True},
+        ))
+        self.assertNotIn(pat, out["content"])
+        self.assertIn("[github-pat]", out["content"])
+        self.assertEqual(out["structured"], {"note": "[github-pat]", "ok": True})
+        self.assertFalse(out["is_error"])
+
+
 class TestStaticEval(unittest.TestCase):
     def codes(self, report: dict[str, Any]) -> set[str]:
         return {f["code"] for f in report["findings"]}
@@ -245,6 +269,19 @@ class TestConnect(StubCase):
         await self.until(lambda: not self.stub_processes(), 10.0, "every stub process to exit")
 
 
+class TestListChanged(StubCase):
+    async def test_a_mid_session_tool_change_is_re_synced_without_reconnecting(self) -> None:
+        server = self.add("friendly")
+        await self.client.start()
+        await self.client.wait_ready(20.0)
+        versions = lambda: self.store.db.connect().execute(
+            "SELECT COUNT(*) FROM mcp_tool_versions WHERE tool_slug=?", ("mcp__friendly__echo",)).fetchone()[0]
+        self.assertEqual(versions(), 1)
+        await self.client.call("mcp__friendly__mutate", {})
+        await self.until(lambda: versions() == 2, 10.0, "the re-listed tool to be recorded as a second version")
+        self.assertEqual(self.client.status(server["id"])[0]["attempts"], 0)
+
+
 class TestMisbehaviour(StubCase):
     async def test_a_hanging_tool_times_out_and_does_not_block_the_next_call(self) -> None:
         self.add("hostile")
@@ -312,10 +349,56 @@ class TestMisbehaviour(StubCase):
                          "a slow server is not a misconfigured one; it keeps being retried")
         await self.until(lambda: self.client.status(server["id"])[0]["attempts"] >= 2, 20.0, "a second attempt")
 
-    async def test_a_remote_transport_is_refused_for_now(self) -> None:
-        probe = await self.client.probe({"transport": "http", "url": "https://example.com"})
+    async def test_sse_is_refused_and_http_needs_a_url(self) -> None:
+        probe = await self.client.probe({"transport": "sse", "url": "https://example.com"})
         self.assertFalse(probe["ok"])
         self.assertIn("not supported", probe["error"])
+        probe = await self.client.probe({"transport": "http", "url": ""})
+        self.assertIn("no URL", probe["error"])
+
+
+def _free_port() -> int:
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+class TestRemoteHttp(unittest.IsolatedAsyncioTestCase):
+    """A streamable-HTTP server end to end: probe, supervise, call."""
+
+    async def asyncSetUp(self) -> None:
+        import sys
+        self.port = _free_port()
+        stub = Path(__file__).with_name("mcp_http_stub.py")
+        self.proc = subprocess.Popen([sys.executable, str(stub), str(self.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.url = f"http://127.0.0.1:{self.port}/mcp"
+        import socket
+        for _ in range(100):
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", self.port)) == 0:
+                    break
+            await asyncio.sleep(0.1)
+        self.store = McpServers(Database(tempfile.mkdtemp(prefix="mcphttp-")))
+        self.client = McpClient(self.store, connect_timeout=15.0, call_timeout=10.0)
+
+    async def asyncTearDown(self) -> None:
+        await self.client.stop()
+        self.proc.terminate()
+        self.proc.wait(10)
+
+    async def test_probe_lists_remote_tools(self) -> None:
+        probe = await self.client.probe({"transport": "http", "url": self.url})
+        self.assertTrue(probe["ok"], probe["error"])
+        self.assertEqual([t["name"] for t in probe["tools"]], ["daily"])
+
+    async def test_supervised_remote_call(self) -> None:
+        row = self.store.create_server("Remote", transport="http", url=self.url)
+        await self.client.start()
+        self.assertTrue(await self.client.wait_ready(15.0), self.client.status(row["id"]))
+        slug = self.store.tools(row["id"])[0]["slug"]
+        out = await self.client.call(slug, {"date": "2026-10-01"})
+        self.assertIn('"total_steps": 8123', out["content"])
 
 
 class TestShadowing(StubCase):

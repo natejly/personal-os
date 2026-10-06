@@ -34,9 +34,10 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
 def test_default_seed() -> None:
     first = j("GET", "/canvases")
     check(len(first) == 1, "one seeded canvas")
-    check(first[0]["name"] == "Desk 1", "seeded canvas is Desk 1")
+    check(first[0]["name"] == "Space 1", "seeded canvas is Space 1")
     check(first[0]["windows"] == [], "seeded canvas has no windows")
     check(first[0]["snap_mode"] == "both" and first[0]["grid_size"] == 16, "seed defaults")
+    check(first[0]["locked"] == 0, "a seeded space starts unlocked")
     again = j("GET", "/canvases")
     check(len(again) == 1 and again[0]["id"] == first[0]["id"], "seeding is idempotent across two GETs")
 
@@ -60,6 +61,10 @@ def test_canvas_crud() -> None:
     check(j("DELETE", f"/canvases/{made['id']}")["ok"] is True, "delete returns ok")
     check(len(j("GET", "/canvases")) == 1, "deleted canvas is gone")
     check(j("DELETE", f"/canvases/{made['id']}")["ok"] is True, "delete is idempotent")
+    blank = j("POST", "/canvases", {"name": "   "})
+    check(blank["name"] == "Space", "a blank name becomes Space")
+    check(j("PUT", f"/canvases/{blank['id']}", {"name": "  "})["name"] == "Space", "clearing a name becomes Space")
+    j("DELETE", f"/canvases/{blank['id']}")
 
 
 def test_windows_and_z() -> None:
@@ -185,6 +190,20 @@ def test_reset_popped() -> None:
     j("DELETE", f"/windows/{w['id']}")
 
 
+def test_opacity() -> None:
+    cid = j("GET", "/canvases")[0]["id"]
+    w = j("POST", f"/canvases/{cid}/windows", {"kind": "chat", "ref_id": "c1"})
+    check(w["opacity"] == 1.0, "a new window is opaque")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 0.6})["opacity"] == 0.6, "opacity round-trips")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 0.01})["opacity"] == 0.2, "opacity clamps to the 0.2 floor")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 4})["opacity"] == 1.0, "opacity clamps to 1")
+    j("PUT", f"/windows/{w['id']}", {"opacity": 0.45})
+    copy = j("POST", "/canvases", {"name": "Faded", "copy_from": cid})
+    check(0.45 in [x["opacity"] for x in copy["windows"]], "duplicating a space carries opacity")
+    j("DELETE", f"/canvases/{copy['id']}")
+    j("DELETE", f"/windows/{w['id']}")
+
+
 def test_notes() -> None:
     n = j("POST", "/notes", {"body": "milk, eggs"})
     check(n["color"] == "yellow" and n["project_id"] is None, "note defaults")
@@ -220,8 +239,23 @@ def test_notes() -> None:
     j("DELETE", f"/notes/{scoped['id']}")
 
 
-TESTS = [test_default_seed, test_canvas_crud, test_windows_and_z, test_layout_bulk, test_window_config_merges,
-         test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_notes]
+def test_lock() -> None:
+    made = j("POST", "/canvases", {"name": "Frozen"})
+    check(made["locked"] == 0, "a new space starts unlocked")
+    check(j("PUT", f"/canvases/{made['id']}", {"locked": True})["locked"] == 1, "locked stores as 1")
+    check(j("GET", f"/canvases/{made['id']}")["locked"] == 1, "the lock survives a re-read")
+    # The lock is renderer policy: the row itself stays writable, so a client and the row can never
+    # disagree in a way that strands a space.
+    check(j("PUT", f"/canvases/{made['id']}", {"zoom": 2.0})["zoom"] == 2.0, "a locked row still takes writes")
+    copy = j("POST", "/canvases", {"name": "Copy", "copy_from": made["id"]})
+    check(copy["locked"] == 0, "a copy of a locked space starts unlocked")
+    check(j("PUT", f"/canvases/{made['id']}", {"locked": False})["locked"] == 0, "unlock stores as 0")
+    j("DELETE", f"/canvases/{made['id']}")
+    j("DELETE", f"/canvases/{copy['id']}")
+
+
+TESTS = [test_default_seed, test_canvas_crud, test_lock, test_windows_and_z, test_layout_bulk, test_window_config_merges,
+         test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_opacity, test_notes]
 
 if __name__ == "__main__":
     failures = 0

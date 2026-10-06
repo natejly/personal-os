@@ -1,0 +1,134 @@
+/* Tool cards: compact, native-feeling cards inside a chat bubble. Colours come from the app's variables only,
+   so light and dark both work with no overrides. */
+.tc-card { overflow: hidden; font-size: 13px; color: var(--text); }
+/* The waiting edge and wash come from .tool-event.awaiting (styles.css), shared with every pending card. */
+.tc-card.warn.awaiting { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
+.tc-card:focus-within { border-color: var(--border-strong); }
+.tc-card.awaiting:focus-within { border-color: var(--accent); }
+
+.tc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tc-icon { display: inline-flex; color: var(--accent); flex-shrink: 0; }
+.tc-title { font-size: 13px; font-weight: 600; }
+.tc-subject { color: var(--text-muted); min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-edited { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+
+.tc-status { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); white-space: nowrap; }
+.tc-status.awaiting { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.tc-status.done, .tc-status.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.tc-status.denied { background: var(--hover); color: var(--text-muted); }
+.tc-status.failed, .tc-status.unverified { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+
+.tc-body { padding: 10px 12px; }
+.tc-section { margin-top: 8px; }
+
+/* labelled key/value list */
+.tc-args { margin: 0; display: grid; gap: 6px; }
+.tc-arg { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.tc-arg dt { color: var(--text-faint); font-size: 12px; }
+.tc-arg dd { margin: 0; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tc-arg.changed dd { box-shadow: -3px 0 0 color-mix(in srgb, var(--info) 70%, transparent); padding-left: 6px; }
+.tc-was { color: var(--text-faint); font-size: 11px; text-decoration: line-through; }
+.tc-long { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tc-long.mono, .mono { font-family: var(--mono); font-size: 12px; }
+/* Inline with the text it expands, so the 24px target is an invisible expander, not a taller line. */
+.tc-more { position: relative; background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font-size: 11px; cursor: pointer; }
+.tc-more::before { content: ''; position: absolute; inset: -6px -4px; }
+.tc-more:hover { text-decoration: underline; }
+.tc-muted { color: var(--text-faint); font-size: 11px; font-style: normal; }
+@media (max-width: 520px) { .tc-arg { grid-template-columns: 1fr; gap: 2px; } }
+
+/* result */
+.tc-result { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg-input); }
+.tc-result.err { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.tc-result.err svg { margin-top: 2px; flex-shrink: 0; }
+.tc-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+
+/* edit form */
+.tc-form { display: grid; gap: 8px; }
+.tc-field { display: grid; gap: 3px; }
+.tc-field > span { font-size: 11px; color: var(--text-faint); }
+.tc-field.narrow { max-width: 260px; }
+.tc-field input, .tc-field textarea, .tc-field select {
+  width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+}
+.tc-field input:focus, .tc-field textarea:focus, .tc-field select:focus { outline: 2px solid var(--focus-ring); outline-offset: 0; border-color: transparent; }
+.tc-field textarea { resize: vertical; }
+.tc-preview { margin: 0; font-family: var(--mono); font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+.tc-field .tc-more { justify-self: start; padding-left: 0; }
+
+/* footer */
+.tc-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.tc-hint { font-size: 11px; color: var(--text-faint); margin-left: auto; }
+.tc-hint.err { color: var(--danger); }
+.tc-hint.warn { color: var(--warn); margin-left: 0; }
+
+/* raw call */
+.tc-details { border-top: 1px solid var(--border); font-size: 12px; }
+.tc-details summary { cursor: pointer; min-height: 24px; padding: 6px 12px; color: var(--text-faint); list-style: none; }
+.tc-details summary::-webkit-details-marker { display: none; }
+.tc-details summary::before { content: '▸'; display: inline-block; width: 12px; transition: transform 0.12s; }
+.tc-details[open] summary::before { transform: rotate(90deg); }
+.tc-details summary:hover { color: var(--text); }
+.tc-details summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.tc-raw { padding: 0 12px 10px; }
+.tc-raw h6 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
+.tc-raw pre { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 240px; overflow: auto; }
+
+/* generic expanded body (inside the existing .tool-event row) */
+.tc-generic { padding: 2px 10px 8px; display: grid; gap: 8px; }
+.tc-generic .tc-result { border: 1px solid var(--border); border-radius: 6px; }
+.tc-generic .tc-details { border-top: 0; }
+.tc-generic .tc-details summary { padding-left: 0; }
+.tc-generic .tc-raw { padding-left: 0; padding-right: 0; }
+.tc-approval .tc-args { margin: 0 0 8px; }
+.tc-approval { margin-top: 0; }
+.tool-name.human { text-transform: none; }
+
+/* desk tool cards: shell, python, browser, vision, documents, desk tools */
+.tc-monowrap { display: grid; gap: 3px; margin-top: 6px; }
+.tc-monolabel { font-size: 11px; color: var(--text-faint); }
+.tc-mono { margin: 0; font-family: var(--mono); font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.tc-mono.tc-cmd { max-height: 120px; }
+.tc-monowrap .tc-more { justify-self: start; padding-left: 0; }
+.tc-meta { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
+.tc-meta > div { display: flex; gap: 6px; min-width: 0; }
+.tc-meta dt { color: var(--text-faint); }
+.tc-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tc-statusrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+/* files a plain chat's tool saved for the user */
+.tc-outputs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 4px 0 8px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
+.tc-output { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.tc-output-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tc-badge { display: inline-flex; align-items: center; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
+.tc-badge.ok { background: rgba(70,167,88,0.15); color: var(--ok); }
+.tc-badge.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--text); }
+.tc-badge.bad { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tc-badge.run { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.tc-chips { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-chip { font-size: 12px; padding: 2px 10px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); }
+.tc-chip.chosen { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tc-sentence { margin: 0; line-height: 1.45; }
+.tc-result.err.inline { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.tc-warning { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 0; }
+.tc-warning svg { margin-top: 2px; flex-shrink: 0; }
+.tc-problems { padding-left: 20px; }
+.tc-notes { margin-top: 6px; color: var(--text-muted); font-size: 12px; }
+.tc-snapshot { margin-top: 6px; font-size: 12px; }
+.tc-snapshot summary { cursor: pointer; color: var(--text-faint); }
+.tc-snapshot summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.tc-snapshot .tc-mono { max-height: 320px; margin-top: 4px; }
+.tc-fullbtn { margin-top: 6px; font-size: 12px; }
+.tc-full-back { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.tc-full { width: min(920px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+.tc-full header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tc-full header .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-full pre { margin: 0; padding: 12px 14px; overflow: auto; flex: 1; min-height: 120px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.tc-full footer { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+
+/* Ship checklist (ShipChecklistCard.tsx): four steps, then the actions. */
+.ship-steps { list-style: none; margin: 4px 0 0; padding: 0; }
+.ship-step-name { min-width: 92px; }
+.ship-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.ship-actions:empty { display: none; }

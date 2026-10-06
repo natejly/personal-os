@@ -1,67 +1,315 @@
 import { useEffect, useState } from 'react'
-import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X } from 'lucide-react'
+import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
+import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
+import { useDocRec } from '../features/docrec/store'
+import { mailWatchLines } from '../lib/todayCards'
+import { hasModelKey } from '../lib/modelLabel'
+import { api } from '../lib/api'
+import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
-import TodoItem from './TodoItem'
+import AgentInbox from './AgentInbox'
+import { inboxBadge } from '../lib/inboxBadge'
+import type { Meeting, MeetingCandidate } from '@shared/types'
+import { moduleHome } from '../shell/registry'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
+import { fenced, lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
+import PlannerPanel from './PlannerPanel'
+import { withoutTodoEvents } from './CalendarWeek'
+import SidebarToggle from './SidebarToggle'
+import { rowButton } from '../lib/rowButton'
 
 function greeting(): string {
   const h = new Date().getHours()
-  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.'
 }
 const fmtTime = (iso: string, allDay: boolean): string => (allDay ? 'All day' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
 const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toDateString()
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
+// Google Tasks dues are midnight UTC; take the date part so it doesn't shift a day locally.
+const fmtDue = (iso: string): string => new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+/** Meeting timestamps are epoch SECONDS, not the ISO strings the calendar rows carry. */
+const fmtClock = (secs: number): string => new Date(secs * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+const fmtLength = (ms: number): string => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : `${Math.round(ms / 60_000)} min`)
+
+/** How often the calendar nudge is re-asked. The backend caches it for 60s, so this is its period. */
+const SUGGEST_MS = 60_000
+
+/**
+ * Today's meetings, whatever is waiting to be reviewed, and the calendar events the backend is
+ * offering to take notes on.
+ *
+ * Its own component so the 60s poll lives and dies with the card rather than with Today. Nothing
+ * here starts a recording on its own: a candidate is an offer with a button, and the one headless
+ * path (`autoRecord`) is a setting the user has to turn on in the Meetings panel.
+ */
+function MeetingsCard(): JSX.Element {
+  // Today's list is deliberately NOT the store's `meetings` array: that one is the Meetings rail's
+  // search result, so a query still sitting in the rail's box would silently filter Today - with no
+  // search box on this page to explain the gap, and with a filtered-out meeting costing its
+  // candidate the "take notes" button. This card owns an unfiltered copy instead.
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const dataScope = useStore((s) => s.dataScope)
+  const meetingsPending = useStore((s) => s.meetingsPending)
+  const meetingStatus = useStore((s) => s.meetingStatus)
+  const meetingBusy = useStore((s) => s.meetingBusy)
+  const openMeeting = useStore((s) => s.openMeeting)
+  const startRecording = useStore((s) => s.startRecording)
+  const recordCandidate = useStore((s) => s.recordCandidate)
+  const setView = useStore((s) => s.setView)
+  const startFromEvent = useDocRec((s) => s.startFromEvent)
+  const docBusy = useDocRec((s) => s.busy)
+  const [candidates, setCandidates] = useState<MeetingCandidate[]>([])
+
+  useEffect(() => {
+    void api.meetings.list(dataScope, '').then(setMeetings).catch(() => undefined)
+  }, [dataScope, meetingStatus?.active?.meeting_id, meetingsPending])
+  useEffect(() => {
+    // `/meetings/suggest` answers [] rather than erroring when Google is unconnected, so there is
+    // nothing to guard on here and a failure just leaves the offer list empty.
+    const ask = (): void => void api.meetings.suggest().then(setCandidates).catch(() => undefined)
+    ask()
+    const timer = setInterval(ask, SUGGEST_MS)
+    return () => clearInterval(timer)
+  }, [])
+
+  const today = new Date().toDateString()
+  const todays = meetings.filter((m) => {
+    const at = m.started_at ?? m.scheduled_start
+    return at !== null && new Date(at * 1000).toDateString() === today
+  })
+  const active = meetingStatus?.active ?? null
+  // Filtered on the meeting's STATE, not merely on whether it is the live one: /meetings/suggest
+  // keeps offering an event for its whole window, so a call that was already recorded and stopped
+  // comes back with its meeting id, and starting that id again restarts the segment counter in the
+  // same directory and overwrites the beginning of the recording.
+  const offers = offerableCandidates(candidates, meetings, active?.meeting_id ?? null)
+  // The backend refuses `start` while the master switch is off, so the offer says why up front.
+  const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
+  const OFF_TITLE = 'The meeting recorder is off. Turn it on in Settings → Meetings.'
+
+  return (
+    <section className="widget">
+      <header>
+        <Mic size={14} /> Meetings
+        {meetingsPending > 0 && <span className="muted small">{meetingsPending} awaiting review</span>}
+        <button className="link small" onClick={() => setView('meetings')}>View all</button>
+      </header>
+
+      {active && (
+        <ul className="events">
+          <li {...rowButton(() => setView('meetings'))} title="Open the meeting that is recording">
+            <span className="ev-time">{formatOffset(active.elapsed_ms / 1000)}</span>
+            <span className="ev-title">Recording now</span>
+          </li>
+        </ul>
+      )}
+
+      {offers.length > 0 && (
+        <ul className="events">
+          {offers.map((c) => (
+            <li key={`${c.calendar_id}:${c.event_id}`}>
+              <span className="ev-time">{fmtTime(c.start, false)}</span>
+              <span className="ev-title">{c.title || '(untitled event)'}</span>
+              {/* Navigate first: the consent modal is hosted by the Meetings view, so a first-ever
+                  recording started from here would otherwise gate on a dialog with nowhere to render. */}
+              <button className="link small" disabled={meetingBusy || active !== null || recorderOff}
+                title={recorderOff ? OFF_TITLE : undefined}
+                onClick={() => { setView('meetings'); void recordCandidate(c) }}>
+                take notes
+              </button>
+              <button className="link small" disabled={docBusy || meetingBusy || active !== null || recorderOff}
+                title={recorderOff ? OFF_TITLE : 'Create a file for this event and record into it'}
+                onClick={() => { setView('meetings'); void startFromEvent(c) }}>
+                in a file
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {todays.length > 0 && (
+        <ul className="events">
+          {todays.map((m) => {
+            const at = m.started_at ?? m.scheduled_start
+            return (
+              <li key={m.id} {...rowButton(() => void openMeeting(m.id))} title="Open these notes">
+                <span className="ev-time">{at !== null ? fmtClock(at) : ''}</span>
+                <span className="ev-title">{m.title || 'Untitled meeting'}</span>
+                <span className="muted small">
+                  {m.duration_ms > 0 ? fmtLength(m.duration_ms) : m.status}
+                  {m.has_pending ? ' · review' : ''}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {!active && offers.length === 0 && todays.length === 0 && (
+        <div className="widget-empty">
+          <p className="muted">No meetings today.</p>
+          <button className="primary-btn" disabled={meetingBusy || recorderOff}
+            title={recorderOff ? OFF_TITLE : undefined}
+            onClick={() => { setView('meetings'); void startRecording() }}>
+            <Mic size={14} /> Record one
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/** One disconnected state for every account-backed card, so each says what it would show and offers the fix. */
+function ConnectAccount({ who, what, onConnect }: { who: string; what: string; onConnect: () => void }): JSX.Element {
+  return (
+    <p className="muted widget-connect">
+      Connect {who} to see {what} here. <button className="link" onClick={onConnect}>Connect</button>
+    </p>
+  )
+}
 
 export default function HomeView(): JSX.Element {
+  const TodosCard = moduleHome('todos')?.home?.Card
+  const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
+  const allTodos = useStore((s) => s.todos)
+  // Tasks and Drive always come from Google; calendar and mail from the active provider (`pim`).
   const google = useStore((s) => s.google)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, refreshDashboard, setView, openMemory, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap } = useStore()
+  const pim = useStore(pimStatus)
+  const pimName = useStore(pimLabel)
+  const provider = useStore(pimProvider)
+  const tasksSync = useStore((s) => s.tasksSync)
+  const { refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, openSettings, refreshRecap, openMemory, toast } = useStore()
   const recap = useStore((s) => s.recap)
+  const inbox = useStore((s) => s.agentInbox)
   const recapLoading = useStore((s) => s.recapLoading)
   const settings = useStore((s) => s.settings)
   const saveSettings = useStore((s) => s.saveSettings)
-  const [recapOpen, setRecapOpen] = useState(true)
   const [quick, setQuick] = useState('')
   const [busy, setBusy] = useState(false)
   const [customizing, setCustomizing] = useState(false)
+  const [watchBusy, setWatchBusy] = useState(false)
+  // Whether the first dashboard request has come back, with or without data.
+  const [settled, setSettled] = useState(false)
 
   const on = (key: string): boolean => homeModuleOn(settings, key)
+  const inboxNew = useStore((s) => inboxBadge(s.agentInbox))
+  const routineDraft = useStore((s) => s.routineDraft)
   const toggleModule = (key: string): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
   }
 
-  useEffect(() => { void refreshDashboard() }, [refreshDashboard])
+  // The ✕ on the recap is the same switch as its row in the customize popover, so hiding it survives
+  // a restart; the toast says where it went and offers the way back.
+  const hideRecap = (): void => {
+    toggleModule('recap')
+    toast('Daily recap hidden. “Choose what shows here” brings it back.', 'info', {
+      label: 'Undo',
+      run: () => void saveSettings({ homeWidgets: { ...(useStore.getState().settings.homeWidgets ?? {}), recap: true } })
+    })
+  }
+
+  useEffect(() => {
+    void refreshDashboard().then(() => setSettled(true))
+    if (!useStore.getState().tasksSync) void useStore.getState().refreshTasksSync()
+  }, [refreshDashboard])
+  // Today left open overnight: coming back to the window re-reads it, and a new day also brings a new recap.
+  useEffect(() => {
+    let day = new Date().toDateString()
+    const onFocus = (): void => {
+      void refreshDashboard()
+      const now = new Date().toDateString()
+      if (now !== day) { day = now; void refreshRecap() }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshDashboard, refreshRecap])
 
   const brief = async (): Promise<void> => {
     newChat(null)
-    await send('Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.')
+    // Without an account there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
+    await send(pim?.connected
+      ? 'Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.'
+      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting ${pimName} in Settings adds them. Be concise and use headers.')
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
+  const rescanMail = async (): Promise<void> => {
+    setWatchBusy(true)
+    try { await api.mailWatch.refresh(); await refreshDashboard() } catch (e) { useStore.getState().toast((e as Error).message, 'error') } finally { setWatchBusy(false) }
+  }
   const quickAdd = async (): Promise<void> => {
     if (!quick.trim()) return
-    await addTodo({ title: quick })
-    setQuick('')
+    try {
+      await addTodo({ title: quick })
+      setQuick('')
+      useStore.getState().toast('Added to todos')
+    } catch (e) {
+      useStore.getState().toast((e as Error).message, 'error')
+    }
   }
 
   const today = new Date().toDateString()
-  const events = d?.calendar ?? []
+  // A due todo is already in the Todos card; its all-day mirror event would list it twice.
+  const events = withoutTodoEvents(d?.calendar ?? [], [...allTodos, ...(d?.todos ?? [])])
   const todayEvents = events.filter((e) => dayKey(e.start) === today)
   const laterEvents = events.filter((e) => dayKey(e.start) !== today)
+
+  // Until the dashboard answers, a card has nothing to count: saying "No projects yet." would be a guess.
+  const pending = d === null ? <p className="muted">{settled ? 'Could not load.' : 'Loading…'}</p> : null
+  const connect = (): void => openSettings(PIM_SETTINGS_TAB)
+  // Without an account, several cards would each say the same "Connect …" line. One strip per account says it
+  // once and the cards stay out of the way until they have something to show.
+  const googleOff = google !== null && !google.connected
+  const pimOff = pim !== null && !pim.connected
+  const strips = provider === 'google'
+    ? [{ who: 'Google', off: googleOff, keys: ['calendar', 'inbox', 'plan', 'gtasks', 'drive'], what: 'your calendar, unread mail, tasks and recent Drive files' }]
+    : [{ who: pimName, off: pimOff, keys: ['calendar', 'inbox', 'plan'], what: 'your calendar and unread mail' },
+       { who: 'Google', off: googleOff, keys: ['gtasks', 'drive'], what: 'Google Tasks and recent Drive files' }]
+  /** What an account card says instead of its rows: still loading, not connected, or its own error. */
+  const gate = (status: typeof google, who: string, what: string, error: string | undefined): JSX.Element | null => {
+    if (!status?.connected) return (status === null && pending) || <ConnectAccount who={who} what={what} onConnect={connect} />
+    return pending ?? (error ? <p className="msg-error">{error}</p> : null)
+  }
+  const googleGate = (what: string, error: string | undefined): JSX.Element | null => gate(google, 'Google', what, error)
+  const pimGate = (what: string, error: string | undefined): JSX.Element | null => gate(pim, pimName, what, error)
+
+  usePageContext(() => ({
+    view: 'home',
+    label: 'Today',
+    detail: [
+      `Today is ${today}.`,
+      todayEvents.length ? `Today\u2019s calendar:\n${lines(todayEvents, (e) => `${e.start} — ${e.summary} (\`${e.id}\`)`)}` : 'Nothing on the calendar today.',
+      laterEvents.length ? `Coming up:\n${lines(laterEvents, (e) => `${e.start} — ${e.summary}`, 10)}` : '',
+      d?.todos?.length ? `Open todos:\n${lines(d.todos, (t) => `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''})`)}` : 'No open todos.',
+      recap?.content ? `Yesterday\u2019s recap:\n${fenced(recap.content, 1500)}` : '',
+      inbox ? (inbox.counts.needs_you ? `Agent inbox, ${inbox.counts.needs_you} waiting on the user:\n${lines([
+        ...inbox.needs_you.approvals.map((a) => `approve ${a.tool}${a.job ? ` (${a.job})` : ''}`),
+        ...inbox.needs_you.proposals.map((p) => `proposed ${p.tool}${p.source ? ` from ${p.source.name}` : ''}`),
+        ...(inbox.needs_you.desks ?? []).map((e) => `desk ${e.desk_title || 'Desk'}: ${e.body || e.kind}`),
+        ...(inbox.needs_you.paused_jobs ?? []).map((p) => `paused job ${p.name}: ${p.reason}`),
+        ...(inbox.needs_you.elsewhere ?? []).map((q) => `${q.count} ${q.label}`)
+      ], (s) => s)}` : 'Agent inbox: nothing is waiting on the user.') : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: (d?.todos ?? []).slice(0, 20).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
+    hints: ['What should I focus on today?', 'Block time for my todos', 'Anything I am forgetting?']
+  }), [d, recap, today, inbox])
 
   return (
     <main className="page home">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2>Today <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
+        <SidebarToggle />
+        <h2><Home size={16} /> Today <span className="muted">· {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
-          <button className="icon-btn" title="Refresh" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
+          <button className="icon-btn" title="Refresh" aria-label="Refresh today’s data" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
           <div className="home-customize-wrap">
-            <button className={`icon-btn ${customizing ? 'on' : ''}`} title="Choose what shows here" onClick={() => setCustomizing((v) => !v)}><SlidersHorizontal size={15} /></button>
+            <button className={`icon-btn ${customizing ? 'on' : ''}`} title="Choose what shows here" aria-label="Choose what shows on Today" aria-expanded={customizing} onClick={() => setCustomizing((v) => !v)}><SlidersHorizontal size={15} /></button>
             {customizing && (
               <>
                 <div className="popover-backdrop" onMouseDown={() => setCustomizing(false)} />
@@ -77,99 +325,155 @@ export default function HomeView(): JSX.Element {
               </>
             )}
           </div>
-          <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
+          <button className="primary-btn" onClick={() => void brief()} title={pim?.connected ? undefined : `Todos only. Connect ${pimName} in Settings to add mail and calendar.`}><Sparkles size={14} /> Brief me</button>
         </div>
+        <AppSwitcher />
       </header>
       <div className="page-body wide">
         <div className="home-hero">
-          <h1>{greeting()}.</h1>
+          <h1 role="heading" aria-level={2}>{greeting()}</h1>
           <div className="quick-ask">
             <MessageSquare size={16} />
-            <input placeholder="Ask anything…" value={quick} onChange={(e) => setQuick(e.target.value)}
+            <input placeholder="Ask anything…" aria-label="Ask anything" value={quick} onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void quickAdd() }
                 else if (e.key === 'Enter' && quick.trim()) { e.preventDefault(); const q = quick; setQuick(''); newChat(null); void send(q) }
               }} />
-            <button className="ghost-btn" onClick={() => void quickAdd()} disabled={!quick.trim()} title="Add as todo (⌘↵)"><Plus size={13} /> Todo</button>
+            <button className="ghost-btn" onClick={() => void quickAdd()} disabled={!quick.trim()} title="Add as a todo instead (⌘↵)" aria-label="Add as a todo instead (⌘↵)"><Plus size={13} /> Todo</button>
           </div>
         </div>
 
-        {on('recap') && (recap?.content || recapLoading) && recapOpen && (
+        {/* The sidebar badge points here, so a hidden inbox still shows while it has something to show. */}
+        {(on('agent') || inboxNew > 0 || routineDraft) && <AgentInbox />}
+
+        {on('recap') && !hasModelKey(settings) && (
+          <p className="muted widget-connect">The daily recap needs a model API key. <button className="link" onClick={() => openSettings('provider')}>Add a key</button></p>
+        )}
+        {on('recap') && hasModelKey(settings) && (recap?.content || recapLoading) && (
           <section className="recap">
             <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
-              <span style={{ flex: 1 }} />
-              <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
-              <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}><X size={13} /></button>
+              <span className="spacer" />
+              <button className="icon-btn sm" title="Regenerate" aria-label="Regenerate daily recap" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
+              <button className="icon-btn sm" title="Hide the daily recap" aria-label="Hide the daily recap" onClick={hideRecap}><X size={13} /></button>
             </header>
             {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
+        {strips.filter((x) => x.off && x.keys.some(on)).map((x) => (
+          <section key={x.who} className="home-connect">
+            <p><b>Connect {x.who}</b> to see {x.what} here.</p>
+            <button className="ghost-btn" onClick={connect}>Connect {x.who}</button>
+          </section>
+        ))}
         <div className="widgets">
-          {on('calendar') && <section className="widget">
-            <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
-            {!google?.connected ? (
-              <div className="widget-empty">
-                <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
-              </div>
-            ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
+          {on('calendar') && !pimOff && <section className="widget">
+            <header><Calendar size={14} /> Calendar {pim?.connected && <span className="muted small">next 48h</span>}<button className="link small" onClick={() => setView('calendar')}>View all</button></header>
+            {pimGate('your calendar', d?.errors.calendar) ?? (events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
-                  <li key={e.id}><span className="cal-dot" style={e.color ? { background: e.color } : undefined} /><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}</li>
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm" aria-label={`Open “${e.summary}” in calendar`}><ExternalLink size={11} /></a>}</li>
                 ))}
                 {laterEvents.length > 0 && <li className="ev-sep">Tomorrow</li>}
                 {laterEvents.map((e) => (
-                  <li key={e.id}><span className="cal-dot" style={e.color ? { background: e.color } : undefined} /><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span></li>
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span></li>
                 ))}
               </ul>
-            )}
+            ))}
           </section>}
 
-          {on('todos') && <section className="widget">
-            <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>all</button></header>
-            {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
-          </section>}
+          {on('todos') && TodosCard && <TodosCard data={d} />}
 
-          {on('inbox') && <section className="widget">
-            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 3 days</span>}</header>
-            {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+          {on('health') && HealthCard && <HealthCard data={d} />}
+
+          {on('inbox') && !pimOff && <section className="widget">
+            <header><Mail size={14} /> Mail inbox {pim?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            {pimGate('unread mail', d?.errors.gmail) ?? ((d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
-                  <li key={m.id} onClick={() => { newChat(null); void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`) }} title="Ask the assistant about this email">
+                  <li key={m.id} {...rowButton(() => void askAboutEmail(m.id, m.subject))} title="Ask the assistant about this email">
                     <span className="mail-from">{fromName(m.from)}</span>
                     <span className="mail-subject">{m.subject || '(no subject)'}</span>
                     <span className="mail-snippet">{m.snippet}</span>
                   </li>
                 ))}
               </ul>
-            )}
+            ))}
           </section>}
 
-          {on('projects') && <section className="widget">
-            <header><FolderKanban size={14} /> Projects</header>
-            {(d?.projects.length ?? 0) === 0 ? <p className="muted">No projects yet.</p> : (
-              <ul className="proj-list">
-                {d!.projects.map((p) => (
-                  <li key={p.id} onClick={() => openProject(p.id)}>
-                    <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
-                    <span className="muted small">{p.stats?.conversations ?? 0} chats · {p.stats?.documents ?? 0} docs</span>
+          {on('mailwatch') && d?.mail_watch && <section className="widget">
+            <header><Mail size={14} /> Waiting mail
+              <button className="link small" onClick={() => { useStore.setState({ mailWatchKind: 'to_reply' }); setView('mail') }}>View all</button>
+              <button className="icon-btn sm" title="Re-scan recent threads" aria-label="Re-scan recent threads" onClick={() => void rescanMail()} disabled={watchBusy}><RefreshCw size={13} className={watchBusy ? 'spin' : ''} /></button>
+            </header>
+            {mailWatchLines(d.mail_watch).length === 0 ? <p className="muted">Nothing waiting.</p> : mailWatchLines(d.mail_watch).map((l) => <p key={l}>{l}</p>)}
+          </section>}
+
+          {on('plan') && !pimOff && <section className="widget">
+            <header><Calendar size={14} /> Day plan {(d?.planner_blocks?.length ?? 0) > 0 && <span className="muted small">proposed</span>}</header>
+            {!pim?.connected ? <ConnectAccount who={pimName} what="a proposed day plan" onConnect={connect} />
+              : <PlannerPanel initial={d?.planner_blocks} onApplied={() => void refreshDashboard()} />}
+          </section>}
+
+          {on('gtasks') && tasksSync?.config.enabled === false && !googleOff && <section className="widget">
+            <header><ListChecks size={14} /> Google Tasks</header>
+            {googleGate('Google Tasks', d?.errors.tasks) ?? ((d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
+              <ul className="events">
+                {d!.tasks!.slice(0, 8).map((t) => (
+                  <li key={t.id}><span className="ev-title">{t.title || '(untitled)'}</span>{t.due && <span className="muted small">{fmtDue(t.due)}</span>}</li>
+                ))}
+              </ul>
+            ))}
+          </section>}
+
+          {on('drive') && !googleOff && <section className="widget">
+            <header><HardDrive size={14} /> Drive {google?.connected && d?.drive && <span className="muted small">recently modified</span>}</header>
+            {/* The scope check comes before the gate: without the scope, the backend's error is only noise. */}
+            {google?.connected && google.missing_scopes.some((s) => s.includes('drive')) ? (
+              <div className="widget-empty">
+                <p className="muted">Drive needs a fresh sign-in.</p>
+                <button className="primary-btn" onClick={connect}>Reconnect Google</button>
+              </div>
+            ) : googleGate('recent Drive files', d?.errors.drive) ?? ((d?.drive?.length ?? 0) === 0 ? <p className="muted">No recent files.</p> : (
+              <ul className="events">
+                {d!.drive!.slice(0, 8).map((f) => (
+                  <li key={f.id}>
+                    <span className="ev-title">{f.name}</span>
+                    {f.modified && <span className="muted small">{new Date(f.modified).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+                    {f.link && <a href={f.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm" aria-label={`Open “${f.name}” in Google Drive`}><ExternalLink size={11} /></a>}
                   </li>
                 ))}
               </ul>
-            )}
+            ))}
+          </section>}
+
+          {on('meetings') && <MeetingsCard />}
+
+          {on('projects') && <section className="widget">
+            <header><FolderKanban size={14} /> Projects</header>
+            {pending ?? (d!.projects.length === 0 ? <p className="muted">No projects yet.</p> : (
+              <ul className="proj-list">
+                {d!.projects.map((p) => (
+                  <li key={p.id} {...rowButton(() => openProject(p.id))}>
+                    <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
+                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural((p.stats?.docs ?? 0) + (p.stats?.documents ?? 0), 'file')}</span>
+                  </li>
+                ))}
+              </ul>
+            ))}
           </section>}
 
           {on('memories') && <section className="widget">
-            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => openMemory('list')}>all</button></header>
-            {(d?.recent_memories.length ?? 0) === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
+            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => openMemory()}>View all</button></header>
+            {pending ?? (d!.recent_memories.length === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
               <ul className="mem-list">{d!.recent_memories.map((m) => <li key={m.id}>{m.content} <ProjectChip projectId={m.project_id} clickable={false} /></li>)}</ul>
-            )}
+            ))}
           </section>}
 
           {on('chats') && <section className="widget">
             <header><MessageSquare size={14} /> Recent chats</header>
-            {(d?.recent_conversations.length ?? 0) === 0 ? <p className="muted">No chats yet.</p> : (
-              <ul className="proj-list">{d!.recent_conversations.map((c) => <li key={c.id} onClick={() => void selectChat(c.id)}><span className="ev-title">{c.title}</span><ProjectChip projectId={c.project_id} clickable={false} /></li>)}</ul>
-            )}
+            {pending ?? (d!.recent_conversations.length === 0 ? <p className="muted">No chats yet.</p> : (
+              <ul className="proj-list">{d!.recent_conversations.map((c) => <li key={c.id} {...rowButton(() => void selectChat(c.id))}><span className="ev-title">{c.title}</span><ProjectChip projectId={c.project_id} clickable={false} /></li>)}</ul>
+            ))}
           </section>}
         </div>
       </div>

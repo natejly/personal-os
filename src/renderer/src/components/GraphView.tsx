@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
-import { Plus, Trash2, Globe, X, Link2, Maximize2 } from 'lucide-react'
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
+import { Plus, Trash2, Globe, X, Link2, Maximize2, History } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
-import type { GraphEdge, GraphNode } from '@shared/types'
+import type { GraphData, GraphEdge, GraphNode } from '@shared/types'
 
 interface SimNode extends SimulationNodeDatum { id: string; label: string; type: string; global: boolean; degree: number }
-interface SimLink extends SimulationLinkDatum<SimNode> { id: string; relation: string }
+interface SimLink extends SimulationLinkDatum<SimNode> { id: string; relation: string; ended?: boolean }
 
 const TYPE_COLORS: Record<string, string> = {
   person: '#3b9edb', project: '#d97757', organization: '#8e6fdb', tool: '#46a758', place: '#e5a13b', concept: '#d95c9e', entity: '#8b8b8b', other: '#8b8b8b'
@@ -57,7 +57,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
         <span className="project-dot sm" style={{ background: colorFor(type) }} />
         <h3>{node.label}</h3>
         {node.project_id === null && <span className="tag global"><Globe size={10} />personal</span>}
-        <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        <button className="icon-btn" aria-label={`Close details for ${node.label}`} onClick={onClose}><X size={16} /></button>
       </header>
       <label><span>Label</span><input value={label} onChange={(e) => setLabel(e.target.value)} onBlur={() => void save()} /></label>
       <label><span>Type</span>
@@ -75,9 +75,9 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
           return (
             <li key={e.id}>
               <span className="dir">{out ? '→' : '←'}</span>
-              <input className="rel" defaultValue={e.relation} onBlur={(ev) => ev.target.value !== e.relation && void api.graph.updateEdge(e.id, { relation: ev.target.value }).then(refreshGraph)} />
+              <input className="rel" aria-label={`Relation ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} defaultValue={e.relation} onBlur={(ev) => ev.target.value !== e.relation && void api.graph.updateEdge(e.id, { relation: ev.target.value }).then(refreshGraph)} />
               <span className="other">{other?.label ?? '?'}</span>
-              <button className="icon-btn ghost danger" onClick={() => void api.graph.deleteEdge(e.id).then(refreshGraph)}><Trash2 size={12} /></button>
+              <button className="icon-btn ghost danger" aria-label={`Delete relation "${e.relation}" ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} onClick={() => void api.graph.deleteEdge(e.id).then(refreshGraph)}><Trash2 size={12} /></button>
             </li>
           )
         })}
@@ -87,7 +87,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
         <input placeholder="relation (e.g. works on)" value={relation} onChange={(e) => setRelation(e.target.value)} />
         <input list="node-labels" placeholder="target entity" value={target} onChange={(e) => setTarget(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addEdge()} />
         <datalist id="node-labels">{graph.nodes.filter((n) => n.id !== node.id).map((n) => <option key={n.id} value={n.label} />)}</datalist>
-        <button className="icon-btn" title="Add relation (creates the target if new)" onClick={() => void addEdge()}><Plus size={14} /></button>
+        <button className="icon-btn" aria-label="Add relation" title="Add relation (creates the target if new)" onClick={() => void addEdge()}><Plus size={14} /></button>
       </div>
       <button className="ghost-btn danger full" onClick={() => void del()}><Trash2 size={14} /> Delete entity and its relations</button>
     </aside>
@@ -102,13 +102,21 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
  * that is not focused keeps its layout but stops burning frames on it.
  */
 export default function GraphView({ projectId: scopedProjectId, query = '', paused = false }: { projectId?: string; query?: string; paused?: boolean }): JSX.Element {
-  const graph = useStore((s) => s.graph)
+  const live = useStore((s) => s.graph)
   const libraryScope = useStore((s) => s.libraryScope)
+  // History shows ended relations too. It refetches whenever the live graph changes.
+  const [history, setHistory] = useState(false)
+  const [past, setPast] = useState<GraphData | null>(null)
   // Selectors, not `useStore()`: a bare subscription re-renders the whole SVG on every streamed token.
   const refreshGraph = useStore((s) => s.refreshGraph)
   const refreshProjects = useStore((s) => s.refreshProjects)
   const scope: Scope = scopedProjectId ?? libraryScope
   const projectId = scope === 'all' || scope === 'personal' ? null : scope
+  useEffect(() => {
+    if (!history) { setPast(null); return }
+    void api.graph.get(scope, true).then(setPast).catch(() => setPast(null))
+  }, [history, scope, live])
+  const graph = history && past ? past : live
   const wrapRef = useRef<HTMLDivElement>(null)
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null)
   const nodesRef = useRef<SimNode[]>([])
@@ -142,14 +150,18 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
       id: n.id, label: n.label, type: n.type, global: n.project_id === null, degree: degree[n.id] ?? 0
     }))
     const ids = new Set(nodes.map((n) => n.id))
-    const links: SimLink[] = graph.edges.filter((e) => ids.has(e.source_id) && ids.has(e.target_id)).map((e) => ({ id: e.id, relation: e.relation, source: e.source_id, target: e.target_id }))
+    const links: SimLink[] = graph.edges.filter((e) => ids.has(e.source_id) && ids.has(e.target_id)).map((e) => ({ id: e.id, relation: e.relation, ended: e.invalid_at != null, source: e.source_id, target: e.target_id }))
     nodesRef.current = nodes
     linksRef.current = links
     simRef.current?.stop()
     simRef.current = forceSimulation<SimNode, SimLink>(nodes)
       .force('link', forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(110).strength(0.6))
-      .force('charge', forceManyBody().strength(-320))
+      // Ranged charge plus x/y gravity: most entities have no edge, and an unbounded repulsion with only
+      // a weak centring force flung those loose nodes past the edges of the pane.
+      .force('charge', forceManyBody().strength(-320).distanceMax(320))
       .force('center', forceCenter(size.w / 2, size.h / 2).strength(0.05))
+      .force('x', forceX<SimNode>(size.w / 2).strength(0.07))
+      .force('y', forceY<SimNode>(size.h / 2).strength(0.07))
       .force('collide', forceCollide<SimNode>().radius((d) => 22 + d.degree * 2))
       .alpha(prev && Object.keys(prev).length ? 0.5 : 1)
       .on('tick', () => setTick((t) => t + 1))
@@ -227,10 +239,11 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
     <div className="graph-body">
       <div className="graph-canvas" ref={wrapRef} onWheel={onWheel} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
         <div className="graph-tools">
-          <input placeholder="New entity" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
-          <button className="icon-btn" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
+          <input placeholder="New entity" aria-label="New entity name" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
+          <button className="icon-btn" aria-label="Add entity" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
           <span className="sep" />
-          <button className="icon-btn" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
+          <button className={`icon-btn ${history ? 'active' : ''}`} aria-label="Show ended relations" aria-pressed={history} title="History: show relations that no longer hold" onClick={() => setHistory((h) => !h)}><History size={15} /></button>
+          <button className="icon-btn" aria-label="Reset graph view" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
         </div>
         {graph.nodes.length === 0 && <p className="empty-hint big center">No entities yet. Chat with auto-learn on, or add one here.</p>}
         <svg width={size.w} height={size.h} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); onPointerDown(e) } }}>
@@ -241,7 +254,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
               if (s.x === undefined || t.x === undefined) return null
               const dim = neighbors ? !(neighbors.has(s.id) && neighbors.has(t.id) && (s.id === selected || t.id === selected)) : false
               return (
-                <g key={l.id} className={`link ${dim ? 'dim' : ''}`}>
+                <g key={l.id} className={`link ${dim ? 'dim' : ''} ${l.ended ? 'ended' : ''}`}>
                   <line x1={s.x} y1={s.y} x2={t.x} y2={t.y} markerEnd="url(#arrow)" />
                   <text x={(s.x! + t.x!) / 2} y={(s.y! + t.y!) / 2 - 4} textAnchor="middle">{l.relation}</text>
                 </g>

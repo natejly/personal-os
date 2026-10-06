@@ -34,6 +34,7 @@ LIMITS = (
     "The server's code is not read and its filesystem or network activity is not observed.",
     "A tool can behave differently from its description, including only on the call that matters.",
     "A tool that hangs, crashes or leaks data is only found by running it; the client bounds the damage with timeouts, it does not prevent it.",
+    "Toxic-flow detection guesses from tool names and descriptions which tools read private data and which send it out; it can miss a pair or flag harmless ones.",
     "Injection detection is pattern matching. Novel phrasing gets through, and unusual wording is flagged that is not an attack.",
 )
 
@@ -212,6 +213,90 @@ def check_name(name: str, where: str) -> list[dict[str, Any]]:
     return out
 
 
+# Words a tool might be called without meaning another tool: a bare-name mention of these is just English.
+COMMON_NAMES = frozenset({
+    "search", "create", "delete", "update", "write", "fetch", "query", "email", "message", "messages", "files",
+    "issue", "issues", "browse", "upload", "download", "status", "report", "export", "import", "lookup",
+    "execute", "convert", "summary", "document", "content", "project", "comment", "record", "records",
+})
+MIN_BARE_NAME = 5
+# What turns a mention of another tool into steering: the instruction patterns above, plus ordering words.
+_DIRECTIVE = re.compile(
+    r"(?:^|[.\s])(?:you must|you should always|always (?:call|use)|first call|before (?:calling|using|invoking|running)|"
+    r"after (?:calling|using)|from now on|instead of|rather than|do not use|don't use|never use)\b", re.I)
+
+
+def _mentions(text: str, needle: str) -> bool:
+    return bool(needle) and re.search(r"(?<![a-z0-9_])" + re.escape(needle.lower()) + r"(?![a-z0-9_])", text.lower()) is not None
+
+
+def check_shadowing(tool: dict[str, Any], other_tools: list[dict[str, Any]], where: str) -> list[dict[str, Any]]:
+    """Text in one server's tool that names another server's tool, or tells the model what to do about it.
+
+    A mention alone is a warning (`references_other_tool`); a mention inside an instruction is a fail
+    (`shadows_other_tool`), because that is how one connector steers calls to another. Same-server
+    mentions are ignored. `tool` needs `slug`/`server_slug`; others need `slug`, `name`, `server_slug`.
+    """
+    mine = str(tool.get("server_slug") or (str(tool.get("slug") or "").split("__") + ["", ""])[1])
+    texts = [("description", str(tool.get("description") or ""))]
+    props = (tool.get("parameters") or {}).get("properties") if isinstance(tool.get("parameters"), dict) else None
+    for arg, spec in (props or {}).items():
+        if isinstance(spec, dict) and spec.get("description"):
+            texts.append((f"arguments.{arg}", str(spec["description"])))
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for other in other_tools:
+        if str(other.get("server_slug") or "") == mine or other.get("slug") == tool.get("slug"):
+            continue
+        names = [str(other.get("slug") or "")]
+        bare = str(other.get("name") or "")
+        if len(bare) >= MIN_BARE_NAME and bare.lower() not in COMMON_NAMES:
+            names.append(bare)
+        srv = str(other.get("server_slug") or "")
+        if len(srv) >= MIN_BARE_NAME and srv.lower() not in COMMON_NAMES:
+            names.append(srv)
+        for field, text in texts:
+            hit = next((n for n in names if _mentions(text, n)), None)
+            key = (str(other.get("slug")), field)
+            if not hit or key in seen:
+                continue
+            seen.add(key)
+            m = re.search(re.escape(hit), text, re.I)
+            excerpt = text[max(0, m.start() - 40):m.end() + 60] if m else text
+            if _DIRECTIVE.search(text):
+                out.append(_finding("shadows_other_tool", "fail", f"{where}.{field}",
+                                    f"tells the model what to do about {other.get('slug')}, a tool from another server", excerpt))
+            else:
+                out.append(_finding("references_other_tool", "warn", f"{where}.{field}",
+                                    f"mentions {other.get('slug')}, a tool from another server", excerpt))
+    return out
+
+
+_READ_VERBS = frozenset({"read", "get", "list", "fetch", "search", "query", "load", "open"})
+_PRIVATE_NOUNS = frozenset({"file", "files", "mail", "email", "emails", "message", "messages", "db", "database", "sql",
+                            "repo", "repository", "document", "documents", "note", "notes", "contact", "contacts",
+                            "calendar", "secret", "secrets", "drive", "inbox"})
+_OUTBOUND = frozenset({"send", "post", "upload", "publish", "email", "webhook", "http", "tweet", "notify", "forward"})
+
+
+def check_toxic_flow(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One warn when a single server offers both a private-data reader and an outbound writer.
+
+    Name/description heuristic only; it never changes a tool's danger tier or mode.
+    """
+    def toks(t: dict[str, Any], desc: bool) -> set[str]:
+        text = str(t.get("name") or "") + (" " + str(t.get("description") or "") if desc else "")
+        return set(re.split(r"[^a-z0-9]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", text).lower()))
+    readers = [t for t in tools if toks(t, False) & _READ_VERBS and toks(t, True) & _PRIVATE_NOUNS]
+    writers = [t for t in tools if toks(t, False) & _OUTBOUND and not toks(t, False) & _READ_VERBS]
+    pair = next(((r, w) for r in readers for w in writers if r is not w), None)
+    if not pair:
+        return []
+    r, w = (str(x.get("name") or "") for x in pair)
+    return [_finding("toxic_flow", "warn", "server", f"{r} can read private data and {w} can send data out; "
+                     "together they could leak what the first reads")]
+
+
 def status_for(findings: Iterable[dict[str, Any]]) -> str:
     severities = {f.get("severity") for f in findings}
     if "fail" in severities:
@@ -236,7 +321,7 @@ def evaluate_tool(tool: dict[str, Any], slug: str = "") -> dict[str, Any]:
 def evaluate_tools(tools: list[dict[str, Any]], slugs: dict[str, str] | None = None) -> dict[str, Any]:
     """Static verdict on a server's whole advertised surface."""
     results = [evaluate_tool(t, (slugs or {}).get(str(t.get("name") or ""), "")) for t in tools]
-    findings = [f for r in results for f in r["findings"]]
+    findings = [f for r in results for f in r["findings"]] + check_toxic_flow(tools)
     status = status_for(findings)
     return {"status": status, "tools": results, "findings": findings, "limits": list(LIMITS),
             "summary": summarize(status, len(tools), findings), "model": EVAL_MODEL}

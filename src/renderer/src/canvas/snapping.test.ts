@@ -206,14 +206,23 @@ test('shift constrains a drag to its dominant axis', () => {
   assert.deepEqual(constrain({ x: -3, y: 22 }), { x: 0, y: 22 })
 })
 
-test('guideLines emits three lines per axis per window plus the two viewport centres', () => {
+test('guideLines emits three lines per axis per window, a GAP line each side, plus the two viewport centres', () => {
   const lines = guideLines([win('a', 0, 0, 100, 100)], view())
-  assert.equal(lines.length, 8)
-  assert.deepEqual(lines.filter((l) => l.axis === 'x').map((l) => l.at), [0, 50, 100, 500])
+  assert.equal(lines.length, 12)
+  assert.deepEqual(lines.filter((l) => l.axis === 'x').map((l) => l.at), [0, 50, 100, 112, -12, 500])
 })
 
-test('tidy up packs onto the pitch in reading order and wraps', () => {
+test('tidy up packs GAP apart in reading order and wraps', () => {
   const out = tidyLayout([win('a', 9, 9, 300, 200), win('b', 500, 40, 300, 200), win('c', 80, 600, 300, 200)], view(1, 0, 0, 700, 800), 16)
-  assert.deepEqual(out.map((r) => [r.x, r.y]), [[16, 16], [336, 16], [16, 240]])
+  assert.deepEqual(out.map((r) => [r.x, r.y]), [[16, 16], [328, 16], [16, 228]])
   assert.deepEqual(out.map((r) => r.w), [300, 300, 300])
+})
+
+test('a dragged rect snaps its edge to exactly GAP from a neighbour', () => {
+  const others = [win('a', 0, 0, 100, 100)]
+  const ctx = { mode: 'guides' as const, grid: 16, view: view(), others, lines: guideLines(others, view()) }
+  // start edge near a's end + GAP (112)
+  assert.equal(snapMove({ x: 115, y: 300, w: 80, h: 80 }, ctx).rect.x, 112)
+  // end edge near a's start - GAP (-12)
+  assert.equal(snapMove({ x: -95, y: 300, w: 80, h: 80 }, ctx).rect.x, -92)
 })

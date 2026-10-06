@@ -1,9 +1,10 @@
 /*
- * Widget bodies and the status ring. Contract §9 — canvas.css owns the window chrome, its tokens and
- * its `ring-breathe` / `ring-pulse` keyframes; nothing here redefines them.
+ * Widget bodies and the status ring. Contract §9 — canvas.css owns the window chrome and its tokens;
+ * nothing here redefines them.
  *
- * The 2 px ring is painted by the *container* of a `.ring`, through `:has()`, because a widget may not
- * touch `WindowFrame`: the marker a widget renders into the title bar is what lights up its window.
+ * A minimized chat has no window border, so its dock tile gets a 2 px ring through `:has()`.
+ * The window on the plane does not. Its `::before` is the glass, and a ring painted there lifts
+ * the blur in front of the transcript. canvas.css recolors that window's own border instead.
  */
 
 :root {
@@ -31,10 +32,11 @@
   gap: 3px;
   height: 14px;
 }
-.ring.working { color: var(--tl-yellow); }
-.ring.done { color: var(--tl-green); }
-.ring.error { color: var(--tl-red); }
-.ring.needs-approval { color: var(--accent); }
+/* The app-wide status vocabulary (styles.css), so a window, a desk and an inbox row agree. */
+.ring.working { color: var(--st-working); }
+.ring.done { color: var(--st-done); }
+.ring.error { color: var(--st-failed); }
+.ring.needs-approval { color: var(--st-needs-you); }
 
 .status-glyph {
   display: grid;
@@ -49,16 +51,15 @@
   height: 13px;
   padding: 0 3px;
   border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-solid);
+  color: var(--on-accent);
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 13px;
   text-align: center;
 }
 
-/* One inset ring per container that holds a marker: the window, and the dock tile of a minimized one. */
-.win:has(.ring)::before,
+/* Dock tile only. A window's `::before` is the glass; painting the ring there covers the transcript with the blur. */
 .dock-tile:has(.ring)::before {
   content: '';
   position: absolute;
@@ -68,26 +69,15 @@
   border-radius: inherit;
   pointer-events: none;
 }
-.win:has(.ring.working)::before,
-.dock-tile:has(.ring.working)::before {
-  border-color: var(--tl-yellow);
-  animation: ring-breathe 1.6s ease-in-out infinite;
-}
-.win:has(.ring.done)::before,
-.dock-tile:has(.ring.done)::before { border-color: var(--tl-green); }
-.win:has(.ring.error)::before,
-.dock-tile:has(.ring.error)::before { border-color: var(--tl-red); }
-.win:has(.ring.needs-approval)::before,
-.dock-tile:has(.ring.needs-approval)::before {
-  border-color: var(--accent);
-  animation: ring-pulse-border 1s ease-in-out infinite;
-}
+.dock-tile:has(.ring.working)::before { border-color: var(--st-working); }
+.dock-tile:has(.ring.done)::before { border-color: var(--st-done); }
+.dock-tile:has(.ring.error)::before { border-color: var(--st-failed); }
+.dock-tile:has(.ring.needs-approval)::before { border-color: var(--st-needs-you); }
 .dock-tile .ring { position: absolute; top: 2px; right: 2px; z-index: 4; }
 .dock-tile .ring-badge { display: none; }
 
+/* The ring states are a static colour: a window that is working must not pulse in the corner of the eye. */
 @keyframes ring-spin { to { transform: rotate(360deg); } }
-/* `ring-pulse` (canvas.css) scales, which would fight the drag transform on a window. */
-@keyframes ring-pulse-border { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* ---------- widget body ---------- */
 
@@ -97,6 +87,16 @@
   height: 100%;
   min-height: 0;
   font-size: 13px;
+}
+/* `.widget` is also the Today card in styles.css (padding, an opaque --bg-elev fill, rounded corners,
+   a 120px floor), and that rule is global. Inside a window it put an inset opaque slab under the
+   glass, so the card look is undone here rather than left to stylesheet order. */
+.win-body .widget,
+.popout-body .widget {
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
 }
 
 /* 24 px strip for a widget's own controls — the chat window's ModelPicker lives here (contract §6). */
@@ -110,7 +110,6 @@
   color: var(--text-muted);
   font-size: 11px;
 }
-.widget-bar .spacer { flex: 1; }
 
 .widget-scroll {
   flex: 1;
@@ -142,7 +141,10 @@
 .widget-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .widget-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
 
+/* 19px to look at, so it fits the 24px bar; the ::before makes it 25px to hit. (A <select> chip has
+   no pseudo-element, and opens on a click anywhere in its own box anyway.) */
 .widget-chip {
+  position: relative;
   height: 19px;
   padding: 0 7px;
   border: 1px solid var(--border);
@@ -152,6 +154,7 @@
   font-size: 11px;
   white-space: nowrap;
 }
+.widget-chip::before { content: ''; position: absolute; inset: -3px -1px; }
 .widget-chip.on { border-color: var(--accent); color: var(--text); }
 
 .widget-input {
@@ -187,10 +190,10 @@
   box-shadow: var(--shadow-focused), 0 0 0 1px var(--accent);
 }
 .widget.drop-over { background: var(--zone-fill); }
+.agenda-day.drop-over, .agenda-day:has(.drop-over) { background: var(--zone-fill); border-radius: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   .status-glyph.working svg,
-  .win:has(.ring)::before,
   .dock-tile:has(.ring)::before,
   .widget-row {
     animation: none !important;
@@ -244,6 +247,28 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
 }
+/* An invisible native select stretched over the icon, the TodoItem due-date trick. */
+.chat-switch { position: relative; flex: none; }
+.chat-switch select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+
+/* The bound conversation was deleted: offer a fresh start or a re-bind in place. Two classes, so its
+   padding outranks the in-window reset on `.widget` above. */
+.widget.chat-gone {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+  color: var(--text-faint);
+}
+.chat-gone .widget-sub { white-space: normal; }
+.chat-gone-send { display: flex; gap: 6px; width: 100%; max-width: 360px; }
+.chat-gone-send input { flex: 1; min-width: 0; }
+.chat-gone-send .primary-btn { white-space: nowrap; }
+.chat-gone-list { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 360px; min-height: 0; overflow: auto; }
+.chat-gone-list .ghost-btn { justify-content: flex-start; max-width: 100%; }
+.chat-gone-list .ghost-btn svg { flex: none; }
+
 .chat-title {
   flex: 1;
   min-width: 0;
@@ -270,32 +295,114 @@
 .chat-rename { opacity: 0; transition: opacity var(--dur-hover) ease; }
 .chat-head:hover .chat-rename { opacity: 1; }
 
-/* Model and effort sit under the text box, quiet until you go looking for them. */
-.composer-footer {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 2px 0;
-  min-width: 0;
-}
-.chat-control {
-  max-width: 48%;
-  height: 22px;
-  padding: 0 4px;
-  font: 11px var(--font);
-  color: var(--text-faint);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  outline: 0;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  transition: color var(--dur-hover) ease, background var(--dur-hover) ease, border-color var(--dur-hover) ease;
-}
-.chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
-
 /* A widget is not a page: drop the 808px centring and the page gutters that leave a chat panel mostly
    margin, and lose the disclaimer line that costs a whole row of vertical space. */
-.widget .composer-wrap.compact { padding: 8px 10px 10px; max-width: none; }
-.widget .composer-wrap.compact .composer { border-radius: 12px; padding: 7px 7px 7px 11px; }
-.widget .messages-inner { max-width: none; padding: 12px 12px 8px; }
+.widget .composer-wrap.compact { padding: 5px 7px 7px; max-width: none; }
+.widget .composer-wrap.compact .composer { border-radius: 12px; padding: 6px 6px 6px 10px; }
+.widget .messages-inner { max-width: none; padding: 8px 9px 4px; }
+
+/* Vertical rhythm, tightened for a panel: at ~440px wide the page's 22px message gap and 26px avatar
+   gutter spend most of the window on whitespace, so a window shows two turns instead of four. */
+.widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
+.widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
+.widget .messages-inner .avatar .lucide { width: 11px; height: 11px; }
+/* The assistant's face: the page sizes it to 30px, which out-ranks the 20px above by stylesheet order. */
+.widget .messages-inner .avatar.face-avatar { width: 22px; height: 22px; margin-top: 0; }
+/* Rows that line up with the reply text, re-aligned to the 22px face + 8px gap (the page uses 38px). */
+.widget .regen-row { padding-left: 30px; margin-top: -8px; }
+.widget .run-error-row { margin-left: 30px; font-size: 12px; }
+.widget .messages-inner .msg-actions { min-height: 22px; }
+/* Page-sized headings read as shouting in a panel, and an image wider than the window scrolls it sideways. */
+.widget .markdown h1 { font-size: 15px; }
+.widget .markdown h2 { font-size: 14px; }
+.widget .markdown h3 { font-size: 13px; }
+.widget .markdown h1, .widget .markdown h2, .widget .markdown h3, .widget .markdown h4 { margin: 12px 0 6px; }
+.widget .markdown img { max-width: 100%; height: auto; }
+.widget .messages-inner .msg.user .user-bubble { padding: 6px 10px; }
+.widget .messages-inner .msg-actions { margin-top: 2px; }
+.widget .messages-inner .markdown > :first-child { margin-top: 0; }
+.widget .messages-inner .markdown > :last-child { margin-bottom: 0; }
+.widget .chat-head { height: 26px; padding: 0 12px 0 8px; }
+/* The frame's 22px move strip lies over this head and swallows clicks. Stop it short of the head's
+   buttons (rename, face toggle, switcher; the right padding keeps them off the resize corner), and
+   start the title past the status glyph the strip draws while the chat is busy. */
+.win[data-kind='chat'] .win-move { right: 68px; }
+.win:has(.win-grip .ring) .chat-head { padding-left: 30px; }
+
+/* Face: the creature alone, centred, scaled to the frame with a little air around it. */
+.face-widget { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.face-widget .face { width: 82%; height: 82%; }
+/* A chat window in blob view: only the creature, filling the (small) frame. Drag it to move the
+   window, click it to get the chat back; it leans in on hover so it reads as something to press. */
+.chat-blob { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: none; cursor: grab; touch-action: none; }
+.chat-blob:active { cursor: grabbing; }
+/* The blob's speech bubble: what the reply is doing now, hung off the face's upper right; the sharp corner is its tail. */
+.blob-say {
+  position: absolute; left: 82%; bottom: 78%; max-width: 220px; padding: 5px 9px;
+  font-size: 11px; line-height: 1.3; color: var(--text-muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px 10px 10px 2px; box-shadow: var(--shadow-float);
+  pointer-events: none; animation: win-open var(--dur-window) var(--spring);
+}
+.chat-blob .face { width: 90%; height: 90%; transition: transform var(--dur-hover) ease; }
+.chat-blob:hover .face { transform: scale(1.06); }
+/* The crew ring: orchestrator centred, children on a ring, one line each. Sized in % so it follows the frame. */
+.crew-ring { position: relative; display: block; width: 100%; height: 100%; }
+.crew-lines { position: absolute; inset: 0; width: 100%; height: 100%; }
+.crew-lines line { stroke: var(--border-strong); stroke-width: 0.8; stroke-dasharray: 2 2; }
+.crew-center { position: absolute; left: 50%; top: 50%; width: 46%; height: 46%; transform: translate(-50%, -50%); }
+.crew-sat { position: absolute; width: 22%; height: 22%; padding: 0; border: 0; background: var(--bg-elev); border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; }
+.crew-sat-btn { padding: 0; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+.crew-ring-box { position: relative; width: 160px; height: 160px; margin: 0 auto 6px; }
+.crew-up { position: absolute; left: 0; top: 0; z-index: 1; padding: 0 6px; font-size: 11px; color: var(--text-muted); background: none; border: 0; cursor: pointer; }
+.crew-up:hover { color: var(--text); }
+.crew-sat .face { width: 100%; height: 100%; }
+.chat-blob:hover .crew-sat .face, .chat-blob:hover .crew-center .face { transform: none; }
+.crew-sat:hover { transform: translate(-50%, -50%) scale(1.15); }
+.win.dragging .chat-blob .face { transform: none; }
+.chat-blob:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+
+/* ---- Crew: a desk or workflow run and the agents under it, as a small tree ---- */
+.crew-head { gap: 8px; }
+.crew-head .crew-title { font-weight: 500; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 45%; }
+.crew-now {
+  flex: none; padding: 4px var(--widget-pad) 0; font-size: 11px; color: var(--text-muted);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.crew-tree { display: flex; flex-direction: column; gap: 2px; }
+.crew-row {
+  display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 3px 7px;
+  border-radius: var(--win-radius-sm); color: var(--text); transition: background var(--dur-hover) ease;
+}
+.crew-row:not(.step) { cursor: pointer; }
+.crew-row:not(.step):hover, .crew-row.on { background: var(--widget-row-hover); }
+.crew-row .crew-name { font-weight: 500; white-space: nowrap; }
+.crew-row .crew-what { flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.crew-row .crew-mark { flex: none; width: 14px; text-align: center; font-size: 11px; color: var(--text-muted); }
+.crew-state { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.crew-state.working, .crew-mark.working { color: var(--st-working); }
+.crew-state.needs-you, .crew-mark.needs-you { color: var(--st-needs-you); }
+.crew-state.done, .crew-mark.done { color: var(--st-done); }
+.crew-state.failed, .crew-mark.failed { color: var(--st-failed); }
+/* The card under a clicked row: the task, the live tool call and the numbers. */
+.crew-pop {
+  margin: 0 7px 4px 7px; padding: 8px 10px; border-radius: var(--win-radius-sm);
+  background: var(--widget-row); border: 1px solid var(--border); font-size: 12px; line-height: 1.4;
+}
+.crew-pop p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.crew-pop .crew-pop-now { color: var(--st-working); }
+.crew-pop .crew-pop-err { color: var(--st-failed); }
+.crew-run-form { padding: 4px 0; }
+/* Fires once when the root finishes while the window is open; stays until clicked. */
+.crew-signal {
+  display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--signal, var(--border-strong)); color: var(--signal, var(--text)); background: color-mix(in srgb, var(--signal, var(--border)) 14%, transparent);
+  font-size: 11px; font-weight: 500; cursor: pointer; animation: crew-pulse 1.1s ease-out 3;
+}
+.crew-signal.done { --signal: var(--st-done); }
+.crew-signal.failed { --signal: var(--st-failed); }
+.crew-signal.needs-you { --signal: var(--st-needs-you); }
+.crew-signal.idle { --signal: var(--st-idle); }
+@keyframes crew-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal, var(--border)) 60%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}

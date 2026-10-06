@@ -81,8 +81,9 @@ class TestSlugify(McpTestCase):
 
 class TestReservedNamesMatchTools(McpTestCase):
     def test_every_registered_builtin_is_reserved(self) -> None:
-        """Static read of tools.py, so a new built-in cannot quietly become shadowable."""
-        src = (Path(__file__).resolve().parents[1] / "tools.py").read_text()
+        """Static read of tools.py and the feature modules, so a new built-in cannot quietly become shadowable."""
+        pkg = Path(__file__).resolve().parents[1]
+        src = "\n".join(p.read_text() for p in [pkg / "tools.py", *sorted((pkg / "modules").glob("*.py"))])
         registered = set(re.findall(r'ToolSpec\(\s*"([A-Za-z0-9_]+)"', src))
         self.assertGreaterEqual(len(registered), 25, "regex stopped matching tools.py")
         self.assertEqual(registered - RESERVED_TOOL_NAMES, set(), "built-ins missing from RESERVED_TOOL_NAMES")
@@ -286,6 +287,9 @@ class TestGrants(McpTestCase):
         self.assertTrue(m["stale"])
         self.assertNotEqual(m["approved_hash"], m["schema_hash"])
         self.mcp.set_grant(self.read, "on")
+        self.assertTrue(self.mcp.effective_mode(self.read)["stale"], "a re-grant before the drift is reviewed stays stale")
+        self.mcp.mark_reviewed(self.read)
+        self.mcp.set_grant(self.read, "on")
         again = self.mcp.effective_mode(self.read)
         self.assertEqual((again["mode"], again["stale"]), ("on", False))
 
@@ -323,7 +327,9 @@ class TestServers(McpTestCase):
 
     def test_remote_fields_are_stored_but_default_to_stdio(self) -> None:
         s = self.mcp.create_server("Remote", transport="sse", url="https://example.test/sse", headers={"X": "1"})
-        self.assertEqual((s["transport"], s["url"], s["headers"]), ("sse", "https://example.test/sse", {"X": "1"}))
+        # Header values are credentials: the row keeps only the names, the value lives in the secret store.
+        self.assertEqual((s["transport"], s["url"], s["headers"]), ("sse", "https://example.test/sse", {"X": ""}))
+        self.assertEqual(self.mcp.server(s["id"], with_secrets=True)["secrets"], {"X": "1"})
         self.assertEqual(self.mcp.create_server("Junk", transport="telepathy")["transport"], "stdio")
 
     def test_status_and_tool_count(self) -> None:

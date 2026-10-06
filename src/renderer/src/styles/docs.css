@@ -1,0 +1,403 @@
+/*
+ * The Docs editor: doc tree, tab strip, editor/preview panes, and the diff cards.
+ * Tokens come from styles.css, so both themes follow without a second palette here.
+ */
+
+.docs-page { display: flex; flex-direction: column; min-height: 0; container: docs / inline-size; }
+.docs-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: var(--docs-tree-w, 240px) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+.docs-body:has(.docs-history) { grid-template-columns: var(--docs-tree-w, 240px) minmax(0, 1fr) var(--docs-history-w, 380px); }
+.docs-body.tree-hidden { grid-template-columns: minmax(0, 1fr); }
+.docs-body.tree-hidden:has(.docs-history) { grid-template-columns: minmax(0, 1fr) var(--docs-history-w, 380px); }
+.resize-handle.docs-tree-edge { left: calc(var(--docs-tree-w, 240px) - 4px); }
+.resize-handle.docs-history-edge { right: calc(var(--docs-history-w, 380px) - 4px); }
+/* Two editor panes plus the history panel is three columns too many: stack the panes instead of
+   squeezing prose into ~30 characters a line. */
+.docs-body:has(.docs-history) .doc-panes.split {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.docs-body:has(.docs-history) .doc-panes.split .docs-render {
+  border-left: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- doc tree ---- */
+.docs-side {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 0;
+}
+.doc-tree { display: flex; flex-direction: column; min-height: 100%; }
+.doc-tree-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.doc-tree-head > .search.mini { flex: 1; min-width: 0; }
+/* The tail is the rest of the column. There is no root to drop onto any more: every doc belongs to
+   Personal or to a project, so the group rows are the only roots and they are always on screen. */
+.doc-tree-tail { flex: 1; min-height: 24px; }
+
+/* A group: Personal, or one project. The top level of the tree, and never empty of a row — a project
+   always has its folder here even before anything is filed in it. */
+.doc-group-row {
+  position: relative;
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 6px; margin-top: 2px; border-radius: 8px;
+  color: var(--text); font-size: 12.5px;
+}
+.doc-group-row:first-child { margin-top: 0; }
+.doc-group-row:hover { background: var(--hover); }
+.doc-group-row.drop-into { background: var(--active); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.doc-group-name {
+  flex: 1; min-width: 0; text-align: left; color: inherit; font: inherit; font-weight: 600;
+  letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-group-row .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.doc-group-row .icon-btn.xs { opacity: 0; flex: none; }
+.doc-group-row:hover .icon-btn.xs, .doc-group-row.menu-open .icon-btn.xs { opacity: 1; }
+/* While a folder is being named it does not exist yet, so nothing about it is draggable or clickable. */
+.doc-folder-row.drafting { cursor: default; background: var(--hover); }
+
+.doc-folder-row {
+  position: relative;
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 8px;
+  color: var(--text-muted); font-size: 12.5px;
+  cursor: grab;
+}
+.doc-folder-row:hover { background: var(--hover); color: var(--text); }
+.doc-folder-row.drop-into { background: var(--active); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.doc-folder-toggle { display: flex; align-items: center; gap: 3px; color: inherit; flex: none; }
+.doc-folder-toggle .rot90 { transform: rotate(90deg); }
+.doc-folder-name {
+  flex: 1; min-width: 0; text-align: left; color: inherit; font: inherit; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-folder-rename {
+  flex: 1; min-width: 0; font: inherit; font-size: 12.5px;
+  background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px;
+  padding: 2px 6px; color: var(--text); outline: 0;
+}
+.doc-folder-row .icon-btn.xs { opacity: 0; flex: none; }
+.doc-folder-row:hover .icon-btn.xs, .doc-folder-row.menu-open .icon-btn.xs { opacity: 1; }
+.doc-folder-menu {
+  position: absolute; top: 100%; right: 4px; z-index: 5;
+  display: flex; flex-direction: column; min-width: 150px; padding: 4px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-float);
+}
+.doc-folder-menu button {
+  text-align: left; padding: 6px 8px; border-radius: 6px;
+  color: var(--text-muted); font-size: 12px;
+}
+.doc-folder-menu button:hover { background: var(--hover); color: var(--text); }
+.doc-folder-menu button.danger:hover { color: var(--danger); }
+
+.doc-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 6px; border-radius: 8px; cursor: pointer;
+  color: var(--text-muted);
+}
+.doc-row[draggable='true']:active { cursor: grabbing; }
+.doc-row:hover { background: var(--hover); color: var(--text); }
+.doc-row.active { background: var(--active); color: var(--text); }
+.doc-row-icon { flex: none; opacity: 0.6; }
+.doc-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.doc-row-title {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-row-meta {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-hit-snippet { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+.doc-hit-snippet mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 2px; }
+.doc-row .icon-btn.xs { opacity: 0; flex: none; }
+.doc-row:hover .icon-btn.xs, .doc-row:focus-within .icon-btn.xs, .doc-row .icon-btn.xs.starred { opacity: 1; }
+.doc-row .icon-btn.starred { color: var(--warn); }
+
+/* An assistant edit waiting on this doc. */
+.doc-pending {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 4px; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent); font-size: 9.5px; font-weight: 600;
+}
+
+/* ---- main pane ---- */
+.docs-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+.doc-tabs {
+  display: flex; gap: 2px; padding: 4px 6px 0;
+  border-bottom: 1px solid var(--border); overflow-x: auto;
+}
+.doc-tab {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 8px; border: 0; border-radius: 8px 8px 0 0;
+  background: none; color: var(--text-faint); cursor: pointer;
+  font: inherit; font-size: 12px; white-space: nowrap;
+}
+.doc-tab:hover { background: var(--hover); color: var(--text); }
+.doc-tab.active { background: var(--bg-elev); color: var(--text); }
+/* An 18px box (the tab stays its height) with a 24px target around it. */
+.doc-tab .tab-x {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; margin: -1px -3px -1px 0; opacity: 0.5; border-radius: 4px;
+}
+.doc-tab .tab-x::before { content: ''; position: absolute; inset: -3px; }
+.doc-tab .tab-x:hover { opacity: 1; background: var(--hover); }
+
+.doc-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  /* Wrap rather than squeeze: with the side panel open the title must stay readable, so the rest
+     of the row drops to a second line before the title shrinks below its minimum. */
+  flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.doc-title-input {
+  flex: 0 1 auto; min-width: 20ch; max-width: 46ch;
+  padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
+  background: none; color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600;
+}
+.doc-title-input:hover { border-color: var(--border); }
+.doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
+
+/* .model-picker pins every svg to the right; this picker leads with a folder icon on the left. */
+.doc-folder-pick svg:first-child { right: auto; left: 8px; }
+/* Specific enough to beat .model-picker select, which sets its own padding and would otherwise run
+   the path under the folder icon. Nested paths are longer, so the box is wider too. */
+.doc-toolbar .doc-folder-pick select { padding-left: 26px; font-size: 12px; max-width: 220px; }
+/* The pickers give way first when the row is tight. */
+.doc-toolbar .doc-folder-pick { flex: 0 1 auto; min-width: 0; }
+.doc-toolbar .doc-folder-pick select { min-width: 0; max-width: 100%; }
+
+/* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
+.dot-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 13px; padding: 0 3px; border-radius: 7px;
+  background: var(--accent-solid); color: var(--on-accent);
+  font-size: 9px; line-height: 13px; text-align: center;
+}
+.doc-toolbar .icon-btn { position: relative; }
+
+/* ---- panes ---- */
+.doc-panes { flex: 1 1 0; min-height: 220px; display: grid; overflow: hidden; position: relative; }
+.doc-panes.edit, .doc-panes.preview { grid-template-columns: minmax(0, 1fr); }
+.doc-panes.split { grid-template-columns: minmax(0, var(--doc-split, 50%)) minmax(0, 1fr); }
+.resize-handle.doc-split-edge { left: calc(var(--doc-split, 50%) - 3px); }
+/* Stacked panes have no vertical divider to move. */
+.docs-body:has(.docs-history) .doc-split-edge { display: none; }
+.doc-panes.split .docs-render { border-left: 1px solid var(--border); }
+/* A reading column of about 72 characters, centred: with the preview on its own the pane is far
+   wider than a line should be. The side padding is what narrows it, so every block shares one edge
+   whatever its own font size, and in a narrow split pane it falls back to the plain gutter. */
+.docs-render { overflow-y: auto; padding: 18px max(22px, calc((100% - 72ch) / 2)); min-height: 0; }
+.docs-render > .muted { color: var(--text-faint); }
+
+/* ---- editor: textarea over a highlighted mirror ---- */
+.md-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0; overflow: hidden;
+
+  /* The two layers must agree exactly or the highlight slides off the text. */
+  --ed-font: var(--mono);
+  --ed-size: 13px;
+  --ed-line: 1.65;
+  --ed-pad: 14px;
+}
+.md-gutter {
+  grid-row: 1; grid-column: 1;
+  overflow: hidden; padding: var(--ed-pad) 8px var(--ed-pad) 12px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
+  color: var(--text-faint);
+  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
+  text-align: right; user-select: none;
+}
+.md-gutter .cur { color: var(--text); }
+.md-surface { grid-row: 1; grid-column: 2; position: relative; min-height: 0; overflow: hidden; }
+
+/* The text column is capped near 88 characters and centred. The padding does it, identically on both
+   layers, so the mirror and the textarea wrap at the same place. */
+.md-mirror, .md-input {
+  position: absolute; inset: 0;
+  margin: 0; padding: var(--ed-pad) max(var(--ed-pad), calc((100% - 88ch) / 2));
+  border: 0; overflow: auto;
+  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
+  white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
+}
+.md-editor.nowrap .md-mirror, .md-editor.nowrap .md-input { white-space: pre; overflow-wrap: normal; }
+.md-mirror { pointer-events: none; color: var(--text); }
+.md-input {
+  /* Transparent text over the mirror; the caret is painted back with `caret-color`. */
+  background: transparent; color: transparent; caret-color: var(--text);
+  resize: none; outline: none;
+}
+.md-input::selection { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+.md-input::placeholder { color: var(--text-faint); }
+
+.md-status {
+  grid-row: 2; grid-column: 1 / -1;
+  display: flex; gap: 12px; align-items: center;
+  padding: 4px 12px; border-top: 1px solid var(--border);
+  color: var(--text-faint); font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  /* One line however narrow the pane: the hints truncate first, never a word per line. */
+  white-space: nowrap; overflow: hidden; min-width: 0;
+}
+/* Counters never wrap; the shortcut reminder is the part that gives way in a narrow pane. */
+.md-status > span { white-space: nowrap; }
+.md-hints { margin-left: auto; opacity: 0.75; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* focus mode: the gutter and status bar go, everything outside the current paragraph fades */
+.md-editor.focus .md-gutter, .md-editor.focus .md-status { display: none; }
+.md-editor.focus { grid-template-columns: minmax(0, 1fr); }
+.md-editor.focus .md-surface { grid-column: 1; }
+.md-mirror .dim { opacity: 0.3; }
+
+/* markdown tokens in the mirror */
+.tk-head { color: var(--accent); font-weight: 600; }
+.tk-bullet, .tk-punct { color: var(--accent); }
+.tk-quote { color: var(--text-muted); font-style: italic; }
+.tk-code, .tk-fence { color: var(--tk-code); }
+.tk-math { color: var(--tk-math); }
+.tk-link { color: var(--tk-link); }
+.tk-strong { font-weight: 700; }
+.tk-em { font-style: italic; }
+.tk-strike { text-decoration: line-through; opacity: 0.7; }
+.tk-table { color: var(--text-muted); }
+
+/* ---- review + history ---- */
+/* The review queue never grows past a third of the pane: the document has to stay visible, since
+   the whole point is judging an edit against what is already written. */
+.doc-review {
+  flex: 0 1 auto;
+  max-height: 34vh;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.doc-review .diff-body { max-height: none; }
+.doc-review h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--accent); }
+
+.docs-history {
+  border-left: 1px solid var(--border);
+  overflow-y: auto; min-height: 0; padding: 8px;
+}
+.docs-history > header { display: flex; align-items: center; padding: 2px 4px 8px; }
+.docs-history h3 { margin: 0; font-size: 13px; flex: 1; }
+.docs-history .pad { padding: 0 4px 8px; }
+/* The panel's tab strip: Outline, Recordings, Links, History. */
+.docs-panel-tabs { gap: 2px; flex-wrap: wrap; }
+.docs-panel-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 8px; border-radius: 7px;
+  color: var(--text-faint); font: inherit; font-size: 12px;
+}
+.docs-panel-tab:hover { background: var(--hover); color: var(--text); }
+.docs-panel-tab.on { background: var(--active); color: var(--text); }
+.docs-panel-count {
+  min-width: 14px; padding: 0 4px; border-radius: 7px;
+  background: var(--accent-solid); color: var(--on-accent);
+  font-size: 9.5px; line-height: 14px; text-align: center;
+}
+.docs-panel-live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+.docs-panel-tabs .spacer { flex: 1; }
+
+/* ---- diff card ---- */
+.diff-card {
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg-elev); margin-bottom: 10px; overflow: hidden;
+}
+.diff-card.pending { border-color: var(--await-border); }
+.diff-card > header, .diff-card > footer {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px 6px 12px; font-size: 11px;
+}
+.diff-card > header { border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diff-card > footer { border-top: 1px solid var(--border); }
+.diff-card > footer button { white-space: nowrap; flex: none; }
+.diff-card .spacer { flex: 1; }
+.diff-who { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; }
+.diff-who.assistant { color: var(--accent); }
+.diff-who.user { color: var(--text-muted); }
+.diff-summary {
+  flex: 1 1 8ch; min-width: 0; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.diff-stat { display: inline-flex; gap: 5px; font-variant-numeric: tabular-nums; }
+.diff-stat .plus { color: var(--ok); }
+.diff-stat .minus { color: var(--danger); }
+.diff-stale {
+  display: flex; align-items: flex-start; gap: 5px;
+  margin: 0; padding: 6px 9px;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--text); font-size: 11px;
+}
+.diff-retitle { margin: 0; padding: 5px 9px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+
+.diff-body {
+  max-height: 46vh; overflow: auto;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+}
+.diff-body .pad { padding: 8px; }
+.diff-hunk + .diff-hunk { border-top: 1px dashed var(--border); }
+.diff-hunk-head { padding: 2px 8px; color: var(--text-faint); background: var(--hover); font-size: 10.5px; }
+
+.diff-row { display: grid; grid-template-columns: 3.2em 3.2em 1.1em minmax(0, 1fr); }
+.diff-row.add { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.diff-row.del { background: color-mix(in srgb, var(--danger) 13%, transparent); }
+.diff-no {
+  padding: 0 5px; text-align: right;
+  color: var(--text-faint); user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.diff-sign { text-align: center; color: var(--text-faint); user-select: none; }
+.diff-text { padding-right: 8px; white-space: pre-wrap; overflow-wrap: break-word; }
+
+.diff-split-row { display: grid; grid-template-columns: 3.2em minmax(0, 1fr) 3.2em minmax(0, 1fr); }
+.diff-split-row .diff-text.add { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.diff-split-row .diff-text.del { background: color-mix(in srgb, var(--danger) 13%, transparent); }
+.diff-split-row .diff-text.void { background: var(--hover); }
+.diff-split-row .diff-text:nth-of-type(1) { border-right: 1px solid var(--border); }
+
+/* the words that actually moved inside a reworded line */
+.diff-text mark {
+  padding: 0 1px; border-radius: 3px;
+  background: none; color: inherit; font-weight: 600;
+}
+.diff-text mark.w-add { background: color-mix(in srgb, var(--ok) 38%, transparent); }
+.diff-text mark.w-del { background: color-mix(in srgb, var(--danger) 34%, transparent); }
+
+/* KaTeX inherits the app's text colour rather than its own near-black default. */
+.markdown .katex { color: var(--text); font-size: 1.04em; }
+.markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+
+/* The pane's own width, not the window's: the page agent column or a narrow window both count. */
+@container docs (max-width: 860px) {
+  .docs-body, .docs-body:has(.docs-history) { grid-template-columns: var(--docs-tree-w, 200px) minmax(0, 1fr); }
+  .docs-body.tree-hidden, .docs-body.tree-hidden:has(.docs-history) { grid-template-columns: minmax(0, 1fr); }
+  .docs-history-edge, .doc-split-edge { display: none; }
+  /* The side panel becomes a drawer over the lower part of the editor instead of vanishing: it is the only place
+     Recordings, Outline and History live, and the toolbar (Record, Stop, the panel toggle) must stay reachable above it. */
+  .docs-history { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: min(55%, 360px); border-left: 0; border-top: 1px solid var(--border); background: var(--bg-elev, var(--bg)); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
+  .doc-panes.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
+}
+
+.doc-tag-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+.doc-tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
+.doc-tag-chip:hover { color: var(--text); }
+.doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }
+.doc-save-state { background: var(--warn); }

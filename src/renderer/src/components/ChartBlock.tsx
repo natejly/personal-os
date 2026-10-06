@@ -1,19 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line, Area, PieChart, Pie, Cell, ScatterChart, Scatter,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, Brush
 } from 'recharts'
-import { BarChart3, Table2, Code2, Copy, Check, AlertCircle } from 'lucide-react'
+import { parseJsonLoose } from '../lib/chartRepair'
+import { AlertCircle, BarChart3, Check, Code2, Copy, Table2 } from 'lucide-react'
+import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
+import OpenInPanel from './ShowButton'
 
 /**
  * Renders a ```chart fenced block: a compact JSON spec the model writes (see RENDER_HINT in the backend).
  * Accepts the documented shape plus a couple of common variants (Chart.js-style labels/datasets, key→value maps).
  */
 
-type Row = Record<string, unknown>
-type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'scatter'
-interface Series { key: string; label: string; type: ChartType }
-interface Spec {
+export type Row = Record<string, unknown>
+export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'scatter'
+export interface Series { key: string; label: string; type: ChartType }
+export interface Spec {
   type: ChartType
   title: string
   x: string
@@ -23,20 +26,24 @@ interface Spec {
   xLabel: string
   yLabel: string
   unit: string
+  /**
+   * A continuous x axis, scaled by value rather than one slot per row. Interactive blocks set this for a
+   * swept range so 200 sample points do not become 200 category ticks; ```chart blocks leave it unset.
+   */
+  xType?: 'category' | 'number'
 }
 
-const TYPES: ChartType[] = ['bar', 'line', 'area', 'pie', 'scatter']
-const MAX_ROWS = 500
-const COLORS = 8 // --chart-1 … --chart-8 in styles.css
+export const TYPES: ChartType[] = ['bar', 'line', 'area', 'pie', 'scatter']
+export const COLORS = 8 // --chart-1 … --chart-8 in styles.css
 
-function num(v: unknown): number | null {
+export function num(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v)
   return null
 }
 
 export function parseSpec(source: string): Spec {
-  const raw = JSON.parse(source) as Record<string, unknown>
+  const raw = parseJsonLoose(source) as Record<string, unknown>
   if (!raw || typeof raw !== 'object') throw new Error('Chart spec must be a JSON object')
   let data: Row[] = []
   let x = typeof raw.x === 'string' ? raw.x : ''
@@ -65,6 +72,9 @@ export function parseSpec(source: string): Spec {
   }
   if (data.length === 0) throw new Error('Chart has no data rows')
   data = data.slice(0, MAX_ROWS)
+  // optional spec.transforms (sort | limit | filter | group)
+  if (raw.transforms !== undefined) data = applyTransforms(data, raw.transforms)
+  if (data.length === 0) throw new Error('The transforms leave no rows')
 
   const keys = Array.from(new Set(data.flatMap((r) => Object.keys(r))))
   if (!x || !keys.includes(x)) x = keys.find((k) => data.some((r) => typeof r[k] === 'string' && num(r[k]) === null)) ?? keys[0]
@@ -97,28 +107,40 @@ export function parseSpec(source: string): Spec {
   }
 }
 
-const fmtNum = (v: unknown, unit = ''): string => {
+export const fmtNum = (v: unknown, unit = ''): string => {
   const n = num(v)
   if (n === null) return String(v ?? '')
-  const s = new Intl.NumberFormat(undefined, { maximumFractionDigits: Math.abs(n) >= 100 ? 0 : 2, notation: Math.abs(n) >= 100000 ? 'compact' : 'standard' }).format(n)
+  const a = Math.abs(n)
+  // Below 1, two significant digits: sub-cent ticks would all round to "0" with fixed decimals.
+  const digits = a > 0 && a < 1 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: a >= 100 ? 0 : 2 }
+  const s = new Intl.NumberFormat(undefined, { ...digits, notation: a >= 100000 ? 'compact' : 'standard' }).format(n)
   if (unit === '$' || unit === '€' || unit === '£') return unit + s
   if (unit === '%') return s + '%'
   return unit ? `${s} ${unit}` : s
 }
 
-const color = (i: number): string => `var(--chart-${(i % COLORS) + 1})`
+export const color = (i: number): string => `var(--chart-${(i % COLORS) + 1})`
 const tick = { fill: 'var(--chart-ink)', fontSize: 11 }
 const tooltipStyle = { background: 'var(--bg-elev)', border: '1px solid var(--border-strong)', borderRadius: 8, fontSize: 12, color: 'var(--text)', boxShadow: '0 4px 16px rgba(0,0,0,0.25)' }
 
-function Chart({ spec }: { spec: Spec }): JSX.Element {
+export function Chart({ spec }: { spec: Spec }): JSX.Element {
   const { type, x, series, data, stacked, unit } = spec
   // keep series in the order the spec lists them (Recharts 3 sorts legends/tooltips alphabetically by default)
   const legend = series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} itemSorter={null} /> : null
   const tooltip = <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'var(--hover)', stroke: 'var(--chart-axis)' }} formatter={(v: unknown) => fmtNum(v, unit)} itemSorter={() => 0} />
-  const xAxis = <XAxis dataKey={x} tick={tick} axisLine={{ stroke: 'var(--chart-axis)' }} tickLine={false} label={spec.xLabel ? { value: spec.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  const numericX = spec.xType === 'number'
+  const dateX = !numericX && isIsoDateColumn(data, x)
+  const xAxis = (
+    <XAxis dataKey={x} tick={tick} axisLine={{ stroke: 'var(--chart-axis)' }} tickLine={false}
+      type={numericX ? 'number' : 'category'}
+      domain={numericX ? ['dataMin', 'dataMax'] : undefined}
+      tickFormatter={numericX ? (v: unknown) => fmtNum(v) : dateX ? fmtIsoDate : undefined}
+      label={spec.xLabel ? { value: spec.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  )
   // bars need a zero baseline; lines/areas read better zoomed to the data range
   const yDomain: [string | number, string | number] = type === 'line' && !stacked ? ['auto', 'auto'] : [0, 'auto']
-  const yAxis = <YAxis tick={tick} axisLine={false} tickLine={false} width={48} domain={yDomain} tickFormatter={(v: unknown) => fmtNum(v, unit)} label={spec.yLabel ? { value: spec.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  // The axis needs extra width when it carries a label, or the rotated text sits on top of the ticks.
+  const yAxis = <YAxis tick={tick} axisLine={false} tickLine={false} width={spec.yLabel ? 66 : 48} domain={yDomain} tickFormatter={(v: unknown) => fmtNum(v, unit)} label={spec.yLabel ? { value: spec.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
   const grid = <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
   const margin = { top: 8, right: 12, bottom: spec.xLabel ? 16 : 0, left: 0 }
 
@@ -163,11 +185,12 @@ function Chart({ spec }: { spec: Spec }): JSX.Element {
       {tooltip}
       {legend}
       {series.map(el)}
+      {data.length > BRUSH_ABOVE && <Brush dataKey={x} height={22} stroke="var(--chart-axis)" fill="var(--bg-elev)" tickFormatter={dateX ? fmtIsoDate : undefined} />}
     </Wrapper>
   )
 }
 
-function DataTable({ spec }: { spec: Spec }): JSX.Element {
+export function DataTable({ spec }: { spec: Spec }): JSX.Element {
   return (
     <div className="chart-table">
       <table>
@@ -178,9 +201,26 @@ function DataTable({ spec }: { spec: Spec }): JSX.Element {
   )
 }
 
-export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
-  const [view, setView] = useState<'chart' | 'table' | 'source'>('chart')
+export type ChartView = 'chart' | 'table' | 'source'
+
+/** The chart/table/source/copy toolbar both chart blocks share; `children` are the block's own actions, before Copy. */
+export function ChartTools({ view, setView, source, chartIcon, kind, children }: { view: ChartView; setView: (v: ChartView) => void; source: string; chartIcon: ReactNode; kind?: 'chart' | 'interactive'; children?: ReactNode }): JSX.Element {
   const [copied, setCopied] = useState(false)
+  const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
+  return (
+    <div className="chart-tools">
+      <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}>{chartIcon}</button>
+      <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
+      <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
+      {children}
+      {kind && <OpenInPanel kind={kind} source={source} />}
+      <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
+    </div>
+  )
+}
+
+export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
+  const [view, setView] = useState<ChartView>('chart')
   const parsed = useMemo<{ spec: Spec } | { error: string }>(() => {
     try { return { spec: parseSpec(source) } } catch (e) { return { error: (e as Error).message } }
   }, [source])
@@ -195,17 +235,11 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
     )
   }
   const { spec } = parsed
-  const copy = (): void => { void navigator.clipboard.writeText(source); setCopied(true); setTimeout(() => setCopied(false), 1200) }
   return (
     <figure className="chart-block">
       <div className="code-head">
         <span>{spec.title || `${spec.type} chart`}</span>
-        <div className="chart-tools">
-          <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}><BarChart3 size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
-          <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
-          <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
-        </div>
+        <ChartTools view={view} setView={setView} source={source} chartIcon={<BarChart3 size={13} />} kind="chart" />
       </div>
       {view === 'chart' && (
         <div className="chart-canvas" style={{ height: spec.type === 'pie' ? 260 : 280 }}>

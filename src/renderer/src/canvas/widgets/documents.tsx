@@ -6,9 +6,7 @@ import { dragProps, useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const ACCEPTS: DragKind[] = ['file']
-const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
 
-const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const inScope = (d: Document, s: Scope): boolean =>
   s === 'all' ? true : s === 'personal' ? d.project_id === null : d.project_id === s
 
@@ -21,7 +19,7 @@ function Row({ d }: { d: Document }): JSX.Element {
         <div className="widget-title" title={d.name}>{d.name}</div>
         <div className="widget-sub">{d.preview || '(no text extracted)'}</div>
       </div>
-      <span className="widget-meta">{fmtSize(d.size)} · {d.chunk_count}</span>
+      <span className="widget-meta">{new Date(d.created_at * 1000).toLocaleDateString()}</span>
       <button className="icon-btn danger" title="Delete" onClick={() => void deleteDocument(d.id)}><Trash2 size={13} /></button>
     </div>
   )
@@ -47,7 +45,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
     void refreshDocuments()
   }, [live, refreshDocuments])
 
-  if (!live) return <div className="widget"><div className="widget-empty">Documents · paused</div></div>
+  if (!live) return <div className="widget"><div className="widget-empty">Uploads · paused</div></div>
 
   const rows = documents.filter((d) => inScope(d, scope))
   return (
@@ -58,14 +56,14 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
           <option value="personal">Personal only</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <input ref={fileRef} type="file" multiple hidden accept={ACCEPT}
+        <input ref={fileRef} type="file" multiple hidden
           onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
         <button className="widget-chip" title={targetProject ? 'Upload to this project' : 'Upload'} onClick={() => fileRef.current?.click()}><Upload size={11} /> Upload</button>
         <span className="spacer" />
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No documents in this scope.</div>
+        <div className="widget-empty">No uploads in this scope.</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((d) => <Row key={d.id} d={d} />)}</div></div>
       )}
@@ -75,7 +73,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
 
 export const def: WidgetDef = {
   kind: 'documents',
-  label: 'Documents',
+  label: 'Uploads',
   icon: <FileText size={15} />,
   defaultSize: { w: 400, h: 480 },
   minSize: { w: 280, h: 240 },

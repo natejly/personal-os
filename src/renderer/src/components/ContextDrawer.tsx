@@ -94,7 +94,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const [showPrompt, setShowPrompt] = useState(false)
   const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
+  const has = ctx.memories.length + (ctx.profile?.length ?? 0) + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
@@ -120,6 +120,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           <ul>{ctx.style.guidelines.map((g) => <li key={g}>{g}</li>)}</ul>
         </section>
       )}
+      {(ctx.profile?.length ?? 0) > 0 && (
+        <section>
+          <h5><Brain size={12} /> Standing preferences ({ctx.profile!.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
+          <ul>{ctx.profile!.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
+        </section>
+      )}
       {ctx.memories.length > 0 && (
         <section>
           <h5><Brain size={12} /> Memories ({ctx.memories.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
@@ -128,14 +134,14 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.nodes.length > 0 && (
         <section>
-          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entit{ctx.nodes.length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
+          <h5><Share2 size={12} /> Graph ({ctx.nodes.filter((n) => !n.kind).length} entit{ctx.nodes.filter((n) => !n.kind).length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
           <ul>
             {ctx.edges.map((e) => {
-              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label
-              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label
-              return <li key={e.id}>{s} <em>{e.relation}</em> {t}</li>
+              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label ?? 'User'
+              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label ?? 'User'
+              return <li key={e.id}>{s} <em>{e.relation.replace(/_/g, ' ')}</em> {t}</li>
             })}
-            {ctx.nodes.filter((n) => !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
+            {ctx.nodes.filter((n) => !n.kind && !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
           </ul>
         </section>
       )}
@@ -266,7 +272,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
             <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Until you clear this, auto-learn reads only your own messages, never the replies or what they read. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
               <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>clear</button>
             </span>
           </div>

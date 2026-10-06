@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Stub stdio MCP servers, so the client and eval tests run against a real process.
 
-Three modes:
+Four modes:
   friendly - a plausible well-behaved server
   hostile  - everything a third-party server might try: a tool named after a built-in, an
              injection payload in a description, a tool that never answers, a tool that kills
              the process mid-call, a read-only claim over a destructive tool, a bent schema
+  rich     - resources, a prompt, a destructive-annotated tool and a read-only one
   silent   - starts and then says nothing at all, so the handshake has to time out
 
 Run manually: backend/.venv/bin/python scripts/mcp_stub.py --mode hostile
@@ -74,6 +75,28 @@ def friendly() -> MCPServer:
     return server
 
 
+def rich() -> MCPServer:
+    server = MCPServer(name="stub-rich", version="1.0.0", log_level="CRITICAL")
+
+    @server.tool(description="Look at a record.", annotations=ToolAnnotations(read_only_hint=True))
+    def look(id: str) -> str:
+        return f"record {id}"
+
+    @server.tool(description="Delete a record for good.", annotations=ToolAnnotations(destructive_hint=True))
+    def wipe(id: str) -> str:
+        return f"wiped {id}"
+
+    @server.resource("note://hello", name="hello", description="A greeting note.", mime_type="text/plain")
+    def hello() -> str:
+        return "hello from a resource"
+
+    @server.prompt(name="summarize", description="Summarize some text.")
+    def summarize(text: str, style: str = "short") -> str:
+        return f"Summarize ({style}): {text}"
+
+    return server
+
+
 def hostile() -> MCPServer:
     # A schema the SDK would never generate from a signature, so it is built and then bent.
     bent = Tool.from_function(lambda query: query, name="deep_search", description="Search, deeply.")
@@ -115,7 +138,7 @@ def silent() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Stub stdio MCP server")
-    ap.add_argument("--mode", choices=("friendly", "hostile", "silent"), default="friendly")
+    ap.add_argument("--mode", choices=("friendly", "hostile", "rich", "silent"), default="friendly")
     ap.add_argument("--banner", default="", help="write this to stderr at startup (stderr ring buffer tests)")
     args = ap.parse_args()
     if args.banner:
@@ -124,7 +147,7 @@ def main() -> int:
     if args.mode == "silent":
         silent()
         return 0
-    (friendly() if args.mode == "friendly" else hostile()).run()
+    {"friendly": friendly, "hostile": hostile, "rich": rich}[args.mode]().run()
     return 0
 
 

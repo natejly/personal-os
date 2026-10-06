@@ -37,8 +37,10 @@ from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
 from . import plans, router
 from . import firecrawl, reach
 from . import mcp_search
-from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block
-from . import redact
+from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
+from .memory_limits import SEARCH_HITS, SEARCH_PAGE, TAINT_SAVE_MIN_OVERLAP
+from . import graph_recall, redact
+from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as ENTITY_TYPES, canonical_type, normalize_predicate
 from . import webread
 from . import websearch
 from . import outbox as outbox_mod
@@ -883,6 +885,32 @@ class Toolbox:
         except Exception:  # noqa: BLE001 - unknown means assume it can reach out
             return True
 
+    def _own_words_save(self, name: str, args: dict[str, Any] | None, ctx: dict[str, Any]) -> bool:
+        """A plain save_memory (no replaces/forget) whose content the user's own words in this chat back: a chat that
+        read untrusted text cannot plant a memory the user never said, but may keep one they did."""
+        a = args if isinstance(args, dict) else {}
+        content = a.get("content")
+        return (name == "save_memory" and isinstance(content, str) and bool(content.strip())
+                and not a.get("replaces") and not a.get("forget") and self._user_backed(ctx, content))
+
+    def _user_backed(self, ctx: dict[str, Any], content: str) -> bool:
+        """At least TAINT_SAVE_MIN_OVERLAP of `content`'s words (the third-person rewrite's "User" aside) appear in one
+        message the user typed in this chat. One message, not the whole chat: words picked from several cannot be
+        stitched into something the user never said."""
+        from .context import _terms
+
+        def words(text: str) -> set[str]:  # "prefers" and "prefer" are the same word
+            return {t[:-1] if len(t) > 3 and t.endswith("s") else t for t in _terms(text)} - {"user"}
+        mine = words(content)
+        if not mine:
+            return False
+        typed = [str(ctx.get("user_text") or "")]
+        cid = ctx.get("conversation_id")
+        if cid and self.conversations is not None:
+            conv = self.conversations.get(cid) or {}
+            typed += [str(m.get("content") or "") for m in conv.get("messages") or [] if m.get("role") == "user"]
+        return max(len(mine & words(t)) for t in typed) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
+
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
         """Effective mode for one call. Untrusted content forces alwaysAsk tools, and anything that writes lasting text, to ask.
 
@@ -896,7 +924,7 @@ class Toolbox:
         # A card in front of it as well would ask twice for one edit, so taint only cards it under "apply".
         reviewed = name == "doc_edit" and str(permissions.get(ctx.get("settings") or {}, "docEditMode") or "review") != "apply"
         if spec and mode == "on" and self.tainted_for(name, args or {}, ctx) and not reviewed and (
-                spec.danger == "network" or self.ask_locked(spec) or name in PROMPT_WRITES
+                spec.danger == "network" or self.ask_locked(spec) or (name in PROMPT_WRITES and not self._own_words_save(name, args, ctx))
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args, ctx):
@@ -1035,8 +1063,22 @@ class Toolbox:
         R("list_documents", ToolSpec("list_documents", "List the uploaded files available in this chat's scope.", _obj({"offset": {"type": "integer", "default": 0}}, []), list_documents, "knowledge",
             examples=[{}, {"offset": 50}]))
 
-        async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0, include_chats: bool = False) -> Any:
-            out = await _memories(ctx, query, offset)
+        async def search_memory(ctx: dict[str, Any], query: str = "", offset: int = 0, include_chats: bool = False,
+                                kind: str = "", since: str = "") -> Any:
+            if kind and kind not in MEMORY_KINDS:
+                return tool_error(f"Unknown kind '{kind}'.", field="kind", expected="one of " + ", ".join(sorted(MEMORY_KINDS)),
+                                  example={"query": "email", "kind": "instruction"})
+            since_ts = None
+            if since:
+                try:
+                    since_ts = datetime.strptime(since.strip(), "%Y-%m-%d").timestamp()
+                except ValueError:
+                    return tool_error(f"since '{since}' is not a date.", field="since", expected="YYYY-MM-DD",
+                                      example={"query": "trip", "since": "2026-09-01"})
+            if not (query.strip() or kind or since_ts is not None):
+                return tool_error("Give a query, or a kind or since filter to list memories.", field="query",
+                                  expected="a non-empty string", example={"query": "coffee"})
+            out = await _memories(ctx, query, offset, kind, since_ts)
             if include_chats:
                 out["conversations"] = _recall_chats(ctx, query)
             return out
@@ -1057,33 +1099,60 @@ class Toolbox:
             return [{"conversation_id": h["id"], "title": h["title"], "date": time.strftime("%Y-%m-%d", time.localtime(h["updated_at"])),
                      "excerpts": [s["text"].replace("\x02", "").replace("\x03", "") for s in h["snippets"]]} for h in hits]
 
-        async def _memories(ctx: dict[str, Any], query: str, offset: int) -> Any:
-            found = None
-            if self.memory_index is not None:
-                cfg = self.settings()
-                qvec = await self.memory_index.query_vec(cfg, query)
-                if qvec is not None:
-                    found = self.memory_index.search(ctx["project_id"], query, qvec, limit=100, settings=cfg)
-            if found is None:
+        def _day(ts: float) -> str:
+            return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+        def _noted(m: dict[str, Any]) -> float:
+            return m.get("valid_from") or m.get("created_at") or 0
+
+        async def _memories(ctx: dict[str, Any], query: str, offset: int, kind: str, since_ts: float | None) -> Any:
+            q = query.strip()
+            if q and self.memory_index is not None:
+                cfg = self.settings()  # a None vector still ranks lexically and through the graph
+                found = self.memory_index.search(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
+                                                 limit=SEARCH_HITS, settings=cfg)
+            elif q:
                 found = self.memories.list(ctx["project_id"], query)
-            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in found]
-            return _scrub_strings(page(rows, offset=offset, limit=20, key="memories"))
+            else:  # a filter-only listing, newest first
+                found = sorted(self.memories.list(ctx["project_id"]), key=_noted, reverse=True)
+            t = time.time()
+            found = [m for m in found if not (m.get("expires_at") and m["expires_at"] <= t)  # expired rows are not memory any more
+                     and (not kind or m["kind"] == kind)
+                     and (since_ts is None or _noted(m) >= since_ts)]
+            rows = []
+            for m in found:
+                row = {"id": m["id"], "content": m["content"], "kind": m["kind"], "scope": "project" if m["project_id"] else "personal"}
+                if _noted(m):
+                    row["valid_from"] = _day(_noted(m))
+                if m.get("expires_at"):
+                    row["expires_at"] = _day(m["expires_at"] - 1)  # the stored instant is the end of the last day it holds
+                conv = self.conversations.get(m["source_conversation_id"], with_messages=False) \
+                    if m.get("source_conversation_id") and self.conversations is not None else None
+                if conv:
+                    row["source"] = {"conversation_id": conv["id"], "title": conv.get("title")}
+                rows.append(row)
+            return _scrub_strings(page(rows, offset=offset, limit=SEARCH_PAGE, key="memories"))
         R("search_memory", ToolSpec("search_memory", (
-            "Search what you remember about the user (long-term memory) for a topic. Set include_chats for 'what did we "
+            "Search what you remember about the user (long-term memory) for a topic. Filter with `kind` and `since` "
+            "(YYYY-MM-DD: only memories learned on or after that date); with a filter the query may be empty to list "
+            "the newest. Each row says where it was learned when that chat still exists. Set include_chats for 'what did we "
             "discuss / decide about X' questions: it also returns matching past conversations in this scope as "
             "{conversation_id, title, date, excerpts} under `conversations`."),
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0},
-                  "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations (this project's and personal ones)"}}, ["query"]),
+                  "include_chats": {"type": "boolean", "default": False, "description": "also search past conversations (this project's and personal ones)"},
+                  "kind": {"type": "string", "enum": sorted(MEMORY_KINDS), "description": "only memories of this kind"},
+                  "since": {"type": "string", "description": "YYYY-MM-DD: only memories learned on or after this local date"}}, ["query"]),
             search_memory, "memory",
             examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20},
-                      {"query": "pricing decision", "include_chats": True}]))
+                      {"query": "pricing decision", "include_chats": True},
+                      {"query": "", "kind": "instruction"}, {"query": "trip", "since": "2026-09-01"}]))
 
         async def save_memory(ctx: dict[str, Any], content: str = "", kind: str = "", personal: bool = False,
-                              replaces: str = "", forget: bool = False) -> Any:
+                              replaces: str = "", forget: bool = False, until: str = "", profile: bool = False) -> Any:
             # Created only on a successful write, so a refused call emits no "learned" event.
             def learned() -> dict[str, Any]:
                 return ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
-            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
+            prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("user_message_id") or ctx.get("message_id")}
             isolated = is_isolated(self.memories.db, ctx.get("project_id"))
             if personal and not (replaces or forget) and isolated:
                 return tool_error("This project keeps its memory to itself, so nothing said here can be saved as personal.",
@@ -1094,7 +1163,8 @@ class Toolbox:
                     return tool_error("forget needs `replaces`: the id of the memory to forget.", field="replaces",
                                       alternative="search_memory to find the memory's id")
                 old = self.memories.get(replaces)
-                if not old or old["invalid_at"] is not None or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id"))):
+                if (not old or old["invalid_at"] is not None or (old.get("expires_at") or 1e18) <= time.time()
+                        or old["project_id"] not in ((ctx.get("project_id"),) if isolated else (None, ctx.get("project_id")))):
                     return tool_error(f"No current memory {replaces} in this chat's scope.", field="replaces",
                                       alternative="search_memory for the memory's current id")
                 # Pinned rows are the user's own curation, as in auto-learn: the model never rewrites or drops them.
@@ -1114,35 +1184,66 @@ class Toolbox:
             if not text.strip():
                 return tool_error("content is empty.", field="content", example={"content": "User prefers dark mode"})
             kind = kind if kind in MEMORY_KINDS else ""
+            try:
+                expires = until_ts(until, datetime.now().date())
+            except ValueError as e:
+                return tool_error(f"until: {e}", field="until", expected="a date, YYYY-MM-DD, today or later",
+                                  example={"content": "User is in Lisbon until 2026-11-20", "until": "2026-11-20"})
+
+            def done(m: dict[str, Any]) -> None:
+                if profile:  # never pinned here: the UI offers "Pin to profile?" and the user decides
+                    learned().setdefault("pin_suggested", []).append(m["id"])
             if old:
-                m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov)
+                m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
                 if not m:
                     return tool_error(f"Could not update {replaces}: it is no longer current.")
                 learned().setdefault("updated", []).append(m)
+                done(m)
                 return {"updated": replaces, "saved": m["id"], "content": m["content"]}
-            m = self.memories.create(None if personal else ctx["project_id"], text, kind=kind or "fact", source="auto", provenance=prov)
+            scope = None if personal else ctx["project_id"]
+            # The same statement reworded supersedes its live twin instead of adding a row (pinned rows never match).
+            dup = await self.memory_index.near_duplicate(self.settings(), scope, text) if self.memory_index is not None else None
+            if dup and dup["content"].strip().lower() != text.strip().lower():  # the same words: create() dedupes, no new version
+                m = self.memories.supersede(dup["id"], text, kind=kind or None, source="auto", provenance=prov, expires_at=expires)
+                if m:
+                    learned().setdefault("updated", []).append(m)
+                    done(m)
+                    return {"updated": dup["id"], "saved": m["id"], "content": m["content"], "merged": True}
+            m = self.memories.create(scope, text, kind=kind or "fact", source="auto", provenance=prov, expires_at=expires)
             learned()["memories"].append(m)
+            done(m)
             return {"saved": m["id"], "content": m["content"]}
-        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference or goal) for future chats. Use when the user says 'remember that…' or shares something clearly worth keeping. "
+        R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference, standing instruction or goal) for future chats. Use when the user says 'remember that…', gives an always/never rule (kind instruction), or shares something clearly worth keeping. "
+                                  "Pass `until` for a fact that stops holding on a date (a trip, a temporary address); the memory then leaves search and context after that day. "
+                                  "`profile: true` marks it as a standing preference worth always having in view; the user decides whether to pin it. "
                                   "To correct a memory, pass its id from search_memory as `replaces` with the corrected content; to forget one, pass `replaces` and `forget: true`.",
             _obj({"content": {"type": "string", "description": "Third person, e.g. 'User prefers dark mode'. Write dates as absolute dates."},
-                  "kind": {"type": "string", "enum": ["fact", "preference", "goal", "note"], "description": "Defaults to fact (or the replaced memory's kind)"},
+                  "kind": {"type": "string", "enum": ["fact", "preference", "instruction", "goal", "note"], "description": "instruction = a standing always/never rule. Defaults to fact (or the replaced memory's kind)"},
                   "personal": {"type": "boolean", "description": "true = available in every chat, false = only this project. Ignored with replaces.", "default": False},
                   "replaces": {"type": "string", "description": "id of an existing memory (from search_memory) that this one corrects; the old wording stays as history"},
-                  "forget": {"type": "boolean", "description": "true = forget the memory named by replaces instead of saving content", "default": False}}, []), save_memory, "memory", "writes",
+                  "forget": {"type": "boolean", "description": "true = forget the memory named by replaces instead of saving content", "default": False},
+                  "until": {"type": "string", "description": "YYYY-MM-DD, the last day this holds; leave out for anything lasting. Relative phrases like 'tomorrow' are resolved."},
+                  "profile": {"type": "boolean", "description": "true = a standing preference the user may want pinned to their profile (never pinned by this call)", "default": False}}, []), save_memory, "memory", "writes",
             examples=[{"content": "User's daughter is called Mira", "kind": "fact", "personal": True},
                       {"content": "User prefers replies under 150 words", "kind": "preference", "personal": True},
                       {"content": "User wants the migration done before March", "kind": "goal"},
+                      {"content": "Always answer in British English", "kind": "instruction", "personal": True, "profile": True},
+                      {"content": "User is staying in Lisbon", "kind": "fact", "until": "2026-11-20"},
                       {"replaces": "mem_8c1d2e", "content": "User now lives in Lisbon"},
                       {"replaces": "mem_8c1d2e", "forget": True}]))
 
         async def graph_search(ctx: dict[str, Any], query: str) -> Any:
-            sub = self.graph.neighborhood(ctx["project_id"], query, max_nodes=40)
+            sub = graph_recall.subgraph(self.graph, ctx["project_id"], query)
             by_id = {n["id"]: n for n in sub["nodes"]}
+            if sub["seeds"]:
+                rels = [graph_recall.edge_line(e, by_id)[2:] for e in sub["edges"]]
+            else:  # no label or alias named: the looser word match keeps the tool forgiving
+                sub = self.graph.neighborhood(ctx["project_id"], query, max_nodes=40)
+                by_id = {n["id"]: n for n in sub["nodes"]}
+                rels = [redact.scrub_command_output(
+                    f"{by_id[e['source_id']]['label']} -[{e['relation']}]-> {by_id[e['target_id']]['label']}") for e in sub["edges"]]
             ents = [{"id": n["id"], "label": redact.scrub_command_output(str(n["label"] or "")),
                      "type": n["type"], "properties": _scrub_strings(n["properties"])} for n in sub["nodes"]]
-            rels = [redact.scrub_command_output(
-                f"{by_id[e['source_id']]['label']} -[{e['relation']}]-> {by_id[e['target_id']]['label']}") for e in sub["edges"]]
             return {"entities": ents, "relations": rels, "total_entities": len(ents), "total_relations": len(rels),
                     "truncated": len(ents) >= 40}
         R("graph_search", ToolSpec("graph_search", "Find entities in the user's knowledge graph matching a query, with their direct relations (1 hop).",
@@ -1152,7 +1253,10 @@ class Toolbox:
         async def graph_traverse(ctx: dict[str, Any], entity: str, depth: int = 2) -> Any:
             g = self.graph.get(ctx["project_id"])
             by_id = {n["id"]: n for n in g["nodes"]}
-            start = next((n for n in g["nodes"] if n["label"].lower() == entity.strip().lower()), None) or next((n for n in g["nodes"] if entity.strip().lower() in n["label"].lower()), None)
+            want = entity.strip().lower()
+            start = (next((n for n in g["nodes"] if n["label"].lower() == want), None)
+                     or next((n for n in g["nodes"] if want in (a.lower() for a in graph_recall.aliases(n))), None)
+                     or next((n for n in g["nodes"] if want in n["label"].lower()), None))
             if not start:
                 labels = [n["label"] for n in g["nodes"]]
                 sample = redact.scrub_command_output(str(labels[0])) if labels else "Acme"
@@ -1180,25 +1284,49 @@ class Toolbox:
             _obj({"entity": {"type": "string"}, "depth": {"type": "integer", "default": 2}}, ["entity"]), graph_traverse, "graph",
             examples=[{"entity": "Acme"}, {"entity": "Mira", "depth": 1}, {"entity": "migration project", "depth": 3}]))
 
-        async def graph_add(ctx: dict[str, Any], source: str, relation: str, target: str, source_type: str = "entity", target_type: str = "entity") -> Any:
-            if source.strip().lower() in SELF_LABELS or target.strip().lower() in SELF_LABELS:
-                return tool_error("The user is not a graph entity.", field="source",
-                                  expected="two named things (people, projects, tools…), never the user",
-                                  example={"source": "Mira", "relation": "works at", "target": "Acme"},
-                                  alternative="save_memory for facts about the user")
-            s = self.graph.upsert_node(ctx["project_id"], source, source_type)
-            t = self.graph.upsert_node(ctx["project_id"], target, target_type)
-            e = self.graph.upsert_edge(ctx["project_id"], s["id"], t["id"], relation)
+        async def graph_add(ctx: dict[str, Any], source: str, relation: str, target: str, source_type: str = "topic", target_type: str = "topic") -> Any:
+            """The user is `self_node`; a relation phrase outside the closed set becomes related_to with the phrase as its note."""
+            pred, phrase = normalize_predicate(relation)
+            if not pred:
+                return tool_error("The relation is empty.", field="relation", expected="one of: " + ", ".join(PREDICATES),
+                                  example={"source": "Mira", "relation": "works_at", "target": "Acme"})
+            pid = ctx["project_id"]
+            if source.strip().lower() in SELF_LABELS:
+                s = self.graph.self_node(pid)
+            else:
+                s = self.graph.upsert_node(pid, source, canonical_type(source_type))
+            if pred in LITERAL_PREDICATES:  # a status or deadline: the object is a value, not an entity
+                t = self.graph.value_node(pid, target)
+                if t is None:
+                    return tool_error("An entity already has that name, so it cannot be used as a value.", field="target",
+                                      expected="a short value such as blocked, or a YYYY-MM-DD date",
+                                      example={"source": "Helios migration", "relation": pred, "target": "blocked"})
+            elif target.strip().lower() in SELF_LABELS:
+                t = self.graph.self_node(pid)
+            else:
+                t = self.graph.upsert_node(pid, target, canonical_type(target_type))
+            if graph_recall.is_literal(s) or (pred not in LITERAL_PREDICATES and graph_recall.is_literal(t)):
+                return tool_error("That name is already used for a value (a status or date), not an entity.", field="source",
+                                  expected="an entity name, e.g. a person, project or tool", example={"source": "Mira", "relation": "works_at", "target": "Acme"})
+            e = self.graph.upsert_edge(pid, s["id"], t["id"], pred, fact=phrase)
+            if pred in SINGLE_VALUED:  # a new employer, status or home replaces the old one (unless the old one is newer)
+                self.graph.supersede_siblings(pid, e)
             learned = ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
             learned["nodes"] += [s, t]
             learned["edges"].append(e)
             return {"added": redact.scrub_command_output(
                 f"{s['label']} -[{e['relation']}]-> {t['label']}")}
-        R("graph_add", ToolSpec("graph_add", "Add a relation (and the entities if new) to the knowledge graph.",
-            _obj({"source": {"type": "string"}, "relation": {"type": "string"}, "target": {"type": "string"}, "source_type": {"type": "string", "default": "entity"}, "target_type": {"type": "string", "default": "entity"}}, ["source", "relation", "target"]), graph_add, "graph", "writes",
-            examples=[{"source": "Mira", "relation": "works at", "target": "Acme", "source_type": "person", "target_type": "company"},
-                      {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
-                      {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
+        R("graph_add", ToolSpec("graph_add", "Add a relation (and the entities if new) to the knowledge graph. relation is one of: "
+            + ", ".join(PREDICATES) + ". Use source \"User\" for facts about the user. status and deadline take a value as the target "
+            "(deadline as YYYY-MM-DD); a new status, deadline, employer, manager or home replaces the old one. "
+            "Types: " + ", ".join(ENTITY_TYPES) + ".",
+            _obj({"source": {"type": "string"}, "relation": {"type": "string"}, "target": {"type": "string"},
+                  "source_type": {"type": "string", "default": "topic"},
+                  "target_type": {"type": "string", "default": "topic"}}, ["source", "relation", "target"]), graph_add, "graph", "writes",
+            examples=[{"source": "Mira", "relation": "works_at", "target": "Acme", "source_type": "person", "target_type": "org"},
+                      {"source": "User", "relation": "uses", "target": "SQLite", "target_type": "tool"},
+                      {"source": "Helios migration", "relation": "status", "target": "blocked", "source_type": "project"},
+                      {"source": "Acme", "relation": "related_to", "target": "Globex", "source_type": "org", "target_type": "org"}]))
 
         async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "",
                              allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> Any:

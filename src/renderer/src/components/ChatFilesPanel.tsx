@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip } from 'lucide-react'
+import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from 'lucide-react'
 import { Popover } from '../canvas/PresetsMenu'
 import { fmtAgo } from '../lib/deskFiles'
 import { actionLabel, groupByKind, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'
@@ -17,15 +17,16 @@ const ICON: Record<ChatFileKind, JSX.Element> = {
 /**
  * One file of a chat: the name opens it (or goes to the chat), the muted line says what happened and when,
  * and a folder button shows paths in Finder. `jump` is how a click on a side-panel file gets to its chat
- * (null when the chat is already on screen); `showChat` adds the chat's title to the muted line.
+ * (null when the chat is already on screen); `showChat` adds the chat's title (or "N chats") to the muted line.
+ * `onOpen` replaces the default open; `onPin` adds a pin toggle to uploads.
  */
-export function ChatFileRow({ file, jump, showChat, onDone }: { file: ChatFile; jump: ((conversationId: string) => void) | null; showChat?: boolean; onDone?: () => void }): JSX.Element {
+export function ChatFileRow({ file, jump, showChat, onDone, onOpen, onPin }: { file: ChatFile; jump: ((conversationId: string) => void) | null; showChat?: boolean; onDone?: () => void; onOpen?: (f: ChatFile) => void; onPin?: (f: ChatFile) => void }): JSX.Element {
   const goes = rowAction(file) === 'jump-to-chat'
   // In the chat itself a coding session or a missing file has nowhere to jump to: the folder is the useful thing.
   const here = goes && !jump
   const click = (): void => {
     if (file.missing || here) return
-    void openChatFile(file, jump)
+    void (onOpen ? onOpen(file) : openChatFile(file, jump))
     onDone?.()
   }
   const canReveal = file.kind !== 'upload' && file.kind !== 'note' && !file.missing
@@ -37,9 +38,13 @@ export function ChatFileRow({ file, jump, showChat, onDone }: { file: ChatFile; 
         <span className="cf-name">{file.name}</span>
         <span className="cf-meta">
           {file.missing ? 'missing' : actionLabel(file.action)} · {fmtAgo(file.created_at)}
-          {showChat && <> · {file.conversation_title || 'Untitled chat'}</>}
+          {showChat && (file.chat_count > 1 ? <> · {file.chat_count} chats</> : file.conversation_id && <> · {file.conversation_title || 'Untitled chat'}</>)}
         </span>
       </button>
+      {onPin && file.kind === 'upload' && (
+        <button type="button" className={`icon-btn ghost cf-pin${file.pinned ? ' on' : ''}`} aria-pressed={file.pinned} aria-label={`${file.pinned ? 'Unpin' : 'Pin'} ${file.name}`}
+          title={file.pinned ? 'Pinned: included in every chat here' : 'Pin into every chat here'} onClick={() => onPin(file)}><Pin size={13} /></button>
+      )}
       {canReveal && <button type="button" className="icon-btn ghost cf-reveal" aria-label={`Show ${file.name} in Finder`} title="Show in Finder" onClick={() => void revealChatFile(file)}><FolderOpen size={13} /></button>}
     </div>
   )

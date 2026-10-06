@@ -1,0 +1,39 @@
+import { AlertTriangle, BadgeCheck, Check, ExternalLink } from 'lucide-react'
+import type { McpCatalogEntry } from '@shared/types'
+import { iconFor } from './catalog'
+
+const TRANSPORT_WORD = { stdio: 'Runs here', http: 'Remote', sse: 'Remote (SSE)' } as const
+const AUTH_WORD = { none: 'No sign-in', api_key: 'API key', oauth: 'Browser sign-in', env: 'Needs settings' } as const
+
+/** One catalog entry: who makes it, how it runs, what it needs, and whether its launcher is missing. */
+export default function ConnectorCard({ entry, warning, onInstall }: {
+  entry: McpCatalogEntry; warning: string; onInstall: () => void
+}): JSX.Element {
+  const Icon = iconFor(entry.icon)
+  const installed = entry.installed.length > 0
+  return (
+    <div className="connector-card">
+      <div className="connector-head">
+        <span className="connector-icon"><Icon size={18} /></span>
+        <span className="connector-title">
+          <b>{entry.name}</b>
+          <small className="muted">
+            {entry.publisher}
+            {entry.official && <span className="tag verified" title="Maintained by the vendor of the service"><BadgeCheck size={11} /> Official</span>}
+          </small>
+        </span>
+        {installed
+          ? <span className="tag verified"><Check size={11} /> Installed</span>
+          : <button className="primary-btn small" aria-label={`Install ${entry.name}`} onClick={onInstall}>Install</button>}
+      </div>
+      <p className="connector-desc">{entry.description}</p>
+      <div className="connector-tags">
+        <span className="tag">{TRANSPORT_WORD[entry.transport]}</span>
+        <span className="tag">{AUTH_WORD[entry.auth]}</span>
+        <span className="tag">{entry.category}</span>
+        {entry.docs && <a className="tag" href={entry.docs} target="_blank" rel="noreferrer" aria-label={`${entry.name} documentation`}><ExternalLink size={11} /> Docs</a>}
+      </div>
+      {warning && !installed && <p className="test-msg fail connector-warn"><AlertTriangle size={12} /> {warning}</p>}
+    </div>
+  )
+}

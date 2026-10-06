@@ -35,6 +35,10 @@ model_list:
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/glm-5p3-flash
       api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: ember-1
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/ember-1
+      api_key: os.environ/FIREWORKS_API_KEY
   - model_name: minimax-m3
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/minimax-m3
@@ -52,6 +56,7 @@ model_list:
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/qwen3-embedding-8b
       api_key: os.environ/FIREWORKS_API_KEY
+    model_info:
       mode: embedding
 
   # ---------------------------------------------------------------- speech to text

@@ -32,6 +32,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
 
   useEffect(() => { void loadScope(scope) }, [scope, loadScope])
 
+  const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
   const showStyle = mode === 'style'
   const showList = mode === 'list'
   const showGraph = mode === 'graph'
@@ -39,7 +40,7 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
   return (
     <div className="memory-panel embedded">
       <div className="memory-toolbar">
-        <span className="muted small">{showStyle ? styleCount : `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} · ${graph.nodes.length} entit${graph.nodes.length === 1 ? 'y' : 'ies'}, ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}`}</span>
+        <span className="muted small">{showStyle ? styleCount : `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} · ${entityCount} entit${entityCount === 1 ? 'y' : 'ies'}, ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}`}</span>
         <div className="toolbar-right">
           {!showStyle && (
             <label className="search"><Search size={14} /><input placeholder={showGraph ? 'Find entity' : 'Search memory'} value={q} onChange={(e) => setQ(e.target.value)} /></label>

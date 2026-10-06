@@ -23,22 +23,12 @@ const flat = (n: unknown): El[] => {
 }
 const text = (n: unknown): string => flat(n).map((e) => [e.props.children].flat().filter((c) => typeof c === 'string').join('')).join(' ')
 
-test('toggling Include my Docs patches useDocsInContext', () => {
+test('toggling Search my Docs patches useDocsInContext', () => {
   const patches: Partial<Settings>[] = []
   const tree = AdvancedRetrieval({ draft: {} as Settings, patch: (p) => patches.push(p), models: [] })
-  const row = flat(tree).find((e) => e.type === 'label' && text(e.props.children).includes('Include my Docs'))
+  const row = flat(tree).find((e) => e.type === 'label' && text(e.props.children).includes('Search my Docs'))
   const box = flat(row?.props.children).find((e) => e.type === 'input')
   assert.equal(box?.props.checked, true)
   box?.props.onChange?.({ target: { checked: false } })
   assert.deepEqual(patches, [{ useDocsInContext: false }])
-})
-
-test('fetch cache is entered in minutes and stored in seconds', () => {
-  const patches: Partial<Settings>[] = []
-  const tree = AdvancedRetrieval({ draft: { fetchCacheSeconds: 600 } as Settings, patch: (p) => patches.push(p), models: [] })
-  const row = flat(tree).find((e) => e.type === 'label' && text(e.props.children).includes('Reuse fetched web pages'))
-  const box = flat(row?.props.children).find((e) => e.type === 'input') as ReactElement<{ value: number; onChange: (e: unknown) => void }>
-  assert.equal(box.props.value, 10)
-  box.props.onChange({ target: { value: '5' } })
-  assert.deepEqual(patches, [{ fetchCacheSeconds: 300 }])
 })

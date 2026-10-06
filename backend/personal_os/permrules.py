@@ -764,12 +764,10 @@ def _roots(roots: Iterable[str]) -> list[str]:
     return [os.path.realpath(_expand_home(r)) for r in roots if r]
 
 
-def _inside(path: str, roots: list[str]) -> bool:
-    return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots)
-
-
-def _outside_dirs(seg: Seg, tokens: list[str], roots: list[str], cwd: str | None) -> list[str]:
-    """Directories this subcommand touches that sit outside every granted root."""
+def _guarded_paths(seg: Seg, tokens: list[str], cwd: str | None) -> list[str]:
+    """Paths this subcommand names that are a credential store or Grain's own data folder or app (mac.sensitive_reason /
+    mac.protected_reason), judged as spelled and as resolved: the file itself, or the folder for a glob."""
+    from . import mac
     out: list[str] = []
     targets: list[str] = [t for op, t in seg.redirects if t not in EXEMPT_PATHS]
     name = os.path.basename(tokens[0]) if tokens else ""
@@ -782,14 +780,15 @@ def _outside_dirs(seg: Seg, tokens: list[str], roots: list[str], cwd: str | None
         targets += [w for w in pos if w != "-"]
     for t in targets:
         if "$" in t and not t.startswith(("$HOME", "${HOME}")):
-            out.append(t)  # an unresolved variable could point anywhere
-            continue
+            continue  # an unresolved variable cannot be judged
         if re.search(r"[*?\[]", t):
             t = os.path.dirname(re.split(r"[*?\[]", t)[0] + "x") or "."
+        spelled = _expand_home(t)
+        if not os.path.isabs(spelled) and cwd:
+            spelled = os.path.join(cwd, spelled)
         p = _real(t, cwd)
-        d = p if (os.path.isdir(p) or t.endswith("/")) else os.path.dirname(p)
-        if not _inside(d, roots) and d not in out:
-            out.append(d)
+        if (mac.sensitive_reason(os.path.normpath(spelled), p) or mac.protected_reason(spelled, p)) and p not in out:
+            out.append(p)
     return out
 
 
@@ -823,7 +822,7 @@ class Verdict:
     external: list[str] = field(default_factory=list)
 
 
-def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, roots: list[str], cwd: str | None) -> Verdict:
+def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None) -> Verdict:
     v = Verdict(subjects=[f"Bash({cmd})"])
     why = hardline(cmd)
     if why:
@@ -860,18 +859,17 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, roots: list[str], cwd: s
                 asked.append(f"Bash({_canon(strip_wrappers(seg.words, True))})")
                 v.rule = v.rule or hit.text
                 break
-    # Paths outside the workspace are judged by the agg tokens, wrappers and all.
+    # A credential store or Grain's own data is judged by the agg tokens, wrappers and all.
     outside: list[str] = []
-    if roots:
-        for seg in judged:
-            for d in _outside_dirs(seg, strip_wrappers(seg.words, True), roots, cwd):
-                for r in rules.deny:
-                    if _matches(r, Subject("external_directory", d), tool, cwd):
-                        v.action, v.rule = "deny", r.text
-                        v.refusal = f"blocked by your permission rule {r.text}"
-                        return v
-                if not any(_matches(r, Subject("external_directory", d), tool, cwd) for r in rules.allow) and d not in outside:
-                    outside.append(d)
+    for seg in judged:
+        for d in _guarded_paths(seg, strip_wrappers(seg.words, True), cwd):
+            for r in rules.deny:
+                if _matches(r, Subject("external_directory", d), tool, cwd):
+                    v.action, v.rule = "deny", r.text
+                    v.refusal = f"blocked by your permission rule {r.text}"
+                    return v
+            if not any(_matches(r, Subject("external_directory", d), tool, cwd) for r in rules.allow) and d not in outside:
+                outside.append(d)
     v.external = outside
     # allow: every subcommand of the line itself needs a verdict.
     unallowed: list[str] = []
@@ -921,7 +919,8 @@ def _suggest_bash(parsed: Parsed, rules: RuleSet, outside: list[str]) -> list[st
 
 def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | None, *,
              roots: Iterable[str] = (), cwd: str | None = None) -> Verdict:
-    """The rule verdict for one call: deny > ask > allow, None when no rule has an opinion."""
+    """The rule verdict for one call: deny > ask > allow, None when no rule has an opinion. `roots` only names where a
+    relative path in a shell command starts (the first entry, the desk workspace); it limits nothing."""
     rs = rules if isinstance(rules, RuleSet) else load_rules(rules)
     rl = _roots(roots)
     if cwd is None and rl:
@@ -929,7 +928,7 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
     args = args if isinstance(args, dict) else {}
     if tool == "shell_run":
         c = args.get("cwd")
-        return _evaluate_bash(tool, str(args.get("command") or ""), rs, rl, _real(c) if isinstance(c, str) and c else cwd)
+        return _evaluate_bash(tool, str(args.get("command") or ""), rs, _real(c) if isinstance(c, str) and c else cwd)
     subs = subject_for(tool, args)
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])
     verdict, rule = _decide(rs, subs, tool, cwd)

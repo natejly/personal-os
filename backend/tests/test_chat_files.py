@@ -168,10 +168,10 @@ def test_local_writes() -> None:
     got = {x["name"]: x for x in CL.get(f"/conversations/{cid}/files").json()["files"]}
     check(got["new.md"]["missing"] and not got["old.md"]["missing"], "a deleted local file is flagged missing")
     with DB.tx() as c:
-        c.execute("INSERT INTO chat_files VALUES('x1',?,'local',?,'secret','edited',NULL,?)", (cid, str(HOME / "Library" / "secret"), time.time()))
-        c.execute("INSERT INTO chat_files VALUES('x2',?,'local',?,'hid','edited',NULL,?)", (cid, str(HOME / "Desktop" / ".hid"), time.time()))
+        c.execute("INSERT INTO chat_files VALUES('x1',?,'local',?,'secret','edited',NULL,?)", (cid, str(HOME / ".ssh" / "secret"), time.time()))
+        c.execute("INSERT INTO chat_files VALUES('x2',?,'local',?,'hid','edited',NULL,?)", (cid, str(HOME / "Desktop" / ".env"), time.time()))
     names = {x["name"] for x in CL.get(f"/conversations/{cid}/files").json()["files"]}
-    check("secret" not in names and "hid" not in names, "a path the local-file tools refuse is dropped")
+    check("secret" not in names and "hid" not in names, "a credential store is dropped from the list")
 
 
 def test_coding_sessions() -> None:

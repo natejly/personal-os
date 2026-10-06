@@ -238,7 +238,7 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
 
 
 def check_watch_dir(raw: str | None) -> str:
-    """The folder a directory job may watch: the local-file tools' guard (inside home, no dot-folders)."""
+    """The folder a directory job may watch: the local-file tools' guard (anywhere but Grain's own data folder and app)."""
     from . import mac
     p = mac.allowed_path(raw or "")
     if not p.is_dir():

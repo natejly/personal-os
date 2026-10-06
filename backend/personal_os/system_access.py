@@ -1,8 +1,8 @@
 """System access panel: what macOS has granted this app, read without ever prompting, plus a shell self-check.
 
-GET /system/access reads TCC state (full disk, input monitoring, per-app automation), installed browsers, the effective
-workspace roots and the claude/opencode CLIs. POST /system/shell-check runs `echo ok` through the same sandboxed
-runner the agent's shell tool uses."""
+GET /system/access reads TCC state (full disk, input monitoring, per-app automation), installed browsers, the file scope
+(what is off limits and what asks first, from mac.py) and the claude/opencode CLIs. POST /system/shell-check runs `echo ok`
+in the home folder through the same sandboxed runner the agent's shell tool uses."""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from . import activity, codingagents, imessage, opencode, shell
+from . import activity, codingagents, imessage, mac, opencode, shell
 
 AUTOMATION = {"messages": "com.apple.MobileSMS", "finder": "com.apple.finder", "systemEvents": "com.apple.systemevents",
               "contacts": "com.apple.AddressBook", "calendar": "com.apple.iCal", "reminders": "com.apple.reminders"}
@@ -51,6 +51,13 @@ def _version(path: str) -> str | None:
         return None
 
 
+def _safe_scope() -> dict[str, list[str]]:
+    try:
+        return mac.scope_summary()
+    except Exception:  # noqa: BLE001
+        return {"protected": [], "sensitive": []}
+
+
 def _cli(path: str | None, hint: str) -> dict[str, Any]:
     return {"path": path, "version": _version(path) if path else None, "hint": hint}
 
@@ -62,18 +69,11 @@ def _cli_safe(find: Callable[[], str | None], hint: str) -> dict[str, Any]:
         return _cli(None, hint)
 
 
-def router(settings: Callable[[], dict[str, Any]], stored_roots: Callable[[], list[str]],
-           shell_jobs: Callable[[], Any]) -> APIRouter:
-    """settings: effective settings (roots already default to ~/Grain); stored_roots: the stored list, so `defaulted`
-    can tell; shell_jobs: the shell job registry (resolved late, it is built after the routers)."""
+def router(settings: Callable[[], dict[str, Any]], shell_jobs: Callable[[], Any]) -> APIRouter:
+    """settings: effective settings; shell_jobs: the shell job registry (resolved late, it is built after the routers)."""
     r = APIRouter()
 
     def access() -> dict[str, Any]:
-        try:
-            roots = [str(x) for x in settings().get("workspaceRoots") or []]
-            defaulted = not stored_roots()
-        except Exception:  # noqa: BLE001
-            roots, defaulted = [], False
         try:
             names = list(activity.installed_browsers())
         except Exception:  # noqa: BLE001
@@ -84,7 +84,7 @@ def router(settings: Callable[[], dict[str, Any]], stored_roots: Callable[[], li
             "automation": {k: _safe(lambda b=b: activity.automation_status(b)) for k, b in AUTOMATION.items()},
             "browsers": [{"name": n, "state": _safe(lambda n=n: activity.automation_status(activity.BROWSER_BUNDLES[n]))}
                          for n in names],
-            "roots": {"roots": roots, "defaulted": defaulted},
+            "scope": _safe_scope(),
             "clis": {"claude": _cli_safe(codingagents.claude_binary, CLAUDE_INSTALL_HINT),
                      "opencode": _cli_safe(opencode.binary, opencode.INSTALL_HINT)},
         }
@@ -98,9 +98,7 @@ def router(settings: Callable[[], dict[str, Any]], stored_roots: Callable[[], li
         cfg = settings()
         cwd: str | None = None
         try:
-            roots = shell.granted_roots(cfg, None)
-            where, _root = shell.resolve_cwd(None, roots)
-            cwd = str(where)
+            cwd = str(shell.resolve_cwd(None, mac.home()))
             ok, out = await shell.run_fixed(shell_jobs(), ["/bin/sh", "-c", "echo ok"], cwd, cfg, sandboxed=True, timeout=10)
             return {"ok": bool(ok and "ok" in out), "output": out, "cwd": cwd, "error": None}
         except shell.ShellError as e:

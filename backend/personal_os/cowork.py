@@ -635,12 +635,13 @@ class Desks:
             return self._one(c, id)
 
     def settle(self, id: str, *, partial: str | None, stopped: bool, error: str | None,
-               chain: bool = False) -> dict[str, Any]:
+               chain: bool = False, answered: bool = False) -> dict[str, Any]:
         """What a finished desk turn means, decided from the three facts the run ends with.
 
         `chain=True` says the supervisor has already decided another turn follows, so the desk stays
         `working`; that flag is why a budget-window stop can be settled honestly without the row
-        having to guess. A desk that is no longer LIVE settled itself during the turn (`desk_ask`,
+        having to guess. `answered=True` says the turn was a plain answer from an `ask` desk (no tool, no plan): it is
+        `done` with reason "answered" instead of the review/blocked an unfinished reply gets. A desk that is no longer LIVE settled itself during the turn (`desk_ask`,
         `desk_done`, a park, a pause) and is left exactly as it is — only a stop or a crash outranks
         a decision the desk already made.
         """
@@ -655,6 +656,8 @@ class Desks:
             return desk
         elif chain:
             return desk
+        elif answered:
+            target, reason = "done", "answered"
         elif partial == "blocked":
             target, reason = "blocked", "approval"
         elif partial:

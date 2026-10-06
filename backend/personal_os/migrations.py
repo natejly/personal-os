@@ -318,6 +318,12 @@ def _memory_provenance_backfill(c: sqlite3.Connection) -> None:
             c.execute("UPDATE memories SET source_conversation_id=?, source_message_id=? WHERE id=?", (conv, um[0], mem[0]))
 
 
+def _autonomous_by_default(c: sqlite3.Connection) -> None:
+    """Every existing install gets `autonomousByDefault` true: a new chat starts as a task (a desk) that works through its
+    steps, and a plain question is simply answered. A value already stored (impossible before this step) is kept."""
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('autonomousByDefault', ?)", (json.dumps(True),))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -337,6 +343,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (15, "memories_expires_at", _memories_expires_at),
     (16, "memories_fts_live", _memories_fts_live),
     (17, "memory_provenance_backfill", _memory_provenance_backfill),
+    (18, "autonomous_by_default", _autonomous_by_default),
 ]
 
 

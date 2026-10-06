@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { EyeOff, MoreHorizontal } from 'lucide-react'
+import { EyeOff, MoreHorizontal, Paperclip } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useChatAttention, useChatFace, useStore } from '../store'
@@ -8,6 +8,9 @@ import { api } from '../lib/api'
 import { copyMarkdown, downloadMarkdown } from '../features/notes/exportDoc'
 import type { Conversation } from '@shared/types'
 import { STATUS_LABEL } from '../lib/deskStatus'
+import { useChatFileCount } from '../lib/useChatFiles'
+import { formatCount } from '../lib/chatFiles'
+import './chatFiles.css'
 
 /**
  * One chat row in the sidebar lists: click or Enter opens it, right-click or the "…" button opens
@@ -30,6 +33,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   const setChatSettings = useStore((s) => s.setChatSettings)
   const forgetLearned = useStore((s) => s.forgetLearned)
   const noLearn = conv.settings?.learn === false
+  const fileCount = useChatFileCount(conv.id)
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState(false)
   /** Enter commits and the unmount's blur commits again: the first one settles, Escape settles it empty. */
@@ -108,7 +112,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
               }}
               onBlur={(e) => commit(e.currentTarget.value)}
             />
-          ) : <>{conv.title}{trail}</>}
+          ) : <>{conv.title}{fileCount > 0 && <span className="convo-files" title={`${fileCount} file${fileCount === 1 ? '' : 's'} in this chat`}><Paperclip size={11} />{formatCount(fileCount)}</span>}{trail}</>}
         </span>
         {attn !== 'idle' && <AttentionDot state={attn} detail={deskStatus && STATUS_LABEL[deskStatus]} />}
         <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}

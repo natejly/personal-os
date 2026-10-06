@@ -69,6 +69,7 @@ from .envs import WorkEnv
 from .microvm import SandboxError, Sandboxes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
+from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
@@ -514,6 +515,12 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
+# Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
+chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
+app.include_router(chat_files_router(chat_files))
+toolbox.chat_files = chat_files
+if toolbox.chat_outputs is not None:
+    toolbox.chat_outputs.on_save = chat_files.record_output
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -7556,6 +7563,7 @@ def accept_revision(rev_id: str) -> dict[str, Any]:
     d = docs.accept(rev_id)
     if not d:
         raise HTTPException(404, "No pending revision with that id")
+    chat_files.record_accepted_revision(rev_id, d)
     return d
 
 
@@ -8560,6 +8568,10 @@ async def _outbox_startup() -> None:
         await asyncio.to_thread(extundo.prune)  # calendar / Tasks undo rows past their 7 days
     with contextlib.suppress(Exception):
         await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
+    try:
+        await asyncio.to_thread(chat_files.backfill)  # idempotent: files that predate the chat_files triggers
+    except Exception as e:  # noqa: BLE001
+        log.warning("chat files backfill failed: %s", type(e).__name__)
 
 
 @app.on_event("shutdown")

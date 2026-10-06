@@ -11,6 +11,7 @@ import ResizeHandle from './ResizeHandle'
 import PlanPanel from './PlanPanel'
 import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
+import ChatFilesButton from './ChatFilesPanel'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
@@ -116,6 +117,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
         </div>
         <div className="no-drag header-right">
+          <ChatFilesButton conversationId={convo?.id} />
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>

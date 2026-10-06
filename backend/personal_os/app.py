@@ -2565,7 +2565,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 blocked.clear()
                 tool_errors.clear()
                 if detector is not None:
-                    detector.obs.clear()
+                    detector.reset()
 
             _round += 1
             meter.rounds = _round - 1  # rounds already completed, for display
@@ -3326,12 +3326,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          **({"review": review} if review else {})}
                 stuck = None
-                if detector is not None and ran:
-                    detector.observe(c["name"], args, result)
+                if detector is not None:
+                    if ran:
+                        detector.observe(c["name"], args, result)
+                    else:
+                        detector.skip(c["name"])  # a streak of calls that never ran ends the run like any other stuck shape
                     stuck = detector.check()
                     if stuck and stuck_hits == 0:
                         stuck_hits = 1
-                        detector.obs.clear()  # the model gets a fresh run at it; the same shape again ends tool use
+                        detector.reset()  # the model gets a fresh run at it; the same shape again ends tool use
                         event["breaker"] = "stuck_nudge"
                     elif stuck:
                         stuck_hits += 1

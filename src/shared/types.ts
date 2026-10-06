@@ -1804,6 +1804,12 @@ export interface GrainApi {
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
+  /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
+  sysAccess: {
+    status: () => Promise<import('./systemAccess').MainStatus>
+    grant: (id: string) => Promise<{ state: import('./systemAccess').AccessState; note?: string }>
+    openPane: (url: string) => Promise<boolean>
+  }
   /** The agent's interactive browser (hidden windows owned by main). The renderer never gets the bridge secret. */
   agentBrowser: {
     list: () => Promise<AgentBrowserSession[]>

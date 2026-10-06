@@ -69,6 +69,11 @@ const api: GrainApi = {
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),
   deskNotify: (payload) => ipcRenderer.send('desk:notify', payload),
   micAccess: () => ipcRenderer.invoke('media:mic-access'),
+  sysAccess: {
+    status: () => ipcRenderer.invoke('sysaccess:status'),
+    grant: (id) => ipcRenderer.invoke('sysaccess:grant', id),
+    openPane: (url) => ipcRenderer.invoke('sysaccess:open-pane', url)
+  },
   agentBrowser: {
     list: () => ipcRenderer.invoke('agentBrowser:list'),
     show: (session: string) => ipcRenderer.invoke('agentBrowser:show', session),

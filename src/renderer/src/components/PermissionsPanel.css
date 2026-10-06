@@ -1,0 +1,13 @@
+.perm-panel h4 { margin: 14px 0 6px; }
+.perm-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border, rgba(128,128,128,.2)); }
+.perm-row .perm-main { flex: 1; min-width: 0; }
+.perm-row .perm-label { font-weight: 500; }
+.perm-row .perm-reason { display: block; font-size: 12px; opacity: .7; }
+.perm-badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.perm-badge.granted { color: var(--ok, #2e9e5b); }
+.perm-badge.denied { color: var(--danger, #d64545); }
+.perm-badge.unasked { color: var(--warn, #b7791f); }
+.perm-badge.unknown { opacity: .65; }
+.perm-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.perm-panel.compact .perm-reason { display: none; }
+.perm-panel ul { margin: 4px 0; padding-left: 18px; }

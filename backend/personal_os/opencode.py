@@ -119,24 +119,95 @@ def summarize(raw: str) -> tuple[str, str | None]:
     return "\n".join(out).strip(), session
 
 
+class Refused(shell.ShellError):
+    """A launch that cannot start: the message is for the model, `alternative` is what to do instead."""
+
+    def __init__(self, message: str, alternative: str | None = None):
+        super().__init__(message)
+        self.alternative = alternative
+
+
+def _desk_root(tb: Any, ctx: dict[str, Any]) -> Path | None:
+    did = str(ctx.get("desk_id") or "")
+    if did and getattr(tb, "workspace", None) is not None:
+        try:
+            return tb.workspace.ensure(did)
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+def default_timeout(settings: dict[str, Any], timeout_s: Any, background: bool) -> int:
+    default_t = shell.BACKGROUND_TIMEOUT if background else max(int(settings.get("shellTimeoutSec") or shell.DEFAULT_TIMEOUT), 300)
+    try:
+        return max(1, min(int(timeout_s or default_t), shell.MAX_TIMEOUT))
+    except (TypeError, ValueError):
+        return default_t
+
+
+async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, state_key: str, continue_session: bool = False,
+                 model: str | None = None, background: bool = False, timeout: int | None = None,
+                 conversation_id: str | None = None, run_id: str | None = None, notify: bool = True,
+                 on_timeout: str | None = None) -> tuple[shell.Job, dict[str, Any]]:
+    """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
+    Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
+    `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
+    s = ctx.get("settings") or tb.settings()
+    exe = binary()
+    if not exe:
+        raise Refused(INSTALL_HINT, "shell_run and fs_edit for the change yourself")
+    if not shell.sandbox_available():
+        raise Refused("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
+                      "was run.", "fs_edit and shell_run for the change yourself")
+    ep = endpoint(s)
+    if not ep:
+        raise Refused("No model endpoint is set up yet (Settings → Model), so opencode has nothing to talk to.")
+    base_url, api_key, default_model = ep
+    use_model = str(model or "").strip() or default_model
+    dr = _desk_root(tb, ctx)
+    where, root = shell.resolve_cwd(cwd, shell.granted_roots(s, dr))
+    timeout = timeout or default_timeout(s, None, background)
+    data_dir = getattr(getattr(getattr(tb, "results", None), "db", None), "data_dir", None)
+    state = state_dir(Path(data_dir) if data_dir else Path(tempfile.gettempdir()) / "grain-opencode", state_key)
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
+    env = shell.scrubbed_env(tmp)
+    env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
+    env.update({"XDG_DATA_HOME": str(state / "data"), "XDG_CONFIG_HOME": str(state / "config"),
+                "XDG_CACHE_HOME": str(state / "cache"), "XDG_STATE_HOME": str(state / "state"),
+                "OPENCODE_CONFIG_CONTENT": config(base_url, use_model, "GRAIN_MODEL_API_KEY"),
+                "GRAIN_MODEL_API_KEY": api_key, "OPENCODE_DISABLE_AUTOUPDATE": "1"})
+    argv = [exe, "run", "--standalone", "--format", "json", "-m", f"{PROVIDER_ID}/{use_model}"]  # standalone: no shared daemon outside the sandbox
+    if continue_session:
+        argv.append("--continue")
+    argv.append(prompt)
+    writable = [str(root), tmp, str(state)]
+    if dr:
+        writable.append(str(dr))
+    # loopback: `opencode run` spawns a private server on a random local port and talks to it
+    profile = sandbox.shell_profile(writable, network=False, allow_hosts=allow_hosts(base_url), loopback=True)
+    shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
+    shown_cmd = f"opencode run {prompt[:160]!r}"
+    try:
+        job = await tb.shell.start(["sandbox-exec", "-p", profile, *argv], command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
+                                   conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
+                                   run_id=run_id if run_id is not None else ctx.get("run_id"),
+                                   background=bool(background), timeout=timeout, notify=notify,
+                                   max_background=int(s.get("shellMaxBackground") or 4),
+                                   on_timeout=on_timeout or ("background" if ctx.get("desk_id") else "kill"))
+    except shell.ShellError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return job, {"cwd": shell._scrub(str(where)), "model": f"{PROVIDER_ID}/{use_model}", "sandboxed": True}
+
+
 def register(tb: Any) -> None:
     """Add opencode_run to a Toolbox (group `shell`). shell.register must have run first (it owns tb.shell)."""
     from .tools import ToolSpec, _obj, tool_error
 
     jobs: shell.ShellJobs = tb.shell
-    data_dir = getattr(getattr(getattr(tb, "results", None), "db", None), "data_dir", None)
 
     def cfg(ctx: dict[str, Any]) -> dict[str, Any]:
         return ctx.get("settings") or tb.settings()
-
-    def desk_root(ctx: dict[str, Any]) -> Path | None:
-        did = str(ctx.get("desk_id") or "")
-        if did and getattr(tb, "workspace", None) is not None:
-            try:
-                return tb.workspace.ensure(did)
-            except Exception:  # noqa: BLE001
-                return None
-        return None
 
     async def opencode_run(ctx: dict[str, Any], prompt: str, cwd: str | None = None, timeout_s: int | None = None,
                            background: bool = False, continue_session: bool = False, model: str | None = None) -> Any:
@@ -149,58 +220,13 @@ def register(tb: Any) -> None:
             return tool_error("opencode_run needs a prompt.", field="prompt", example={"prompt": "add a --dry-run flag to cli.py"})
         if len(prompt) > MAX_PROMPT:
             return tool_error(f"The prompt is over {MAX_PROMPT} characters; point opencode at a file instead.", field="prompt")
-        exe = binary()
-        if not exe:
-            return tool_error(INSTALL_HINT, alternative="shell_run and fs_edit for the change yourself")
-        if not shell.sandbox_available():
-            return tool_error("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
-                              "was run.", alternative="fs_edit and shell_run for the change yourself")
-        ep = endpoint(s)
-        if not ep:
-            return tool_error("No model endpoint is set up yet (Settings → Model), so opencode has nothing to talk to.")
-        base_url, api_key, default_model = ep
-        use_model = str(model or "").strip() or default_model
-        roots = shell.granted_roots(s, desk_root(ctx))
-        try:
-            where, root = shell.resolve_cwd(cwd, roots)
-        except shell.ShellError as e:
-            return tool_error(shell._scrub(str(e)))
-        default_t = shell.BACKGROUND_TIMEOUT if background else max(int(s.get("shellTimeoutSec") or shell.DEFAULT_TIMEOUT), 300)
-        try:
-            timeout = max(1, min(int(timeout_s or default_t), shell.MAX_TIMEOUT))
-        except (TypeError, ValueError):
-            timeout = default_t
+        timeout = default_timeout(s, timeout_s, bool(background))
         key = str(ctx.get("desk_id") or ctx.get("conversation_id") or "chat")
-        state = state_dir(Path(data_dir) if data_dir else Path(tempfile.gettempdir()) / "grain-opencode", key)
-        tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
-        env = shell.scrubbed_env(tmp)
-        env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
-        env.update({"XDG_DATA_HOME": str(state / "data"), "XDG_CONFIG_HOME": str(state / "config"),
-                    "XDG_CACHE_HOME": str(state / "cache"), "XDG_STATE_HOME": str(state / "state"),
-                    "OPENCODE_CONFIG_CONTENT": config(base_url, use_model, "GRAIN_MODEL_API_KEY"),
-                    "GRAIN_MODEL_API_KEY": api_key, "OPENCODE_DISABLE_AUTOUPDATE": "1"})
-        argv = [exe, "run", "--standalone", "--format", "json", "-m", f"{PROVIDER_ID}/{use_model}"]  # standalone: no shared daemon outside the sandbox
-        if continue_session:
-            argv.append("--continue")
-        argv.append(prompt)
-        writable = [str(root), tmp, str(state)]
-        dr = desk_root(ctx)
-        if dr:
-            writable.append(str(dr))
-        # loopback: `opencode run` spawns a private server on a random local port and talks to it
-        profile = sandbox.shell_profile(writable, network=False, allow_hosts=allow_hosts(base_url), loopback=True)
-        shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
-        shown_cmd = f"opencode run {prompt[:160]!r}"
         try:
-            job = await jobs.start(["sandbox-exec", "-p", profile, *argv], command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
-                                   conversation_id=ctx.get("conversation_id"), run_id=ctx.get("run_id"),
-                                   background=bool(background), timeout=timeout, notify=True,
-                                   max_background=int(s.get("shellMaxBackground") or 4),
-                                   on_timeout="background" if ctx.get("desk_id") else "kill")
+            job, base = await launch(tb, ctx, prompt, cwd=cwd, state_key=key, continue_session=continue_session, model=model,
+                                     background=bool(background), timeout=timeout)
         except shell.ShellError as e:
-            shutil.rmtree(tmp, ignore_errors=True)
-            return tool_error(shell._scrub(str(e)))
-        base: dict[str, Any] = {"cwd": shell._scrub(str(where)), "model": f"{PROVIDER_ID}/{use_model}", "sandboxed": True}
+            return tool_error(shell._scrub(str(e)), alternative=getattr(e, "alternative", None))
         if background:
             return {"job_id": job.id, "background": True, **base,
                     "note": "opencode is working in the background. shell_poll(job_id) reads its raw event stream; shell_kill(job_id) stops it."}

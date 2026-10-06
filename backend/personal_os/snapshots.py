@@ -49,7 +49,7 @@ SKIP_ITEMS_REPORTED = 20
 FILE_TOOLS = frozenset({"write_local_file", "move_local_file", "trash_local_file", "fs_edit", "fs_copy", "fs_mkdir"})
 # run_python and desk_fetch_file can write the workspace too (run_python only inside a desk: roots_for_call needs a desk id).
 DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "desk_import_sandbox", "run_python", "desk_fetch_file", "sandbox_export_file"})
-SHELL_TOOLS = frozenset({"shell_run", "opencode_run"})
+SHELL_TOOLS = frozenset({"shell_run", "opencode_run", "coding_session_start", "coding_session_send"})
 PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 
 READ_ONLY_COMMANDS = frozenset({
@@ -186,7 +186,7 @@ class Snapshots:
             if read_only_shell(str(args.get("command") or args.get("cmd") or "")):
                 return []
             allr = self.roots(desk_id, settings)
-            cwd = args.get("cwd")
+            cwd = args.get("cwd") or args.get("repo_path")
             if cwd:
                 hit = self._containing(allr, str(cwd))
                 if hit:

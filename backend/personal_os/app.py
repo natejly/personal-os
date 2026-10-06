@@ -3614,7 +3614,7 @@ def _answered(desk: dict[str, Any], run: Run, error: str | None = None) -> bool:
     question, not unfinished work: the desk settles done with no nudge and no self-review, and the chat's next message
     relaunches it like any other. A continuation turn (a nudge, a wake, a resume) is not a plain answer: it picks up work."""
     return (desk.get("autonomy") == "ask" and not str(run.input.get("content") or "").startswith(tuple(CONTINUE_MESSAGES.values())) and not desk.get("plan_id") and not error and not run.error and not run.stop.is_set()
-            and run.partial is None and run.tool_calls == 0 and run.steps_consumed == 0
+            and run.partial is None and run.tool_calls == 0 and run.tool_ok == 0 and run.steps_consumed == 0
             and desk.get("status") in ("working", "planning"))
 
 

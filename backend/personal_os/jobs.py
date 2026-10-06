@@ -238,9 +238,12 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
 
 
 def check_watch_dir(raw: str | None) -> str:
-    """The folder a directory job may watch: the local-file tools' guard (anywhere but Grain's own data folder and app)."""
+    """The folder a directory job may watch: the local-file tools' guard (anywhere but Grain's own data folder and app),
+    and never a credential store: an unattended job has no one to approve reading one."""
     from . import mac
     p = mac.allowed_path(raw or "")
+    if why := mac.sensitive_reason(raw or "", p):
+        raise mac.LocalPathError(why)
     if not p.is_dir():
         raise mac.LocalPathError(f"{p} is not a folder")
     return str(p)

@@ -27,6 +27,16 @@ test('every settings tab opens and renders cleanly', async ({ grain }) => {
   noErrors(grain)
 })
 
+test('Voice input settings act at once and persist through /voice/config', async ({ grain }) => {
+  const { page, api } = grain
+  await openSettings(page, 'Behavior')
+  await dialog(page).getByLabel('Transcription').first().selectOption('local')
+  await field(page, 'Tidy dictation with the model').setChecked(true, { force: true })
+  await expect.poll(async () => api('/voice/config')).toMatchObject({ sttBackend: 'local', dictationCleanup: true })
+  await closeSettings(page)
+  noErrors(grain)
+})
+
 test('toggles and fields persist through PUT /settings and survive relaunch', async ({ grain }) => {
   const { page, api } = grain
   // Behavior
@@ -162,11 +172,9 @@ test('invalid values are clamped or rejected without breaking the modal', async 
     expect(r.status).toBeLessThan(500)
   }
   expect((await api('/settings')).maxToolRounds).toBe(3)
-  // Unknown keys are ignored, read-only keys cannot be written.
-  await api('/settings', { method: 'PUT', body: { nonsense: 1, meetings: { enabled: true } } })
-  const after = await api('/settings')
-  expect(after.nonsense).toBeUndefined()
-  expect(after.meetings).toEqual(before.meetings)
+  // Unknown keys are ignored.
+  await api('/settings', { method: 'PUT', body: { nonsense: 1 } })
+  expect((await api('/settings')).nonsense).toBeUndefined()
   expect(grain.consoleErrors.filter((e) => !benign(e) && !/status of 422/.test(e))).toEqual([]) // the refusals above
 })
 
@@ -288,7 +296,7 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   await save(page)
   expect((await api('/settings')).systemPrompt.length).toBe(big.length)
   // Wrong-typed or odd-shaped values for the toggles: accepted or refused, never a broken app.
-  for (const body of [{ hiddenViews: [null, {}, 3] }, { homeWidgets: { projects: 'yes', x: null } }, { hiddenViews: 'meetings' }, { homeWidgets: [] }]) {
+  for (const body of [{ hiddenViews: [null, {}, 3] }, { homeWidgets: { projects: 'yes', x: null } }, { hiddenViews: 'library' }, { homeWidgets: [] }]) {
     await api('/settings', { method: 'PUT', body, raw: true })
   }
   const p2 = await grain.relaunch()

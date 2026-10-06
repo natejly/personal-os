@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine, Mic } from 'lucide-react'
+import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import ShellJobs from './ShellJobs'
 import CodingSessions from './CodingSessions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
-import { viewHidden } from '../moduleToggles'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { citeLabel, openCite } from '../lib/remarkCites'
@@ -89,7 +88,6 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const setView = useStore((s) => s.setView)
   const openMemory = useStore((s) => s.openMemory)
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
@@ -97,7 +95,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
+    || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -115,23 +113,11 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           <pre className="ctx-prompt">{ctx.page.detail}</pre>
         </section>
       )}
-      {ctx.activity && (
-        <section>
-          <h5><MonitorDot size={12} /> Activity <button className="link" onClick={() => setView('activity')}>manage</button></h5>
-          <pre className="ctx-prompt">{ctx.activity}</pre>
-        </section>
-      )}
       {ctx.style && (
         <section>
           <h5><PenLine size={12} /> Writing style {ctx.style.project_id ? '(project voice)' : '(your voice)'} <button className="link" onClick={() => openMemory('style')}>edit</button></h5>
           <p className="muted small">{ctx.style.summary}</p>
           <ul>{ctx.style.guidelines.map((g) => <li key={g}>{g}</li>)}</ul>
-        </section>
-      )}
-      {ctx.meetings && (
-        <section>
-          <h5><Mic size={12} /> Meetings <button className="link" onClick={() => setView('meetings')}>manage</button></h5>
-          <pre className="ctx-prompt">{ctx.meetings}</pre>
         </section>
       )}
       {ctx.memories.length > 0 && (
@@ -198,11 +184,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
-  const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
-  const fixModules = { label: 'Turn on in Settings → Modules', open: () => openSettings('modules') }
-  const meetingCount = useStore((s) => s.meetings.length)
-  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -230,7 +213,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.draftMode, cs.useMeetings])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useStyle, cs.draftMode])
 
   return (
     <aside className="context-drawer">
@@ -259,9 +242,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} locked={!!cs.private} />
         <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} locked={!!cs.private} />
         <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts from your notes and uploads" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
-        <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} fix={viewHidden(settings, 'activity') ? fixModules : undefined} />
         <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} locked={!!cs.private} />
-        <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} fix={viewHidden(settings, 'meetings') ? fixModules : undefined} />
         {convo && !cs.private && <>
           <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Stays in history and search; nothing from it becomes a memory, graph relation or draft skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
           {cs.learn === false && <button className="link small" onClick={() => void useStore.getState().forgetLearned(convo.id)}>Forget what was learned here</button>}
@@ -285,8 +266,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
             <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops activity, meeting notes, and document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
-              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useActivity: false, useMeetings: false, useDocuments: false })}>clear</button>
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
+              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>clear</button>
             </span>
           </div>
         )}

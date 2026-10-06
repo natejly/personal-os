@@ -12,7 +12,7 @@ export async function rebuildIndex(docs: Docs = api.documents): Promise<Awaited<
 
 const clamp = (v: string, lo: number, hi: number): number => Math.min(hi, Math.max(lo, Number(v) || lo))
 
-/** The retrieval knobs the backend reads (retrieval.py, context.py, meeting_index.py, fetch_url). No hooks, so it
+/** The retrieval knobs the backend reads (retrieval.py, context.py, fetch_url). No hooks, so it
  *  stays a plain function of draft + patch. Ranges match NUMERIC_SETTING_RANGES in app.py. */
 export default function AdvancedRetrieval({ draft, patch, models }: { draft: Settings; patch: (p: Partial<Settings>) => void; models: { id: string }[] }): JSX.Element {
   return <details className="modal-free">
@@ -20,10 +20,6 @@ export default function AdvancedRetrieval({ draft, patch, models }: { draft: Set
     <label className="toggle-row plain">
       <span className="toggle-text"><b>Include my Docs in auto-context</b><small>Search your own Docs as well as uploaded files when a chat pulls in documents.</small></span>
       <input type="checkbox" checked={draft.useDocsInContext !== false} onChange={(e) => patch({ useDocsInContext: e.target.checked })} /><span className="switch" />
-    </label>
-    <label className="toggle-row plain">
-      <span className="toggle-text"><b>Semantic meeting search</b><small>Embed meeting summaries and transcripts so meetings can be found by meaning. Sends meeting text to the embedding provider.</small></span>
-      <input type="checkbox" checked={draft.meetingEmbeddings === true} onChange={(e) => patch({ meetingEmbeddings: e.target.checked })} /><span className="switch" />
     </label>
     <label><span>Search mode</span>
       <select value={draft.retrievalMode ?? 'hybrid'} onChange={(e) => patch({ retrievalMode: e.target.value as 'hybrid' | 'bm25' })}>

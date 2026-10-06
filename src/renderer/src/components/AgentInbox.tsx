@@ -1,6 +1,6 @@
 /**
  * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
- * a link into every other review queue: doc edits, meeting notes, skills, workflow runs, memory tidy-ups) and
+ * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
  * "While you were away" (what the scheduled jobs did, late fires and failures included).
  *
  * Everything here is rendered from the backend's journal rows — agent_runs, run_events, approvals and
@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore, type SettingsTab, type View } from '../store'
+import { useStore } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -193,10 +193,6 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
-  const setView = useStore((s) => s.setView)
-  const openSettings = useStore((s) => s.openSettings)
-  // The daily digest's fix-it links: one per setup gap, to the view or Settings tab that fixes it.
-  const links = r.links ?? []
   // An unread problem opens itself; reading it (Mark all read included) collapses it.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
@@ -238,12 +234,6 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           {r.summary ? <ReportBody text={r.summary} /> : (
             !r.error && <p className="muted">It wrote nothing. {r.tool_calls} tool call{r.tool_calls === 1 ? '' : 's'}.</p>
           )}
-          {links.map((l) => (
-            <button key={l.label} className="ghost-btn sm"
-              onClick={() => { if (l.settings) openSettings(l.settings as SettingsTab); else if (l.view) setView(l.view as View) }}>
-              {l.label} <ArrowRight size={13} />
-            </button>
-          ))}
         </>
       )}
     </li>
@@ -830,8 +820,6 @@ export default function AgentInbox(): JSX.Element | null {
       if (first) void openDoc(first.id)
       else openFiles('notes')
     }
-    else if (key === 'meetings') setView('meetings')
-    else if (key === 'suggestions') setView('activity')
     else if (key === 'memory') { setMemoryMode('list'); openSettings('memory') }
     else { setLibraryTab(key === 'workflows' ? 'automations' : key); setView('library') }
   }

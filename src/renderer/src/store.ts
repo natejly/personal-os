@@ -30,7 +30,7 @@ import type { Attention, CodingSession, RunInfo, ShipChecklist } from '@shared/t
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
-import { uploadToast, type UploadOutcome } from './lib/uploadNote'
+import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { stepZoom } from './lib/zoom'
 
@@ -983,7 +983,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'reasoning':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'tool_decision':
@@ -4091,6 +4091,8 @@ export const useStore = create<State>((set, get) => {
     uploadDocuments: async (files, projectId) => {
       const saved: UploadOutcome[] = []
       for (const f of Array.from(files)) {
+        const tooBig = uploadTooBig(f.size)  // refused here so a huge file is not streamed to the backend only to get a 413
+        if (tooBig) { get().toast(`${f.name}: ${tooBig}`, 'error'); continue }
         try {
           const doc = (await api.documents.upload(projectId, f)) as UploadResult
           // An older backend says nothing about readability; its files count as readable, as before.

@@ -57,6 +57,10 @@ class CodingTestCase(unittest.IsolatedAsyncioTestCase):
         p = unittest.mock.patch.object(ca, "claude_binary", return_value="/bin/claude")
         p.start()
         self.addCleanup(p.stop)
+        for q in (unittest.mock.patch.object(ca, "DAEMON_FILE", self.tmp / "no-daemon.json"),
+                  unittest.mock.patch.object(ca, "login_path", return_value=None)):
+            q.start()
+            self.addCleanup(q.stop)
         self.addCleanup(self._dir.cleanup)
 
     def job_files(self, jid: str, state: str, detail: str = "", lines: list[dict[str, Any]] | None = None, **extra: Any) -> None:
@@ -159,10 +163,10 @@ class ClaudeDriver(CodingTestCase):
             self.assertFalse(any(a.startswith("--dangerously") for a in argv))
         self.assertEqual(dashed[-1], "Task: -x")
 
-    async def test_start_records_ids_and_never_adds_a_flag_unasked(self) -> None:
+    async def test_start_records_ids_and_maps_grain_mode_to_the_flag(self) -> None:
         row = await self.started()
         argv = next(a for a in self.fake.calls if "--bg" in a)
-        self.assertNotIn("--permission-mode", argv)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "auto")  # Grain's default mode is auto
         self.assertEqual((row["status"], row["external_id"], row["session_id"]), ("working", "deadbeef", SID))
         self.assertEqual(self.events[-1][0], "coding_session")
         self.assertEqual(self.events[-1][1]["id"], row["id"])
@@ -268,7 +272,7 @@ class OpencodeDriver(CodingTestCase):
         self.assertEqual(ca.map_job(job("exited", 2))[0], "failed")
         self.assertEqual(ca.map_job(job("killed"))[0], "stopped")
         self.assertEqual(ca.map_job(job("timed_out"))[0], "failed")
-        self.assertIn("600", ca.map_job(job("timed_out"))[1])
+        self.assertIn("30 minutes", ca.map_job(job("timed_out"))[1])
         self.assertEqual(ca.map_job(job("orphaned"))[0], "blocked")
 
     async def test_send_refused_when_the_job_record_was_lost(self) -> None:

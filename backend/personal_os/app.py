@@ -28,14 +28,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import imessage, system_access
-from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, redact, stt, tools, verify
+from . import activity, approval_edits, approval_log, assist, autoreview, backups, llm, mac, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn
+from . import learn, memory_limits
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
@@ -58,7 +58,7 @@ from . import guide, meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
-from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
+from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
@@ -69,6 +69,7 @@ from .envs import WorkEnv
 from .microvm import SandboxError, Sandboxes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
+from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
@@ -514,6 +515,12 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap,
                   conversations=convos, extundo=extundo)
+# Which chat each file belongs to (chat_files.py): triggers record uploads, local writes and coding sessions; these hooks the rest.
+chat_files = ChatFiles(db, toolbox.chat_outputs.root if toolbox.chat_outputs is not None else None)
+app.include_router(chat_files_router(chat_files))
+toolbox.chat_files = chat_files
+if toolbox.chat_outputs is not None:
+    toolbox.chat_outputs.on_save = chat_files.record_output
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -698,6 +705,21 @@ async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in out.items() if k != "is_error"}
 
 
+def _mcp_review_text(name: str) -> str:
+    """The auto reviewer's description of an MCP tool (connector tools have no ToolSpec): its text plus its self-reported hints."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    return mcp_review_text(tool) if tool else ""
+
+
+def _mcp_event(name: str) -> dict[str, Any] | None:
+    """The `mcp` field of a tool_call event, so a card can say which connector asks and what it claims to do."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    if tool is None:
+        return None
+    server = mcp_store.server(tool["server_id"])
+    return {"server": server["name"] if server else "MCP", "read_only": tool["read_only"], "destructive": tool["destructive"]}
+
+
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
     live = (mcp.status(row["id"]) or [{}])[0]
@@ -705,11 +727,12 @@ def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     return {**row,
             "live": {"status": live.get("status", row["status"]), "detail": live.get("detail", row["status_detail"]),
                      "running": bool(live.get("running")), "ready": bool(live.get("ready")),
-                     "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
+                     "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {},
+                     "resources": live.get("resources") or [], "prompts": live.get("prompts") or []},
             "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"]), "drift": mcp_drift.view(mcp_store, t, every)}
                       for t in mcp_store.tools(row["id"], include_missing=True)],
             "eval": mcp_store.latest_eval(row["id"]),
-            "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") == "http" else None}
+            "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") in ("http", "sse") else None}
 
 
 def fscope(raw: str | None) -> str:
@@ -987,17 +1010,18 @@ class McpProbeIn(BaseModel):
 
 
 def _mcp_transport_ok(transport: str | None) -> None:
-    """Only stdio and streamable HTTP connect; an sse server would be saved only to fail every time."""
-    if transport == "sse":
-        raise HTTPException(400, "sse is not supported: use the server's streamable HTTP endpoint")
-    if transport is not None and transport not in ("stdio", "http"):
-        raise HTTPException(400, "transport must be stdio or http")
+    if transport is not None and transport not in ("stdio", "http", "sse"):
+        raise HTTPException(400, "transport must be stdio, http or sse")
 
 
 class McpGrantIn(BaseModel):
     mode: str
     scope: str = "global"
     scope_id: str | None = None
+    confirm: bool = False  # the user has seen that the server calls this tool destructive
+
+
+app.include_router(mcp_routes.router(mcp_store, mcp, _mcp_server_view))
 
 
 @app.get("/mcp/servers")
@@ -1133,8 +1157,11 @@ def mcp_set_grant(slug: str, body: McpGrantIn) -> dict[str, Any]:
         raise HTTPException(400, f"mode must be one of {', '.join(MCP_MODES)}")
     if body.scope not in MCP_SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(MCP_SCOPES)}")
-    if mcp_store.tool(slug) is None:
+    tool = mcp_store.tool(slug)
+    if tool is None:
         raise HTTPException(404, "No such MCP tool")
+    if body.mode == "on" and tool["destructive"] and not body.confirm:
+        raise HTTPException(409, "destructive: confirm required")  # standing permission for a self-declared destructive tool is explicit
     mcp_store.set_grant(slug, body.mode, body.scope, body.scope_id)
     return mcp_store.effective_mode(slug, body.scope_id if body.scope == "project" else None,
                                     body.scope_id if body.scope == "chat" else None)
@@ -1475,6 +1502,9 @@ PLAN_HINT = ("When a request needs more than a couple of tool calls, open with t
              "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
              "earlier rounds — is what keeps a long task on track. If a decision is genuinely the user's, call ask_user once "
              "instead of guessing.")
+# Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
+MEMORY_HINT = ("Save corrections, standing instructions and durable facts the user states with save_memory (kind instruction for always/never rules, until for facts that stop holding on a date).\n"
+               "Call search_memory before answering a question about the user's past or preferences that is not already in context.")
 # Plan mode in an ordinary chat (conv.settings.planMode, else settings.planMode). 'always' starts every
 # reply drafting; 'auto' starts it the first time the reply reaches for a consequential tool.
 CHAT_PLAN_HINT = ("## Plan mode is on\nBefore anything that changes something (writes, sends, creates, deletes, runs code), "
@@ -1720,6 +1750,7 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
             result = {**result, "replayed": True}
         if spec.taints and not (isinstance(result, dict) and result.get("error")):
             ctx["tainted"] = True
+            ctx.setdefault("taint_sources", []).append(name)
     return result
 
 
@@ -1852,6 +1883,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             plan_mode=str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off") in ("auto", "always"),
             fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
         model = routed[0]
+    user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
     regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
     placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
@@ -1900,6 +1932,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 convos.update(conv_id, {"title": "New chat"})
                 conv = {**conv, "title": "New chat"}
         um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None)
+        user_msg_id = um["id"]
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text or attachments[0]["name"])
@@ -1913,6 +1946,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "error", {"message": "Nothing to resume"}
             return
         user_text = users[-1]["content"]
+        user_msg_id = users[-1]["id"]
     else:
         # regenerate: the trailing answer is superseded, not deleted, so it survives a failed or stopped replacement
         msgs = conv["messages"]
@@ -1941,7 +1975,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                               if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
+        user_msg_id = users[-1]["id"]
 
+    run_user_texts: list[str] = [user_text]  # every user message this run answered (steers add to it): all a tainted chat may learn from
     tracer = Tracer()
     _desk = (run.desk_id if run else None) or conv["settings"].get("deskId")
     _job = conv["settings"].get("job_id")
@@ -1959,6 +1995,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         prior = prior[:last_u]
     rq = retrieval_query(prior, user_text)
     doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # also caps the profile block
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
@@ -1967,12 +2004,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
-        draft=bool(conv["settings"].get("draftMode")),
+        draft=bool(conv["settings"].get("draftMode")), window=win,
     )
     skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
-    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
     # can say what is happening (a `status` event); a turn that does not compact is unchanged.
     pre_am: dict[str, Any] | None = None
@@ -2048,10 +2084,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
             "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
+            # a chat tainted with no recorded source: no tool's own-subject exemption may read its taint as explained
+            "taint_unsourced": bool(conv["settings"].get("tainted")) and not conv["settings"].get("taint_sources"),
             "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
-            "proposal_only": proposal_only(run), "message_id": am["id"],
+            "proposal_only": proposal_only(run), "message_id": am["id"], "user_message_id": user_msg_id,
             "skip_permissions": skip_permissions, "permission_mode": pmode, "user_text": user_text,
             "review_cache": review_cache,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
@@ -2097,8 +2135,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             sp = toolbox.specs.get(name)
             recent, first = autoreview.digest(messages)
             return await autoreview.review(
-                cfg, model, name=name, description=sp.description if sp else "", args=args, danger=danger, user_text=user_text,
-                task=first, recent=recent, mode=raw_mode, tainted=bool(tool_ctx["tainted"]), cancel=stop, conv_id=conv_id,
+                cfg, model, name=name, description=sp.description if sp else _mcp_review_text(name), args=args, danger=danger, user_text=user_text,
+                task=first, recent=recent, mode=raw_mode, tainted=toolbox.tainted_for(name, args, tool_ctx), cancel=stop, conv_id=conv_id,
                 cache=review_cache)
 
         def _log_mode(name: str, args: dict[str, Any], uid: str, decision: str, scope: str, note: str,
@@ -2122,11 +2160,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return True
             if pmode == "auto":
                 locked = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(name, args, tool_ctx)))
-                hard = forced and (bool(tool_ctx["tainted"]) or not locked)
+                hard = forced and (toolbox.tainted_for(name, args, tool_ctx) or toolbox.forces_card(name, args, tool_ctx) or not locked)
                 rt = autoreview.route("auto", mode="ask", danger=danger, hard_forced=hard, soft_forced=locked and not hard, fenced=fenced)
                 if rt in ("review", "review_strict"):
                     rv = await _review_call(name, args, danger, "ask")
-                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], bool(tool_ctx["tainted"]))
+                    out = autoreview.apply(rt, rv["verdict"], rv["confidence"], toolbox.tainted_for(name, args, tool_ctx))
                     if out == "run":
                         _log_mode(name, args, blog, "auto", "auto-review", "mode: auto", rv)
                         return True
@@ -2306,6 +2344,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+        if any(s["function"]["name"] in ("save_memory", "search_memory") for s in tool_schemas):
+            tools_hint += "\n" + MEMORY_HINT
         if mcp_defer:
             _counts: dict[str, int] = {}
             for t in mcp_store.tools():
@@ -2643,6 +2683,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
                         messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable())})})
                     user_text = um["content"]
+                    user_msg_id = tool_ctx["user_message_id"] = um["id"]
+                    run_user_texts.append(um["content"])
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
                 # The new message gets a clean slate: breakers that tripped on the work before it must not cut
                 # the work it asks for. Budget and round count are the run's and stay.
@@ -2902,7 +2944,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if fs_ask and mode == "on":
                     mode = "ask"
                 lockable = bool(spec and (toolbox.ask_locked(spec) or toolbox.forces_ask(c["name"], args, tool_ctx)))
-                hard_forced = hard_forced or (lockable and bool(tool_ctx["tainted"]))
+                hard_forced = hard_forced or toolbox.forces_card(c["name"], args, tool_ctx) or (
+                    lockable and toolbox.tainted_for(c["name"], args, tool_ctx))
                 desk_cleared = False
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
@@ -2952,7 +2995,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # forces either here, so the card buys no grant or allow rule.
                 # That alone does not stop an approved plan step from standing in for the card: taint the plan did
                 # not expect already forced above, so this is taint the user saw on the plan card (taint_only).
-                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])
+                taint_only = not forced and mode == "ask" and danger in ASK_LOCKED_DANGER and toolbox.tainted_for(c["name"], args, tool_ctx)
                 forced = forced or taint_only
                 hard_forced = hard_forced or taint_only
                 perm = permrules.Resolution(mode, forced)
@@ -3046,14 +3089,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if pmode != "manual" and claimed is None and pre is None and not proposing and mode != "off":
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
+                    hints = _mcp_event(c["name"]) or {}
+                    # A connector call forced by untrusted content stays a card in every mode, allow-all included.
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
                     rt = autoreview.route(
                         pmode, mode=mode, danger=danger, explicit_on=explicit == "on",
                         # an alwaysAsk tool's stored "ask" is only the cap on "on", not a choice, so it is not an explicit ask
                         explicit_ask=(explicit == "ask" and not locked_spec) or (mode == "ask" and perm.kind in ("rule", "external_directory")),
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
-                        hard_forced=hard_forced, soft_forced=lockable and not hard_forced,
+                        # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
+                        hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
                         # a write outside the workspace folders or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop"),
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
                     if rt == "run":
                         if mode == "ask":
@@ -3061,7 +3108,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         lifted_all = pmode == "allow_all" and danger != "safe"
                     elif rt in ("review", "review_strict"):
                         review = await _review_call(c["name"], args, danger, raw_mode)
-                        outcome = autoreview.apply(rt, review["verdict"], review["confidence"], bool(tool_ctx["tainted"]))
+                        outcome = autoreview.apply(rt, review["verdict"], review["confidence"], toolbox.tainted_for(c["name"], args, tool_ctx))
                         if outcome == "run":
                             mode, forced = "on", False
                         elif outcome == "deny":
@@ -3113,7 +3160,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
-                                    "review": review,
+                                    "review": review, "mcp": _mcp_event(c["name"]),
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
@@ -3568,9 +3615,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # topic — the run ends here either way. A failure here is as quiet as a failed memory extraction.
     # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
     # that did nothing — and never leaves a span open for the UI to show as still running.
-    # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
-    # sample of how the user writes. The voice profile is injected into later chats.
-    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+    # A tainted chat may still bank the user's own prose: only the user's half ever reaches this, and
+    # looks_like_prose already rejects pastes and quotes. The voice profile is injected into later chats.
+    if (not error and not gone and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -3595,16 +3642,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
     # A scheduled run never writes to long-term memory either way: it is one more model call nobody
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
-    # A tainted reply has read someone else's page or transcript. Mining it into memory would
-    # plant that text in later chats. The user can still save a memory by approving the tool.
-    if (not error and text and not gone and not proposal_only(run) and not tool_ctx["tainted"]
+    # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
+    # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
+    if (not error and text and not gone and not proposal_only(run)
+            and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
+        user_only = bool(tool_ctx["tainted"])
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
-            user_text=user_text, assistant_text=text, model=model, settings=cfg,
-            spans=list(tracer.spans), tool_events=list(tool_events),
-            skills_in_use=learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
+            user_text="\n\n".join(run_user_texts) if user_only else user_text,
+            assistant_text="" if user_only else text, model=model, settings=cfg,
+            spans=list(tracer.spans), tool_events=[] if user_only else list(tool_events),
+            skills_in_use=[] if user_only else learn.skills_seen(used["skills"], tool_events, skills, conv["project_id"]),
+            user_only=user_only, user_message_id=user_msg_id,
         ))
 
     # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.
@@ -5932,17 +5983,14 @@ async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], con
 
 
 async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """Fused memory hits for build_context. None = embeddings off or unavailable: the plain pinned/recent + BM25 path."""
+    """Relevance-gated memory hits for build_context (lexical, cosine above the floor, graph seeds; lexical + graph
+    alone when embeddings are off). None = retrieval failed or memory is off: build_context falls back to lexical matches."""
     if not conv_settings.get("useMemory", True):
         return None
     try:
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         qvec = await memory_index.query_vec(cfg, query)
-        if qvec is None:
-            return None
-        hits = memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
-        have = {m["id"] for m in hits}
-        return [*(m for m in memories.pinned(project_id) if m["id"] not in have), *hits]  # pins ride on top of the 40
+        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -6000,9 +6048,10 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
 
 @app.get("/memories/export")
 def export_memories(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
-    """The live memories of one scope as a portable file (content, kind, pinned). Ids and project links stay behind."""
+    """The live memories of one scope as a portable file (content, kind, pinned, expires_at when set). Ids and project links stay behind."""
     rows = memories.list(sid(project_id), "", include_global)
-    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"])} for m in rows]}
+    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"]),
+                                               **({"expires_at": m["expires_at"]} if m.get("expires_at") else {})} for m in rows]}
 
 
 class MemoryImportIn(BaseModel):
@@ -6020,8 +6069,10 @@ def import_memories(body: MemoryImportIn) -> dict[str, int]:
     before = len(memories.list(pid, "", False))
     for m in items:
         if isinstance(m, dict) and isinstance(m.get("content"), str) and m["content"].strip():
-            kind = m.get("kind") if m.get("kind") in ("fact", "preference", "goal", "note") else "fact"
-            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")))
+            kind = m.get("kind") if m.get("kind") in learn.KINDS else "fact"
+            exp = m.get("expires_at")
+            exp = float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > time.time() else None  # a past expiry is skipped
+            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")), expires_at=exp)
     added = len(memories.list(pid, "", False)) - before
     return {"added": added, "skipped": len(items) - added}
 
@@ -6365,7 +6416,7 @@ def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
 
 def _too_big(n: int) -> str | None:
     if n > MAX_UPLOAD_BYTES:
-        return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"
+        return f"Files must be {limits.MAX_UPLOAD_MB} MB or smaller"
     return None
 
 
@@ -6386,7 +6437,7 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
     # The project is resolved first so an upload for a deleted project leaves no file behind, and the file is
-    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 20 MB
+    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 50 MB
     # PDF on the event loop would stall every SSE stream.
     pid = wsid(project_id)
     safe = safe_upload_name(name)
@@ -7566,6 +7617,7 @@ def accept_revision(rev_id: str) -> dict[str, Any]:
     d = docs.accept(rev_id)
     if not d:
         raise HTTPException(404, "No pending revision with that id")
+    chat_files.record_accepted_revision(rev_id, d)
     return d
 
 
@@ -8570,6 +8622,10 @@ async def _outbox_startup() -> None:
         await asyncio.to_thread(extundo.prune)  # calendar / Tasks undo rows past their 7 days
     with contextlib.suppress(Exception):
         await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
+    try:
+        await asyncio.to_thread(chat_files.backfill)  # idempotent: files that predate the chat_files triggers
+    except Exception as e:  # noqa: BLE001
+        log.warning("chat files backfill failed: %s", type(e).__name__)
 
 
 @app.on_event("shutdown")

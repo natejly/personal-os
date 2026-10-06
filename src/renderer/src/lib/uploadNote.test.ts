@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { uploadNote, uploadToast } from './uploadNote'
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, uploadNote, uploadToast, uploadTooBig } from './uploadNote'
 
 test('an unreadable upload gets a warning, not an "Uploaded" toast', () => {
   const t = uploadToast({ id: 'd1', name: 'shot.png', mime: 'image/png', readable: false })
@@ -18,4 +18,13 @@ test('only the readable files become attachments, and none when none are', () =>
   assert.deepEqual(none.files, [])
   assert.equal(none.toasts.length, 1)
   assert.deepEqual(uploadNote([]).files, [])
+})
+
+test('uploads are capped at 50 MB, worded like the server refusal', () => {
+  assert.equal(MAX_UPLOAD_MB, 50)
+  assert.equal(MAX_UPLOAD_BYTES, 50 * 1024 * 1024)
+  assert.equal(uploadTooBig(MAX_UPLOAD_BYTES), null)
+  assert.equal(uploadTooBig(30 * 1024 * 1024), null)
+  assert.equal(uploadTooBig(MAX_UPLOAD_BYTES + 1), 'Files must be 50 MB or smaller')
+  assert.equal(uploadTooBig(undefined), null)
 })

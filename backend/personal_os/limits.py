@@ -24,7 +24,8 @@ MESSAGE_WINDOW_FRACTION = 0.5      # one message may fill at most this share of 
 MCP_DEFER_ABOVE = 12               # offer connector tools through search once more than this many are ready (0 = send all)
 TOOL_DEFER_ABOVE = 40              # past this many built-in tools, send the core set plus tool_search (0 = send all)
 SKILLS_INLINE_BUDGET = 6000        # characters of approved skill text inlined in the system prompt
-CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000}  # tokens per retrieval block
+CONTEXT_BUDGET = {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000,
+                  "profile": 1000}  # tokens per retrieval block; "profile" is the always-on standing preferences (memory_limits)
 
 # ---- Run budget ----
 RUN_TOKENS = 200_000               # per reply, prompt+completion summed over every model call (0 = none)
@@ -56,6 +57,9 @@ BROWSER_MAX_TABS = 4               # tabs per desk browser
 BROWSER_IDLE_SECONDS = 300         # an idle agent browser is closed after this
 SHELL_TIMEOUT_SECONDS = 120        # foreground shell default; a call may ask for up to 600
 SHELL_MAX_BACKGROUND = 4           # live background shell jobs at once
+CODING_SESSION_TIMEOUT_MINUTES = 30  # an OpenCode coding session is stopped after this
+CODING_SESSION_MAX_CONCURRENT = 3  # live coding sessions at once, their own pool apart from SHELL_MAX_BACKGROUND
+LOGIN_SHELL_TIMEOUT_SECONDS = 5    # resolving the user's login-shell PATH for a new claude daemon
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt
@@ -65,6 +69,9 @@ JOB_EXPIRE_DAYS = 0                # a recurring job pauses this many days after
 GMAIL_SEND_HOLD_SECONDS = 90       # undo window on outgoing mail (clamped to 60-120 on read)
 
 # ---- Storage ----
+MAX_UPLOAD_MB = 50                   # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_UNZIPPED_BYTES = MAX_UPLOAD_BYTES * 5 // 2  # a docx/xlsx's declared uncompressed size, summed; refused past this (zip bomb guard)
 FILE_SNAPSHOT_MAX_BYTES = 5_000_000  # largest file pre-image kept
 FILE_SNAPSHOT_RETAIN_DAYS = 14       # undo history age
 FILE_SNAPSHOT_BUDGET_MB = 200        # disk budget for pre-images
@@ -120,6 +127,8 @@ RANGES: dict[str, tuple[float, float]] = {
     "fetchCacheSeconds": (0, 86_400),
     "imessageLongRunMinutes": (1, 1440),
     "deskMaxLive": (1, 1000),
+    "codingSessionTimeoutMinutes": (1, 1440),
+    "codingSessionMaxConcurrent": (1, 20),
 }
 
 

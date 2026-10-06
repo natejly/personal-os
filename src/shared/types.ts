@@ -60,6 +60,8 @@ export interface ContextUsed {
   meetings: string | null
   /** Pinned documents carried whole this turn. Absent on older messages. */
   pinned?: { document_id: string; name: string }[]
+  /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
+  profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
   /** Items dropped per section because it hit its token budget (contextBudget). */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
@@ -434,6 +436,12 @@ export interface McpTool {
   /** Set when the server stopped offering it; the row is kept so the slug cannot be reused. */
   missing_since: number | null
   effective: McpEffective
+  /** The server's own annotations, as sent. Self-reported and unverified: never a reason to trust a tool. */
+  annotations?: Record<string, unknown>
+  /** readOnlyHint is true. The server's claim, not a guarantee. */
+  read_only?: boolean
+  /** destructiveHint is true and readOnlyHint is not. Turning such a tool `on` needs an explicit confirm. */
+  destructive?: boolean
   /** Only on /mcp/tools: its server is connected right now. */
   ready?: boolean
   /** Set when the shape changed since the user last saw it; `quarantined` means it is withheld from the model. */
@@ -502,6 +510,8 @@ export interface McpServer {
   url: string
   headers: Record<string, string>
   description: string
+  /** The catalog entry this server was installed from; '' for a hand-added one. */
+  catalog_id?: string
   enabled: boolean
   /** Remote servers only: whether a browser sign-in is stored. null for stdio. */
   signed_in?: boolean | null
@@ -518,6 +528,8 @@ export interface McpServer {
     ready: boolean
     attempts: number
     server_info: McpReport['server_info']
+    resources?: { uri: string; name: string; description: string; mime_type: string }[]
+    prompts?: { name: string; description: string; arguments: { name: string; required?: boolean }[] }[]
   }
   tools: McpTool[]
   eval: McpEvalRecord | null
@@ -526,8 +538,8 @@ export interface McpServer {
 /** A launch config, as the add form holds it and as /mcp/check takes it. */
 export interface McpServerDraft {
   name: string
-  /** sse is refused by the API; a remote server is streamable HTTP. */
-  transport: 'stdio' | 'http'
+  /** A remote server is streamable HTTP, or the older SSE transport. */
+  transport: 'stdio' | 'http' | 'sse'
   command: string
   args: string[]
   cwd: string
@@ -539,12 +551,105 @@ export interface McpServerDraft {
   description: string
 }
 
+/** One field of a catalog entry's install form. A secret goes to the secret store, never into args or the URL. */
+export interface McpCatalogField {
+  id: string
+  label: string
+  secret?: boolean
+  required?: boolean
+  help?: string
+  placeholder?: string
+  default?: string
+  /** Plain fields only: split on newlines/commas into several args. */
+  multiple?: boolean
+}
+
+export interface McpCatalogEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  /** A lucide icon name in kebab-case. */
+  icon: string
+  publisher: string
+  /** Maintained by the vendor of the service. */
+  official: boolean
+  docs: string
+  transport: 'stdio' | 'http' | 'sse'
+  runtime: 'node' | 'python' | 'docker' | 'binary' | 'remote'
+  auth: 'none' | 'api_key' | 'oauth' | 'env'
+  fields: McpCatalogField[]
+  /** Ids of the servers already installed from this entry. */
+  installed: string[]
+}
+
+/** Whether the program a local connector is launched with is on the PATH. */
+export interface McpRuntime {
+  command: string
+  found: boolean
+  path: string | null
+  hint: string
+}
+
+export interface McpCatalog {
+  entries: McpCatalogEntry[]
+  categories: string[]
+  runtimes: Record<string, McpRuntime>
+}
+
+/** A search hit from the public MCP registry. Never verified by Grain. */
+export interface McpRegistryResult {
+  id: string
+  name: string
+  description: string
+  version: string
+  repository: string | null
+  verified: false
+  transport: 'stdio' | 'http' | 'sse'
+  install: { command: string; args: string[]; url: string; env: Record<string, string> }
+  secret_keys: string[]
+  env_keys: string[]
+  docs?: string
+}
+
+/** One server found in another app's config. Env and header values never reach the renderer. */
+export interface McpImportServer {
+  ref: string
+  key: string
+  name: string
+  transport: 'stdio' | 'http' | 'sse'
+  command: string
+  args: string[]
+  url: string
+  env_keys: string[]
+  header_keys: string[]
+  /** Env keys whose values will go to the secret store. */
+  secret_keys: string[]
+  installed: boolean
+}
+
+export interface McpImportSource {
+  id: 'claude_desktop' | 'claude_code' | 'cursor'
+  label: string
+  path: string
+  found: boolean
+  error: string | null
+  servers: McpImportServer[]
+}
+
 /** The trail a deep_research call leaves on its tool event (never shown to the model). */
 export interface ResearchTrail {
   plan: string[]
   steps: { q: string; status: string; sources: { url: string; title: string }[]; claims: number }[]
   sources_considered: { url: string; title: string; n?: number }[]
   dropped: number
+}
+
+/** On a connector tool's `tool_call` event. The flags are the server's own claims. */
+export interface McpToolOrigin {
+  server: string
+  read_only: boolean
+  destructive: boolean
 }
 
 export interface ToolEvent {
@@ -582,6 +687,8 @@ export interface ToolEvent {
   interrupted?: boolean
   /** Arguments were repaired before the call ran. */
   repaired?: boolean
+  /** Set on a connector's tool: which connector, and what the server claims about it (unverified). */
+  mcp?: McpToolOrigin | null
   /** Refused before the gate: broken JSON, unknown name or signature mismatch. */
   invalid?: 'arguments' | 'name' | 'schema'
   /** Handle of the stored full result (read_tool_result). */
@@ -781,6 +888,8 @@ export interface Memory {
   valid_from?: number | null
   invalid_at?: number | null
   superseded_by?: string | null
+  /** Unix seconds after which the row is expired: out of the live list and the prompt, kept in history. Null or absent: never expires. */
+  expires_at?: number | null
   source_conversation_id?: string | null
   source_message_id?: string | null
 }
@@ -1398,6 +1507,9 @@ export interface Settings {
   contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
+  /** Coding sessions: OpenCode stops after this many minutes (1-1440, default 30); how many run at once (1-20, default 3). */
+  codingSessionTimeoutMinutes?: number
+  codingSessionMaxConcurrent?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1578,7 +1690,7 @@ export type ChatEvent =
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
@@ -1624,6 +1736,8 @@ export interface Learned {
   skill_revisions?: { id: string; name: string; why: string; revises: string }[]
   conversation_id?: string
   message_id?: string
+  /** Ids of memories the model suggested pinning to the standing preferences. */
+  pin_suggested?: string[]
 }
 
 /**
@@ -1814,6 +1928,8 @@ export interface GrainApi {
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
+  /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
+  codingAttach: (externalId: string) => Promise<boolean>
   /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
   sysAccess: {
     status: () => Promise<import('./systemAccess').MainStatus>

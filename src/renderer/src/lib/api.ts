@@ -10,7 +10,7 @@ import type {
   Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
-  McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
+  McpCatalog, McpEffective, McpImportSource, McpRegistryResult, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
@@ -367,8 +367,18 @@ export const api = {
     /** The same check on a config that has not been saved, so trust can be decided first. */
     checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }, NO_TIMEOUT),
     tools: () => req<{ tools: McpTool[]; grants: McpGrant[] }>('/mcp/tools'),
-    setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
-      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
+    /** `confirm` is required to turn a destructive tool `on`; without it the API answers 409. */
+    setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string, confirm?: boolean) =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null, ...(confirm ? { confirm: true } : {}) }) }),
+    catalog: () => req<McpCatalog>('/mcp/catalog'),
+    /** Env and header values the entry's fields fill go to the secret store backend-side. */
+    install: (id: string, values: Record<string, string>) =>
+      req<McpServer>(`/mcp/catalog/${encodeURIComponent(id)}/install`, { method: 'POST', body: json({ values }) }, NO_TIMEOUT),
+    registrySearch: (q: string, limit = 20) =>
+      req<{ results: McpRegistryResult[]; error: string | null }>(`/mcp/registry/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    importSources: () => req<{ sources: McpImportSource[] }>('/mcp/import/sources'),
+    importServers: (refs: string[]) =>
+      req<{ created: McpServer[]; skipped: { ref: string; reason: string }[] }>('/mcp/import', { method: 'POST', body: json({ refs }) }, NO_TIMEOUT),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
     acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
     clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>

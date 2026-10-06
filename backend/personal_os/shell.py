@@ -848,9 +848,9 @@ def register(tb: Any) -> None:
                              shell_kill, "shell", "writes", examples=[{"job_id": "a1b2c3"}]))
 
 
-# ---- fixed commands with no model in the loop (ship.py) ----
+# ---- fixed commands with no model in the loop (ship.py, codingagents.py; `label` names the caller in the job registry) ----
 async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[str, Any], *, sandboxed: bool,
-                    timeout: float) -> tuple[bool, str]:
+                    timeout: float, label: str = "ship", extra_env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run one argv through the shell job registry and wait for it: (exit code 0, scrubbed output).
 
     sandboxed=True is shell_run's sandbox: writes only in `cwd` and a private tmp dir, network only when shellNetwork is
@@ -870,8 +870,10 @@ async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[s
         env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
         if os.environ.get("SSH_AUTH_SOCK"):
             env["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+    if extra_env:
+        env.update(extra_env)
     job = await jobs.start(argv, command=shlex.join(argv[-3:] if sandboxed else argv), cwd=cwd, env=env, tmp=tmp,
-                           conversation_id="ship", run_id=None, background=False, notify=False, timeout=timeout,
+                           conversation_id=label, run_id=None, background=False, notify=False, timeout=timeout,
                            max_background=int(settings.get("shellMaxBackground") or 4), on_timeout="kill")
     try:
         await jobs.wait(job)

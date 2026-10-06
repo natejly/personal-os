@@ -35,7 +35,7 @@ from .context import build_context, cite_slim, context_taints, estimate_tokens, 
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
-from . import learn
+from . import learn, memory_limits
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
@@ -1489,6 +1489,9 @@ PLAN_HINT = ("When a request needs more than a couple of tool calls, open with t
              "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
              "earlier rounds — is what keeps a long task on track. If a decision is genuinely the user's, call ask_user once "
              "instead of guessing.")
+# Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
+MEMORY_HINT = ("Save corrections, standing instructions and durable facts the user states with save_memory (kind instruction for always/never rules, until for facts that stop holding on a date).\n"
+               "Call search_memory before answering a question about the user's past or preferences that is not already in context.")
 # Plan mode in an ordinary chat (conv.settings.planMode, else settings.planMode). 'always' starts every
 # reply drafting; 'auto' starts it the first time the reply reaches for a consequential tool.
 CHAT_PLAN_HINT = ("## Plan mode is on\nBefore anything that changes something (writes, sends, creates, deletes, runs code), "
@@ -1974,6 +1977,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         prior = prior[:last_u]
     rq = retrieval_query(prior, user_text)
     doc_hits = await _doc_hits(conv["project_id"], rq, cfg, conv["settings"])
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))  # also caps the profile block
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         memory_hits=await _memory_hits(conv["project_id"], rq, cfg, conv["settings"]),
@@ -1982,12 +1986,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         global_system_prompt="\n\n".join(p for p in (_persona_text(persona), cfg["systemPrompt"]) if p),
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
-        draft=bool(conv["settings"].get("draftMode")),
+        draft=bool(conv["settings"].get("draftMode")), window=win,
     )
     skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
-    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
     # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
     # can say what is happening (a `status` event); a turn that does not compact is unchanged.
     pre_am: dict[str, Any] | None = None
@@ -2323,6 +2326,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+        if any(s["function"]["name"] in ("save_memory", "search_memory") for s in tool_schemas):
+            tools_hint += "\n" + MEMORY_HINT
         if mcp_defer:
             _counts: dict[str, int] = {}
             for t in mcp_store.tools():
@@ -5953,17 +5958,14 @@ async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], con
 
 
 async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """Fused memory hits for build_context. None = embeddings off or unavailable: the plain pinned/recent + BM25 path."""
+    """Relevance-gated memory hits for build_context (lexical, cosine above the floor, graph seeds; lexical + graph
+    alone when embeddings are off). None = retrieval failed or memory is off: build_context falls back to lexical matches."""
     if not conv_settings.get("useMemory", True):
         return None
     try:
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         qvec = await memory_index.query_vec(cfg, query)
-        if qvec is None:
-            return None
-        hits = memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
-        have = {m["id"] for m in hits}
-        return [*(m for m in memories.pinned(project_id) if m["id"] not in have), *hits]  # pins ride on top of the 40
+        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -6021,9 +6023,10 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
 
 @app.get("/memories/export")
 def export_memories(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
-    """The live memories of one scope as a portable file (content, kind, pinned). Ids and project links stay behind."""
+    """The live memories of one scope as a portable file (content, kind, pinned, expires_at when set). Ids and project links stay behind."""
     rows = memories.list(sid(project_id), "", include_global)
-    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"])} for m in rows]}
+    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"]),
+                                               **({"expires_at": m["expires_at"]} if m.get("expires_at") else {})} for m in rows]}
 
 
 class MemoryImportIn(BaseModel):
@@ -6041,8 +6044,10 @@ def import_memories(body: MemoryImportIn) -> dict[str, int]:
     before = len(memories.list(pid, "", False))
     for m in items:
         if isinstance(m, dict) and isinstance(m.get("content"), str) and m["content"].strip():
-            kind = m.get("kind") if m.get("kind") in ("fact", "preference", "goal", "note") else "fact"
-            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")))
+            kind = m.get("kind") if m.get("kind") in learn.KINDS else "fact"
+            exp = m.get("expires_at")
+            exp = float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > time.time() else None  # a past expiry is skipped
+            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")), expires_at=exp)
     added = len(memories.list(pid, "", False)) - before
     return {"added": added, "skipped": len(items) - added}
 

@@ -29,6 +29,12 @@ class _Repo:
     def for_context(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
 
+    def profile(self, *_a: Any, **_k: Any) -> list[Any]:
+        return []
+
+    def matching(self, *_a: Any, **_k: Any) -> list[Any]:
+        return []
+
     def pinned(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
 

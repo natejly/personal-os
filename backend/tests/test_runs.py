@@ -236,7 +236,7 @@ def test_event_names_are_the_chatevent_union() -> None:
     check(by["assistant_message"]["id"] and "context_used" in by["assistant_message"], "assistant_message shape")
     check(set(by["delta"]) == {"id", "text"}, f"delta shape is {{id, text}}, got {set(by['delta'])}")
     check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped",
-                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind", "notice"}, f"done shape, got {set(by['done'])}")
+                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind", "notice", "attachments"}, f"done shape, got {set(by['done'])}")
     check(by["done"]["segment"] is False, "the last done ends the run; a steered segment's says True")
     check(by["done"]["stopped"] is False, "an uninterrupted run reports stopped false")
     check(set(by["span"]) == {"message_id", "span"}, "span shape")

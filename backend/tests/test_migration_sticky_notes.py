@@ -14,6 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import docs, migrations  # noqa: E402
 
+# Only the migration under test: the fixture builds the tables it touches, not a whole version-11 store, so the
+# steps after it (permission mode, chat files, memories, ...) would stop on tables it does not have.
+migrations.MIGRATIONS = [m for m in migrations.MIGRATIONS if m[0] <= 12]
+
 BODY = "## Buy milk\n\n- eggs\n- bread  \n\ttabbed line\n"
 
 

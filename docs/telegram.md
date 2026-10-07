@@ -28,13 +28,38 @@ with a different bot's clears the pairing and issues a fresh code.
 Turning it on starts from now: messages sent while Grain was off are not replayed. After a restart
 Grain picks up where it left off but ignores messages older than ten minutes.
 
+## The Telegram chat in Grain
+
+Once paired, the bridge's conversation is an ordinary chat in Grain: it sits first in the sidebar,
+above the pinned chats, labelled **Telegram** with a small paper-plane mark, and the same label and
+mark show in the chat header. It exists from the moment pairing succeeds, so there is something to
+open before the first text arrives. Grain's own chats created before this change keep working: the
+one the phone was already writing into is picked up and labelled when Grain starts.
+
+It is one shared thread. Everything that passes through the bot shows there as it happens, with no
+reload: your texts and the photos or files you send, the assistant's replies with their images and
+files, progress updates and their screenshots, approval cards and how they were answered (from the
+phone or the app), and, when **Send worker results to Telegram** is on, the result a background
+worker pushed to the phone from another chat (prefixed with that chat's title).
+
+Typing into the chat in Grain works the other way round: the turn runs as a Telegram turn, the
+reply and its attachments go to the phone as well, and the message you typed is sent to your phone
+first, prefixed "From Grain:", so the thread on the phone is complete too. A steer typed in Grain
+while a reply runs is mirrored the same way. With no chat paired, the chat simply answers in Grain.
+
+Only the paired chat ever receives anything. What the bridge does for itself stays out of the
+conversation: pairing codes, `/start`, command replies such as `/status` and `/help`, and Grain's
+internal control turns (worker wake-ups, nudges, resumes) are never stored in it or mirrored. `/new`
+on the phone starts a fresh conversation, which takes the label and the top spot; the old one stays
+in the list as a normal chat.
+
 ## Commands
 
 | Message | Does |
 | --- | --- |
-| `/status` | What is running, how long the Texts run has been going, how many approvals wait |
-| `/stop` | Stops the reply running in the Texts conversation |
-| `/new` | Starts a fresh Texts conversation and sends later messages there |
+| `/status` | What is running, how long the Telegram chat's run has been going, how many approvals wait |
+| `/stop` | Stops the reply running in the Telegram chat |
+| `/new` | Starts a fresh Telegram chat and sends later messages there |
 | `/help` | Lists the commands |
 
 Anything else is a normal chat turn. If a reply is still running when you write again, the message
@@ -43,7 +68,7 @@ one. Grain shows "typing" in Telegram while a run you started there is live.
 
 ### Approvals
 
-When a run in the Texts conversation needs approval, Grain sends the tool, a one-line summary and
+When a run in the Telegram chat needs approval, Grain sends the tool, a one-line summary and
 the key arguments (secrets removed) with **Approve** and **Deny** buttons. Tapping one answers, and
 the message is edited to show "Approved." or "Denied." with the buttons gone.
 
@@ -59,10 +84,28 @@ entries are unchanged; the history notes that the answer came by Telegram.
 
 ### Replies
 
-Replies are plain text: markdown is stripped and links become bare URLs. Long replies are split at
-paragraph breaks into messages under Telegram's 4,096 character limit; past about eight parts the
-rest is left in Grain ("…full reply in Grain"). If a run fails, the message says so and the
-details stay in Grain.
+Replies are formatted for the phone with Telegram's HTML markup: bold, italic and strikethrough,
+inline code and code blocks (with their language), links with previews off, headings as bold
+lines, quotes, bullets, and markdown tables as monospace blocks with aligned columns. A table too
+wide for a phone (over 60 columns) or too long (over 40 rows) is attached as `table.csv` and a
+one-line placeholder stays in the text. Text with no markup is sent as plain text. If Telegram
+rejects the markup of a message, that part is resent as plain text; if that is refused too, the
+whole reply goes as a `reply.md` file instead.
+
+Long replies are split into messages under Telegram's 4,096 character limit at a paragraph, line,
+sentence or word boundary, never inside a code block, a tag or an escaped character: a code block
+that spans two messages is closed at the end of one and reopened at the start of the next. Past a
+sensible length (6,000 characters of text, or more than four messages) the phone gets a short
+summary instead, the first paragraph cut to 600 characters plus "Full reply attached.", with the
+whole reply attached as `reply.md`. Nothing is truncated any more. If a run fails, the message says
+so and the details stay in Grain.
+
+Anything the assistant produces during a Telegram turn rides on the final reply without a separate
+step: documents it writes, PDFs, spreadsheets and CSV files, code files, rendered pages, charts,
+generated images and screenshots, including browser screenshots it takes while using the agent
+browser. Pictures go as photos or albums, everything else as files with the reply as caption, with
+the size limits and fallbacks below; a file already sent as a progress update is not sent twice.
+Only files the assistant made in that run attach this way, never the ones you sent it.
 
 ### Screenshots, images and files
 
@@ -75,7 +118,7 @@ tool reports the missing permission instead of returning an empty or desktop-onl
 
 `send_files` lets the assistant (and background workers) attach images and other files to what it
 tells you: screenshots, charts it made, generated pictures, or files on this Mac. In the app they
-appear inline under the reply (images as pictures, other files as chips). In the Texts conversation
+appear inline under the reply (images as pictures, other files as chips). In the Telegram chat
 they also go to your phone: one picture as a photo with the note as its caption, several as an album
 (ten per album), anything else as a file. A picture that Telegram will not take as a photo (over 10
 MB, more than 10,000 pixels across both sides, or a very long strip) is sent as a file instead; a
@@ -84,7 +127,7 @@ fails, Grain retries the picture as a file, then tells you which attachment coul
 
 ### Progress updates
 
-In the Texts conversation the assistant answers first, in a line or two, then works. At meaningful
+In the Telegram chat the assistant answers first, in a line or two, then works. At meaningful
 milestones it sends a short update, with a screenshot when a picture says more than words, and the
 final reply can carry images too. Updates are rate limited so a busy run does not flood the chat:
 at most one progress message every twenty seconds per conversation, with anything that arrives
@@ -108,7 +151,7 @@ stickers are not accepted yet.
 
 **Message me when long runs finish or need approval** (off by default) sends "Grain finished:
 <title> (N min)" when a chat run started in the app takes at least the set minutes (default 3), and
-sends approval requests from any run, not only the Texts conversation.
+sends approval requests from any run, not only the Telegram chat.
 
 ## Privacy and safety
 

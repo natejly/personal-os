@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import fsx, mac, permissions, redact, tools
+from . import fsx, mac, permissions, redact, sendfiles, tools
 from .tools import ToolSpec, UrlBlocked, _obj, tool_error
 from .workspace import WorkspaceError
 
@@ -353,9 +353,13 @@ def register(tb: Any) -> None:
         f = d / f"{int(time.time() * 1000)}.png"
         f.write_bytes(raw)
         shown = os.path.relpath(f, root) if root is not None else str(f)
-        return _shown({"path": shown, "bytes": len(raw), "width": res.get("width"), "height": res.get("height"),
-                       "url": res.get("url") or "", "title": res.get("title") or "",
-                       "note": "view_image can look at this file; the image itself is not returned here"})
+        out = {"path": shown, "bytes": len(raw), "width": res.get("width"), "height": res.get("height"),
+               "url": res.get("url") or "", "title": res.get("title") or "",
+               "note": "view_image can look at this file; the image itself is not returned here"}
+        if ctx.get("auto_attach"):  # a Telegram chat turn: the picture rides on the reply (and goes to the phone, see browser_manage)
+            out["attachment"] = sendfiles.store_file(tb, ctx, f.name, "image/png", raw)
+            sendfiles.attach_to_reply(ctx, out["attachment"])
+        return _shown(out)
 
     async def browser_manage(ctx: dict[str, Any], action: str, tab: int | None = None, ms: int = 1000, text: str = "", accept: bool = True,
                              prompt_text: str = "", full_page: bool = False, ref: str = "", paths: list[str] | None = None,
@@ -384,7 +388,16 @@ def register(tb: Any) -> None:
             return await call("browser_manage", "manage", {"action": "dialog", "accept": bool(accept), "promptText": prompt_text}, ctx, 20)
         if action == "screenshot":
             res = await mac.page_bridge.browser("manage", {"session": sess, "action": "screenshot", "fullPage": bool(full_page)}, 30)
-            return save_screenshot(ctx, res) if res.get("ok") else _fail("browser_manage", res)
+            if not res.get("ok"):
+                return _fail("browser_manage", res)
+            out = save_screenshot(ctx, res)
+            hook = getattr(tb, "user_update", None)
+            if hook is not None and isinstance(out.get("attachment"), dict):  # show it on the phone now; the bridge dedups the final reply
+                try:
+                    await hook(ctx, "", [out["attachment"]])
+                except Exception:  # noqa: BLE001 - a failed live send must not fail the tool; the picture still rides on the reply
+                    pass
+            return out
         if action == "upload":
             if not ref:
                 return tool_error("browser_manage(upload): ref of the file input is required", field="ref",

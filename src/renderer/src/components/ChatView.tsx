@@ -25,6 +25,8 @@ import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '..
 import DeskStrip, { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
+import TelegramIcon from './TelegramIcon'
+import { chatLabel, isTelegramChat } from '../lib/chatRows'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -131,10 +133,13 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 onMouseDown={(e) => e.preventDefault()} onClick={() => { setEditingTitle(false); void retitleChat(convo.id) }}><Sparkles size={14} /></button>
             </>
           ) : (
-            <button className="title-btn" onClick={() => convo && setEditingTitle(true)} disabled={!convo}>
-              {convo?.title ?? 'New chat'}
-              {convo && <Pencil size={12} />}
-            </button>
+            <>
+              {convo && isTelegramChat(convo) && <span style={{ display: 'flex', alignItems: 'center', paddingLeft: 8, color: 'var(--text-muted)' }}><TelegramIcon size={14} /></span>}
+              <button className="title-btn" onClick={() => convo && setEditingTitle(true)} disabled={!convo}>
+                {convo ? chatLabel(convo) : 'New chat'}
+                {convo && <Pencil size={12} />}
+              </button>
+            </>
           )}
         </div>
         <div className="no-drag header-right">

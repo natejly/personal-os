@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,77 @@ from .extract_text import safe_upload_name
 
 MAX_FILES = 20
 MAX_BYTES = 50 * 1024 * 1024
+ATTACH_KEYS = ("id", "name", "mime", "size")
+
+
+def attach_to_reply(ctx: dict[str, Any], doc: dict[str, Any]) -> None:
+    """Put an Uploads document ({id, name, mime, size}) on this run's final reply, once per id, in the order added."""
+    seen = ctx.setdefault("reply_attachments", [])
+    if all(s["id"] != doc["id"] for s in seen):
+        seen.append({k: doc[k] for k in ATTACH_KEYS})
+
+
+def store_file(tb: Any, ctx: dict[str, Any], name: str, mime: str, data: bytes) -> dict[str, Any]:
+    """Keep bytes in Uploads (the same bytes share one row per project) and describe them as an attachment."""
+    pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
+    dest, digest = blob_store.store(tb.documents.db.data_dir, name, data)
+    row = tb.documents.find_by_hash(pid, digest) or tb.documents.create(pid, name, mime, len(data), str(dest), "", content_hash=digest)
+    return {"id": row["id"], "name": row["name"], "mime": row["mime"], "size": row["size"]}
+
+
+def _read_file(p: Path) -> tuple[str, str, bytes] | None:
+    try:
+        if not p.is_file() or p.stat().st_size > MAX_BYTES:
+            return None
+        return safe_upload_name(p.name), mimetypes.guess_type(p.name)[0] or "application/octet-stream", p.read_bytes()
+    except OSError:
+        return None
+
+
+def made_files(tb: Any, ctx: dict[str, Any], tool: str, out: dict[str, Any]) -> list[dict[str, Any]]:
+    """The attachments for the files a finished tool call made: an `attachment` or Uploads `saved` rows (screenshots, images),
+    `outputs` entries in this chat's files (scripts, sandbox exports, downloads), a converted file, a text file written on
+    the Mac, a new Files note (as .md), or the charts a script drew. Anything unreadable is skipped."""
+    found: list[dict[str, Any]] = []
+    att = out.get("attachment")
+    if isinstance(att, dict) and att.get("id"):
+        found.append(att)
+    for s in out.get("saved") if isinstance(out.get("saved"), list) else []:
+        d = tb.documents.get(s.get("doc_id") or "") if isinstance(s, dict) else None
+        if d:
+            found.append({k: d[k] for k in ATTACH_KEYS})
+    files: list[tuple[str, str, bytes]] = []
+    paths: list[Path] = []
+    box = tb.files_for(ctx) if hasattr(tb, "files_for") else None
+    rels = [o["path"] for o in out.get("outputs") or [] if isinstance(o, dict) and isinstance(o.get("path"), str)]
+    if tool == "convert_document" and isinstance(out.get("output"), str):
+        rels.append(out["output"])
+    for rel in rels:
+        try:
+            paths.append(Path(rel) if os.path.isabs(rel) else box[0].resolve_in(box[1], rel))
+        except Exception:  # noqa: BLE001 - a WorkspaceError, or no files box for this run: skip the file
+            continue
+    if tool == "write_local_file" and out.get("mode") in ("create", "overwrite") and isinstance(out.get("path"), str):
+        paths.append(Path(out["path"]))
+    files += [f for f in map(_read_file, paths[:MAX_FILES]) if f]
+    if tool == "doc_create" and getattr(tb, "docs", None) is not None and out.get("doc_id"):
+        d = tb.docs.get(out["doc_id"])
+        if d:
+            files.append((safe_upload_name(f"{d['title'] or 'note'}.md"), "text/markdown", str(d["content"]).encode()))
+    if tool == "run_python":
+        for img in out.get("images") or []:
+            head, _, b64 = str(img.get("data") if isinstance(img, dict) else "").partition(",")
+            if head.startswith("data:") and b64:
+                files.append((safe_upload_name(os.path.basename(str(img.get("name") or "chart.png"))), str(img.get("mime") or "image/png"), base64.b64decode(b64)))
+    found += [store_file(tb, ctx, *f) for f in files[:MAX_FILES]]
+    return found[:MAX_FILES]
+
+
+async def attach_made(tb: Any, ctx: dict[str, Any], tool: str, out: Any) -> None:
+    """Toolbox.call, when ctx["auto_attach"] is set (a Telegram chat turn): what the agent just made rides on the reply."""
+    if isinstance(out, dict) and not out.get("error"):
+        for d in await asyncio.to_thread(made_files, tb, ctx, tool, out):
+            attach_to_reply(ctx, d)
 
 
 def register(tb: Any) -> None:
@@ -51,11 +123,7 @@ def register(tb: Any) -> None:
             raise ValueError("not a file")
         if st.st_size > MAX_BYTES:
             raise ValueError(f"{st.st_size // (1024 * 1024)} MB is over the {MAX_BYTES // (1024 * 1024)} MB limit")
-        data = p.read_bytes()
-        name, mime = safe_upload_name(p.name), mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-        dest, digest = blob_store.store(tb.documents.db.data_dir, name, data)
-        row = tb.documents.find_by_hash(pid, digest) or tb.documents.create(pid, name, mime, len(data), str(dest), "", content_hash=digest)
-        return {"id": row["id"], "name": row["name"], "mime": row["mime"], "size": row["size"]}
+        return store_file(tb, ctx, safe_upload_name(p.name), mimetypes.guess_type(p.name)[0] or "application/octet-stream", p.read_bytes())
 
     def thumb(att: dict[str, Any]) -> dict[str, Any] | None:
         """The chat thumbnail of an attached picture (JPEG), None for anything else or an unreadable file."""
@@ -85,10 +153,8 @@ def register(tb: Any) -> None:
         if entries and not attached:
             return tool_error("send_files: none of the files could be sent: " + "; ".join(f"{e['file']}: {e['error']}" for e in errors),
                               field="files", alternative="pass document ids from screenshot / generate_image, or paths that exist on this Mac")
-        seen = ctx.setdefault("reply_attachments", [])
         for a in attached:
-            if all(s["id"] != a["id"] for s in seen):
-                seen.append(a)
+            attach_to_reply(ctx, a)
         delivered = "app"
         hook = getattr(tb, "user_update", None)
         if hook is not None:

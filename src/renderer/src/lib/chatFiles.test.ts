@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { actionLabel, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, uploadTarget, type ChatFile } from './chatFiles'
+import { actionLabel, artifactShowItem, artifactsQuery, filesQuery, formatCount, groupByChat, groupByKind, kindLabel, projectFilter, rowAction, uploadTarget, type ChatFile } from './chatFiles'
 
 const f = (id: string, kind: ChatFile['kind'], chat: string, at: number, over: Partial<ChatFile> = {}): ChatFile => ({
   id, conversation_id: chat, conversation_title: `Chat ${chat}`, project_id: null, kind, ref: id, name: id, action: 'created', message_id: null, chat_count: 1, pinned: false, created_at: at, missing: false, rel: null, ...over
@@ -68,4 +68,27 @@ test('uploadTarget: the side panel with a chat, the standalone viewer without', 
   assert.equal(uploadTarget(null), 'viewer')
   assert.equal(uploadTarget(undefined), 'viewer')
   assert.equal(uploadTarget(''), 'viewer')
+})
+
+test('Files → Artifacts: groups by chat, the chat with the newest file first, trashed chats labelled without a link', () => {
+  const l = [
+    f('old.csv', 'output', 'c1', 1),
+    f('new.png', 'output', 'c2', 9, { chat_deleted: true }),
+    f('mid.md', 'output', 'c1', 5)
+  ]
+  const g = groupByChat(l)
+  assert.deepEqual(g.map((x) => x.conversationId), ['c2', 'c1'])
+  assert.deepEqual(g.map((x) => x.deleted), [true, false])
+  assert.deepEqual(g[1].files.map((x) => x.name), ['old.csv', 'mid.md'])
+  assert.equal(g[0].title, 'Chat c2')
+})
+
+test('artifactShowItem: a file item whose bytes come from the artifact route, not /local/raw', () => {
+  const item = artifactShowItem({ id: 'a1', name: 'report.pdf', size: 12 })
+  assert.equal(item.kind, 'file')
+  assert.equal(item.rawPath, '/chat-files/a1/raw')
+  assert.equal(item.title, 'report.pdf')
+  assert.equal(item.size, 12)
+  assert.equal(artifactsQuery(), '/chat-files/artifacts?limit=50')
+  assert.equal(artifactsQuery('1.5|x', 10), '/chat-files/artifacts?limit=10&cursor=1.5%7Cx')
 })

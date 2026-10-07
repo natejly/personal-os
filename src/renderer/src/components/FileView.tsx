@@ -68,7 +68,7 @@ export default function FileView({ item, tick = 0, toolbar = false, onPages }: {
   const [raw, setRaw] = useState(false)
   const id = item.documentId
   const name = item.name || item.title
-  const path = item.path ?? ''
+  const path = item.path ?? item.rawPath ?? ''
   const kept = !(id && item.hasOriginal === false)
   // Where the content comes from: the original's bytes, the converted preview, the stored text, or nowhere.
   const from = !kept ? 'doc' : viewer === 'office' ? 'preview' : viewer === 'other' ? (id ? 'doc' : 'none') : id || path ? 'raw' : 'none'

@@ -6,10 +6,11 @@ import { rowButton } from '../lib/rowButton'
 import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
-import ProjectArtifacts from './ProjectArtifacts'
+import ProjectContext from './ProjectContext'
 import SendToSpace from './SendToSpace'
 import { oneLine } from '../lib/emailAsk'
 import { useProjectFileCount } from '../lib/useChatFiles'
+import { PROJECT_TAB_LABEL } from '../lib/projectTabs'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
@@ -62,10 +63,10 @@ export default function ProjectView(): JSX.Element {
   const st = project.stats
 
   const TABS: { key: ProjectTab; label: string; icon: JSX.Element; n?: number }[] = [
-    { key: 'chats', label: 'Chats', icon: <MessageSquare size={14} />, n: rows.length },
-    { key: 'artifacts', label: 'Artifacts', icon: <Files size={14} />, n: fileCount },
-    { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
-    { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
+    { key: 'chats', label: PROJECT_TAB_LABEL.chats, icon: <MessageSquare size={14} />, n: rows.length },
+    { key: 'context', label: PROJECT_TAB_LABEL.context, icon: <Files size={14} />, n: fileCount },
+    { key: 'instructions', label: PROJECT_TAB_LABEL.instructions, icon: <BookOpen size={14} /> },
+    { key: 'memory', label: PROJECT_TAB_LABEL.memory, icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
   ]
 
   return (
@@ -123,7 +124,7 @@ export default function ProjectView(): JSX.Element {
           <p className="muted small">Saved when you click away.</p>
         </div>
       )}
-      {tab === 'artifacts' && <ProjectArtifacts key={id} projectId={id} />}
+      {tab === 'context' && <ProjectContext key={id} projectId={id} />}
       {tab === 'memory' && <MemoryPanel projectId={id} />}
     </main>
   )

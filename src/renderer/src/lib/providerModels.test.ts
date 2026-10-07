@@ -50,10 +50,10 @@ test('remapSettings reports the labels of fields that lost their value', () => {
   const r = remapSettings({
     defaultModel: 'accounts/fireworks/models/ember-1',
     fastModel: '',
-    extractionModel: 'accounts/fireworks/models/gpt-5-mini',
+    modelLow: 'accounts/fireworks/models/gpt-5-mini',
     embeddingModel: 'accounts/fireworks/models/qwen3-embedding-8b',
     visionModel: undefined
   }, openai)
-  assert.deepEqual(r.patch, { defaultModel: 'gpt-5', extractionModel: 'gpt-5-mini', embeddingModel: '' })
+  assert.deepEqual(r.patch, { defaultModel: 'gpt-5', modelLow: 'gpt-5-mini', embeddingModel: '' })
   assert.deepEqual(r.cleared, ['Search model'])
 })

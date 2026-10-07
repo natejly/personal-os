@@ -87,7 +87,7 @@ class StatusTests(unittest.TestCase):
     def test_providers_route(self) -> None:
         ps = client.get("/setup/providers").json()["providers"]
         self.assertEqual(len(ps), 7)
-        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel"})
+        self.assertEqual(set(ps[0]), {"id", "name", "baseUrl", "needsKey", "keyUrl", "defaultModel", "models", "note", "rerankModel", "tiers"})
 
     def test_requires_token(self) -> None:
         self.assertEqual(TestClient(app).get("/setup/status").status_code, 401)

@@ -26,8 +26,12 @@ export function remapModel(id: string, to: ProviderInfo, live?: string[], field:
 /** The model fields of Settings, in the order the Model tab shows them. */
 export const MODEL_FIELDS = [
   { key: 'defaultModel', label: 'Chat model', field: 'chat' },
-  { key: 'fastModel', label: 'Fast model' },
-  { key: 'extractionModel', label: 'Helper model' },
+  { key: 'modelHigh', label: 'High tier', tier: 'high' },
+  { key: 'modelMedium', label: 'Medium tier', tier: 'medium' },
+  { key: 'modelLow', label: 'Low tier', tier: 'low' },
+  // Older knobs, no longer shown: blank follows the tiers, but a saved value is still remapped on a provider switch.
+  { key: 'fastModel', label: 'Fast model', hidden: true },
+  { key: 'extractionModel', label: 'Helper model', hidden: true },
   { key: 'embeddingModel', label: 'Search model' },
   { key: 'retrievalRerankModel', label: 'Rerank model' },
   { key: 'visionModel', label: 'Vision model' },

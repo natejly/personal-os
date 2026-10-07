@@ -1966,8 +1966,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .convo-item.sub.muted { color: var(--text-faint); gap: 6px; }
 /* The doc marker is informational, so it stays quiet and never claims the hover affordance. */
 .convo-item .row-kind { flex-shrink: 0; color: var(--text-faint); margin-right: 2px; }
-.project-viewall { display: block; width: 100%; text-align: left; padding: 4px 8px; border-radius: 8px; font-size: 12.5px; color: var(--text-faint); }
-.project-viewall:hover { background: var(--hover); color: var(--text-muted); }
 .link.sub { padding: 2px 8px; }
 
 /* ---------- Recap ---------- */

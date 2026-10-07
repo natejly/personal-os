@@ -1,21 +1,20 @@
 /**
  * Fenced ```html / ```svg blocks in assistant markdown: which fences are ours, and the document the
- * sandboxed preview iframe gets. Pure (no DOM, no React) so node:test covers the trust boundary.
+ * svg preview iframe gets. Pure (no DOM, no React) so node:test covers the trust boundary.
  *
- * The preview is a `srcdoc` iframe with `sandbox="allow-scripts"` and NEVER allow-same-origin, so the
- * code runs in an opaque origin: no app cookies, no app storage, no access to `window.parent`'s DOM, no
- * preload bridge. A CSP meta tag (minus the directives a meta tag cannot carry: frame-ancestors and
- * sandbox) is injected first, so the document cannot reach the network either. Note a srcdoc frame also
- * inherits the renderer's own CSP, which has no 'unsafe-inline' for scripts: inline <script> in a fence
- * preview is blocked there.
+ * Both previews run in an iframe with `sandbox="allow-scripts"` and NEVER allow-same-origin, so the
+ * content lives in an opaque origin: no app cookies, no app storage, no access to the app's DOM, no
+ * preload bridge. An html preview is served by the `grain-preview:` scheme with its own CSP header
+ * (shared/htmlPreview.ts): a srcdoc frame would inherit the app's CSP, which blocks inline script. An svg
+ * preview stays a srcdoc frame whose CSP meta tag, injected first, forbids script outright.
  */
 
 export const PREVIEW_SANDBOX = 'allow-scripts'
 
-/** What a <meta> CSP can express for a sandboxed preview. */
-export const PREVIEW_CSP = [
+/** SVG never needs a script, and nothing it loads may leave the document. */
+export const SVG_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  "script-src 'none'",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
   'font-src data:',
@@ -27,9 +26,6 @@ export const PREVIEW_CSP = [
   "frame-src 'none'",
   "worker-src 'none'"
 ].join('; ')
-
-/** SVG never needs a script, so its preview refuses them outright. */
-export const SVG_CSP = PREVIEW_CSP.replace("script-src 'unsafe-inline'", "script-src 'none'")
 
 export type FenceKind = 'html' | 'svg' | null
 
@@ -43,25 +39,7 @@ export function fenceKind(lang: string): FenceKind {
 
 const metaFor = (csp: string): string => `<meta http-equiv="Content-Security-Policy" content="${csp.replace(/"/g, '&quot;')}">`
 
-/**
- * The full document for the iframe's `srcdoc`. The CSP meta goes first, ahead of anything the model wrote, so
- * no script can run before it takes effect; any leading doctype is re-emitted in front of it to stay out of
- * quirks mode. A fragment is wrapped so it has a body and sensible defaults.
- */
-export function buildPreviewDoc(code: string, kind: 'html' | 'svg' = 'html'): string {
-  const csp = kind === 'svg' ? SVG_CSP : PREVIEW_CSP
-  let body = (code || '').trim()
-  if (kind === 'svg') {
-    return `<!doctype html>${metaFor(csp)}<meta charset="utf-8"><body style="margin:0;display:flex;justify-content:center;background:transparent">${body}</body>`
-  }
-  body = body.replace(/^<!doctype[^>]*>/i, '').trim()
-  if (!/<html[\s>]/i.test(body)) {
-    body = `<meta charset="utf-8"><body style="margin:0;padding:12px;font-family:system-ui,sans-serif">${body}</body>`
-  }
-  return `<!doctype html>${metaFor(csp)}${body}`
-}
-
-/** True if the document has inline script, i.e. will be blocked in the chat preview. */
-export function hasScript(code: string): boolean {
-  return /<script[\s>]/i.test(code || '')
+/** The full svg document for the iframe's `srcdoc`, the CSP meta first, ahead of anything the model wrote. */
+export function buildPreviewDoc(code: string): string {
+  return `<!doctype html>${metaFor(SVG_CSP)}<meta charset="utf-8"><body style="margin:0;display:flex;justify-content:center;background:transparent">${(code || '').trim()}</body>`
 }

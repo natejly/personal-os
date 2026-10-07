@@ -51,7 +51,7 @@ test('the composer answers a question too: a message to a waiting chat goes to i
   expect(realErrors(grain)).toEqual([])
 })
 
-test('stop a working chat from the strip, then message it to pick it back up', async ({ grain }) => {
+test('stop a working chat from the composer, then message it to pick it back up', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
@@ -59,9 +59,9 @@ test('stop a working chat from the strip, then message it to pick it back up', a
   const { desk } = await deskChat(grain, { brief: 'slow work', title: 'Slowpoke' })
   await openChat(page, 'Slowpoke')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await expect(strip(page)).toContainText(/Working|Planning/)
+  await expect(strip(page)).toHaveCount(0) // a lone agent working: the composer's Stop is the control
   await expect(chatRow(page, 'Slowpoke').locator('.attn-dot')).toHaveAttribute('aria-label', /Working|Planning/)
-  await strip(page).getByRole('button', { name: /Stop/ }).dblclick()
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
   await expect(strip(page)).toContainText('Stopped')
   await expect(strip(page).getByRole('button', { name: /^Stop$/ })).toHaveCount(0)
@@ -95,13 +95,12 @@ test('turning autonomy off stops the desk and the chat answers as a plain chat; 
   expect(await deskStatus(grain, desk.id)).toBe('stopped') // the message did not wake the desk
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
   await turnOn(page, 'Work and propose')
-  await expect(strip(page)).toBeVisible()
-  expect(await deskOf(grain, chat.id)).toBe(desk.id)
+  await expect.poll(() => deskOf(grain, chat.id)).toBe(desk.id)
   await waitStatus(grain, desk.id, 'review', 90_000)
   expect(realErrors(grain)).toEqual([])
 })
 
-test('pause and resume from the strip', async ({ grain }) => {
+test('pause over the API, resume from the strip', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE], delay: 120_000 })
@@ -109,7 +108,7 @@ test('pause and resume from the strip', async ({ grain }) => {
   const { desk } = await deskChat(grain, { brief: 'pausable', title: 'Pausable' })
   await openChat(page, 'Pausable')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await strip(page).getByRole('button', { name: /Pause/ }).click()
+  await grain.api(`/cowork/desks/${desk.id}/pause`, { method: 'POST' }) // the strip hides while a lone agent works, so no Pause button to click
   await waitStatus(grain, desk.id, 'paused', 60_000)
   await expect(strip(page)).toContainText('Paused')
   llm.queue.length = 0

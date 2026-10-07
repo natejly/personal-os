@@ -1665,10 +1665,13 @@ export interface Settings {
 }
 
 export interface ModelPrice {
-  input: number
-  output: number
-  /** 'proxy' = read from the LiteLLM price map, 'override' = set by hand here. */
-  source?: 'proxy' | 'override'
+  /** $ per million tokens. A side is missing when the model has no such price (embeddings have only input). */
+  input?: number
+  output?: number
+  cache_read?: number
+  cache_write?: number
+  /** 'proxy' = read from the LiteLLM price map, 'fireworks' = built-in Fireworks list price, 'override' = set by hand here. */
+  source?: 'proxy' | 'fireworks' | 'override'
 }
 
 /** Aggregated counters shared by every slice of the usage report. */

@@ -634,7 +634,7 @@ export const api = {
   stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }, STOP_TIMEOUT_MS),
   usage: {
     report: (days = 30) => req<UsageReport>(`/usage?days=${days}`),
-    setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
+    setPrices: (modelPrices: Record<string, { input?: number; output?: number }>) =>
       req<{ repriced: number; prices: Record<string, ModelPrice> }>('/usage/prices', { method: 'PUT', body: json({ modelPrices }) })
   },
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),

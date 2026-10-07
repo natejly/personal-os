@@ -1,9 +1,9 @@
 """LLM usage accounting: one row per model call (chat rounds and auto-learn), with cost.
 
-Prices come from the LiteLLM proxy's /model/info (its bundled price map) and can be
-overridden per model in settings["modelPrices"] as {"model": {"input": $/M tokens, "output": $/M tokens}}.
-A provider called directly (Fireworks, OpenAI, ...) publishes no price list here, so its calls stay unpriced
-(cost NULL, shown as unknown) until the user enters a price; nothing is guessed.
+Prices, all in USD per 1M tokens, from (later wins): the LiteLLM proxy's /model/info (its bundled price map),
+the Fireworks list prices below, and the user's overrides in settings["modelPrices"] as
+{"model": {"input": ..., "output": ...}}. A model none of them prices stays unpriced (cost NULL, shown as
+unknown, never $0); nothing is guessed.
 """
 from __future__ import annotations
 
@@ -18,6 +18,19 @@ from . import providers
 from .db import Database, new_id, now
 
 PRICE_TTL = 600
+
+# Fireworks serverless list prices (Standard tier), USD per 1M tokens: input, cached input, output.
+# Source: https://docs.fireworks.ai/serverless/pricing and https://fireworks.ai/pricing, retrieved 2026-10-07.
+# deepseek-v4p1-flash changed on 2026-10-01 (was 0.22 / 0.007 / 0.66). Keyed by short_model(); add a model only
+# from that page. Embeddings are billed on input tokens only.
+FIREWORKS_PRICES: dict[str, dict[str, float]] = {
+    "ember-1": {"input": 3.00, "cache_read": 0.30, "output": 15.00},
+    "glm-5p3": {"input": 1.40, "cache_read": 0.26, "output": 4.40},
+    "glm-5p3-flash": {"input": 0.15, "cache_read": 0.03, "output": 0.50},
+    "kimi-k3": {"input": 3.00, "cache_read": 0.30, "output": 15.00},
+    "deepseek-v4p1-flash": {"input": 0.30, "cache_read": 0.006, "output": 1.20},
+    "qwen3-embedding-8b": {"input": 0.10},
+}
 
 
 def short_model(model: str) -> str:
@@ -35,6 +48,7 @@ class Pricing:
     def __init__(self) -> None:
         self._proxy: dict[str, dict[str, float]] = {}
         self._caps: dict[str, dict[str, Any]] = {}
+        self._targets: dict[str, str] = {}  # proxy alias -> the model it routes to ('glm-5.3' -> '.../glm-5p3')
         self._fetched = 0.0
         self._base = ""
 
@@ -68,8 +82,12 @@ class Pricing:
                 return
             out: dict[str, dict[str, float]] = {}
             caps: dict[str, dict[str, Any]] = {}
+            targets: dict[str, str] = {}
             for m in r.json().get("data", []):
                 info = m.get("model_info") or {}
+                target = str((m.get("litellm_params") or {}).get("model") or "")
+                if m.get("model_name") and target:
+                    targets[m["model_name"]] = target
                 if m.get("model_name"):
                     # Independent of prices: a model with no price row still reports what it can do.
                     found = {k: v for k, v in (("mode", info.get("mode")), ("reasoning", info.get("supports_reasoning")),
@@ -78,8 +96,9 @@ class Pricing:
                     if found:
                         caps[m["model_name"]] = found
                 i, o = info.get("input_cost_per_token"), info.get("output_cost_per_token")
-                if m.get("model_name") and (i is not None or o is not None):
-                    row = {"input": float(i or 0) * 1e6, "output": float(o or 0) * 1e6}
+                # A price map row of zeros is a model it has no price for, not a free one.
+                if m.get("model_name") and (i or o):
+                    row = {k: float(v) * 1e6 for k, v in (("input", i), ("output", o)) if v is not None}
                     if info.get("cache_read_input_token_cost") is not None:
                         row["cache_read"] = float(info["cache_read_input_token_cost"]) * 1e6
                     if info.get("cache_creation_input_token_cost") is not None:
@@ -87,36 +106,44 @@ class Pricing:
                     out[m["model_name"]] = row
             self._proxy = out
             self._caps = caps
+            self._targets = targets
         except Exception:  # noqa: BLE001 - pricing is best effort
             pass
 
     def table(self, settings: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """{model: {input, output, source: 'proxy'|'override'}} in $ per million tokens."""
+        """{model: {input?, output?, cache_read?, cache_write?, source: 'proxy'|'fireworks'|'override'}} in $ per million tokens.
+
+        Fireworks list prices replace the proxy's for the same model, under its alias too. An override keeps the
+        cached-input price of the row it replaces unless it sets its own."""
         out: dict[str, dict[str, Any]] = {m: {**p, "source": "proxy"} for m, p in self._proxy.items()}
+        for alias, target in self._targets.items():
+            if short_model(target) in FIREWORKS_PRICES:
+                out[alias] = {**FIREWORKS_PRICES[short_model(target)], "source": "fireworks"}
+        out.update({m: {**p, "source": "fireworks"} for m, p in FIREWORKS_PRICES.items()})
         for m, p in (settings.get("modelPrices") or {}).items():
             if isinstance(p, dict) and (p.get("input") is not None or p.get("output") is not None):
-                row = {"input": float(p.get("input") or 0), "output": float(p.get("output") or 0), "source": "override"}
-                for k in ("cache_read", "cache_write"):
-                    if p.get(k) is not None:
-                        row[k] = float(p[k])
-                out[m] = row
+                base = {k: v for k, v in (out.get(m) or {}).items() if k in ("cache_read", "cache_write")}
+                out[m] = {**base, **{k: float(p[k]) for k in ("input", "output", "cache_read", "cache_write") if p.get(k) is not None},
+                          "source": "override"}
         return out
 
     def cost(self, settings: dict[str, Any], model: str, prompt_tokens: int, completion_tokens: int,
              cached_tokens: int = 0, cache_write_tokens: int = 0) -> float | None:
         """Reasoning tokens are already inside completion_tokens, so they cost nothing extra here."""
-        table = self.table(settings)
-        p = table.get(model) or table.get(short_model(model))
-        if not p:
-            short = short_model(model)
-            p = next((v for k, v in table.items() if short_model(k) == short), None) if short else None
-        if not p:
-            return None
+        # Any row naming this model, by full id or short name; an override beats a list price beats the proxy's,
+        # and an exact id beats a short-name match within the same source.
+        short, rank = short_model(model), {"override": 0, "fireworks": 1, "proxy": 2}
+        rows = [(rank[v["source"]], k != model, v) for k, v in self.table(settings).items()
+                if model and (k == model or short_model(k) == short)]
+        p = min(rows, key=lambda r: r[:2])[2] if rows else None
+        if not p or p.get("input") is None or (completion_tokens and p.get("output") is None):
+            return None  # unknown, never $0
+        # Cached and cache-write tokens are part of prompt_tokens: each prompt token is billed once, at its own rate.
         cached = max(0, min(int(cached_tokens or 0), prompt_tokens))
         written = max(0, min(int(cache_write_tokens or 0), prompt_tokens - cached))
         uncached = prompt_tokens - cached - written
         return (uncached * p["input"] + cached * p.get("cache_read", p["input"]) + written * p.get("cache_write", p["input"])
-                + completion_tokens * p["output"]) / 1e6
+                + completion_tokens * p.get("output", 0.0)) / 1e6
 
 
 # What a call was for, from its kind and tag. Order is the display order.

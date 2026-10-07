@@ -1,4 +1,4 @@
-import type { UsageBucket } from '@shared/types'
+import type { ModelPrice, UsageBucket } from '@shared/types'
 
 /** Pure formatting for Settings → Usage. Cost is only ever what was priced; an unpriced call is never guessed. */
 
@@ -29,4 +29,25 @@ export function tokenSplit(b: Pick<UsageBucket, 'prompt_tokens' | 'completion_to
   const parts = [`${fmt(b.prompt_tokens)} in`, `${fmt(b.completion_tokens)} out`]
   if (b.cached_tokens) parts.push(`${fmt(b.cached_tokens)} cached`)
   return parts.join(' · ')
+}
+
+/** Price rows to PUT: only rows already overridden or edited. A blank side is left out (unknown), never sent as 0;
+ *  both sides blank drops the override. */
+export function overridesToSave(
+  models: string[],
+  prices: Record<string, ModelPrice>,
+  draft: Record<string, { input: string; output: string }>
+): Record<string, { input?: number; output?: number }> {
+  const out: Record<string, { input?: number; output?: number }> = {}
+  for (const m of models) {
+    if (!draft[m] && prices[m]?.source !== 'override') continue
+    const row: { input?: number; output?: number } = {}
+    for (const k of ['input', 'output'] as const) {
+      const v = (draft[m]?.[k] ?? (prices[m]?.[k] != null ? String(prices[m][k]) : '')).trim()
+      const n = Number(v)
+      if (v && Number.isFinite(n) && n >= 0) row[k] = n
+    }
+    if (row.input != null || row.output != null) out[m] = row
+  }
+  return out
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { costNote, costText, money, shortModel, tokenSplit } from './usageFormat'
+import { costNote, costText, overridesToSave, money, shortModel, tokenSplit } from './usageFormat'
 
 test('costText: priced, partly priced, unpriced, empty', () => {
   assert.equal(costText({ calls: 0, cost: 0, unpriced: 0 }), '$0')
@@ -26,4 +26,30 @@ test('tokenSplit and money', () => {
   assert.equal(tokenSplit({ prompt_tokens: 10, completion_tokens: 2, cached_tokens: 0 }, f), '10 in · 2 out')
   assert.equal(tokenSplit({ prompt_tokens: 10, completion_tokens: 2, cached_tokens: 8 }, f), '10 in · 2 out · 8 cached')
   assert.equal(money(0.004), '$0.0040')
+})
+
+test('overridesToSave sends only overrides and edited rows, a blank side left out, never 0', () => {
+  const prices = {
+    custom: { input: 1, output: 2, source: 'override' as const },
+    listed: { input: 3, output: 4, source: 'fireworks' as const },
+    proxied: { input: 5, output: 6, source: 'proxy' as const },
+    embed: { input: 0.1, source: 'fireworks' as const },
+    cleared: { input: 7, output: 8, source: 'override' as const },
+    half: { input: 9, source: 'override' as const },
+  }
+  const models = [...Object.keys(prices), 'fresh']
+  const draft = {
+    proxied: { input: '5', output: '9' },
+    cleared: { input: '', output: '' },
+    embed: { input: '0.1', output: '' },
+    fresh: { input: '1.5', output: '3' },
+  }
+  assert.deepEqual(overridesToSave(models, prices, draft), {
+    custom: { input: 1, output: 2 },
+    proxied: { input: 5, output: 9 },
+    embed: { input: 0.1 },
+    half: { input: 9 },
+    fresh: { input: 1.5, output: 3 },
+  })
+  assert.deepEqual(overridesToSave(['listed', 'proxied'], prices, {}), {})
 })

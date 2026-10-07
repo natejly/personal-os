@@ -3,7 +3,7 @@ import { RefreshCw, AlertCircle, Check } from 'lucide-react'
 import { api } from '../lib/api'
 import type { ModelPrice, UsageBucket, UsagePeriod, UsageReport } from '@shared/types'
 import ChartBlock from './ChartBlock'
-import { costNote, costText, money, shortModel, tokenSplit } from '../lib/usageFormat'
+import { costNote, costText, money, overridesToSave, shortModel, tokenSplit } from '../lib/usageFormat'
 import { useStore } from '../store'
 
 /** Settings → Usage: today / week / month totals, tokens and cost per day, model and feature, plus per-model prices.
@@ -67,18 +67,14 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
   const [msg, setMsg] = useState('')
 
   const valueOf = (m: string, side: 'input' | 'output'): string =>
-    draft[m]?.[side] ?? (report.prices[m] ? String(report.prices[m][side]) : '')
+    draft[m]?.[side] ?? (report.prices[m]?.[side] != null ? String(report.prices[m][side]) : '')
   const edit = (m: string, side: 'input' | 'output', v: string): void =>
     setDraft((d) => ({ ...d, [m]: { input: valueOf(m, 'input'), output: valueOf(m, 'output'), [side]: v } }))
 
   const save = async (): Promise<void> => {
     setSaving('saving')
-    // Send every model that has a price, so hand-edits and proxy values both persist as overrides.
-    const out: Record<string, { input: number; output: number }> = {}
-    for (const m of models) {
-      const i = Number(valueOf(m, 'input')), o = Number(valueOf(m, 'output'))
-      if (Number.isFinite(i) && Number.isFinite(o) && (i > 0 || o > 0)) out[m] = { input: i, output: o }
-    }
+    // Only overrides and edited rows: list and proxy prices stay live instead of freezing into settings.
+    const out = overridesToSave(models, report.prices, draft)
     try {
       const r = await api.usage.setPrices(out)
       setSaving('saved')
@@ -103,7 +99,7 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
               <th scope="row" className="mono">{m}</th>
               <td><input type="number" aria-label={`${m} input price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
               <td><input type="number" aria-label={`${m} output price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
-              <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : report.prices[m] ? 'from proxy' : 'no price'}</td>
+              <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : report.prices[m]?.source === 'fireworks' ? 'Fireworks list price' : report.prices[m] ? 'from proxy' : 'no price'}</td>
             </tr>
           ))}
         </tbody>
@@ -226,7 +222,7 @@ export default function UsageView(): JSX.Element {
       <p className="muted small">
         {proxy
           ? 'Read from your LiteLLM proxy. A price you enter here wins. Saving re-prices the history.'
-          : 'Your provider is called directly and does not share prices with Grain, so new calls show cost as unknown until you enter a price ($ per million tokens). Saving re-prices the history; calls priced earlier keep their cost.'}
+          : 'Fireworks list prices are built in. Other directly-called providers show cost as unknown until you enter a price ($ per million tokens). Saving re-prices the history; calls priced earlier keep their cost.'}
       </p>
       <PriceEditor report={report} onSaved={(prices) => setReport((r) => (r ? { ...r, prices } : r))} />
     </div>

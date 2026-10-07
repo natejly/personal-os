@@ -866,7 +866,7 @@ class Subagents:
                 end = ev
         u = end.get("usage") or end.get("usage_est") or {}
         pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-        cost = self.pricing.cost(cfg, ch.model, pt, ct) if self.pricing is not None else None
+        cost = self.pricing.cost(cfg, ch.model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)) if self.pricing is not None else None
         ch.meter.add(pt, ct, cost)
         return "".join(buf).strip(), end
 

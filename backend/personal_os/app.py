@@ -6024,8 +6024,9 @@ class PricesIn(BaseModel):
 @app.put("/usage/prices")
 async def put_prices(body: PricesIn) -> dict[str, Any]:
     """Save per-model price overrides ($ per million tokens) and re-price the whole log."""
-    clean = {m: {"input": float(p.get("input") or 0), "output": float(p.get("output") or 0)} for m, p in body.modelPrices.items()
-             if p.get("input") is not None or p.get("output") is not None}
+    # A side left blank stays unset (unknown), never $0.
+    clean = {m: {k: float(p[k]) for k in ("input", "output", "cache_read", "cache_write") if p.get(k) is not None}
+             for m, p in body.modelPrices.items() if p.get("input") is not None or p.get("output") is not None}
     db.set_settings({"modelPrices": clean})
     cfg = settings()
     await pricing.refresh(cfg, force=True)

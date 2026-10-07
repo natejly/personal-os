@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -129,6 +130,23 @@ def test_sandbox_hosts_and_loopback() -> None:
     assert not any("evil" in l for l in net)  # only localhost or * are ever written
     assert any("network-bind" in l for l in net)
     assert not any("network-bind" in l for l in sandbox.shell_profile(["/tmp"]).splitlines())
+    # A remote host allow needs the resolver socket with it, or every hostname fails ENOTFOUND inside.
+    dns = f'(allow network-outbound (remote unix-socket (path-literal "{sandbox.MDNS_SOCKET}")))'
+    assert dns in net
+    assert dns not in sandbox.shell_profile(["/tmp"], allow_hosts=["localhost:4000"], loopback=True)
+    assert dns not in sandbox.shell_profile(["/tmp"], proxy_port=4000)
+    assert dns not in sandbox.shell_profile(["/tmp"])
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("sandbox-exec"), reason="needs macOS sandbox-exec")
+def test_sandboxed_coding_agent_can_resolve_a_hostname() -> None:
+    """The live check behind the rule above: `*:443` is useless while getaddrinfo cannot reach mDNSResponder."""
+    code = "import socket; socket.getaddrinfo('api.fireworks.ai', 443)"
+    if subprocess.run([sys.executable, "-c", code], capture_output=True).returncode:
+        pytest.skip("no DNS on this machine")
+    p = sandbox.shell_profile(["/tmp"], network=False, allow_hosts=opencode.ALLOW_HOSTS, loopback=True)
+    r = subprocess.run(["sandbox-exec", "-p", p, sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-400:]
 
 
 def test_summary_keeps_text_and_tool_lines_and_the_session() -> None:

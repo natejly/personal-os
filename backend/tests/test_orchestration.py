@@ -750,6 +750,24 @@ def test_deleting_a_chat_stops_its_workers_unannounced() -> None:
     assert not seat("wake") and mgr.pending_wakes(cid) == []
 
 
+def test_deleting_a_project_stops_its_chats_workers_unannounced() -> None:
+    """Live and archived chats alike: an archived chat's worker may still be running."""
+    pid = appmod.projects.create("Doomed project")["id"]
+    chats = {t: appmod.convos.create(pid, "Orchestration", "test-model")["id"] for t in ("Doomed project job", "Archived project job")}
+    wids = {}
+    for title, cid in chats.items():
+        GATES[title] = threading.Event()
+        wids[title] = start_workers(cid, [title])[0]["worker_id"]
+    wait(lambda: len(STARTS) == 2, "both to run")
+    appmod.convos.update(chats["Archived project job"], {"archived": True})
+    assert client.delete(f"/projects/{pid}").status_code == 200
+    for title, wid in wids.items():
+        wait(lambda wid=wid: store.get(wid)["ended_at"], f"{title} to end")
+        assert store.get(wid)["status"] == "interrupted", "stopped, not left to finish as done"
+    time.sleep(0.1)
+    assert not seat("wake") and all(mgr.pending_wakes(cid) == [] for cid in chats.values())
+
+
 def test_workers_do_not_serialize_on_a_shared_writable_root() -> None:
     """Two workers with the default tool set run side by side: a worker with writer tools takes no folder lock for its
     whole run, so the second one never sits 'running' with no model round until the first ends."""

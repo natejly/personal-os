@@ -34,7 +34,6 @@ export function startMockLLM() {
       calls.push(body)
       const msgs = body.messages || []
       const lastUser = [...msgs].reverse().find((m) => m.role === 'user')
-      const lastMsg = msgs[msgs.length - 1]
       const text = typeof lastUser?.content === 'string' ? lastUser.content : (lastUser?.content || []).map((p) => p.text || '').join(' ')
       const fail = text.match(/!!fail (\d+)/)
       const slow = text.match(/!!slow (\d+)/)
@@ -48,7 +47,8 @@ export function startMockLLM() {
         res.statusCode = Number(fail[1])
         return res.end(JSON.stringify({ error: { message: `mock failure ${fail[1]}` } }))
       }
-      const toolAlready = lastMsg?.role === 'tool'
+      // a system nudge can follow the tool result, so any tool message after the last user turn counts
+      const toolAlready = msgs.slice(msgs.lastIndexOf(lastUser) + 1).some((m) => m.role === 'tool')
       let content = reply ? reply[1].trim() : `MOCK: ${text.replace(/!!\w+.*$/s, '').trim() || '(empty)'}`
       if (toolAlready) content = 'MOCK: tool done'
       const toolCall = tool && !toolAlready ? { id: 'call_mock1', type: 'function', function: { name: tool[1], arguments: tool[2] } } : null

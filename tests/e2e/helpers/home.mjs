@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['Provider & cost', 'Permissions', 'Autonomy', 'Memory', 'Behavior', 'Modules', 'Integrations', 'Data']
+export const TABS = ['Model', 'Usage', 'Permissions', 'Integrations', 'Texting', 'Appearance', 'System access', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
@@ -11,6 +11,14 @@ export async function openSettings(page, tab) {
   if (!(await dialog(page).count())) await page.locator('.settings-btn').click()
   await expect(dialog(page)).toBeVisible()
   if (tab) await dialog(page).getByRole('tab', { name: tab }).click()
+  return dialog(page)
+}
+
+/** Open Settings on its Advanced tab with one collapsed group (e.g. 'Approvals', 'Layout', 'Data and support') expanded. */
+export async function openAdvanced(page, group) {
+  await openSettings(page, 'Advanced')
+  const summary = dialog(page).locator('.adv-group > summary', { hasText: group })
+  if (!(await summary.evaluate((el) => el.parentElement.open))) await summary.click()
   return dialog(page)
 }
 

@@ -636,7 +636,8 @@ def test_shell_profile_shape() -> None:
     p = sandbox.shell_profile(["/tmp/w"], network=False)
     assert "(deny network*)" in p and "(allow network*)" not in p and "(deny default)" in p
     assert ".ssh" in p and "Keychains" in p and "gcloud" in p and r"\.env" in p
-    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials"):
+    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".vault-token",
+                   os.path.join(".cargo", "credentials.toml")):
         assert os.path.join(os.path.expanduser("~"), secret) in p, secret
     assert "hooks" in p
     assert "(allow network*)" in sandbox.shell_profile(["/tmp/w"], network=True)

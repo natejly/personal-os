@@ -156,7 +156,7 @@ def protected_reason(*paths: str | Path) -> str | None:
 SENSITIVE_DIRS = frozenset({".ssh", ".aws", ".gnupg", ".kube", ".azure", "gcloud", ".docker"})
 SENSITIVE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".ppk"})
 SENSITIVE_NAMES = frozenset({".netrc", ".npmrc", ".pgpass", ".git-credentials", ".pypirc", "credentials", "credentials.json",
-                             "application_default_credentials.json"})
+                             "credentials.toml", ".vault-token", "application_default_credentials.json"})
 SENSITIVE_PREFIXES = ("/dev/", "/proc/")
 KEY_FILE_RE = re.compile(r"^id_(rsa|dsa|ecdsa|ed25519)(?!.*\.pub$)")
 # Keychains and cookie jars: whole folders under the home folder (or /Library) the user has to approve.
@@ -168,7 +168,7 @@ BROWSER_DIRS = ("Google/Chrome", "Arc", "BraveSoftware", "Microsoft Edge", "Chro
 BROWSER_FILE_NAMES = ("Cookies", "Cookies-journal", "Login Data", "Login Data-journal", "Login Data For Account", "Web Data",
                       "Web Data-journal", "cookies.sqlite", "cookies.sqlite-wal", "key4.db", "logins.json")
 BROWSER_FILES = frozenset(n.lower() for n in BROWSER_FILE_NAMES)
-SENSITIVE_HOME_FILES = (".config/gh/hosts.yml",)
+SENSITIVE_HOME_FILES = (".config/gh/hosts.yml", ".cargo/credentials.toml")
 # What the shell sandbox denies for read and write: the same stores as `sensitive_reason`, as paths a profile can name.
 CRED_HOME_DIRS = tuple(sorted(SENSITIVE_DIRS - {"gcloud"})) + (".config/gcloud",) + KEYCHAIN_DIRS
 CRED_HOME_FILES = tuple(sorted(n for n in SENSITIVE_NAMES if n.startswith("."))) + SENSITIVE_HOME_FILES

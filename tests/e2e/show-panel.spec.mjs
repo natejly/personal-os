@@ -69,14 +69,20 @@ test('show opens the panel on html, then a PDF from this Mac in the built-in vie
   }
 })
 
-test('a file outside the home folder is refused, and the panel stays closed', async () => {
-  const grain = await launchApp({ name: 'show-panel-guard' })
+test('a credential store is refused, and the panel stays closed; a plain file outside the home folder opens', async () => {
+  // Whole-Mac scope is the default, so the guard is about what a file is: keys and credential files never reach the panel.
+  const home = mkdtempSync(join(tmpdir(), 'grain-show-guard-'))
+  mkdirSync(join(home, '.aws'))
+  writeFileSync(join(home, '.aws', 'credentials'), '[default]\nplaceholder = not a real credential\n')
+  const grain = await launchApp({ name: 'show-panel-guard', backendEnv: { HOME: home } })
   try {
     const { page } = grain
     await newChat(page)
-    await showTool(page, { kind: 'file', path: '/etc/hosts' })
-    await expect(await openFold(page)).toContainText(/outside your home folder/)
+    await showTool(page, { kind: 'file', path: '~/.aws/credentials' })
+    await expect(await openFold(page)).toContainText(/credential/)
     await expect(panel(page)).toHaveCount(0)
+    await showTool(page, { kind: 'file', path: '/etc/hosts' })
+    await expect(panel(page)).toBeVisible()
   } finally {
     await grain.close()
   }

@@ -270,7 +270,7 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
 export type ChatFace = { name: string; hue?: number; tone?: number }
 
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -362,7 +362,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
             {!bare && !isUser && message.content.trim() && <ReadAloudButton id={message.id} text={message.content} />}
-            {editable && isUser && (
+            {resendable && isUser && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />
               </button>

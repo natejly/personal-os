@@ -57,9 +57,30 @@ def default_model(settings: dict[str, Any]) -> str:
 
 
 def _hostport(url: str) -> str:
-    u = urlparse(url if "//" in url else f"//{url}")
-    host = (u.hostname or "").lower()
-    return f"{host}:{u.port}" if u.port else host
+    """host[:port], lowercase. An address that cannot be parsed (a stored typo such as host:11x34) yields its raw
+    text, which matches no preset, so it reads as a custom address instead of raising."""
+    try:
+        u = urlparse(url if "//" in url else f"//{url}")
+        host = (u.hostname or "").lower()
+        return f"{host}:{u.port}" if u.port else host
+    except ValueError:
+        return url.strip().lower()
+
+
+def check_base_url(url: str) -> str:
+    """The trimmed address when it is empty or an http(s) URL with a host and a valid port; else ValueError."""
+    base = url.strip()
+    if not base:
+        return base
+    try:
+        u = urlparse(base)
+        ok = u.scheme in ("http", "https") and bool(u.hostname)
+        u.port  # noqa: B018 - raises ValueError on a non-numeric or out-of-range port
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ValueError("baseUrl must be an http:// or https:// address with a valid host and port")
+    return base
 
 
 def infer(base_url: str | None) -> str | None:

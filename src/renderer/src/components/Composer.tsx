@@ -72,6 +72,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const newChat = !onSend && !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
     startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent, private: st.draftPrivate })
+  // A draft that starts autonomous becomes a desk, which plans by its own autonomy and ignores this chat's plan mode.
+  const startsAsDesk = useStore((s) => newChatAutonomy(s) !== null)
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
@@ -463,7 +465,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <>
             <PermissionModePill />
             {/* A chat working autonomously plans by its desk's autonomy, so its own plan mode steps aside. */}
-            {!deskBound && <PlanModeToggle conversationId={conversationId} />}
+            {!deskBound && !startsAsDesk && <PlanModeToggle conversationId={conversationId} />}
             <AutonomyToggle conversationId={conversationId} draft={newChat} />
           </>
         )}

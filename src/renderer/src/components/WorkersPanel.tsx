@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Bot, ChevronDown, ChevronRight, RotateCcw, Square } from 'lucide-react'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
-import { useStore } from '../store'
+import { useStore, useConversation } from '../store'
 import { sortWorkers, upsertWorker, workerActions, workerIsLive, workerLine } from '../lib/workers'
 
 const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
@@ -14,7 +14,8 @@ const ENDED_SHOWN = 4
  * Stop / Resume, and approval cards the worker is waiting on. Refetches on the app topic's `workers` event with a
  * 3 s poll as a fallback while any worker is live. Hidden when the chat has none.
  */
-export default function WorkersPanel({ conversationId }: { conversationId?: string }): JSX.Element | null {
+export default function WorkersPanel({ conversationId: focusId }: { conversationId?: string }): JSX.Element | null {
+  const conversationId = useConversation(focusId)?.id // the main view passes no id: resolve the focused chat
   const [workers, setWorkers] = useState<WorkerInfo[]>([])
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)

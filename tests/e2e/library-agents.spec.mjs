@@ -63,7 +63,10 @@ test('Library > Agents: a drafted agent is edited, saved, approved, and a chat s
   expect(offered.sort()).toEqual(['current_time', 'web_search'])
   await shot(page, 'agents-chat')
 
-  // A plain chat sees the roster, so it can delegate by description.
+  // A chat that can spawn subagents sees the roster, so it can hand work over by description. (A reply that delegates to
+  // workers is not shown it: the roster names agent_spawn, which that reply does not have.)
+  await api('/settings', { method: 'PUT', body: { tools: { delegate: 'off' } } })
+  await page.reload()
   await newChat(page)
   await sayAndWait(page, '!!reply ok', 'ok')
   expect(callFor(llm, '!!reply ok').messages[0].content).toContain('trip-planner: Plans trips')
@@ -72,7 +75,9 @@ test('Library > Agents: a drafted agent is edited, saved, approved, and a chat s
 
 test('a subagent opens from its card, takes a message while it runs, and shows in the crew ring', async ({ grain }) => {
   const { page, api } = grain
-  await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } }) // every tool offered up front, no tool_search round
+  // Every tool offered up front, no tool_search round. A plain chat reply hands work to workers with delegate and is not
+  // offered agent_spawn; with delegate off the chat spawns subagents itself, which is the path this test covers.
+  await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, tools: { delegate: 'off' } } })
   const s = (await spaces(grain))[0]
   const c = await api('/conversations', { method: 'POST', body: { title: 'Crew' } })
   const w = await api(`/canvases/${s.id}/windows`, { method: 'POST', body: { kind: 'chat', ref_id: c.id, x: 64, y: 48, w: 560, h: 600 } })

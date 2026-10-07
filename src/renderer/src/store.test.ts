@@ -1238,7 +1238,7 @@ test('Memory lives in Settings: split by default, and every way in lands on its 
   assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'memory', 'list', ['x']])
   reset()
   st().openSettings('modules')
-  assert.equal(st().settingsTab, 'appearance')
+  assert.equal(st().settingsTab, 'sidebar')
 })
 
 test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {

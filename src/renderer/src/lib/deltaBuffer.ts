@@ -1,6 +1,6 @@
 import type { ChatEvent } from '@shared/types'
 
-type TextEvent = Extract<ChatEvent, { event: 'delta' | 'reasoning' }>
+type TextEvent = Extract<ChatEvent, { event: 'delta' }>
 
 export interface DeltaBufferOptions {
   intervalMs?: number

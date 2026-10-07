@@ -87,7 +87,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "Use markdown when it helps. You may be given memories, a knowledge graph, and file "
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
-    "extractionModel": "",
+    "extractionModel": "",  # "" = the low tier (app.settings() fills it); a saved value overrides
+    # Model tiers (providers.tier_model): "" = the active provider's default for that tier.
+    "modelHigh": "",
+    "modelMedium": "",
+    "modelLow": "",
     "fastModel": "",  # what Auto sends a short, plain message to (router.py); empty means Auto uses the default model
     "autoRoute": False,  # new chats start on Auto: the fast or the default model per message
     "consolidateEvery": CONSOLIDATE_EVERY,  # propose a memory tidy-up after this many new auto memories; 0 = manual only

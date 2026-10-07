@@ -273,7 +273,8 @@ class Workers:
 
     # ---- context ---------------------------------------------------------------------------------
     KEEP = ("project_id", "conversation_id", "agent_id", "settings", "conv_settings", "permission_mode", "skip_permissions",
-            "user_text", "explicit_modes", "tool_overrides", "model", "effort", "allowed_urls", "mcp_loaded", "tool_loaded", "auto_attach")
+            "user_text", "explicit_modes", "tool_overrides", "model", "effort", "allowed_urls", "mcp_loaded", "tool_loaded", "auto_attach",
+            "chat_link")  # a worker started by another chat's message keeps that hop's depth
 
     def worker_ctx(self, parent: dict[str, Any], allow_subworkers: bool) -> dict[str, Any]:
         """A reply's tool ctx, cut down to what a detached worker may carry: no run, no message, no reply-bound closures

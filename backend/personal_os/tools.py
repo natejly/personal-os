@@ -748,6 +748,8 @@ class Toolbox:
         subagents.register(self)
         from . import workers
         workers.register(self)  # delegate / message_worker / check_worker / stop_worker / resume_worker
+        from . import chatlink
+        chatlink.register(self)  # list_chats / read_chat / message_chat
         from . import research
         research.register(self)  # deep_research: planned fan-out over read-only subagents
         from . import opencode, shell

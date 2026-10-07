@@ -4,6 +4,7 @@ import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
 import Face from './Face'
+import { workersCardShown } from '../lib/statusChrome'
 import { liveWorkerCount, sortWorkers, workerActions, workerIsLive, workerWord } from '../lib/workers'
 
 const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
@@ -20,7 +21,8 @@ function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
  * Approval cards the worker is waiting on stay inline. Fed by the app topic's `workers` event (see the store), with a
  * 3 s poll as a fallback while any worker is live. Hidden when the chat has none.
  */
-export default function WorkersPanel({ conversationId: focusId }: { conversationId?: string }): JSX.Element | null {
+/** `all`: the side panel's list, finished workers included. Above the composer (the default) it shows only while one is live. */
+export default function WorkersPanel({ conversationId: focusId, all = false }: { conversationId?: string; all?: boolean }): JSX.Element | null {
   const conversationId = useConversation(focusId)?.id // the main view passes no id: resolve the focused chat
   const workers = useWorkers(conversationId)
   const [open, setOpen] = useState(true)
@@ -36,7 +38,7 @@ export default function WorkersPanel({ conversationId: focusId }: { conversation
     return () => clearInterval(t)
   }, [anyLive, conversationId, loadWorkers])
 
-  if (!workers.length) return null
+  if (!workers.length || (!all && !workersCardShown(liveWorkerCount(workers)))) return null
   const sorted = sortWorkers([...workers])
   const shown = [...sorted.filter(workerIsLive), ...sorted.filter((w) => !workerIsLive(w)).slice(0, ENDED_SHOWN)]
   const live = liveWorkerCount(workers)

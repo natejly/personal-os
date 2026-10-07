@@ -8,7 +8,6 @@ import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
-import PlanPanel from './PlanPanel'
 import WorkersPanel from './WorkersPanel'
 import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
@@ -197,7 +196,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
           <WorkersPanel conversationId={conversationId} />
           {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
-          <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}

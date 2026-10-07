@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { EyeOff, MoreHorizontal, Paperclip } from 'lucide-react'
+import { MoreHorizontal, Paperclip } from 'lucide-react'
 import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useChatAttention, useStore } from '../store'
@@ -58,7 +58,7 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
     },
     { label: 'Export as Markdown', run: () => void exportMd(false) },
     { label: 'Copy as Markdown', run: () => void exportMd(true) },
-    ...(conv.settings?.private ? [] : [
+    ...([
       { label: noLearn ? 'Learn from this chat again' : 'Don’t learn from this chat', run: () => void setChatSettings({ learn: noLearn }, conv.id) },
       ...(noLearn ? [{ label: 'Forget what was learned here', run: () => void forgetLearned(conv.id) }] : [])
     ] as MenuEntry[]),
@@ -102,7 +102,6 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         <ChatPulse conv={conv} size={sub ? 12 : 14} />
         <span className="convo-title">
           {telegram ? <TelegramIcon size={sub ? 11 : 13} /> : lead}
-          {conv.settings?.private && <EyeOff size={11} className="convo-private" aria-label="Private chat" />}
           {renaming ? (
             <input
               className="convo-rename"

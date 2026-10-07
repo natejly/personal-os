@@ -3,7 +3,7 @@ import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
+import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -20,7 +20,7 @@ import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import MemoryChips from './MemoryChips'
-import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
+import { nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 import ResearchTrail from './ResearchTrail'
@@ -228,17 +228,6 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 }
 
 /** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
-function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
-  const [now, setNow] = useState(() => Date.now())
-  const ticking = statusTicks(status, now)
-  useEffect(() => {
-    if (!ticking) return
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [ticking])
-  return <div className="run-status" role="status">{statusText(status, now)}</div>
-}
-
 /** The three dots for a reply with nothing to show yet; past 5s they gain the elapsed time, so a slow model does not look hung. */
 export function Thinking(): JSX.Element {
   const [start] = useState(() => Date.now())
@@ -326,7 +315,6 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             <ReplyAttachments files={message.attachments} />
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
-            {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}

@@ -126,17 +126,19 @@ def test_harness_runs_end_to_end_and_hides_history(run: dict) -> None:
             assert not [i for i in run["ranked"][c["id"]] if store[i].get("project_id")], c["id"]
 
 
-# Floors: the offline run on 2026-10-07 (recorded qwen3-embedding-8b vectors, retrieval before any ranking change), minus a small margin.
-# Baseline: overall R@5 0.638, R@10 0.836, MRR 0.483; negatives empty-correct 0/7; must_not violations 46 (38 in the top 10).
-FLOORS = {  # category -> (recall@10, MRR) baseline in the comment
-    "lexical": (0.95, 0.78),       # 1.000, 0.831
-    "paraphrase": (0.72, 0.26),    # 0.773, 0.310
-    "graph": (0.50, 0.18),         # 0.556, 0.233
-    "temporal": (0.72, 0.30),      # 0.769, 0.352
-    "supersession": (0.95, 0.57),  # 1.000, 0.621
-    "anaphoric": (0.95, 0.59),     # 1.000, 0.640
+# Floors: the offline run on 2026-10-07 (recorded qwen3-embedding-8b vectors and qwen3-reranker-8b scores) with
+# reranking, the temporal window and graph-relevance ordering all on, minus a small margin.
+# Final: overall R@5 0.928, R@10 0.951, MRR 0.850; negatives empty-correct 0/7; must_not violations 41 (39 in the top 10).
+# Baseline before this branch was R@5 0.638, R@10 0.836, MRR 0.483 (must_not 46 / 38).
+FLOORS = {  # category -> (recall@10, MRR); the measured value in the comment
+    "lexical": (0.95, 0.90),       # 1.000, 0.955
+    "paraphrase": (0.95, 0.90),    # 1.000, 0.955
+    "graph": (0.65, 0.42),         # 0.722, 0.477
+    "temporal": (0.92, 0.80),      # 0.974, 0.859
+    "supersession": (0.95, 0.95),  # 1.000, 1.000
+    "anaphoric": (0.95, 0.75),     # 1.000, 0.806
 }
-OVERALL_FLOOR = {"recall@5": 0.60, "recall@10": 0.79, "mrr": 0.44}
+OVERALL_FLOOR = {"recall@5": 0.90, "recall@10": 0.93, "mrr": 0.81}
 
 
 def test_retrieval_does_not_regress(run: dict) -> None:
@@ -147,4 +149,4 @@ def test_retrieval_does_not_regress(run: dict) -> None:
         got = s["categories"][cat]
         assert got["recall@10"] >= r10, f"{cat} recall@10 {got['recall@10']:.3f} < {r10}"
         assert got["mrr"] >= mrr, f"{cat} mrr {got['mrr']:.3f} < {mrr}"
-    assert s["must_not"]["violations"] <= 50 and s["must_not"]["top10"] <= 42
+    assert s["must_not"]["violations"] <= 44 and s["must_not"]["top10"] <= 42

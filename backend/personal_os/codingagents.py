@@ -139,7 +139,6 @@ def _lead(text: str) -> str:
     return f"Task: {text}" if text.startswith("-") else text
 
 
-DEFAULT_CLAUDE_MODEL = "fable"
 # Two generic helpers every session may hand work to, inline (--agents): one writes, one checks.
 CLAUDE_AGENTS = json.dumps({
     "implementer": {"description": "Makes a focused code change: reads the surrounding code, edits the files and runs what it touched.",
@@ -154,9 +153,11 @@ CLAUDE_AGENTS = json.dumps({
 
 
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None) -> list[str]:
-    """The start command: the model asked for, else fable, with the two inline sub-agents. A permission flag appears
-    only when the caller asked for a mode."""
-    return [exe, "--bg", "-n", name, "--model", model or DEFAULT_CLAUDE_MODEL, "--agents", CLAUDE_AGENTS,
+    """The start command, with the two inline sub-agents. A model flag appears only when the caller named one: the
+    session runs on the user's own account, so their own CLI default is the one model they are known to have quota for
+    (pinning one here started every session on it and failed the moment that model's limit was reached). A permission
+    flag likewise appears only when the caller asked for a mode."""
+    return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
             *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 

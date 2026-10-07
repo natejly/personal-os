@@ -236,3 +236,38 @@ def test_availability(monkeypatch: Any, tmp_path: Path) -> None:
     b.settings["visionModel"] = ""
     monkeypatch.setattr(vision, "_which", lambda b: "/fake/tesseract")
     assert b.tb.available("view_image") is True
+
+
+# ---- pictures stored in Uploads ----
+def _docs_box(tmp: Path, **settings: Any) -> tuple[Any, Any, dict[str, Any]]:
+    from personal_os import blobs
+    from personal_os.db import Database
+    from personal_os.repos import Documents
+    docs = Documents(Database(tmp / "data"))
+    tb = Toolbox(None, None, docs, lambda: {"defaultModel": "", **settings})  # type: ignore[arg-type]
+    png = _png()
+    dest, digest = blobs.store(docs.db.data_dir, "shot.png", png)
+    row = docs.create(None, "shot.png", "image/png", len(png), str(dest), "", content_hash=digest)
+    return tb, docs, row
+
+
+def test_view_image_reads_an_uploads_document_by_id(monkeypatch: Any, tmp_path: Path) -> None:
+    _stub_complete(monkeypatch)
+    tb, docs, row = _docs_box(tmp_path, visionModel="my/vlm")
+    ctx = {"project_id": None, "settings": {"visionModel": "my/vlm"}, "tainted": False, "taint_sources": [], "message_id": None}
+    out = asyncio.run(tb.call("view_image", {"document_id": row["id"]}, ctx))
+    assert out["description"].startswith("A red rectangle") and (out["width"], out["height"]) == (64, 32)
+    assert "no document" in asyncio.run(tb.call("view_image", {"document_id": "nope"}, ctx))["error"]
+    assert "empty path" in asyncio.run(tb.call("view_image", {}, ctx))["error"]
+
+
+def test_image_parts_only_for_a_chat_model_that_reads_images(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(llm, "_VISION_FLAGS", {})
+    _, docs, row = _docs_box(tmp_path)
+    att = {"id": row["id"], "name": "shot.png", "mime": "image/png", "size": row["size"]}
+    parts = vision.image_parts(docs, [att], "claude-sonnet-5-5")
+    assert len(parts) == 1 and parts[0]["type"] == "image_url" and parts[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert vision.image_parts(docs, [att], "accounts/fireworks/models/gpt-oss-120b") == []  # a text-only chat model
+    assert vision.image_parts(docs, [att], None) == [] and vision.image_parts(docs, None, "claude-sonnet-5-5") == []
+    assert vision.image_parts(docs, [{**att, "mime": "image/svg+xml"}, {**att, "mime": "application/pdf"}, {**att, "id": "gone"}], "claude-sonnet-5-5") == []
+    assert len(vision.image_parts(docs, [att] * 6, "claude-sonnet-5-5")) == vision.MAX_TURN_IMAGES

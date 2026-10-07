@@ -41,6 +41,16 @@ test('`done` stops the session answering while the auto-learn tail keeps the str
   assert.ok(after.finishedAt, 'and the green hold starts')
 })
 
+test('`done` keeps the files the reply attached, and a done without any leaves them alone', () => {
+  const files = [{ id: 'd1', name: 'screen.png', mime: 'image/png', size: 10 }]
+  const withFiles = applyEvent(session(), { event: 'done', data: { ...(DONE as { data: object }).data, attachments: files } } as unknown as ChatEvent, true)
+  assert.deepEqual(withFiles.conversation?.messages?.[0].attachments, files)
+  const again = applyEvent(withFiles, { event: 'done', data: { ...(DONE as { data: object }).data, attachments: null } } as unknown as ChatEvent, true)
+  assert.deepEqual(again.conversation?.messages?.[0].attachments, files)
+  const row = applyEvent(session(), { event: 'assistant_message', data: msg({ attachments: files }) } as unknown as ChatEvent, true)
+  assert.deepEqual(row.conversation?.messages?.[0].attachments, files)
+})
+
 test('the tail events that arrive after `done` never make it answering again', () => {
   let s = applyEvent(session(), DONE, true)
   for (const ev of [

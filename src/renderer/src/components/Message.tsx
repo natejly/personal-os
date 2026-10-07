@@ -6,6 +6,7 @@ import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb,
 import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
+import { fetchBlobUrl } from '../features/notes/api'
 import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
@@ -319,6 +320,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <Thinking />
               ) : null}
             </BodyBoundary>
+            <ReplyAttachments files={message.attachments} />
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
             {streaming && message.status && <StatusLine status={message.status} />}
@@ -398,6 +400,37 @@ export function AttachmentChips({ files }: { files?: Attachment[] | null }): JSX
         </button>
       ))}
     </div>
+  )
+}
+
+/** An image the assistant attached to its reply, as a click-to-open thumbnail. The raw route needs the app token, so it is fetched into a blob. */
+export const isImageAttachment = (a: Attachment): boolean => a.mime.startsWith('image/') && !a.mime.includes('svg')
+
+function ReplyImage({ file }: { file: Attachment }): JSX.Element {
+  const [url, setUrl] = useState<string | undefined>()
+  useEffect(() => {
+    let dead = false
+    let made = ''
+    fetchBlobUrl(`/documents/${encodeURIComponent(file.id)}/raw`).then((u) => { made = u; if (dead) URL.revokeObjectURL(u); else setUrl(u) }).catch(() => undefined)
+    return () => { dead = true; if (made) URL.revokeObjectURL(made) }
+  }, [file.id])
+  return (
+    <button className="reply-image" title={`Open ${file.name}`} onClick={() => void useStore.getState().openDoc(file.id)}>
+      <img src={url} alt={file.name} />
+    </button>
+  )
+}
+
+/** The files the assistant sent with a reply (screenshots, charts, documents): images inline in a grid, the rest as chips. */
+export function ReplyAttachments({ files }: { files?: Attachment[] | null }): JSX.Element | null {
+  if (!files?.length) return null
+  const images = files.filter(isImageAttachment)
+  const rest = files.filter((a) => !isImageAttachment(a))
+  return (
+    <>
+      {images.length > 0 && <div className="reply-images">{images.map((a) => <ReplyImage key={a.id} file={a} />)}</div>}
+      <AttachmentChips files={rest} />
+    </>
   )
 }
 

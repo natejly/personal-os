@@ -139,15 +139,16 @@ def test_a_browser_screenshot_is_attached_and_sent_live_once_when_the_flag_is_on
     assert Path(tb.documents.get(att["id"])["path"]).read_bytes() == PNG
     assert on["reply_attachments"] == [att]  # the central hook saw `attachment` again and added nothing
     assert len(updates) == 1 and updates[0][0] is on and updates[0][1] == "" and updates[0][2] == [att]
-    run_tool(tb, "browser_manage", {"action": "screenshot"}, on)  # the same bytes: one Uploads row, one reply attachment
-    assert on["reply_attachments"] == [att] and len(updates) == 2
+    run_tool(tb, "browser_manage", {"action": "screenshot"}, on)  # a second capture is a second picture on the reply and a second live send
+    assert len(on["reply_attachments"]) == 2 and on["reply_attachments"][0] == att and len(updates) == 2
 
 
 def test_a_browser_screenshot_stays_off_the_reply_with_the_flag_off(browser) -> None:
     tb, updates, ctx = browser
     off = ctx()
     out = run_tool(tb, "browser_manage", {"action": "screenshot"}, off)
-    assert "attachment" not in out and out["bytes"] == len(PNG) and "reply_attachments" not in off and updates == []
+    # The capture is still an Uploads picture the chat shows; only the reply attach and the live send are for the Telegram chat.
+    assert out["attachment"]["size"] == len(PNG) and "reply_attachments" not in off and updates == []
 
 
 def test_a_failing_live_hook_does_not_fail_the_screenshot(browser) -> None:

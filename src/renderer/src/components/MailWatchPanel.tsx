@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, ExternalLink, X, ListPlus } from 'lucide-react'
+import { RefreshCw, ExternalLink, X, ListPlus, ScanSearch } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import type { MailWatchList as WatchData, MailWatchThread } from '@shared/types'
@@ -61,8 +61,8 @@ export function MailWatchChips({ watch }: { watch: MailWatch }): JSX.Element {
     <>
       {chip('to_reply')}
       {chip('awaiting_reply')}
-      <button className="icon-btn sm" title="Re-scan recent threads" aria-label="Re-scan recent threads" onClick={() => void refresh()} disabled={busy}>
-        <RefreshCw size={13} className={busy ? 'spin' : ''} />
+      <button className="icon-btn sm" title="Re-scan recent threads for replies" aria-label="Re-scan recent threads" onClick={() => void refresh()} disabled={busy}>
+        <ScanSearch size={13} className={busy ? 'spin' : ''} />
       </button>
     </>
   )

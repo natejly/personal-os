@@ -259,7 +259,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         {convo && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>
-            <span className="muted small"> A single reply has the same button. Either way it waits in Library → Skills until you approve it.</span>
+            <span className="muted small"> Waits in Library → Skills until you approve it.</span>
           </div>
         )}
         {cs.useTools && (

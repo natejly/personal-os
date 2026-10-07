@@ -103,7 +103,7 @@ export default function HomeView(): JSX.Element {
     // Without an account there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
     await send(pim?.connected
       ? 'Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.'
-      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting ${pimName} in Settings adds them. Be concise and use headers.')
+      : `Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting ${pimName} in Settings adds them. Be concise and use headers.`)
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
   const rescanMail = async (): Promise<void> => {
@@ -227,7 +227,7 @@ export default function HomeView(): JSX.Element {
         )}
         {strips.filter((x) => x.off && x.keys.some(on)).map((x) => (
           <section key={x.who} className="home-connect">
-            <p><b>Connect {x.who}</b> to see {x.what} here.</p>
+            <p>See {x.what} here.</p>
             <button className="ghost-btn" onClick={connect}>Connect {x.who}</button>
           </section>
         ))}

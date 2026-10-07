@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { baseName, remapModel, remapSettings } from './providerModels'
+import { MODEL_FIELDS, baseName, remapModel, remapSettings } from './providerModels'
 import type { ProviderInfo } from '../components/onboarding/steps'
 
 const info = (id: string, defaultModel: string, models: string[]): ProviderInfo =>
@@ -38,6 +38,12 @@ test('a provider with no catalogue keeps the id, or strips a vendor prefix', () 
   assert.equal(remapModel('llama3', custom), 'llama3')
   assert.equal(remapModel('accounts/fireworks/models/ember-1', custom), 'ember-1')
   assert.equal(remapModel('x/y', info('litellm', '', ['a'])), 'y')
+})
+
+test('the rerank model is a picker and a blank value stays blank', () => {
+  assert.ok(MODEL_FIELDS.some((f) => f.key === 'retrievalRerankModel' && f.label === 'Rerank model'))
+  assert.equal(remapModel('', openai), '')
+  assert.deepEqual(remapSettings({ retrievalRerankModel: '' }, openai).patch, {})
 })
 
 test('remapSettings reports the labels of fields that lost their value', () => {

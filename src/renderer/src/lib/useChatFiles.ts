@@ -1,15 +1,19 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { api, fetchRaw, req } from './api'
+import { api, req } from './api'
 import { useStore } from '../store'
-import { fileViewer, uploadShowItem } from './showPanel'
-import { filesQuery, rowAction, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
+import { uploadShowItem } from './showPanel'
+import { artifactShowItem, artifactsQuery, filesQuery, rowAction, uploadTarget, type ChatFile, type ChatFilesPage, type FilesScope } from './chatFiles'
 
 /** Network and store side of chat files; the grouping and click routing are pure, in chatFiles.ts. */
 export const chatFilesApi = {
   forChat: (id: string, limit = 200) => req<ChatFilesPage>(`/conversations/${id}/files?limit=${limit}`),
   list: (scope: FilesScope, cursor?: string | null, limit = 50) => req<ChatFilesPage>(filesQuery(scope, cursor, limit)),
-  counts: () => req<{ counts: Record<string, number>; projects?: Record<string, number> }>('/chat-files/counts?scope=all')
+  counts: () => req<{ counts: Record<string, number>; projects?: Record<string, number> }>('/chat-files/counts?scope=all'),
+  artifacts: (cursor?: string | null, limit = 50) => req<ChatFilesPage>(artifactsQuery(cursor, limit)),
+  /** Files → Artifacts: open in the default app / reveal in Finder, by the index row (the backend owns the path). */
+  openArtifact: (id: string) => req(`/chat-files/${id}/open`, { method: 'POST' }),
+  revealArtifact: (id: string) => req(`/chat-files/${id}/reveal`, { method: 'POST' })
 }
 
 /** Per-chat and per-project file counts for the sidebar badges and the project tab, kept outside the main store: one fetch fills every row. */
@@ -29,24 +33,6 @@ export function useChatFileCountsSync(): void {
     }, 400)
     return () => clearTimeout(t)
   }, [conversations])
-}
-
-const TEXTISH = new Set(['markdown', 'text'])
-const SHOW_MAX_BYTES = 200_000
-
-/** Outputs sit in the app's own data folder, which the panel's file route refuses; small text is fetched and shown, the rest is saved. */
-async function showOutput(f: ChatFile, chat: string): Promise<void> {
-  const rel = f.rel ?? `outputs/${f.name}`
-  const kind = fileViewer({ name: f.name, path: rel, mime: '' })
-  if (!TEXTISH.has(kind)) return api.conversations.downloadOutput(chat, rel)
-  const res = await fetchRaw(`/conversations/${chat}/outputs/download?path=${encodeURIComponent(rel)}`)
-  if (Number(res.headers.get('content-length') || 0) > SHOW_MAX_BYTES) {  // a multi-MB CSV would stall the panel
-    void res.body?.cancel()
-    return api.conversations.downloadOutput(chat, rel)
-  }
-  const text = await res.text()
-  const source = kind === 'markdown' ? text : `\`\`\`\n${text.replace(/```/g, "'''")}\n\`\`\``
-  useStore.getState().openShow(chat, { kind: 'markdown', title: f.name, source })
 }
 
 /** An upload opens in the chat's side panel when there is a chat, else in the standalone viewer. */
@@ -71,7 +57,7 @@ export async function openChatFile(f: ChatFile, jump: ((conversationId: string) 
       case 'jump-to-chat': return
       case 'open-doc': return await s.openDoc(f.ref)
       case 'open-upload': return await openUpload(f.ref, chat)
-      case 'open-output': return chat ? await showOutput(f, chat) : undefined
+      case 'open-output': return chat ? s.openShow(chat, artifactShowItem(f)) : undefined
       case 'open-local': return chat ? s.openShow(chat, { kind: 'file', title: f.name, path: f.ref, name: f.name }) : undefined
     }
   } catch (e) {
@@ -79,13 +65,14 @@ export async function openChatFile(f: ChatFile, jump: ((conversationId: string) 
   }
 }
 
-/** Show in Finder: the file itself for a local path, the folder for an output or a coding session. */
+/** Show in Finder: the file itself for a local path or an output, the folder for a coding session. */
 export async function revealChatFile(f: ChatFile): Promise<void> {
   const toast = useStore.getState().toast
   try {
     const ok = f.kind === 'local'
       ? await window.os.data.fileAction(f.ref, 'reveal')
-      : await window.os.data.reveal(f.kind === 'output' ? (await api.conversations.outputs(f.conversation_id!)).folder : f.ref)
+      : f.kind === 'output' ? (await chatFilesApi.revealArtifact(f.id), true)
+      : await window.os.data.reveal(f.ref)
     if (!ok) toast('That is no longer there.', 'error')
   } catch (e) {
     toast((e as Error).message, 'error')

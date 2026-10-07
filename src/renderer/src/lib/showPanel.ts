@@ -78,8 +78,8 @@ export function textLang(name: string): string {
 export const rawPath = (path: string): string => `/local/raw?path=${encodeURIComponent(path)}`
 
 /** Where a file item's bytes live: the stored original for an upload, the file on disk otherwise. */
-export const itemRawPath = (item: Pick<ShowItem, 'path' | 'documentId'>): string =>
-  item.documentId ? `/documents/${item.documentId}/raw` : rawPath(item.path ?? '')
+export const itemRawPath = (item: Pick<ShowItem, 'path' | 'documentId' | 'rawPath'>): string =>
+  item.documentId ? `/documents/${item.documentId}/raw` : item.rawPath ?? rawPath(item.path ?? '')
 
 /** A fenced block promoted to the panel: the same source, titled by its kind. */
 export function fromFence(kind: Exclude<ShowItem['kind'], 'file'>, source: string, title?: string): ShowItem {

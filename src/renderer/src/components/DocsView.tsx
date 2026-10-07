@@ -32,10 +32,11 @@ import { effectiveTypography, typographyStyle } from '../features/notes/typograp
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
 import DocumentsView from './DocumentsView'
+import ArtifactsView from './ArtifactsView'
 import ScopeSelect from './ScopeSelect'
 import SidebarToggle from './SidebarToggle'
 
-const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads']]
+const SECTIONS: [FilesSection, string][] = [['notes', 'Notes'], ['uploads', 'Uploads'], ['artifacts', 'Artifacts']]
 
 const PANEL_KEY = 'grain.docs.panel'
 const readPanel = (): PanelState => {
@@ -339,6 +340,7 @@ export default function DocsView(): JSX.Element {
       </header>
 
       {section === 'uploads' && <DocumentsView embedded />}
+      {section === 'artifacts' && <ArtifactsView />}
       {section === 'notes' && <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
         {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
         {treeOpen && (

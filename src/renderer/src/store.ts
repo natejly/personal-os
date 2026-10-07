@@ -49,10 +49,10 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** Which tab a project page shows. */
-export type ProjectTab = 'chats' | 'artifacts' | 'instructions' | 'memory'
+export type ProjectTab = 'chats' | 'context' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
-export type FilesSection = 'notes' | 'uploads'
+export type FilesSection = 'notes' | 'uploads' | 'artifacts'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */

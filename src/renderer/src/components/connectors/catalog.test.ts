@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { McpCatalogEntry, McpRegistryResult } from '@shared/types'
-import { connectorName, fieldsValid, filterCatalog, iconFor, initialValues, registryDraft, runtimeWarning, tokenize } from './catalog'
+import { connectorName, detectionLabel, fieldsValid, filterCatalog, iconFor, initialValues, oneClick, registryDraft, runtimeWarning, tokenize } from './catalog'
 import { Plug } from 'lucide-react'
 
 const entry = (over: Partial<McpCatalogEntry>): McpCatalogEntry => ({
@@ -71,4 +71,17 @@ test('every icon the bundled catalog names has a real lucide component, not the 
   const doc = JSON.parse(readFileSync('backend/personal_os/data/mcp_catalog.json', 'utf8')) as { entries: { id: string; icon: string }[] }
   const missing = doc.entries.filter((e) => iconFor(e.icon) === Plug).map((e) => `${e.id}:${e.icon}`)
   assert.deepEqual(missing, [])
+})
+
+test('detection shows the path when found and the hint when missing; only a found entry with no fields is one click', () => {
+  const found = entry({ detected: { found: true, path: '/usr/local/bin/claude', hint: 'x' } })
+  const missing = entry({ detected: { found: false, path: '', hint: 'Install it first.' } })
+  assert.deepEqual(detectionLabel(found), { found: true, text: 'Detected at /usr/local/bin/claude' })
+  assert.deepEqual(detectionLabel(missing), { found: false, text: 'Install it first.' })
+  assert.equal(detectionLabel(entry({})), null)
+  assert.equal(oneClick(found), true)
+  assert.equal(oneClick(missing), false)
+  assert.equal(oneClick(entry({})), false)
+  assert.equal(oneClick({ ...found, fields: [{ id: 'k', label: 'K' }] }), false)
+  assert.equal(runtimeWarning(missing, { node: { command: 'npx', found: false, hint: 'h' } }), '')
 })

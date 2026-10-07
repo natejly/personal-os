@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Download, Upload, Plug, Cpu, MessageSquare, Palette, ShieldCheck, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Plug, Cpu, MessageSquare, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, type LucideIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
@@ -354,6 +354,14 @@ export default function SettingsModal(): JSX.Element {
               <h3>Permissions</h3>
               <p className="muted">How Grain handles actions that could change something: sending, deleting, running, scheduling.</p>
               <PermissionModeCards mode={mode} onPick={(m) => saveEarly({ permissionMode: m })} />
+              <label className={`toggle-row plain all-connections ${draft.allowAllConnections ? 'danger' : ''}`}>
+                <span className="toggle-text">
+                  <b>{draft.allowAllConnections && <ShieldAlert size={13} aria-hidden />} Allow all domains and MCP servers</b>
+                  <small>Lifts the host allow-lists for fetching, browsing and shell network, and lets every connector tool run without a per-tool approval. Grain&apos;s own data, app, credential stores and the untrusted-content checks stay protected.</small>
+                </span>
+                <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
+                  onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
+              </label>
               <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">

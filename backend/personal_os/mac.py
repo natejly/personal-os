@@ -512,7 +512,9 @@ def _open_trash() -> tuple[int, Path]:
     try:
         fd = os.open(trash, flags)
     except OSError as e:
-        raise LocalPathError("the Trash is off limits") from e
+        # Without Full Disk Access macOS refuses the open; the error says what to do rather than reading as a policy.
+        raise LocalPathError("the Trash could not be opened: grant Grain Full Disk Access in System Settings > Privacy & Security, "
+                             "or move the file somewhere else instead") from e
     return fd, trash
 
 

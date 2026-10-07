@@ -23,3 +23,8 @@ export const pillTitle = (m: PermissionMode): string =>
   m === 'allow_all'
     ? 'Dangerously allow all is on: Grain acts without asking. Click to change it in Settings.'
     : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`
+
+/** Second composer pill, independent of the mode: shown only while "Allow all domains and MCP servers" is on. */
+export const ALL_CONNECTIONS_LABEL = 'All domains + MCP'
+export const allConnectionsTitle = 'All domains and MCP servers are allowed: fetching, browsing, shell network and every connector tool run without a host list or per-tool approval. Click to change it in Settings.'
+export const allConnectionsOn = (s: { allowAllConnections?: unknown } | null | undefined): boolean => s?.allowAllConnections === true

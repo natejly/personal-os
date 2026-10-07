@@ -387,6 +387,15 @@ def _drop_nav_placement(c: sqlite3.Connection) -> None:
     c.execute("DELETE FROM settings WHERE key = 'navPlacement'")
 
 
+def _allow_all_connections_for_existing(c: sqlite3.Connection) -> None:
+    """An install that already has chats keeps the connections it had: allowAllConnections on. A fresh database (every
+    migration runs at once, nothing yet written) stays off. The permissions row exists either way, so it is no signal."""
+    from . import permissions
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('conversations', 'messages')")}
+    if any(c.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone() for t in tables):  # a bare test schema may lack both
+        permissions._write(c, {"allowAllConnections": True})
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -413,6 +422,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (22, "drop_meetings_activity", _drop_meetings_activity),
     (23, "messages_kind", _messages_kind),
     (24, "drop_nav_placement", _drop_nav_placement),
+    (25, "allow_all_connections_for_existing", _allow_all_connections_for_existing),
 ]
 
 

@@ -211,6 +211,7 @@ function Extras({ live }: { live: McpServer['live'] }): JSX.Element | null {
 }
 
 export default function McpSettings(): JSX.Element {
+  const allowAll = useStore((s) => Boolean(s.settings?.allowAllConnections))
   const toast = useStore((s) => s.toast)
   const [servers, setServers] = useState<McpServer[]>([])
   const [open, setOpen] = useState<string | null>(null)
@@ -265,7 +266,7 @@ export default function McpSettings(): JSX.Element {
     const parsed = fromConfigJson(text)
     if (!parsed) return false
     setDraft((d) => 'url' in parsed
-      ? { ...d, name: d.name || (parsed.name ?? ''), transport: 'http', url: parsed.url,
+      ? { ...d, name: d.name || (parsed.name ?? ''), transport: d.transport === 'sse' ? 'sse' : 'http', url: parsed.url,
           headerRows: Object.entries(parsed.headers).map(([k, v]) => ({ k, v })) }
       : { ...d, name: d.name || (parsed.name ?? ''), transport: 'stdio', argv: parsed.argv, envText: parsed.envText || d.envText })
     toast('Loaded from config JSON')
@@ -364,7 +365,7 @@ export default function McpSettings(): JSX.Element {
         Connectors are <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer">MCP</a> servers:
         other people&apos;s programs that hand the assistant extra tools. A local one runs on this machine, under your
         account; a remote one is a web address, reached with the headers or sign-in you give it. Nothing is added or enabled unless you do it here, and every tool from a
-        connector <b>asks before it runs</b> until you say otherwise.
+        connector {allowAll ? <><b>runs without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on under Permissions</> : <><b>asks before it runs</b> until you say otherwise</>}.
       </p>
 
       <div className="seg" role="tablist" aria-label="Connectors">
@@ -505,20 +506,17 @@ export default function McpSettings(): JSX.Element {
             <label><span>Name</span>
               <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
             </label>
-            <div className="seg" role="group" aria-label="Where the server runs">
-              {(['stdio', 'http'] as const).map((t) => {
-                const on = (draft.transport === 'stdio') === (t === 'stdio')
-                return (
-                  <button key={t} className={on ? 'on' : ''} aria-pressed={on}
-                    onClick={() => { if (!on) setDraft({ ...draft, transport: t }); setDraftReport(null) }}>
-                    {t === 'stdio' ? 'Local' : 'Remote'}
-                  </button>
-                )
-              })}
+            <div className="seg" role="group" aria-label="Transport">
+              {(['stdio', 'http', 'sse'] as const).map((t) => (
+                <button key={t} className={draft.transport === t ? 'on' : ''} aria-pressed={draft.transport === t}
+                  onClick={() => { if (draft.transport !== t) setDraft({ ...draft, transport: t }); setDraftReport(null) }}>
+                  {t === 'stdio' ? 'stdio' : t.toUpperCase()}
+                </button>
+              ))}
             </div>
             {draft.transport !== 'stdio' ? (
               <>
-                <label><span>URL <small className="muted">(the streamable HTTP endpoint, or paste the server&apos;s config JSON here)</small></span>
+                <label><span>URL <small className="muted">({draft.transport === 'sse' ? 'the SSE endpoint' : 'the streamable HTTP endpoint'}, or paste the server&apos;s config JSON here)</small></span>
                   <input value={draft.url} spellCheck={false} placeholder="https://example.com/mcp"
                     onChange={(e) => setDraft({ ...draft, url: e.target.value })}
                     onPaste={(e) => {

@@ -118,6 +118,17 @@ export const queuePositions = (desks: Desk[]): Map<string, number> =>
     .sort((a, b) => (a.queued_at ?? 0) - (b.queued_at ?? 0))
     .map((d, i) => [d.id, i + 1]))
 
+/**
+ * How attached files read in the chat bubble: a chip naming them, not a sentence the user never
+ * typed. `[report.pdf]`, `[notes.md, data.csv]`, `[3 files]`. Paths are what addInputs answered
+ * with (`inputs/<name>`, already de-duplicated by the workspace).
+ */
+export function inputChip(paths: string[]): string {
+  const names = paths.map((p) => p.replace(/^inputs\//, ''))
+  if (!names.length) return ''
+  return `[${names.length > 2 ? `${names.length} files` : names.join(', ')}]`
+}
+
 /** The host of a URL for emphasis, with the rest split off. Falls back to the raw string. */
 export function splitUrl(url: string): { host: string; rest: string } {
   try {

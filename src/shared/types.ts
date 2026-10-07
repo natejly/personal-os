@@ -868,6 +868,8 @@ export interface ConversationSettings {
   docId?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
+  /** Set on the Telegram bridge's conversation: the sidebar pins it first under the label "Telegram". */
+  telegram?: boolean
 }
 
 /** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */

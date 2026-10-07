@@ -1,7 +1,8 @@
 # Texting Grain (Telegram)
 
 Message Grain from your phone through a private Telegram bot that only you can use. The backend
-long-polls the bot, treats a message in your chat with it as a normal chat turn, and replies there.
+long-polls the bot, treats a message in your chat with it as a normal chat turn, and replies there,
+with screenshots and files when the assistant has them to show.
 Tools, permissions and approvals work exactly as they do in the app: a message never skips an
 approval and never turns on skip-permissions.
 
@@ -63,6 +64,46 @@ paragraph breaks into messages under Telegram's 4,096 character limit; past abou
 rest is left in Grain ("…full reply in Grain"). If a run fails, the message says so and the
 details stay in Grain.
 
+### Screenshots, images and files
+
+The assistant has a `screenshot` tool that captures the whole screen, one window (by app name or
+window title) or a region with the Mac's own screen capture. Captures are saved as uploads in
+Grain's data folder and shown in the chat; they never leave the Mac unless the assistant sends them
+to you. Captures need the **Screen Recording** permission: Grain's Settings → Permissions lists it,
+and the switch lives in System Settings → Privacy & Security → Screen Recording. Without it the
+tool reports the missing permission instead of returning an empty or desktop-only picture.
+
+`send_files` lets the assistant (and background workers) attach images and other files to what it
+tells you: screenshots, charts it made, generated pictures, or files on this Mac. In the app they
+appear inline under the reply (images as pictures, other files as chips). In the Texts conversation
+they also go to your phone: one picture as a photo with the note as its caption, several as an album
+(ten per album), anything else as a file. A picture that Telegram will not take as a photo (over 10
+MB, more than 10,000 pixels across both sides, or a very long strip) is sent as a file instead; a
+file over 50 MB cannot be sent by a bot, and the message says so with the file's name. If a send
+fails, Grain retries the picture as a file, then tells you which attachment could not be delivered.
+
+### Progress updates
+
+In the Texts conversation the assistant answers first, in a line or two, then works. At meaningful
+milestones it sends a short update, with a screenshot when a picture says more than words, and the
+final reply can carry images too. Updates are rate limited so a busy run does not flood the chat:
+at most one progress message every twenty seconds per conversation, with anything that arrives
+sooner folded into the next one. Attachments are never dropped by the limit. The run itself has no
+cap: no step, time or token limit comes from texting.
+
+Background workers finished for a chat started in the app push their result to the phone when
+**Send worker results to Telegram** is on; a worker's attached images ride along.
+
+### Sending photos to Grain
+
+You can send the bot a photo, an image file or any document, with a caption. Grain downloads it
+(Telegram lets bots fetch files up to 20 MB; a bigger one gets a reply saying so), stores it as an
+upload attached to your message, and the assistant sees it: a model that reads images gets the
+picture itself, any other model gets the extracted or OCR text and can look at it with
+`view_image`. The caption is the message text; a photo with no caption is a valid turn. Send photos one at
+a time: an album arrives as separate messages, and each is its own turn. Voice notes, video and
+stickers are not accepted yet.
+
 ### Long runs (optional)
 
 **Message me when long runs finish or need approval** (off by default) sends "Grain finished:
@@ -71,9 +112,10 @@ sends approval requests from any run, not only the Texts conversation.
 
 ## Privacy and safety
 
-- **Owner only.** Grain accepts one private chat with one Telegram account. Messages from anyone
-  else, groups, channels, edited messages and button taps from other accounts are ignored without
-  a reply. Before pairing, the only thing accepted is `/start <code>` with the right, unexpired
+- **Owner only.** Grain accepts one private chat with one Telegram account. Messages, photos and
+  files from anyone else, groups, channels, edited messages and button taps from other accounts are
+  ignored without a reply. Every outgoing message, photo and file is checked against the paired
+  chat in the one place that sends, so nothing can be addressed elsewhere. Before pairing, the only thing accepted is `/start <code>` with the right, unexpired
   code.
 - **Pairing code.** Eight random characters, single use, valid for 15 minutes, compared in constant
   time. A wrong or expired code gets no reply.
@@ -81,7 +123,10 @@ sends approval requests from any run, not only the Texts conversation.
   (mode 0600) when the Keychain is unavailable. It is never a setting, so it never appears in the
   settings API, backups of settings, or the UI after saving. It is also kept out of logs and error
   messages.
-- **Logs** carry masked ids, lengths and outcomes. Message bodies stay out of logs.
+- **Logs** carry masked ids, lengths, counts and outcomes. Message bodies, captions, file contents
+  and the token stay out of logs.
+- **Screenshots** are files in Grain's data folder like any upload, and the model treats what a
+  screen shows as untrusted content.
 - **Rate limit.** 20 messages a minute from you (one "Slow down" reply, then silence; `/stop` and
   deny always get through).
 - **One poller per token per Mac.** A per-user lock tied to the token means a dev backend running
@@ -108,5 +153,8 @@ The status line in Settings → Texting names the problem.
 - Needs the Mac awake and Grain running. Messages sent while Grain is down for more than ten
   minutes are skipped.
 - Private chat with one owner only; no group use.
-- No attachments, images or voice notes in either direction.
+- Photos and files go both ways; voice notes, video and stickers do not.
+- Outgoing photos: 10 MB, 10,000 pixels across width plus height, side ratio under 20; anything
+  else goes as a file, up to 50 MB. Incoming files: 20 MB (a Telegram bot limit).
+- Screenshots need Screen Recording; on a Mac without it the tool explains what to grant.
 - Approvals that need edited arguments, or plans you want to edit step by step, still need the app.

@@ -19,7 +19,7 @@ export interface Parsed {
 }
 
 const STRING_KEYS = ['id', 'output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
-  'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format']
+  'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format', 'delivered']
 const NUMBER_KEYS = ['exit_code', 'duration_s', 'bytes', 'width', 'height', 'tab', 'total_pages', 'total_bytes']
 const BOOL_KEYS = ['timed_out', 'still_running', 'background', 'ocr', 'truncated']
 
@@ -192,6 +192,10 @@ export function gateProblems(error: string | null | undefined): { lead: string; 
 }
 
 /** One file a plain chat's tool saved for the user (backend `Workspace.output_entry`); path is relative to the chat's files. */
+/** The names of the files a send_files result attached to the reply. */
+export const attachedNames = (d: Fields | null | undefined): string[] =>
+  Array.isArray(d?.attached) ? (d.attached as unknown[]).map((a) => str((a as Fields | null)?.name)).filter(Boolean) : []
+
 export interface OutputFile { name: string; size: number; path: string }
 
 const OUTPUT_ENTRY = /\{\s*"name":\s*"((?:[^"\\]|\\.)*)",\s*"size":\s*(\d+),\s*"path":\s*"((?:[^"\\]|\\.)*)"\s*\}/g

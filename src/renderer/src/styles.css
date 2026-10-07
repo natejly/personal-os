@@ -1968,10 +1968,17 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 5px 6px 5px 10px; }
 /* A read run: one line, quieter. */
 .inbox-item.seen { padding: 4px 10px; color: var(--text-muted); }
-/* One line per row: status dot, what it is, a summary that gives way first, then the one action.
-   Arguments and reports sit behind the disclosure at the end, so the list scans as a list. */
+/* One line per row: status dot, what it is, a summary that gives way first, then the one decision.
+   The dot, the name and the summary are one button — clicking the row is what opens it, so arguments,
+   reports and every second action sit folded underneath and the list scans as a list. */
 .inbox-row { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 13px; }
 .inbox-row > * { flex-shrink: 0; }
+.inbox-row > .inbox-open {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 24px;
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.inbox-go { color: var(--text-muted); }
+.inbox-open:hover .inbox-line, .inbox-open:hover .inbox-go { color: var(--text); }
 .inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-idle); }
 .inbox-dot.needs-you { background: var(--st-needs-you); }
 .inbox-dot.working { background: var(--st-working); }
@@ -1980,7 +1987,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-tool { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--text); }
 .inbox-job { font-weight: 600; }
 .inbox-tool, .inbox-job { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inbox-row > .inbox-line { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12.5px; }
+.inbox-row .inbox-line { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 12.5px; }
 .inbox-when { white-space: nowrap; }
 /* 11px of underlined text is the label; the target is the 24px box around it. */
 .agent-inbox .link.small { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; }

@@ -10,6 +10,8 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Changed
 
+- **No status chrome for the main agent.** The strip above the composer shows only while background workers are running; the main agent's own progress has no strip, card, checklist row, inline plan checklist, restart or error banner, or streaming status line. The composer's Stop stops it. The checklist and finished workers moved to the chat's side panel (Checklist and Workers tabs, from the Documents button).
+- **Private chats removed.** The Private switch, the sidebar eye icon and the Context panel locks are gone; migration 30 clears the flag, so chats that were private now read memory and learn like any other.
 - **Composer "Mode" button.** The composer control that hands a chat to a desk is now called Mode (accessible name "Mode: how the assistant works in this chat"), and each style has a one-line description: Plan first, Ask as it goes, and Autonomous (renamed from "Work and propose"; same behaviour, same API values).
 - **Read aloud and voice chat removed.** The speaker button on a reply, the hands-free voice chat loop (`/voice`, the waveform button) and their settings (voice, speed, turn cap) are gone; migration 29 deletes the stored keys. Dictation (the mic button and its chord) is the one voice input and still never sends for you.
 - **Projects: Artifacts tab renamed Context.** The project tab that lists a project's chats' files, notes and uploads is now called Context, so "Artifacts" means one thing: the Files section above.

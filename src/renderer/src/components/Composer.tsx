@@ -6,7 +6,7 @@ import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
 import { mentionItems, routeMention } from '../lib/mentions'
-import { ArrowUp, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
 import { PermissionModePill } from './PermissionMode'
@@ -69,14 +69,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget, page agent or a pop-out.
   const newChat = !onSend && !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
-    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent, private: st.draftPrivate })
+    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent })
   // A draft that starts autonomous becomes a desk, which plans by its own autonomy and ignores this chat's plan mode.
   const startsAsDesk = useStore((s) => newChatAutonomy(s) !== null)
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
-  // Private is fixed when the chat is created, so it is a switch only on a draft and a label after.
-  const chatPrivate = useStore((s) => (activeId ? !!s.sessions[activeId]?.conversation.settings.private : s.draftPrivate))
   const setChatSettings = useStore((s) => s.setChatSettings)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
@@ -443,11 +441,6 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           nothing sits after it to be pushed. An empty page-agent panel has no chat for either toggle to set. */}
       <div className="composer-footer">
         {footer}
-        {!onSend && (activeId
-          ? chatPrivate && <span className="ghost-btn private-chat on" title="Nothing in this chat is remembered, learned from, or found by chat search"><EyeOff size={13} /> Private</span>
-          : <button className={`ghost-btn private-chat ${chatPrivate ? 'on' : ''}`} aria-pressed={chatPrivate}
-              title="Private: this chat reads no memories and teaches nothing, and chat search skips it. Fixed once the first message is sent."
-              onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
         {conversationId !== '\u0000page-agent' && (
           <>
             <PermissionModePill />

@@ -480,7 +480,7 @@ export const api = {
     /** Chats working autonomously list among the rest. */
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}&include_desks=true`),
     get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
-    create: (projectId: string | null, model?: string, isPrivate = false) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model, ...(isPrivate ? { private: true } : {}) }) }, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */

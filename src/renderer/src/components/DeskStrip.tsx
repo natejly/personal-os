@@ -1,7 +1,8 @@
-import { CircleHelp, PanelRight, Pause, Play, ShieldQuestion, Square, TriangleAlert } from 'lucide-react'
+import { CircleHelp, PanelRight, Pause, Play, ShieldQuestion, Square } from 'lucide-react'
 import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
 import { useChatFaceById, useStore, useWorkers } from '../store'
-import { STATUS_LABEL, stripHidden } from '../lib/deskStatus'
+import { STATUS_LABEL } from '../lib/deskStatus'
+import { inlinePlanShown, stripShown } from '../lib/statusChrome'
 import { liveWorkerCount } from '../lib/workers'
 import { queuePositions } from '../lib/deskFiles'
 import DeskPlan from './DeskPlan'
@@ -16,7 +17,7 @@ export const useChatDesk = (deskId?: string): Desk | FullDesk | null =>
 
 /**
  * The slim line above the composer while a chat works autonomously: what it is doing, how far it has got, what is
- * waiting on you, and the run controls. Hidden while a lone agent plans or works (see `stripHidden`). Buttons are gated on `desk.actions`, which the backend reads off the same
+ * waiting on you, and the run controls. Shown only while a background worker is live (see `stripShown`); the main agent's own progress has no strip. Buttons are gated on `desk.actions`, which the backend reads off the same
  * transition tables its routes enforce, so a button is never offered for a route that 409s.
  */
 export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: string; panelOpen?: boolean; onPanel?: () => void }): JSX.Element | null {
@@ -26,7 +27,7 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
   const { startDesk, pauseDesk, resumeDesk, stopDesk } = useStore()
   const liveWorkers = liveWorkerCount(useWorkers(desk?.conversation_id))
   const face = useChatFaceById(desk?.conversation_id)
-  if (!desk || stripHidden(desk.status, liveWorkers)) return null
+  if (!desk || !stripShown(desk.status, liveWorkers)) return null
   // Live, the status word says it all; the reason only matters once the run has stopped.
   const detail = position ? `#${position} in line` : ['stopped', 'failed', 'interrupted'].includes(desk.status) ? desk.status_reason : ''
   return (
@@ -54,8 +55,8 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
 }
 
 /**
- * What the desk is waiting on, at the foot of the transcript: a question (answered from the composer), the cards a
- * parked turn let go of, the plan (the approval card while pending, then the live checklist), and why it stopped.
+ * What the desk is waiting on you for, at the foot of the transcript: a question (answered from the composer), the cards a
+ * parked turn let go of, and a plan waiting for approval. Nothing about its own progress: that has no card (lib/statusChrome).
  */
 export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent[] }): JSX.Element | null {
   // A card whose call is still pending in the transcript is answered there; these are the ones a parked turn let go of.
@@ -82,16 +83,7 @@ export function DeskInline({ desk, events }: { desk: FullDesk; events: ToolEvent
           </div>
         </div>
       )}
-      {desk.plan && <DeskPlan desk={desk} />}
-      {desk.status === 'interrupted' && (
-        <div className="desk-banner warn">
-          <TriangleAlert size={14} />
-          <div><b>Interrupted by a restart</b><p>Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}</p></div>
-        </div>
-      )}
-      {desk.last_error && desk.status !== 'interrupted' && (
-        <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
-      )}
+      {inlinePlanShown(desk.plan) && <DeskPlan desk={desk} />}
     </div>
   )
 }

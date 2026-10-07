@@ -836,9 +836,6 @@ export interface ConversationSettings {
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
-  /** Set only when the chat is created. Memory, graph, voice and auto-learn are then forced off for good,
-   *  and the chat is left out of chat search. */
-  private?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
@@ -854,7 +851,7 @@ export interface ConversationSettings {
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
   skipPermissions?: boolean
   autoLearn: boolean
-  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. Unlike `private`, it can be switched at any time. */
+  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. It can be switched at any time. */
   learn?: boolean
   /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
   titleSource?: 'auto' | 'user'

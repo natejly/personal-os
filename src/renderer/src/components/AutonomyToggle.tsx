@@ -25,7 +25,7 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   const doneGate = useStore((s) => s.settings.deskDoneGate !== false)
   const openSettings = useStore((s) => s.openSettings)
   const { workAutonomously, stopWorkingAutonomously, patchDesk, setDraftAutonomy } = useStore()
-  const draftLevel = useStore((s) => (draft && !convId ? startAutonomy({ autonomousByDefault: s.settings.autonomousByDefault, draft: s.draftAutonomy, mainComposer: true, agent: s.draftChatSettings.agent, private: s.draftPrivate }) : null))
+  const draftLevel = useStore((s) => (draft && !convId ? startAutonomy({ autonomousByDefault: s.settings.autonomousByDefault, draft: s.draftAutonomy, mainComposer: true, agent: s.draftChatSettings.agent }) : null))
   const [open, setOpen] = useState(false)
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('ask')
   const box = useRef<HTMLSpanElement>(null)

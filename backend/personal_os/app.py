@@ -1188,7 +1188,6 @@ class ConvIn(BaseModel):
     project_id: str | None = None
     title: str = "New chat"
     model: str | None = None
-    private: bool = False  # only settable here: memory, graph, voice and auto-learn stay off for the chat's life
 
 
 class ConvPatch(BaseModel):
@@ -1212,7 +1211,7 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
     cfg = settings()
-    out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"], private=body.private)
+    out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"])
     if cfg.get("responseStyle", "default") != "default":  # the global choice seeds a new chat; the chat owns it from then on
         out = convos.update(out["id"], {"settings": {"responseStyle": cfg["responseStyle"], "responseStyleText": cfg.get("responseStyleText", "")}}) or out
     return out
@@ -1431,8 +1430,6 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
 
-# Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
-PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
 TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
               "the user's own data; answer directly only when nothing you could look up would change it. "
               "After using tools, write the final answer for the user. " + FENCE_RULE)
@@ -1977,8 +1974,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
-        if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
-            modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
@@ -4054,7 +4049,7 @@ def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None,
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
     src = convos.get(conv_id, with_messages=False) if conv_id else None
-    if texts and texts != conv_id and not (src or {}).get("settings", {}).get("private"):  # a private chat's work stays out of other chats
+    if texts and texts != conv_id:
         _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
 
 
@@ -4068,8 +4063,6 @@ def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"), None)
     modes = toolbox.effective(*maps) if conv["settings"].get("useTools", True) else {}
-    if conv["settings"].get("private"):
-        modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
     srcs = list(conv["settings"].get("taint_sources") or [])
     return {"project_id": conv["project_id"], "conversation_id": conv_id, "agent_id": None, "settings": cfg, "conv_settings": conv["settings"],
             "permission_mode": autoreview.mode_of(cfg), "skip_permissions": autoreview.mode_of(cfg) == "allow_all", "user_text": "",

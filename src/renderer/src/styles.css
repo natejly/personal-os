@@ -566,6 +566,7 @@ kbd {
   max-width: 100%;
 }
 .msg.user { flex-direction: row-reverse; }
+.user-from { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
 .user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 /* A quoted selection in the user's bubble: set off from the task text, rendered as markdown. */
 .user-quote { margin: 6px 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--border-strong); color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }

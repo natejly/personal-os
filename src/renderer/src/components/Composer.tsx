@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
-import { mentionItems, routeMention } from '../lib/mentions'
+import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
@@ -90,9 +90,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // '@' opens the same menu over the agents (lib/mentions.ts). A draft opening with `@name` goes to that agent's chat on send.
   const agentDefs = useStore((s) => s.agentDefs)
   const agentRows = useMemo(() => [...agentDefs.builtin, ...agentDefs.custom.filter((d) => d.approved && !d.hidden)], [agentDefs])
+  const conversations = useStore((s) => s.conversations)
+  const chatRows = useMemo(() => mentionChats(conversations, activeId), [conversations, activeId])
   const caret = box.current?.querySelector('textarea')?.selectionStart ?? text.length
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows))
+    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows, 8, chatRows))
   useEffect(() => setSlashActive(0), [text])
 
   // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,

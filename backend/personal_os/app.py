@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
-from . import fsx
+from . import chatlink, fsx
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -219,6 +219,9 @@ def _run_changed(run: Run) -> None:
     telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
+    if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
+        for cid in list(_chat_waiting):
+            _schedule_chat_delivery(cid)
 
 
 bus.on_change = _run_changed
@@ -1402,6 +1405,7 @@ class ChatIn(BaseModel):
     attachments: list[str] | None = None  # ids of uploaded documents sent with this turn; their text is inlined for the model
     wake: dict[str, Any] | None = None  # set only by the backend: this turn hands finished workers' reports to the assistant (workers.build_wake)
     kind: str | None = None  # set only by the backend: this turn's content is an internal control message (nudge, continue, resume, handoff, report), stored hidden from the user
+    chat_link: dict[str, Any] | None = None  # set only by the backend: this turn carries another chat's message or reply (chatlink.ChatLinks.turn)
 
 
 def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[dict[str, Any]]:
@@ -1975,6 +1979,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if is_wake and body.wake.get("tainted"):  # the worker read untrusted text; its report carries that into this turn
             tool_ctx["tainted"] = True
             tool_ctx["taint_sources"].append("worker")
+        if body.chat_link:  # another chat's message or reply: untrusted like a tool result, and its depth bounds the next hop
+            tool_ctx["tainted"] = True
+            tool_ctx["taint_sources"].append("chat")
+            tool_ctx["chat_link"] = dict(body.chat_link)
         if is_wake and body.wake.get("attachments"):  # files the workers sent: they ride on this reply
             tool_ctx["reply_attachments"] = list(body.wake["attachments"])
         use_tools = conv["settings"].get("useTools", True)
@@ -2284,6 +2292,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             run_notes.append({"role": "system", "content": parked_note})
         if regen_done:
             run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
+        if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id)):
+            run_notes.append({"role": "system", "content": mnote})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
@@ -3488,7 +3498,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     reasoning = "".join(rbuf).strip() or None
     outcome = None if error else ("stopped" if stop.is_set() else partial)
     # A wake turn the assistant answers with NO_REPLY (or nothing) is silent: its reply row goes, and nothing is pushed anywhere.
-    silent = is_wake and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say
+    silent = (is_wake or bool(body.chat_link)) and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say
     # A front turn that only handed work on (hand-off tools, the task list) and has nothing to say is silent too: the app shows the work.
     silent = silent or (not is_wake and not error and not stop.is_set() and _front() and workers_mod.dispatch_only(e.get("name") for e in tool_events)
                         and workers_mod.is_silent(text))
@@ -3518,6 +3528,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
         if text and not error and not silent and not stop.is_set():
             _push_wake_reply(text, tool_ctx.get("reply_attachments"), conv_id)
+    if body.chat_link:
+        chat_links.ended(body.chat_link, text, error, silent=silent, stopped=stop.is_set())
     if tool_ctx.get("learned"):
         yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
@@ -3819,7 +3831,7 @@ def _over_live_cap() -> bool:
 
 
 def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None,
-                 kind: str | None = None) -> Run | dict[str, Any] | None:
+                 kind: str | None = None, chat_link: dict[str, Any] | None = None) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
     the chain to a supervisor task. None means the claim was lost or a run is already live. Over
     deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
@@ -3844,7 +3856,7 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
         return None
     text = (content or "").strip() or claimed["brief"]
     # An explicit kind wins; a queued turn lost it when its messages were joined, so the leading backend text names it.
-    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text))
+    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text), chat_link=chat_link)
     run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
                     desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content, **({"wake": wake} if wake else {})})
     _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
@@ -3988,7 +4000,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
         target = next((m for m in conv["messages"] if m["id"] == body.replace_from), None)
         if not target or target["role"] != "user":
             raise HTTPException(404, "No such message to edit")
-    if body.wake is not None:
+    if body.wake is not None or body.chat_link is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     # Typed in Grain into the Texts chat: it runs as a Telegram turn and shows on the phone. Internal turns (wake, ...) never get here.
@@ -4051,6 +4063,56 @@ async def _wake_conversation(conv_id: str) -> None:
     _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+
+
+# ---------------- chats messaging each other (chatlink.py) ----------------
+_chat_waiting: set[str] = set()  # chats owed a cross-chat turn that could not start yet (a reply was being written there)
+
+
+def _schedule_chat_delivery(conv_id: str) -> None:
+    try:
+        asyncio.get_running_loop().call_soon(_deliver_chat, conv_id)
+    except RuntimeError:  # called from the threadpool
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(_deliver_chat, conv_id)
+
+
+def _deliver_chat(conv_id: str) -> None:
+    """Start the oldest cross-chat turn owed to this chat (a message to it, or the reply to one it sent) as a hidden-kind
+    user row and a reply run under the chat's own settings, as a worker's wake does. Synchronous, so nothing can start a
+    second run between the check and the start."""
+    nxt = chat_links.next_for(conv_id)
+    if nxt is None:
+        _chat_waiting.discard(conv_id)
+        return
+    row = convos.get(conv_id, with_messages=False)
+    if row is None:  # the chat is gone: a message to it is dropped, a reply to it has nobody to tell
+        chat_links.ended({"id": nxt[1]["id"], "kind": "chat_reply"}, "")
+        _chat_waiting.discard(conv_id)
+        return _schedule_chat_delivery(conv_id)
+    desk_id = row["settings"].get("deskId")
+    if bus.answering(conv_id) or (desk_id and (bus.live(conv_id) or _over_live_cap())):
+        _chat_waiting.add(conv_id)  # _run_changed retries; a queued desk turn would lose the link and its fence, so it never queues
+        return
+    _chat_waiting.discard(conv_id)
+    kind, link = nxt
+    got = chat_links.turn(kind, link)
+    if got is None:
+        return _schedule_chat_delivery(conv_id)
+    text, cl = got
+    chat_links.started(kind, link["id"])
+    if desk_id:
+        started = _launch_desk(desk_id, text, MESSAGE_FROM, kind=kind, chat_link=cl)
+        if not isinstance(started, Run):
+            chat_links.unstarted(kind, link["id"])
+            _chat_waiting.add(conv_id)
+        return
+    body = ChatIn(content=text, kind=kind, chat_link=cl)
+    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+
+
+chat_links = chatlink.ChatLinks(db, convos, deliver=_schedule_chat_delivery)
+toolbox.chat_links = chat_links
 
 
 def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
@@ -5010,6 +5072,11 @@ async def _workers_startup() -> None:
             _schedule_wake(cid)
     except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
         log.warning("worker recovery failed", exc_info=True)
+    try:
+        for cid in chat_links.recover():
+            _schedule_chat_delivery(cid)
+    except Exception:  # noqa: BLE001
+        log.warning("chat link recovery failed", exc_info=True)
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------

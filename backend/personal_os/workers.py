@@ -166,7 +166,7 @@ def fence_report(worker_id: str, status: str, text: str) -> str:
 
 def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
     """The hidden user message for finished workers, and the wake record the run carries. Each report is
-    {id, title, goal, status, text, tainted?}; several fold into one message, oldest first."""
+    {id, title, goal, status, text, tainted?, attachments?}; several fold into one message, oldest first."""
     blocks = []
     for r in reports:
         lines = [f"Worker {r['id']}" + (f" ({_one_line(r.get('title'), 80)})" if r.get("title") else "") + f": {r['status']}."]
@@ -177,7 +177,8 @@ def build_wake(reports: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         lines.append(fence_report(r["id"], r["status"], r.get("text") or ""))
         blocks.append("\n".join(lines))
     wake = {"ids": [r["id"] for r in reports], "tainted": any(r.get("tainted") for r in reports),
-            "title": next((str(r["title"]) for r in reports if r.get("title")), "")}
+            "title": next((str(r["title"]) for r in reports if r.get("title")), ""),
+            "attachments": list({a["id"]: a for r in reports for a in r.get("attachments") or []}.values())}  # files the workers sent
     return WAKE_HEADER + "\n\n" + "\n\n".join(blocks), wake
 
 
@@ -360,7 +361,8 @@ class Workers:
         by = self.stopped.pop(ch.id, None)
         if self.store is not None:
             self.store.mark_input(ch.id, exit_reason=ch.exit_reason, tainted=bool(ch.ctx.get("tainted")),
-                                  taint_sources=list(ch.ctx.get("taint_sources") or []), **({"wake_delivered": 1} if by == "tool" else {}))
+                                  taint_sources=list(ch.ctx.get("taint_sources") or []), attachments=list(ch.ctx.get("reply_attachments") or []),
+                                  **({"wake_delivered": 1} if by == "tool" else {}))
         self._emit(ch.conversation_id, self.info_of(ch))
         self.pump()
         if self.on_end is not None and not self.closing and by != "tool" and ch.conversation_id:

@@ -31,7 +31,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
-from . import compaction, followups, otel_export, router, titles
+from . import compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, fsx
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
@@ -1938,6 +1938,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Chain-of-thought from reasoning models. Kept out of `buf` so it never becomes the reply, and
         # never goes back to the model: history() reads content only.
         rbuf: list[str] = []
+        # The client never sees the raw thinking: a low-tier model turns it into short status lines.
+        tsum = thinking_summary.ThinkingSummary(cfg, model)
         error: str | None = None
         tool_events: list[dict[str, Any]] = []
         # Uploaded-file excerpts are text the user did not
@@ -2517,8 +2519,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if ev["type"] == "reasoning":
                     rbuf.append(ev["text"])
-                    yield "reasoning", {"id": am["id"], "text": ev["text"]}
+                    tsum.add(ev["text"])
+                    for line in tsum.take():
+                        yield "thinking_summary", {"id": am["id"], "text": line}
                 elif ev["type"] == "delta":
+                    for line in tsum.take():
+                        yield "thinking_summary", {"id": am["id"], "text": line}
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
                 elif ev["type"] == "retry":
@@ -2563,7 +2569,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 steered, steers[:] = list(steers), []
                 # A segment that already streamed or ran tools closes cleanly; an untouched one is reused.
                 if buf or tool_events or rbuf:
-                    reasoning = "".join(rbuf).strip() or None
+                    reasoning = tsum.stored()
                     convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning,
                                           outcome=partial, attachments=tool_ctx.get("reply_attachments"))
                     _active.pop(am["id"], None)
@@ -2579,6 +2585,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["message_id"] = am["id"]
                     buf = []
                     rbuf = []
+                    tsum.reset()
                     tool_events = []
                     tracer = Tracer()
                     yield "assistant_message", {**am, "context_used": cite_slim(used)}
@@ -2659,10 +2666,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if first_token is None:
                         first_token = now_ms()
                     rbuf.append(ev["text"])
-                    yield "reasoning", {"id": am["id"], "text": ev["text"]}
+                    tsum.add(ev["text"])
+                    for line in tsum.take():
+                        yield "thinking_summary", {"id": am["id"], "text": line}
                 elif ev["type"] == "delta":
                     if first_token is None:
                         first_token = now_ms()
+                    for line in tsum.take():
+                        yield "thinking_summary", {"id": am["id"], "text": line}
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
                 elif ev["type"] == "retry":
@@ -3182,7 +3193,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # (the card stays on it as pending) and record what this turn spent, as the normal end does.
                         kept = tool_events + ([pending_card] if pending_card else [])
                         convos.finish_message(am["id"], "".join(buf).strip(), None, used, kept, tracer.spans,
-                                              "".join(rbuf).strip() or None, attachments=tool_ctx.get("reply_attachments"))
+                                              tsum.stored(), attachments=tool_ctx.get("reply_attachments"))
                         convos.touch(conv_id)
                         if run is not None:
                             run.partial, run.cost, run.rounds = partial, meter.cost, meter.rounds
@@ -3195,7 +3206,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         tool_events.append(card)
                         tracer.end(tspan, {"parked": True})
                         text = "".join(buf).strip()
-                        reasoning = "".join(rbuf).strip() or None
+                        reasoning = tsum.stored()
                         convos.finish_message(am["id"], text, None, used, tool_events, tracer.spans, reasoning,
                                               attachments=tool_ctx.get("reply_attachments"))
                         convos.touch(conv_id)
@@ -3471,7 +3482,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if run is not None and run.kind == "chat" and not desk_id:
             gone = "Interrupted: the backend shut down while this reply was running."
         convos.finish_message(am["id"], text, gone or (None if text else "Cancelled"), used, kept, tracer.spans,
-                              "".join(rbuf).strip() or None, outcome="interrupted", attachments=tool_ctx.get("reply_attachments"))
+                              tsum.stored(), outcome="interrupted", attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)
         await _end_jobs()
         raise
@@ -3495,7 +3506,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     text = "".join(buf).strip()
     if not text and not error and not stop.is_set() and not tool_events and not desk_id and not is_wake:
         error = "The model returned an empty reply. Try again."
-    reasoning = "".join(rbuf).strip() or None
+    reasoning = tsum.stored()
     outcome = None if error else ("stopped" if stop.is_set() else partial)
     # A wake turn the assistant answers with NO_REPLY (or nothing) is silent: its reply row goes, and nothing is pushed anywhere.
     silent = (is_wake or bool(body.chat_link)) and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say

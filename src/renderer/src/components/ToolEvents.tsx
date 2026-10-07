@@ -322,14 +322,14 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
         <button className="tool-head" title={tools.find((x) => x.name === t.name)?.description || t.name} aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
-          <span className="tool-name human">{d.verb}</span>
+          <span className={`tool-name human ${t.pending && !t.needs_approval ? 'shimmer' : ''}`}>{d.verb}</span>
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
           <span className="tool-summary">{d.subject}</span>
           <Verdict event={t} />
           {t.plan ? (
             <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
+          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : null) : t.error ? <AlertCircle size={12} aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
         </button>
         {t.error && !open[t.id] && <div className="tool-err">{errorLine(t.error)}</div>}
         {t.images && t.images.length > 0 && (

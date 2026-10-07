@@ -29,6 +29,7 @@ export const MODEL_FIELDS = [
   { key: 'fastModel', label: 'Fast model' },
   { key: 'extractionModel', label: 'Helper model' },
   { key: 'embeddingModel', label: 'Search model' },
+  { key: 'retrievalRerankModel', label: 'Rerank model' },
   { key: 'visionModel', label: 'Vision model' },
   { key: 'imageModel', label: 'Image model' }
 ] as const

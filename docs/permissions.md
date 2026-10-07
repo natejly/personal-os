@@ -16,7 +16,7 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 | Key | What it decides |
 | --- | --- |
 | `tools` | Global mode per tool: on, ask or off |
-| `alwaysAsk` | External and scheduling tools that always show a card |
+| `alwaysAsk` | External and scheduling tools that show a card in Auto and Manual, not in Allow everything (sending email is the exception: it always shows the review card) |
 | `permissionRules` | `{allow, ask, deny}` lists of `Tool(pattern)` rules; deny beats ask beats allow |
 | `skipPermissions` | Chats skip ordinary cards (a chat's own switch wins) |
 | `unattendedApprovals` | A job run that would ask: `deny` (refuse) or `ask` (park a card) |
@@ -60,6 +60,29 @@ Narrower scopes stay where they are, because they are scopes, not copies:
 
 A tool's mode resolves chat, then agent, then project, then global, then the tool's default. A deny rule refuses over
 any of them, and an Always ask tool tops out at ask whatever a map says.
+
+## Allow everything
+
+`permissionMode: allow_all` runs tools without cards or a reviewer. That includes unsandboxed shell commands, moving
+or trashing local files, running Shortcuts, installing Python packages, scheduling tasks and deleting calendar
+events. What still asks or is refused:
+
+- Deny rules refuse.
+- Grain's own data folder and app bundle, and credential stores (keys, passwords, sign-in files, Keychain).
+- Permanent deletes outside the Trash (`rm` of files outside a temp folder, `shred`, `find -delete`, `xargs rm`), disk
+  wipes (`diskutil erase`, `dd` to a disk device, `mkfs`) and a git force-push: an approval card.
+- Writes right after untrusted content, and a runaway repeated call: a card.
+- Sending email: always the editable review card.
+
+Every action is still logged in approval history, and an unsandboxed shell command also gets a backend log line.
+
+The shell floor is `permrules.allow_all_floor()`, called from the chat loop, the `run_python` tool bridge and workers
+through `shell.floor()`. `destructive()` parses chained commands, pipes, wrappers such as `sudo`/`env`/`nohup`, `$()`,
+backticks, `sh -c` and `eval` strings and, best effort, subshells and `{ }` groups; it follows a literal `cd` through
+the chain. Paths under `/tmp`, `/private/tmp`, `/var/folders`, `$TMPDIR` and a desk's `work/` folder are scratch, not
+user files. For an unsandboxed command `touches_protected()` also cards any path-like word that names a credential
+store or Grain's own data or app, and the Keychain CLI (`security find-…`, `dump-keychain`, `export`). Sandboxed
+commands get that protection from the OS sandbox. The floor card has no session or rule option.
 
 ## The surface
 

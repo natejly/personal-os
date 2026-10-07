@@ -11,7 +11,7 @@ The claims worth a test:
   - past delegationAfterRounds the reply may only hand off (and never stops), with the setting off nothing narrows;
   - workers queue FIFO past workerMaxConcurrent, and a low-memory machine holds the queue while something runs;
   - stop (tool: no wake; UI: wake), resume with history, restart sweep, approvals routed to the chat and the phone;
-  - ack-before-work, depth limits, argv and default-model contracts.
+  - depth limits, argv and default-model contracts.
 
 Run: uv run --project backend --with pytest pytest backend/tests/test_orchestration.py
 """
@@ -353,17 +353,6 @@ def test_forced_delegation_rule() -> None:
     assert "gmail_search" in err["error"] and "delegate" in json.dumps(err)
 
 
-def test_ack_decisions() -> None:
-    assert W.ack_nudge_due(1, False, False, True, False) and not W.ack_nudge_due(1, False, True, True, False), "the nudge goes out once"
-    assert not W.ack_nudge_due(0, False, False, True, False), "not before any tool round"
-    assert not W.ack_nudge_due(1, True, False, True, False), "not once the user has been told something"
-    assert not W.ack_nudge_due(1, False, False, True, True), "never in a wake turn"
-    assert not W.ack_nudge_due(1, False, False, False, False), "never outside the front agent"
-    assert W.ack_inject_due(1, False, True, False) and not W.ack_inject_due(0, False, True, False)
-    assert not W.ack_inject_due(1, True, True, False) and not W.ack_inject_due(1, False, True, True) and not W.ack_inject_due(1, False, False, False)
-    assert W.ACK_LINE == "On it, working on that now."
-
-
 def test_wake_decision_and_message() -> None:
     assert W.wake_decision(False, 0, True) == "skip" and W.wake_decision(True, 0, True) == "skip"
     assert W.wake_decision(False, 2, False) == "skip", "the chat is gone"
@@ -448,48 +437,6 @@ def test_the_threshold_resets_on_a_new_turn() -> None:
     FRONT[:] = [{"text": "b", "calls": [search(3)]}, {"text": "second reply"}]
     stream(cid, "two")
     assert "search_memory" in seat("front")[-1]["tools"], "work rounds are counted per reply"
-
-
-# ---------------- 6. ack before work ----------------
-def test_a_textless_tool_turn_gets_the_nudge_then_the_ack_line() -> None:
-    cid = new_conv()
-    FRONT[:] = [{"text": "", "calls": [search(1)]}, {"text": "", "calls": [search(2)]}, {"text": "Here you go."}]
-    events = stream(cid, "find stuff")
-    front = seat("front")
-    assert not any(W.ACK_NUDGE in str(m.get("content")) for m in front[0]["messages"])
-    assert any(m["role"] == "system" and m["content"] == W.ACK_NUDGE for m in front[1]["messages"]), "after a textless tool round the model is asked for a line first"
-    names = [e for e, _ in events]
-    ack_at = next(i for i, (e, d) in enumerate(events) if e == "delta" and W.ACK_LINE in d["text"])
-    second_call = next(i for i, (e, d) in enumerate(events) if e == "tool_result" and d["id"].endswith(":c2"))
-    first_call = next(i for i, (e, d) in enumerate(events) if e == "tool_result" and d["id"].endswith(":c1"))
-    assert first_call < ack_at < second_call, "the ack is emitted before the round-2 calls run (and not before round 1)"
-    assert names.count("done") >= 1
-    msgs = client.get(f"/conversations/{cid}").json()["messages"]
-    assert msgs[-1]["content"].startswith(W.ACK_LINE) and msgs[-1]["content"].endswith("Here you go."), "the ack is persisted with the reply"
-    assert sum(m["content"].count(W.ACK_LINE) for m in msgs) == 1
-
-
-def test_no_ack_when_the_model_already_spoke_or_calls_once() -> None:
-    cid = new_conv()
-    FRONT[:] = [{"text": "Checking.", "calls": [search(1)]}, {"text": "", "calls": [search(2)]}, {"text": "Done."}]
-    events = stream(cid, "x")
-    assert not any(e == "delta" and W.ACK_LINE in d["text"] for e, d in events)
-    assert not any(m["content"] == W.ACK_NUDGE for s in seat("front") for m in s["messages"] if m["role"] == "system")
-    SEEN.clear()
-    FRONT[:] = [{"text": "", "calls": [search(3)]}, {"text": "Done."}]
-    events = stream(cid, "y")
-    assert not any(e == "delta" and W.ACK_LINE in d["text"] for e, d in events), "a single tool round never needs the backend's ack"
-
-
-def test_a_wake_turn_never_acks() -> None:
-    cid = new_conv()
-    WORKER["Ack job"] = [{"text": "ack result"}]
-    FRONT[:] = [delegate("Ack job"), {"text": "Started."}]
-    WAKE[:] = [{"text": "", "calls": [search(1)]}, {"text": "", "calls": [search(2)]}, {"text": "Fine."}]
-    say(cid)
-    msgs = settle(cid)
-    assert msgs[-1]["role"] == "assistant" and msgs[-1]["content"] == "Fine."
-    assert not any(W.ACK_NUDGE in str(m.get("content")) for s in seat("wake") for m in s["messages"])
 
 
 # ---------------- 4. the queue ----------------

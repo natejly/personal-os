@@ -90,7 +90,6 @@ RETRIEVAL_MIN_SIMILARITY = 0.25    # drops vector-only hits below this similarit
 RETRIEVAL_PER_DOC_CAP = 3          # passages per document
 RETRIEVAL_CANDIDATES = 20          # candidates per ranker
 CONSOLIDATE_EVERY = 25             # propose a memory tidy-up after this many new auto memories (0 = manual only)
-VOICE_LOOP_MAX_TURNS = 20          # hands-free safety stop: a mic left on would keep looping (not a reply budget)
 TELEGRAM_LONG_RUN_MINUTES = 3      # when a run not started from Telegram counts as long
 
 # Accepted ranges for PUT /settings (finite numbers only). The keys in AUTOMATIC also accept 0, meaning "derive it".

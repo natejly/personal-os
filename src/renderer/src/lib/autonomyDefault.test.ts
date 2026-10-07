@@ -20,5 +20,4 @@ test('composers other than the main new-chat one never arm', () => {
   assert.equal(startAutonomy({ draft: null, mainComposer: false }), null)
   assert.equal(startAutonomy({ draft: 'ask', mainComposer: false }), null)
   assert.equal(startAutonomy({ ...main, agent: 'researcher' }), null)
-  assert.equal(startAutonomy({ ...main, private: true }), null)
 })

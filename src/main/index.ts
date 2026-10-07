@@ -426,6 +426,7 @@ if (gotLock) app.whenReady().then(async () => {
   registerSystemAccess()
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  on('app:show', () => showMain())  // a chat notification was clicked: bring the main window forward
   registerPopouts(() => win)
   registerQuickAsk((id) => { showMain(); sendMenu(`open-chat:${id}`) })
   registerBus()

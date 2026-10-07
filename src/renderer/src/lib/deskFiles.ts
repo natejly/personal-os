@@ -85,7 +85,7 @@ export interface TurnChanges {
  * agent only read things, or snapshots were unavailable) is left out: an empty row has nothing to
  * undo. Only the most recent `limit` runs are considered, because each costs a request.
  */
-export function groupChangesByTurn(runs: RunInfo[], changes: Record<string, RunChanges | undefined>, limit = 8): TurnChanges[] {
+export function groupChangesByTurn(runs: Pick<RunInfo, 'run_id' | 'started_at'>[], changes: Record<string, RunChanges | undefined>, limit = 8): TurnChanges[] {
   return [...runs]
     .sort((a, b) => b.started_at - a.started_at)
     .slice(0, limit)
@@ -96,9 +96,12 @@ export function groupChangesByTurn(runs: RunInfo[], changes: Record<string, RunC
 }
 
 /** The runs worth asking for changes: most recent first, capped. */
-export function recentRunIds(runs: RunInfo[], limit = 8): string[] {
+export function recentRunIds(runs: Pick<RunInfo, 'run_id' | 'started_at'>[], limit = 8): string[] {
   return [...runs].sort((a, b) => b.started_at - a.started_at).slice(0, limit).map((r) => r.run_id)
 }
+
+/** One run in GET /conversations/{id}/changes: the run's summary with the ids Undo and the reply footer use. */
+export interface ChatRunChanges extends RunChanges { run_id: string; message_id: string | null; started_at: number }
 
 export const STATUS_WORD: Record<'A' | 'M' | 'D', string> = { A: 'created', M: 'modified', D: 'deleted' }
 

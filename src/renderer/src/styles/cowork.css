@@ -252,6 +252,18 @@
 .desk-approval-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .desk-approval-sentence { margin: 0; color: var(--text); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .desk-approval-host { font-weight: 700; }
+/* The agent's question: the question once, answer chips, a one-line own-answer box; one muted line once answered. */
+.desk-ask { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.ask-question { margin: 0; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+.ask-option { white-space: normal; text-align: left; }
+.ask-own { display: flex; align-items: flex-end; gap: 4px; }
+.ask-own textarea {
+  flex: 1; min-width: 0; resize: none; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; color: var(--text); font: inherit; font-size: 13px; line-height: 1.4; outline: 0; max-height: 110px;
+}
+.ask-own textarea:focus { border-color: var(--accent); }
+.ask-done { margin: 4px 0; font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-done span { color: var(--text); }
 .desk-approval-details { font-size: 12px; color: var(--text-muted); }
 .desk-approval-details summary { cursor: pointer; }
 .inline-note { display: flex; gap: 6px; align-items: center; margin: 8px 0 0; }
@@ -284,7 +296,6 @@
 }
 .desk-strip-status { font-weight: 600; white-space: nowrap; }
 .desk-strip-detail { color: var(--text-muted); min-width: 0; flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.desk-strip-meta { color: var(--text-faint); white-space: nowrap; }
 .desk-inline { display: flex; flex-direction: column; gap: 8px; }
 .desk-inline:empty { display: none; }
 .desk-panel {
@@ -296,3 +307,10 @@
 .desk-panel .desk-files { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 40%) minmax(0, 1fr); }
 .desk-panel .desk-tree { border-right: 0; border-bottom: 1px solid var(--border); }
 @media (max-width: 760px) { .desk-panel { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 8; } }
+
+/* The plain-chat Files tab reuses the chat file rows: section headings and the empty line as in the old popover. */
+.cf-list h4 { margin: 0; padding: 6px 8px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.cf-list .empty-hint { margin: 0; padding: 6px 8px; font-size: 12px; }
+/* A desk chat's Files tab: the chat's own files over the workspace tree, a short scrolling block under a quiet divider. */
+.cf-above { flex: none; max-height: 40%; padding-bottom: 4px; }
+.desk-panel .cf-ws { margin: 0; padding: 6px 16px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); border-top: 1px solid var(--border); }

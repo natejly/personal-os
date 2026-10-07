@@ -2760,3 +2760,10 @@ select:focus-visible {
 .adv-group { border: 1px solid var(--border); border-radius: 10px; margin: 8px 0; padding: 0 12px; }
 .adv-group > summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-size: 13px; }
 .adv-group[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+
+/* Files the assistant attached to its reply: images as a thumbnail grid, the rest as chips. */
+.reply-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.reply-image { padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--panel, var(--bg)); cursor: zoom-in; overflow: hidden; line-height: 0; }
+.reply-image img { display: block; max-width: 100%; max-height: 320px; min-width: 48px; min-height: 48px; font: 11px var(--font); color: var(--text-faint); line-height: 1.4; }
+.reply-image:hover { border-color: var(--accent); }
+.msg-body .msg-files { justify-content: flex-start; margin-top: 8px; }

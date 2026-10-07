@@ -54,6 +54,7 @@ class Env:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.updates: list[dict[str, Any]] = []
         self.fail: dict[str, Exception] = {}
+        self.files: list[tuple[str, dict[str, Any]]] = []
         self.turns: list[tuple[str, str]] = []
         self.decisions: list[tuple[str, str]] = []
         self.stopped: list[str] = []
@@ -90,14 +91,18 @@ class Env:
         self.new_convs += 1
         return f"conv-new-{self.new_convs}"
 
-    async def api(self, token: str, method: str, params: dict[str, Any], timeout: float | None = None) -> Any:
+    async def api(self, token: str, method: str, params: dict[str, Any], timeout: float | None = None, files: Any = None) -> Any:
         assert token == TOKEN
         self.calls.append((method, params))
+        if files:
+            self.files.append((method, files))
         if method in self.fail:
             raise self.fail[method]
         if method == "getUpdates":
             out, self.updates = self.updates, []
             return out
+        if method == "getFile":
+            return {"file_path": "photos/x.jpg", "file_size": 1234}
         return True
 
     # ---- helpers
@@ -193,7 +198,7 @@ async def test_old_messages_are_history_not_instructions(env: Env) -> None:
 @case
 async def test_attachment_only_messages_get_a_polite_no(env: Env) -> None:
     await env.feed(msg(None))
-    assert env.turns == [] and env.sent() == ["Attachments aren't supported yet — send text."]
+    assert env.turns == [] and env.sent() == [tg.UNSUPPORTED]
 
 
 # ---------------------------------------------------------------- pairing

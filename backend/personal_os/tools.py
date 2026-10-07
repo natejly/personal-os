@@ -701,6 +701,7 @@ class Toolbox:
         # run_python's outputs/ land when there is no desk. Same containment and quotas as a desk.
         root = getattr(workspace, "root", None)
         self.chat_outputs = Workspace(Path(root).parent, sub="chats") if isinstance(root, (str, Path)) else None
+        self.user_update: Callable[[dict[str, Any], str, list[dict[str, Any]]], Awaitable[bool]] | None = None  # send_files' live delivery: (ctx, text, attachments) -> accepted; set by app.py
         self.chat_files: Any = None  # chat_files.ChatFiles: which chat each file belongs to; set by app.py
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.trash: Any = None  # soft delete (trash.py); set by app.py
@@ -747,10 +748,12 @@ class Toolbox:
         from . import commands as _commands, workflows as _workflows
         _workflows.register(self)
         _commands.register(self)
-        from . import browser, deliver, envs, imagegen, vision
+        from . import browser, deliver, envs, imagegen, screenshot, sendfiles, vision
         browser.register(self)  # browser_*: the agent's own interactive browser
         vision.register(self)   # view_image
         imagegen.register(self)  # generate_image
+        screenshot.register(self)  # screenshot (macOS)
+        sendfiles.register(self)  # send_files
         deliver.register(self)  # convert_document / render_preview / doc_guide
         envs.register(self)     # python_install: the shared work environment
 

@@ -1419,6 +1419,11 @@ Maths renders when written inline as `$...$` and as a display block with `$$` on
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
 The `show` tool opens the same kinds of content (plus markdown and files on this Mac: PDFs, images, text) in a side panel beside the chat, with more room than an inline block. Use it when the user should look at something while you talk about it, e.g. a PDF they asked about or a full-page mock-up."""
 
+# The Texts conversation is answered on the user's phone (telegram.py).
+TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first in one or two lines, then work. At meaningful milestones send a "
+                 "brief update with send_files (a screenshot when it shows more than words; not every step). Images and files you send_files "
+                 "reach the phone; the final reply may carry them too.")
+
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
 
@@ -1954,6 +1959,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if is_wake and body.wake.get("tainted"):  # the worker read untrusted text; its report carries that into this turn
             tool_ctx["tainted"] = True
             tool_ctx["taint_sources"].append("worker")
+        if is_wake and body.wake.get("attachments"):  # files the workers sent: they ride on this reply
+            tool_ctx["reply_attachments"] = list(body.wake["attachments"])
         use_tools = conv["settings"].get("useTools", True)
         _tool_maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
                       persona.tool_modes if persona is not None else None)
@@ -2241,7 +2248,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
-                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
+                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "",
+                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
@@ -2271,11 +2279,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if src not in tool_ctx["taint_sources"]:
                     tool_ctx["taint_sources"].append(src)
 
+        # The pictures sent with this turn go to the chat model itself when it reads images; earlier turns replay as text.
+        turn_images = await asyncio.to_thread(vision.image_parts, documents, attachments if body.content is not None else None, model)
+
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
             hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
+            if turn_images and (i := max((i for i, m in enumerate(head) if m["role"] == "user"), default=-1)) >= 0:
+                head[i] = {**head[i], "content": [{"type": "text", "text": head[i]["content"]}, *turn_images]}
             return head + [dict(n) for n in run_notes]
         messages = _assemble(history)
         base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
@@ -2526,7 +2539,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if buf or tool_events or rbuf:
                     reasoning = "".join(rbuf).strip() or None
                     convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning,
-                                          outcome=partial)
+                                          outcome=partial, attachments=tool_ctx.get("reply_attachments"))
                     _active.pop(am["id"], None)
                     # A steer closes the current segment and the reply carries on in a fresh assistant
                     # message, so this `done` ends a segment, not the run. Anything supervising the run
@@ -2534,7 +2547,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                   "reasoning": reasoning, "outcome": partial}
+                                   "reasoning": reasoning, "outcome": partial, "attachments": tool_ctx.pop("reply_attachments", None) or None}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
                     _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
@@ -2559,7 +2572,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable(), front=front_hint)})})
+                        steer_text = convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable(), front=front_hint)})
+                        steer_images = await asyncio.to_thread(vision.image_parts, documents, um.get("attachments"), model)
+                        messages.append({"role": "user", "content": [{"type": "text", "text": steer_text}, *steer_images] if steer_images else steer_text})
                     user_text = um["content"]
                     user_msg_id = tool_ctx["user_message_id"] = um["id"]
                     run_user_texts.append(um["content"])
@@ -3138,7 +3153,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # (the card stays on it as pending) and record what this turn spent, as the normal end does.
                         kept = tool_events + ([pending_card] if pending_card else [])
                         convos.finish_message(am["id"], "".join(buf).strip(), None, used, kept, tracer.spans,
-                                              "".join(rbuf).strip() or None)
+                                              "".join(rbuf).strip() or None, attachments=tool_ctx.get("reply_attachments"))
                         convos.touch(conv_id)
                         if run is not None:
                             run.partial, run.cost, run.rounds = partial, meter.cost, meter.rounds
@@ -3152,14 +3167,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         tracer.end(tspan, {"parked": True})
                         text = "".join(buf).strip()
                         reasoning = "".join(rbuf).strip() or None
-                        convos.finish_message(am["id"], text, None, used, tool_events, tracer.spans, reasoning)
+                        convos.finish_message(am["id"], text, None, used, tool_events, tracer.spans, reasoning,
+                                              attachments=tool_ctx.get("reply_attachments"))
                         convos.touch(conv_id)
                         if run is not None:
                             run.partial, run.cost, run.rounds = None, meter.cost, meter.rounds
                         yield "done", {"id": am["id"], "error": None, "context_used": cite_slim(used), "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                       "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid}
+                                       "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid,
+                                       "attachments": tool_ctx.get("reply_attachments") or None}
                         return
                     if run is not None:
                         run.set_status("running")
@@ -3428,7 +3445,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if run is not None and run.kind == "chat" and not desk_id:
             gone = "Interrupted: the backend shut down while this reply was running."
         convos.finish_message(am["id"], text, gone or (None if text else "Cancelled"), used, kept, tracer.spans,
-                              "".join(rbuf).strip() or None, outcome="interrupted")
+                              "".join(rbuf).strip() or None, outcome="interrupted", attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)
         await _end_jobs()
         raise
@@ -3463,7 +3480,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "removed_message", {"id": am["id"]}
     else:
         convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning,
-                              outcome=outcome, error_kind=error_kind)
+                              outcome=outcome, error_kind=error_kind, attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)
         otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
     if run is not None:
@@ -3473,12 +3490,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     yield "done", {"id": None if silent else am["id"], "error": error, "context_used": cite_slim(used), "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
+                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice,
+                   "attachments": tool_ctx.get("reply_attachments") or None}
     await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if is_wake:
         workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
         if text and not error and not silent and not stop.is_set():
-            _push_wake_reply(text)
+            _push_wake_reply(text, tool_ctx.get("reply_attachments"))
     if tool_ctx.get("learned"):
         yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
@@ -3971,7 +3989,7 @@ def _wake_reports(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
         info, inp = workers_mgr.info(r), r.get("input") or {}
         out.append({"id": r["run_id"], "title": info["title"], "goal": info["goal"], "status": info["status"],
-                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted"))})
+                    "text": workers_mgr.report_text(r), "tainted": bool(inp.get("tainted")), "attachments": inp.get("attachments") or []})
     return out
 
 
@@ -4006,10 +4024,10 @@ async def _wake_conversation(conv_id: str) -> None:
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
 
 
-def _push_wake_reply(text: str) -> None:
-    """The reply written for a finished worker, to the phone when telegramPushWorkerResults is on."""
+def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None) -> None:
+    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on."""
     if settings().get("telegramPushWorkerResults"):
-        telegram_bridge.push(text)
+        telegram_bridge.push(text, attachments or None)
 
 
 def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
@@ -9269,13 +9287,33 @@ def _telegram_create_conversation() -> str:
     return create_conversation(ConvIn(title="Texts"))["id"]
 
 
-async def _telegram_turn(conv_id: str, text: str) -> dict[str, Any]:
+def _telegram_message_attachments(message_id: str) -> list[dict[str, Any]]:
+    with db.tx() as c:
+        r = c.execute("SELECT attachments FROM messages WHERE id=?", (message_id,)).fetchone()
+    try:
+        atts = json.loads(r["attachments"]) if r and r["attachments"] else []
+    except ValueError:
+        return []
+    return [a for a in atts if isinstance(a, dict)]
+
+
+def _telegram_attachment_path(doc_id: str) -> Path | None:
+    d = documents.get(doc_id)
+    return blobs.inside_uploads(db.data_dir, d.get("path")) if d else None
+
+
+async def _telegram_store_upload(name: str, mime: str, data: bytes) -> dict[str, Any]:
+    row = await asyncio.to_thread(_store_upload, None, name, mime, data)
+    return {"id": row["id"], "name": row["name"], "mime": row["mime"], "size": row["size"]}
+
+
+async def _telegram_turn(conv_id: str, text: str, attachment_ids: list[str] | None = None) -> dict[str, Any]:
     """A message is a new turn, or a steer when a reply is still being written. The two can race, so a 409 tries the other."""
     for _ in range(2):
         try:
             if bus.answering(conv_id):
-                return await steer_run(conv_id, SteerIn(content=text))
-            return await chat(conv_id, ChatIn(content=text, origin="telegram"))
+                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None))
+            return await chat(conv_id, ChatIn(content=text, origin="telegram", attachments=attachment_ids or None))
         except HTTPException as e:
             if e.status_code != 409:
                 raise
@@ -9307,7 +9345,17 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     message_text=_telegram_message_text,
     app_only_tools=frozenset({PLAN_TOOL, *QUESTION_TOOLS}),
     conversation_title=_telegram_conversation_title,
+    message_attachments=_telegram_message_attachments,
+    attachment_path=_telegram_attachment_path,
+    store_upload=_telegram_store_upload,
 ))
+
+
+async def _telegram_user_update(ctx: dict[str, Any], text: str, atts: list[dict[str, Any]]) -> bool:
+    return telegram_bridge.send_update(ctx.get("conversation_id"), text, atts)
+
+
+toolbox.user_update = _telegram_user_update  # send_files' live delivery to the phone
 
 
 @app.on_event("startup")

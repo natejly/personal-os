@@ -1728,7 +1728,7 @@ export type ChatEvent =
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
   | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason']; model?: string; why?: string } }
-  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
+  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null; attachments?: Attachment[] | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 # ---- Retrieval (memory_index.py) ----
 RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a turn's window share can carry
-VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans (a numpy dot over 5k short rows stays under ~10 ms)
+VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest first (a numpy dot over 5k short rows stays under ~10 ms); older rows past it are not scanned
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
 QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
@@ -17,6 +17,17 @@ W_BM25 = 1.0
 W_COSINE = 1.0
 W_GRAPH = 0.7
 W_RECENT = 0.5
+# A date phrase in the query ("last month", "in March") ranks memories learned in that window: a fifth ranker
+# (W_TEMPORAL) over in-window rows that are also about the query (cosine >= TEMPORAL_MIN_SIMILARITY, below the
+# general floor because the window already narrows the field), then a post-fusion nudge of +-TEMPORAL_BOOST/2 by
+# closeness to the window, also applied to reranker scores. A soft signal, never a filter: a row a whole window
+# away keeps 20% of its score, so a strong match survives a mis-read date phrase while weak ones sink. 1.6 because
+# reranker scores spread over orders of magnitude (0.9 vs 0.001): the eval's temporal MRR with rerank on went
+# 0.66 at 0.6, 0.76 at 1.2, 0.86 at 1.6; the fused path reads the same at 0.6 and 1.6 but leaks fewer
+# out-of-window rows into the top 10 (28 -> 12).
+W_TEMPORAL = 0.8
+TEMPORAL_BOOST = 1.6
+TEMPORAL_MIN_SIMILARITY = 0.25
 # A vector-only hit counts as relevant at this cosine or above. Higher than the documents floor
 # (limits.RETRIEVAL_MIN_SIMILARITY, 0.25): a passage is one of several cited excerpts, but a memory line is injected
 # with no reranker every turn it matches, and a short unrelated sentence routinely scores near that floor.
@@ -25,6 +36,12 @@ LEXICAL_HITS = 15        # keyword hits per lexical pass (FTS, then CJK substrin
 CONTEXT_HITS = 40        # most log rows a turn asks retrieval for; the "memories" window share trims further
 SEARCH_HITS = 100        # most rows search_memory ranks before paging
 SEARCH_PAGE = 20         # rows per search_memory page
+# Rerank (search_reranked): a second-stage model reorders the fused rows; any failure leaves the fused order.
+RERANK_CANDIDATES = 30   # fused rows sent to the reranker; the rest keep their fused place after them (the call's cost grows with this)
+RERANK_TIMEOUT = 1.5     # seconds a turn waits for it; past that the turn keeps the fused order (a reply must not stall on a ranking aid)
+RERANK_MIN_CANDIDATES = 4  # fewer rows are not worth a network call: the order barely matters at that size
+RERANK_MIN_SCORE = 0.0   # scored rows below this are dropped; 0 keeps all (to be calibrated against the eval before it is raised)
+RERANK_BACKOFF = 300.0   # seconds after a failed call before trying again, like Embedder.BACKOFF_SECONDS: a dead route costs one wait, not one per turn
 
 # ---- Write-time dedupe ----
 # A new memory this close (cosine) to a live, unpinned row in scope supersedes it instead of adding a row: the same
@@ -55,7 +72,7 @@ TIDY_AT_KEY = "memoryTidyAt"
 # How long after an assistant reply finished an auto-learn write can land (extraction is one LLM call
 # queued behind the reply); a wider window would start guessing which reply a memory came from.
 BACKFILL_WINDOW_S = 180
-# Memory page source quote: long enough to recognise the message, short enough for one row.
+# Memory source quote: long enough to recognise the message, short enough for one row.
 SOURCE_QUOTE_CHARS = 240
 
 # ---- Graph extraction ----
@@ -79,7 +96,7 @@ GRAPH_CONTEXT_MAX_SEEDS = 8         # entities a message may seed; past this the
 GRAPH_CONTEXT_MAX_EDGES = 24        # live 1-hop edges considered before the "graph" window share trims
 GRAPH_RECENCY_HALF_LIFE_DAYS = 90   # an edge's recency weight halves every this many days since it became true
 GRAPH_QUALIFIER_CHARS = 120         # the role or relationship note shown after an edge line; longer is a sentence, not a qualifier
-GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher
+GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher, most recently updated first
 
 # ---- Graph backfill ----
 GRAPH_BACKFILL_DELAY_SECONDS = 1.0  # pause between extraction calls, so a backfill never crowds out live chat on the proxy

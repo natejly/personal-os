@@ -39,7 +39,7 @@ import time
 from typing import Any, Callable
 
 from .db import Database, new_id, row_to_dict
-from . import mail_edits, redact, verify
+from . import mail_attachments, mail_edits, redact, verify
 from .google import GoogleNotConnected, NotSent
 
 log = logging.getLogger(__name__)
@@ -82,7 +82,10 @@ CREATE TABLE IF NOT EXISTS pending_sends (
   message_id TEXT,                             -- Gmail id, once it is out
   thread_id TEXT,
   error TEXT,
-  verification TEXT                            -- JSON verdict from the post-send read-back
+  verification TEXT,                           -- JSON verdict from the post-send read-back
+  attachments TEXT,                            -- JSON list of Uploads document ids
+  cc_addr TEXT,
+  bcc_addr TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pending_sends_due ON pending_sends(status, send_after);
 """
@@ -91,8 +94,10 @@ SEND_JSON = ("verification",)
 
 class Outbox:
     def __init__(self, db: Database, google: Any, get_settings: Callable[[], dict[str, Any]] | None = None,
-                 bounds: tuple[int, int] = (HOLD_MIN, HOLD_MAX), clock: Callable[[], float] = time.time):
+                 bounds: tuple[int, int] = (HOLD_MIN, HOLD_MAX), clock: Callable[[], float] = time.time,
+                 documents: Any = None):
         self.db = db
+        self.documents = documents
         self.google = google
         self.get_settings = get_settings or db.get_settings
         self.bounds = bounds
@@ -101,6 +106,11 @@ class Outbox:
         self._loop_ref: asyncio.AbstractEventLoop | None = None
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # The table is created above with these columns; one made before they existed gets them here.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(pending_sends)").fetchall()}
+            for col in ("attachments", "cc_addr", "bcc_addr"):
+                if col not in have:
+                    c.execute(f"ALTER TABLE pending_sends ADD COLUMN {col} TEXT")
 
     # ---- config ----
     def config(self) -> dict[str, Any]:
@@ -116,31 +126,43 @@ class Outbox:
 
     # ---- queue / cancel / send now ----
     def queue(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
-              origin: str = "app", conversation_id: str | None = None) -> dict[str, Any]:
+              origin: str = "app", conversation_id: str | None = None,
+              attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None) -> dict[str, Any]:
         """Hold a send. With the hold turned off it goes out immediately, verification and all."""
-        mail_edits.check_send(to, subject)  # ValueError now, not a failed row 90s later
+        mail_edits.check_send(to, subject, cc, bcc)  # ValueError now, not a failed row 90s later
+        ids = list(attachments or [])
+        items = self._attachments(ids)  # AttachmentError now too: a bad id or an oversize total never starts a hold
         cfg = self.config()
         if not cfg["enabled"]:
-            out = self.google.gmail_send(to, subject, body, reply_to_message_id)
+            out = self.google.gmail_send(to, subject, body, reply_to_message_id, **extras(items, cc, bcc))
             v = out.get("verification")
             # Same shape as a queued row, so one caller handles both: this one is just already over.
             return {"id": "", "to": to, "subject": subject, "status": SENT, "held": False, "seconds_left": 0,
                     "message_id": out.get("sent"), "thread_id": out.get("thread_id"),
-                    "verified": verify.ok(v), "verification": v,
+                    "verified": verify.ok(v), "verification": v, "attachments": [i["name"] for i in items],
                     "error": None if verify.ok(v) else verify.summary_text(v)}
         pid, t = new_id(), self.clock()
         row = {"id": pid, "to_addr": to, "subject": subject, "body": body,
                "reply_to_message_id": reply_to_message_id, "origin": origin, "conversation_id": conversation_id,
                "status": HOLDING, "hold_seconds": cfg["seconds"], "created_at": t,
-               "send_after": t + cfg["seconds"]}
+               "send_after": t + cfg["seconds"], "attachments": json.dumps(ids) if ids else None,
+               "cc_addr": cc or None, "bcc_addr": bcc or None}
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO pending_sends(id, to_addr, subject, body, reply_to_message_id, origin, conversation_id,"
-                " status, hold_seconds, created_at, send_after) VALUES(:id, :to_addr, :subject, :body,"
-                " :reply_to_message_id, :origin, :conversation_id, :status, :hold_seconds, :created_at, :send_after)",
+                " status, hold_seconds, created_at, send_after, attachments, cc_addr, bcc_addr) VALUES(:id, :to_addr,"
+                " :subject, :body, :reply_to_message_id, :origin, :conversation_id, :status, :hold_seconds, :created_at,"
+                " :send_after, :attachments, :cc_addr, :bcc_addr)",
                 row)
         self.poke()
         return self._out(row)
+
+    def _attachments(self, ids: list[str]) -> list[dict[str, Any]]:
+        if not ids:
+            return []
+        if self.documents is None:
+            raise mail_attachments.AttachmentError("Attachments are not available here.")
+        return mail_attachments.resolve(self.documents, self.db.data_dir, ids)
 
     def get(self, pid: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -242,8 +264,10 @@ class Outbox:
 
     def _deliver(self, row: dict[str, Any]) -> None:
         try:
-            out = self.google.gmail_send(row["to_addr"], row["subject"], row["body"], row["reply_to_message_id"])
-        except (NotSent, GoogleNotConnected) as e:
+            items = self._attachments(_ids(row.get("attachments")))
+            out = self.google.gmail_send(row["to_addr"], row["subject"], row["body"], row["reply_to_message_id"],
+                                         **extras(items, row.get("cc_addr"), row.get("bcc_addr")))
+        except (NotSent, GoogleNotConnected, mail_attachments.AttachmentError) as e:
             # Gmail was never asked to send: the row stays open so Send now can try again.
             log.warning("outbox: send %s not attempted: %s", row["id"], e)
             with self.db.tx() as c:
@@ -297,9 +321,15 @@ class Outbox:
             self._event.clear()
 
     # ---- shaping ----
+    def _names(self, ids: list[str]) -> list[str]:
+        docs = [self.documents.get(i) if self.documents is not None else None for i in ids]
+        return [d["name"] for d in docs if d]
+
     def _out(self, row: dict[str, Any]) -> dict[str, Any]:
         d = dict(row)
         d["to"] = d.pop("to_addr", d.get("to"))
+        d["attachments"] = self._names(_ids(d.get("attachments")))
+        d["cc"], d["bcc"] = d.pop("cc_addr", None) or "", d.pop("bcc_addr", None) or ""
         d.pop("body", None)  # the list is an undo affordance, not a mail client
         if isinstance(d.get("verification"), str):
             try:
@@ -309,6 +339,19 @@ class Outbox:
         d["verified"] = verify.ok(d.get("verification")) if d.get("status") == SENT else None
         d["seconds_left"] = max(0, int(round(float(d.get("send_after") or 0) - self.clock()))) if d.get("status") == HOLDING else 0
         return d
+
+
+def extras(items: list[dict[str, Any]], cc: str | None, bcc: str | None) -> dict[str, Any]:
+    """The optional keyword arguments of a send that are set: a mail client that lacks one is never passed it."""
+    return {k: v for k, v in (("attachments", items), ("cc", cc), ("bcc", bcc)) if v}
+
+
+def _ids(raw: Any) -> list[str]:
+    """The attachment ids of a row (a JSON list in the column)."""
+    try:
+        return [str(i) for i in json.loads(raw)] if raw else []
+    except ValueError:
+        return []
 
 
 def router(outbox: Outbox) -> Any:
@@ -350,7 +393,7 @@ def queued_result(row: dict[str, Any]) -> dict[str, Any]:
                 shown[key] = redact.scrub_command_output(shown[key])
         return shown
     left = row.get("seconds_left") or row.get("hold_seconds") or 0
-    return {"queued": row.get("id"), "to": row.get("to"),
+    return {"queued": row.get("id"), "to": row.get("to"), "attachments": row.get("attachments") or [],
             "subject": redact.scrub_command_output(str(row.get("subject") or "")),
             "status": row.get("status"), "sends_in_seconds": left,
             "note": f"NOT SENT YET. Held for {left}s so the user can undo it, then it goes out on its own. "

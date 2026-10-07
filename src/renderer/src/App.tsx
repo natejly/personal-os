@@ -14,7 +14,6 @@ import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SelectionToolbar from './components/SelectionToolbar'
 import LibraryView from './components/LibraryView'
-import MemoryPage from './components/MemoryPage'
 import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
@@ -268,7 +267,6 @@ export default function App(): JSX.Element {
           {view === 'mail' && <MailView />}
           {view === 'docs' && <DocsView />}
           {view === 'library' && <LibraryView />}
-          {view === 'memory' && <MemoryPage />}
           {view === 'project' && <ProjectView />}
         </RenderBoundary>
       )}

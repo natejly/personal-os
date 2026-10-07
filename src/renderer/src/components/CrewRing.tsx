@@ -1,6 +1,6 @@
 import Face from './Face'
 
-export interface RingNode { id: string; name?: string; status?: string; title: string }
+export interface RingNode { id: string; name?: string; hue?: number; tone?: number; status?: string; title: string }
 
 /** Where child i of n sits, in % of the frame: evenly round a ring, the first straight up. */
 export const ringPoints = (n: number, radius = 38): { x: number; y: number }[] =>
@@ -34,7 +34,7 @@ export default function CrewRing({ center, kids, onPick, onCenter }: {
       {kids.map((k, i) => (
         <button key={k.id} className="crew-sat" style={{ left: `${pts[i].x}%`, top: `${pts[i].y}%` }} title={k.title}
           onPointerDown={stop} onClick={(e) => { stop(e); onPick(k.id) }}>
-          <Face name={k.name ?? k.id} status={k.status} size="fill" />
+          <Face name={k.name ?? k.id} hue={k.hue} tone={k.tone} status={k.status} size="fill" />
         </button>
       ))}
     </span>

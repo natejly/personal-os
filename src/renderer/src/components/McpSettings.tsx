@@ -361,11 +361,13 @@ export default function McpSettings(): JSX.Element {
 
   return (
     <div className="mcp">
-      <p className="muted">
-        Connectors are <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer">MCP</a> servers:
-        other people&apos;s programs that hand the assistant extra tools. A local one runs on this machine, under your
-        account; a remote one is a web address, reached with the headers or sign-in you give it. Nothing is added or enabled unless you do it here, and every tool from a
-        connector {allowAll ? <><b>runs without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on under Permissions</> : <><b>asks before it runs</b> until you say otherwise</>}.
+      {/* One line: what a connector is lives on the MCP link's hover and in docs/connectors.md, not above every sub-tab. */}
+      <p className="muted small">
+        <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer"
+          title="A connector is an MCP server: another program that hands the assistant extra tools. A local one runs on this Mac under your account; a remote one is a web address reached with the headers or sign-in you give it.">MCP</a> servers
+        that add tools. Nothing runs until you add it here{allowAll
+          ? <>, and their tools <b>run without asking</b> while &ldquo;Allow all domains and MCP servers&rdquo; is on</>
+          : <>; their tools <b>ask before they run</b> until you say otherwise</>}.
       </p>
 
       <div className="seg" role="tablist" aria-label="Connectors">

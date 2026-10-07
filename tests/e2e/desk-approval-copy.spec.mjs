@@ -1,27 +1,36 @@
 // Regression: ISSUE-012 — a desk approval card claims the chat read untrusted content
 // Found by /qa on 2026-10-06
 // Report: .gstack/qa-reports/run-20261006T212932Z/
+import { writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { join } from 'node:path'
 import { test, expect } from './fixtures.mjs'
 import { newChat, say } from './helpers/chat.mjs'
+import { homeScratch, rmScratch } from './helpers/cowork.mjs'
 import { enableModules } from './helpers/mah.mjs'
 
 test.describe.configure({ timeout: 180_000 })
 
-test('an autonomy-forced approval card does not say the chat read untrusted content', async ({ grain }) => {
+// An autonomous chat follows the permission mode, so its own changes raise no forced card any more; a credential
+// store (.env) still forces one in every mode, and this chat has read nothing untrusted.
+test('a card forced by a credential-store read, not by taint, does not say the chat read untrusted content', async ({ grain }) => {
   const { page, api } = grain
   await enableModules(api)
   await api('/settings', { method: 'PUT', body: { autonomousByDefault: true, toolDeferAbove: 0 } })
   await page.reload()
   await page.waitForSelector('.sidebar')
   await newChat(page)
-  await say(page, '!!tool health_log {"metric":"sleep","value":7.25,"note":"copy check"}')
-  const card = page.locator('.tc-approval').first()
-  await expect(card).toBeVisible({ timeout: 60_000 })
-  await expect(card).toContainText('needs your OK')
-  await expect(card).not.toContainText('untrusted')
-  const [c] = await api('/conversations?include_desks=true')
-  expect((await api(`/conversations/${c.id}`)).settings.tainted).toBeFalsy()
+  const dir = homeScratch()
+  try {
+    writeFileSync(join(dir, '.env'), 'SECRET=1\n')
+    await say(page, `!!tool read_local_file {"path":"${join(dir, '.env')}"}`)
+    const card = page.locator('.tc-approval').first()
+    await expect(card).toBeVisible({ timeout: 60_000 })
+    await expect(card).toContainText('needs your OK each time')
+    await expect(card).not.toContainText('untrusted')
+    const [c] = await api('/conversations?include_desks=true')
+    expect((await api(`/conversations/${c.id}`)).settings.tainted).toBeFalsy()
+  } finally { rmScratch(dir) }
 })
 
 /** A provider in front of the harness mock that answers a tool-offering request with the next scripted step, then plain text. */

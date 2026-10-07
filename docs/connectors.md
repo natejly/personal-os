@@ -133,7 +133,9 @@ about itself. Two rules:
 
 **Permission modes.** Manual keeps the per-tool modes above. Auto sends a connector call that would ask to
 the safety reviewer. Allow everything runs connector calls without a card, except one that untrusted
-content in the reply forced to ask: that card stays in every mode.
+content in the reply forced to ask: that card stays in every mode. The OpenCode and Claude Code connectors
+are the exception under Allow everything: they run in a tainted reply too, as `opencode_run` and
+`coding_session_start` do.
 
 **Secrets.** API keys and header values go to the macOS Keychain (service `Grain`), one entry per
 server, written through the `security` command on stdin so a key never appears in a process list. If the

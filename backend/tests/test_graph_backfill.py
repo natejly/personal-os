@@ -78,7 +78,6 @@ def test_second_run_processes_nothing(env, monkeypatch) -> None:
 
 def test_ineligible_chats_are_skipped(env, monkeypatch) -> None:
     db, convos, graph = env
-    private = convos.create(None, "p", "m", private=True)
     off = convos.create(None, "o", "m")
     convos.update(off["id"], {"settings": {"autoLearn": False}})
     muted = convos.create(None, "m", "m")
@@ -86,7 +85,7 @@ def test_ineligible_chats_are_skipped(env, monkeypatch) -> None:
     gone = convos.create(None, "g", "m")
     tainted = convos.create(None, "t", "m")
     convos.update(tainted["id"], {"settings": {"tainted": True}})
-    for c in (private, off, gone, tainted, muted):
+    for c in (off, gone, tainted, muted):
         convos.add_message(c["id"], "user", "I use Docker daily")
     with db.tx() as c:
         c.execute("UPDATE conversations SET deleted_at=1 WHERE id=?", (gone["id"],))

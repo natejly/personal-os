@@ -31,7 +31,7 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user", "gmail_send"})  # gmail_send: the email card is the user writing, not granting
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
@@ -645,6 +645,193 @@ def hardline(cmd: str, parsed: Parsed | None = None) -> str | None:
                 if why:
                     return why
     return None
+
+
+# ---------------------------------------------------------------- destructive floor
+# Allow everything still shows a card for these: deletes that skip the Trash, disk wipes and history rewrites on a remote.
+# Best effort over the same parser as the hardline list; the sandbox and the hardline list are still the boundary.
+
+RM_COMMANDS = {"rm", "unlink", "srm", "shred"}
+GIT_GLOBAL_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+DISKUTIL_WIPES = re.compile(r"^(erase|secureErase|zeroDisk|randomDisk|reformat|partitionDisk)", re.I)
+APFS_WIPES = {"deletecontainer", "deletevolume", "erasevolume"}
+DEV_OK = ("/dev/null", "/dev/zero", "/dev/stdout", "/dev/stderr", "/dev/tty")
+
+
+def temp_roots(extra: Iterable[str] = ()) -> list[str]:
+    """Folders whose contents are scratch: deleting inside them is not a permanent loss of user files."""
+    import tempfile
+    roots = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders", tempfile.gettempdir(),
+             os.environ.get("TMPDIR") or "", *extra]
+    out: list[str] = []
+    for r in roots:
+        if r:
+            for v in (os.path.normpath(r), os.path.realpath(r)):
+                if v not in out and v != "/":
+                    out.append(v)
+    return out
+
+
+def _in_temp(arg: str, cwd: str | None, roots: list[str]) -> bool:
+    a = arg
+    for var in ("${TMPDIR}", "$TMPDIR"):
+        if a.startswith(var):
+            a = (os.environ.get("TMPDIR") or "/tmp") + a[len(var):]
+    a = _expand_home(a)
+    if "$" in a or "`" in a:
+        return False  # a variable or substitution we cannot resolve: assume it names user files
+    glob = bool(re.search(r"[*?\[]", a))
+    if glob:
+        a = os.path.dirname(re.split(r"[*?\[]", a)[0] + "x") or "."
+    if not os.path.isabs(a):
+        a = os.path.join(cwd or os.path.expanduser("~"), a)
+    for p in {os.path.normpath(a), os.path.realpath(a)}:
+        for r in roots:
+            if p.startswith(r + "/") or (glob and p == r):
+                return True
+    return False
+
+
+def _git_force_push(args: list[str]) -> bool:
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in GIT_GLOBAL_ARG else 1
+    if i >= len(args) or args[i] != "push":
+        return False
+    rest = args[i + 1:]
+    return any(a in ("-f", "--force", "--mirror", "--delete", "-d") or a.startswith("--force-with-lease")
+               or (a.startswith("-") and not a.startswith("--") and "f" in a)
+               or (a.startswith("+") and len(a) > 1) or (a.startswith(":") and len(a) > 1) for a in rest)
+
+
+def _destructive_tokens(tokens: list[str], raw: list[str], cwd: str | None, roots: list[str]) -> str | None:
+    if not tokens:
+        return None
+    name = os.path.basename(tokens[0])
+    args = tokens[1:]
+    if name in RM_COMMANDS:
+        paths, flags = [], True
+        for a in args:
+            if flags and a == "--":
+                flags = False
+            elif flags and a.startswith("-") and a != "-":
+                continue
+            else:
+                paths.append(a)
+        if not paths:
+            # `xargs rm`, `find ... | xargs rm`: the names arrive on stdin, nothing to judge them by
+            return f"mass delete through xargs {name}" if any(os.path.basename(w) == "xargs" for w in raw) else None
+        outside = [a for a in paths if not _in_temp(a, cwd, roots)]
+        if outside:
+            return f"permanent delete ({name} {' '.join(outside[:3])})"
+        return None
+    if name == "find" and any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for a in args):
+        execs = [os.path.basename(args[j + 1]) for j, a in enumerate(args[:-1]) if a in ("-exec", "-execdir", "-ok", "-okdir")]
+        if "-delete" in args or any(e in RM_COMMANDS for e in execs):
+            starts = []
+            for a in args:
+                if a.startswith("-") or a in ("(", "!", ")"):
+                    break
+                starts.append(a)
+            if not starts or not all(_in_temp(a, cwd, roots) for a in starts):
+                return "mass delete (find -delete)" if "-delete" in args else "mass delete (find -exec rm)"
+    if name == "git" and _git_force_push(args):
+        return "git force-push"
+    if name == "diskutil" and args:
+        sub = args[1:] if args[0].lower() == "apfs" else args
+        if args[0].lower() == "apfs" and sub and sub[0].lower() in APFS_WIPES:
+            return "diskutil apfs " + sub[0]
+        if DISKUTIL_WIPES.match(args[0]):
+            return "diskutil " + args[0]
+    if name == "dd" and any(a.startswith("of=/dev/") and a[3:] not in DEV_OK for a in args):
+        return "dd to a device"
+    if name.startswith("mkfs") or name == "newfs" or name.startswith("newfs_"):
+        return "formatting a filesystem"
+    return None
+
+
+def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -> str | None:
+    """Why this shell command cannot be taken back (a delete that skips the Trash, a disk wipe, a force-push), or None.
+    Looks through chains, pipes, env/sudo/nohup wrappers, $() and backticks, `sh -c` / `eval` strings and, best effort,
+    ( subshells ) and { groups }. Deleting inside a temp folder (temp_roots, plus `scratch`) does not count."""
+    roots = temp_roots(scratch)
+
+    def walk(text: str, depth: int, here: str | None) -> str | None:
+        if depth > 4:
+            return None
+        p = split_command(text)
+        segs = p.segments + p.nested
+        if p.opaque:  # a subshell or group the splitter gives up on: split again with the brackets as separators
+            segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
+        for seg in segs:
+            tokens = strip_wrappers(seg.words, True)
+            if len(tokens) == 2 and tokens[0] == "cd" and "$" not in tokens[1].replace("$HOME", "").replace("$TMPDIR", ""):
+                # `cd /tmp/x && rm -rf build`: later relative paths are judged from there (a literal folder only)
+                t = tokens[1].replace("$TMPDIR", os.environ.get("TMPDIR") or "/tmp")
+                t = _expand_home(t)
+                here = os.path.normpath(t if os.path.isabs(t) else os.path.join(here or os.path.expanduser("~"), t))
+                continue
+            why = _destructive_tokens(tokens, seg.words, here, roots)
+            if why:
+                return why
+            inner = _shell_c(tokens)
+            if inner is None and tokens and os.path.basename(tokens[0]) == "eval":
+                inner = " ".join(tokens[1:])
+            if inner is not None and (why := walk(inner, depth + 1, here)):
+                return why
+        return None
+    return walk(normalize(cmd or ""), 0, cwd)
+
+
+KEYCHAIN_SUBCOMMANDS = re.compile(r"^(find-|dump-keychain|export|delete-|add-|set-|unlock-keychain|import)")
+
+
+def touches_protected(cmd: str, cwd: str | None = None) -> str | None:
+    """Why a command run OUTSIDE the sandbox reaches what the sandbox would have kept it from: a credential store, Grain's
+    own data folder or app (mac.sensitive_reason / protected_reason) named by any path-like word, or the Keychain CLI.
+    Best effort: a path built at run time is not seen."""
+    from . import mac
+    text = normalize(cmd or "")
+    p = split_command(text)
+    segs = p.segments + p.nested
+    if p.opaque:
+        segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
+    for seg in segs:
+        tokens = strip_wrappers(seg.words, True)
+        if tokens and os.path.basename(tokens[0]) == "security" and len(tokens) > 1 and KEYCHAIN_SUBCOMMANDS.match(tokens[1]):
+            return "Keychain access (security " + tokens[1] + ")"
+        if (inner := _shell_c(tokens)) is not None and (why := touches_protected(inner, cwd)):
+            return why
+        words = [w.split("=", 1)[1] if w.startswith("-") and "=" in w else w for w in tokens[1:]]
+        for w in words + [t for _, t in seg.redirects]:
+            if not w or w in EXEMPT_PATHS or not (w.startswith(("/", "~", "$HOME", "${HOME}", ".")) or "/" in w):
+                continue
+            if "$" in w.replace("${HOME}", "").replace("$HOME", ""):
+                continue
+            if re.search(r"[*?\[]", w):
+                w = os.path.dirname(re.split(r"[*?\[]", w)[0] + "x") or "."
+            spelled = _expand_home(w)
+            if not os.path.isabs(spelled) and cwd:
+                spelled = os.path.join(cwd, spelled)
+            real = _real(w, cwd)
+            why = mac.sensitive_reason(os.path.normpath(spelled), real) or mac.protected_reason(spelled, real)
+            if why:
+                return f"{w}: {why}"
+    return None
+
+
+def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
+                    scratch: Iterable[str] = ()) -> tuple[str, str] | None:
+    """What Allow everything still cards for this call, as (card kind, reason): an unsandboxed command that names a
+    credential store or Grain's own data or app ("external_directory"), or a command `destructive` flags
+    ("destructive"), sandboxed or not. None for anything else."""
+    if tool != "shell_run" or not isinstance(args, dict):
+        return None
+    cmd = str(args.get("command") or "")
+    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd)):
+        return "external_directory", why
+    why = destructive(cmd, cwd, scratch)
+    return ("destructive", why) if why else None
 
 
 # ---------------------------------------------------------------- subjects

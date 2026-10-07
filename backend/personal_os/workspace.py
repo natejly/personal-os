@@ -586,6 +586,11 @@ class Workspace:
                 os.replace(tmp, p)
         except OSError as e:
             raise _oserror(rel, "written", e, "check that no parent of that path is already a file") from e
+        if not exists and self.on_save is not None:
+            try:
+                self.on_save(desk_id, p)
+            except Exception:  # noqa: BLE001 - recording a save never breaks the write
+                pass
         return {"path": rel, "mode": mode, "created": not exists, "bytes": p.stat().st_size,
                 "state": self.state(desk_id, rel), "usage": self.usage(desk_id)}
 

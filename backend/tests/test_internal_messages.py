@@ -229,18 +229,19 @@ def test_migration_26_marks_the_leaked_prefixes_and_nothing_else() -> None:
             ("7", "assistant", "You ended your reply without calling anything", None),
             ("8", "user", "You ended your reply without calling x", "wake")]
     c.executemany("INSERT INTO messages VALUES(?,?,?,?)", rows)
+    c.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")  # later steps read it
     c.execute("PRAGMA user_version = 25")
-    assert migrations.run(c) == [26]
+    assert migrations.run(c) == list(range(26, migrations.latest() + 1))
     kinds = dict(c.execute("SELECT id, kind FROM messages"))
     assert kinds == {"1": "nudge", "2": "continue", "3": "resume", "4": "handoff", "5": None, "6": None, "7": None, "8": "wake"}
     assert c.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 8, "nothing is deleted"
 
 
-def test_a_fresh_database_is_at_version_26() -> None:
-    assert migrations.latest() == 26
+def test_a_fresh_database_is_at_the_latest_version() -> None:
+    assert migrations.latest() >= 26
     with tempfile.TemporaryDirectory() as td:
         with Database(td).connect() as c:
-            assert migrations.current(c) == 26
+            assert migrations.current(c) == migrations.latest()
 
 
 # ---------------- (e) the phone ----------------

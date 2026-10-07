@@ -1102,20 +1102,6 @@ test('learnedText counts updates and forgets as changes', () => {
   assert.equal(learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never), 'Forgot 1')
 })
 
-test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.getState().newChat()
-  useStore.setState({ toasts: [], uploadTaintTarget: null })
-  await useStore.getState().setChatSettings({ private: true })
-  assert.equal(useStore.getState().draftPrivate, true)
-  const { calls } = stubFetch(t, () => json({ detail: 'down' }, 500))
-  assert.equal(await useStore.getState().send('hi'), false)
-  const create = calls.find((c) => c.method === 'POST' && c.path.endsWith('/conversations'))
-  assert.equal(create?.body.private, true)
-  useStore.getState().newChat()
-  assert.equal(useStore.getState().draftPrivate, false)
-})
-
 test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
@@ -1230,4 +1216,95 @@ test('the side chat parks its model and effort until its thread exists, and a pi
   assert.equal(useStore.getState().pageAgentPin?.id, 'a')
   useStore.getState().unpinPageAgent()
   assert.equal(useStore.getState().pageAgentPin, null)
+})
+
+test('Memory lives in Settings: split by default, and every way in lands on its tab', () => {
+  const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
+  assert.equal(st().memoryMode, 'split')
+  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'model', memoryMode: 'list', memoryFocus: ['old'], view: 'home' }) }
+  reset()
+  st().openMemory()
+  assert.equal(st().settingsOpen, true)
+  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().memoryMode, 'split')
+  assert.equal(st().memoryFocus, null)
+  assert.equal(st().view, 'home', 'no page to navigate to')
+  reset()
+  st().openMemory('graph')
+  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().memoryMode, 'graph')
+  reset()
+  st().showMemories(['x'])
+  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'memory', 'list', ['x']])
+  reset()
+  st().openSettings('modules')
+  assert.equal(st().settingsTab, 'appearance')
+})
+
+test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {
+  const made: Array<{ title: string; body?: string; tag?: string }> = []
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const real = { N: g.Notification, d: g.document, f: globalThis.fetch }
+  let focused = false
+  g.Notification = class { static permission = 'granted'; onclick: (() => void) | null = null; constructor(title: string, o: { body?: string; tag?: string }) { made.push({ title, ...o }) } }
+  g.document = { hasFocus: () => focused }
+  const conv = (id: string): object => ({ id, project_id: null, title: `Chat ${id}`, model: 'm', settings: {}, created_at: 0, updated_at: 0, messages: [] })
+  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    return new Response(JSON.stringify(/\/conversations\/n\d$/.test(url) ? conv(url.slice(-2)) : []), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const frame = (cid: string, rid: string, o: Record<string, unknown> = {}): void =>
+    useStore.getState().onRunState({ run_id: rid, conversation_id: cid, message_id: null, seq: 1, started_at: 0, live: true, answering: true, status: 'running', kind: 'chat', replied: false, ...o } as never)
+  const finish = (cid: string, rid: string, o: Record<string, unknown> = {}): void => { frame(cid, rid); frame(cid, rid, { answering: false, replied: true, ...o }) }
+  const unread = (id: string): number | undefined => useStore.getState().unreadById[id]
+  try {
+    useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [], sessions: {}, unreadById: {}, conversations: [conv('n1'), conv('n2')], view: 'chat', focusedConversationId: 'n2' } as never)
+
+    finish('n1', 'ra')
+    assert.equal(unread('n1'), 1, 'off screen: a dot')
+    assert.deepEqual(made.map((n) => [n.title, n.body, n.tag]), [['Chat n1', 'Reply ready', 'ra:reply']], 'one banner, fixed body')
+    frame('n1', 'ra', { answering: false, replied: true, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'the run ending after its reply does not count twice')
+
+    made.length = 0
+    focused = true
+    finish('n2', 'rb')
+    assert.equal(unread('n2'), undefined, 'on screen and focused: nothing to flag')
+    assert.equal(made.length, 0, 'and no banner')
+
+    focused = false
+    finish('n2', 'rc')
+    assert.equal(unread('n2'), undefined, 'on screen in an unfocused window: no dot')
+    assert.equal(made.length, 1, 'but a banner')
+
+    made.length = 0
+    frame('n1', 'rd')
+    frame('n1', 'rd', { answering: false, replied: false, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'a silent wake leaves nothing to read')
+    assert.equal(made.length, 0)
+
+    await useStore.getState().selectChat('n1')
+    assert.equal(unread('n1'), undefined, 'opening the chat reads it')
+  } finally {
+    reset()
+    useStore.setState({ unreadById: {}, focusedConversationId: null } as never)
+    g.Notification = real.N
+    g.document = real.d
+    globalThis.fetch = real.f
+  }
+})
+
+test('the composer Stop stops the main agent of a chat working autonomously, with no strip on screen', async () => {
+  const calls: [string, string][] = []
+  const real = api.stopRun
+  api.stopRun = (async (c: string, runId?: string) => { calls.push([c, runId ?? '']); return { ok: true } }) as never
+  try {
+    const conv = { id: 'cd', title: 't', project_id: null, model: null, settings: { deskId: 'd1' }, created_at: 0, updated_at: 0, messages: [msg()] } as never
+    useStore.setState({ sessions: { cd: session({ conversation: conv, streaming: { messageId: 'm1', runId: 'rd', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never, workers: {} } as never)
+    await useStore.getState().stop('cd')
+    assert.deepEqual(calls, [['cd', 'rd']], 'the run itself is stopped: the desk turn is that run')
+    assert.equal(useStore.getState().sessions.cd.streaming?.stopping, true)
+  } finally {
+    api.stopRun = real
+  }
 })

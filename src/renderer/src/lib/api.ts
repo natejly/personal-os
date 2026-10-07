@@ -20,6 +20,7 @@ import type {
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
+import type { ChatRunChanges } from './deskFiles'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
@@ -430,11 +431,17 @@ export const api = {
     /** Free slots as draft text; creates no draft or event. */
     suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
       req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }, NO_TIMEOUT),
-    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
-    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
+    /** Stores one attachment of a message in Uploads (for the viewer, or to attach it to a forward). */
+    gmailAttachmentImport: (messageId: string, attachmentId: string) =>
+      req<Document>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/import`, { method: 'POST' }, NO_TIMEOUT),
+    /** Writes one attachment to the Downloads folder. */
+    gmailAttachmentSave: (messageId: string, attachmentId: string) =>
+      req<{ path: string; name: string }>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/save`, { method: 'POST' }, NO_TIMEOUT)
   },
   /** Backups, restore and export (backend backups.py). */
   data: {
@@ -473,7 +480,7 @@ export const api = {
     /** Chats working autonomously list among the rest. */
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}&include_desks=true`),
     get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
-    create: (projectId: string | null, model?: string, isPrivate = false) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model, ...(isPrivate ? { private: true } : {}) }) }, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
@@ -615,6 +622,7 @@ export const api = {
   undoExternal: (id: string) => req<{ ok: boolean; kind: string }>(`/external-undo/${encodeURIComponent(id)}`, { method: 'POST' }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
+  conversationChanges: (id: string) => req<{ available: boolean; runs: ChatRunChanges[] }>(`/conversations/${id}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),

@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore, useChatTainted } from '../store'
+import { useStore, useChatTainted, useChatFaceById } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -23,6 +23,7 @@ import { SAFE_MD } from './Message'
 import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
+import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -138,6 +139,17 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
     setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
   }
+  // A proposed email is the same editable card as in the chat; Accept there is Send (or Save draft), Reject is Discard.
+  const MailCard = p.tool === 'gmail_send' || p.tool === 'gmail_draft' ? TOOL_CARDS[p.tool] : undefined
+  if (MailCard) {
+    const event = { id: p.id, name: p.tool, arguments: p.args, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+    return (
+      <li className="inbox-item">
+        <MailCard event={event} pending conversationId={p.conversation_id ?? undefined}
+          decide={async (ok, edited) => { const e = await decideProposal(p.id, ok, edited); if (e) useStore.getState().toast(e, 'error') }} />
+      </li>
+    )
+  }
   // Closing the row ends the edit too: Accept must never send text from boxes that are not on screen.
   const toggle = (): void => {
     if (open) setEditing(false)
@@ -207,6 +219,7 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const chatFace = useChatFaceById(r.conversation_id)
   // An unread problem opens itself; Mark all read collapses it. A row the user opened stays open — that click
   // marks it read too, and a click must not undo itself.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
@@ -229,7 +242,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-row">
         <RowOpen open={open} what="the report" onOpen={show}>
-          <Face name={r.job} status={r.status} size={18} />
+          <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
           <Dot tone={tone} label={toneLabel} />
           <span className="inbox-job">{r.job}</span>
           <span className="inbox-line" title={line}>{line}</span>

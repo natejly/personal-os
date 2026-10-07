@@ -6,11 +6,17 @@ the repos that own those tables need no hook; notes, Workspace saves and accepte
 Every write is INSERT OR IGNORE and never raises: a missing index row must not break the write it describes.
 There is no foreign key: rows of a purged chat are hidden by joining conversations at read time, and an FK could
 abort the insert that fired a trigger.
+
+Files → Artifacts is the `output` rows of every chat (plain chats' outboxes under <data>/chats/<id>/ and desks'
+workspaces under <data>/cowork/<desk id>/), newest first, grouped by chat. Bytes are never copied: a row is a
+path. A trashed chat keeps its artifacts listed (labelled with its title, no live link) while the bytes are on
+disk; a purge removes the folder and the rows (trash.py). A row whose file is gone is left out of the list.
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -18,6 +24,10 @@ from typing import Any
 
 from . import mac
 from .db import Database, new_id
+
+DESK_ROOT, DESK_SUBDIRS = "cowork", ("work", "outputs")  # workspace.py's layout; .baseline and .trash are the workspace's own
+RECONCILE_S = 10.0  # the artifacts list rescans the folders at most this often
+RAW_AS_TEXT = {"text/html", "image/svg+xml", "application/xhtml+xml", "application/xml", "text/xml", "text/javascript", "application/javascript"}
 
 log = logging.getLogger(__name__)
 
@@ -72,10 +82,63 @@ def migrate(c: sqlite3.Connection) -> None:
       {_INSERT}VALUES(lower(hex(randomblob(16))), new.conversation_id, 'coding', new.worktree, new.name, 'created', NULL, new.created_at); END""")
 
 
+def _walk(top: Path) -> list[tuple[Path, float]]:
+    """Regular files under `top`, skipping dot entries and symlinks (a desk can point one anywhere)."""
+    out: list[tuple[Path, float]] = []
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = [x for x in dirnames if not x.startswith(".") and not Path(dirpath, x).is_symlink()]
+        for fn in filenames:
+            p = Path(dirpath, fn)
+            if fn.startswith(".") or p.is_symlink():
+                continue
+            try:
+                out.append((p.resolve(), p.stat().st_mtime))
+            except OSError:
+                continue
+    return out
+
+
+def scan_outputs(data_dir: Path, desks: dict[str, str]) -> list[tuple[str, Path, float]]:
+    """(conversation id, path, mtime) for every file under chats/<conversation>/outputs/ and, for each desk in
+    `desks` (desk id → conversation id), its work/ and outputs/. Shell runs and scripts write straight to disk, so
+    this walk is how those files are found; save_bytes/write record theirs as they happen."""
+    out: list[tuple[str, Path, float]] = []
+    chats = Path(data_dir) / "chats"
+    if chats.is_dir():
+        for d in chats.iterdir():
+            if not d.is_symlink() and (d / "outputs").is_dir():
+                out.extend((d.name, p, m) for p, m in _walk(d / "outputs"))
+    cowork = Path(data_dir) / DESK_ROOT
+    for did, cid in desks.items():
+        for sub in DESK_SUBDIRS:
+            top = cowork / did / sub
+            if not top.is_symlink() and top.is_dir():
+                out.extend((cid, p, m) for p, m in _walk(top))
+    return out
+
+
+def desk_owners(c: sqlite3.Connection) -> dict[str, str]:
+    return {r[0]: r[1] for r in c.execute("SELECT id, conversation_id FROM desks").fetchall()} if _has(c, "desks") else {}
+
+
+def insert_outputs(c: sqlite3.Connection, found: list[tuple[str, Path, float]]) -> None:
+    """Index `found` as output rows of chats that still exist (trashed ones included: their files are still artifacts)."""
+    known = {r[0] for r in c.execute("SELECT id FROM conversations").fetchall()}
+    for cid, p, mtime in found:
+        if cid in known:
+            c.execute(_INSERT + "VALUES(?,?,?,?,?,?,?,?)", (new_id(), cid, "output", str(p), p.name, "saved", None, mtime))
+
+
+def backfill_outputs(c: sqlite3.Connection, data_dir: Path) -> None:
+    """Migration step: index the chat outboxes and desk workspaces that exist on disk (chat_artifacts_backfill)."""
+    insert_outputs(c, scan_outputs(data_dir, desk_owners(c)))
+
+
 class ChatFiles:
     def __init__(self, db: Database, chats_root: Path | None) -> None:
         self.db = db
         self.root = Path(chats_root) if chats_root is not None else None
+        self._reconciled = 0.0
 
     # ---- recording ----
     def record(self, conversation_id: str | None, kind: str, ref: str, name: str, action: str, message_id: str | None = None) -> None:
@@ -95,6 +158,17 @@ class ChatFiles:
             self.record(owner, "output", str(p), p.name, "saved")
         except Exception as e:  # noqa: BLE001
             log.warning("chat file not recorded (output): %s", type(e).__name__)
+
+    def record_desk_output(self, desk_id: str, path: Path) -> None:
+        """Workspace.on_save for desk workspaces: the file belongs to the desk's chat."""
+        try:
+            with self.db.tx() as c:
+                cid = desk_owners(c).get(desk_id)
+            if cid:
+                p = Path(path).resolve()
+                self.record(cid, "output", str(p), p.name, "saved")
+        except Exception as e:  # noqa: BLE001
+            log.warning("chat file not recorded (desk output): %s", type(e).__name__)
 
     def record_accepted_revision(self, rev_id: str, doc: dict[str, Any]) -> None:
         """A doc_edit proposal accepted from the review card. The revision has no conversation column, so the chat is
@@ -125,30 +199,24 @@ class ChatFiles:
             if _has(c, "coding_sessions"):
                 c.execute(f"""{_INSERT}SELECT lower(hex(randomblob(16))), conversation_id, 'coding', worktree, name, 'created', NULL, created_at
                   FROM coding_sessions WHERE conversation_id IS NOT NULL AND conversation_id NOT LIKE 'coding:%'""")
-            known = {r["id"] for r in c.execute("SELECT id FROM conversations").fetchall()}
-            for cid, p, mtime in (f for f in found if f[0] in known):
-                c.execute(_INSERT + "VALUES(?,?,?,?,?,?,?,?)", (new_id(), cid, "output", str(p), p.name, "saved", None, mtime))
+            insert_outputs(c, found)
             return c.total_changes - before
 
     def _output_files(self) -> list[tuple[str, Path, float]]:
-        """chats/<conversation_id>/outputs/** regular files; backfill keeps those of conversations that still exist."""
-        if self.root is None or not self.root.is_dir():
+        if self.root is None:
             return []
-        out: list[tuple[str, Path, float]] = []
-        for d in self.root.iterdir():
-            if d.is_symlink() or not (d / "outputs").is_dir():
-                continue
-            for dirpath, dirnames, filenames in os.walk(d / "outputs"):
-                dirnames[:] = [x for x in dirnames if not x.startswith(".") and not Path(dirpath, x).is_symlink()]
-                for fn in filenames:
-                    p = Path(dirpath, fn)
-                    if fn.startswith(".") or p.is_symlink():
-                        continue
-                    try:
-                        out.append((d.name, p.resolve(), p.stat().st_mtime))
-                    except OSError:
-                        continue
-        return out
+        with self.db.tx() as c:
+            desks = desk_owners(c)
+        return scan_outputs(self.root.parent, desks)
+
+    def reconcile(self) -> None:
+        """Index outputs written straight to disk since the last look (shell runs, scripts), at most every RECONCILE_S."""
+        if time.time() - self._reconciled < RECONCILE_S:
+            return
+        self._reconciled = time.time()
+        found = self._output_files()
+        with self.db.tx() as c:
+            insert_outputs(c, found)
 
     # ---- reading ----
     def _from(self, c: sqlite3.Connection, scope: str) -> tuple[str, list[Any]]:
@@ -224,16 +292,67 @@ class ChatFiles:
             except mac.LocalPathError:
                 return None
         elif kind == "output":
-            if self.root is None:
+            rel = self._rel(ref, r["conversation_id"])
+            if rel is None:
                 return None
-            try:
-                rel = Path(ref).relative_to((self.root / r["conversation_id"]).resolve()).as_posix()
-            except ValueError:
-                return None
+        keys = r.keys()
         return {"id": r["id"], "conversation_id": r["conversation_id"], "conversation_title": r["conversation_title"],
                 "project_id": r["project_id"], "kind": kind, "ref": ref, "name": name, "action": r["action"],
                 "message_id": r["message_id"], "created_at": r["created_at"], "missing": missing, "rel": rel,
-                "pinned": bool(r["pinned"]), "chat_count": r["chat_count"]}
+                "pinned": bool(r["pinned"]), "chat_count": r["chat_count"],
+                "chat_deleted": bool(r["chat_deleted"]) if "chat_deleted" in keys else False}
+
+    def _rel(self, ref: str, conversation_id: str) -> str | None:
+        """An output's path inside its chat's outbox or its desk's workspace, or None for a path under neither
+        (such a row is never served: the raw route trusts this containment)."""
+        if self.root is None:
+            return None
+        p = Path(ref)
+        for base in (self.root / conversation_id, self.root.parent / DESK_ROOT):
+            try:
+                rel = p.relative_to(base.resolve())
+            except ValueError:
+                continue
+            if base.name == DESK_ROOT:  # cowork/<desk id>/work/x → work/x
+                rel = Path(*rel.parts[1:]) if len(rel.parts) > 1 else None
+            return rel.as_posix() if rel else None
+        return None
+
+    # ---- Files → Artifacts ----
+    def artifacts(self, limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+        """Every chat's outputs, newest first, trashed chats included (`chat_deleted`), purged chats and files no
+        longer on disk left out. Rescans the folders first (reconcile), so a file a shell wrote is not missed."""
+        self.reconcile()
+        limit = max(1, min(200, int(limit)))
+        with self.db.tx() as c:
+            sql, args = ("FROM chat_files f JOIN conversations c ON c.id=f.conversation_id WHERE f.kind='output'", [])
+            if cursor:
+                ts, _, fid = cursor.partition("|")
+                sql, args = sql + " AND (f.created_at < ? OR (f.created_at = ? AND f.id < ?))", [float(ts), float(ts), fid]
+            rows = c.execute("SELECT f.*, c.title AS conversation_title, c.project_id, c.deleted_at IS NOT NULL AS chat_deleted, "
+                             f"NULL AS doc_name, NULL AS note_title, 0 AS pinned, 1 AS chat_count {sql} "
+                             "ORDER BY f.created_at DESC, f.id DESC LIMIT ?", (*args, limit + 1)).fetchall()
+        more, rows = len(rows) > limit, rows[:limit]
+        files = []
+        for r in rows:
+            f = self._shape(r)
+            if f is None or f["missing"]:  # ponytail: one stat per row; the DB row stays for the chat's own list, which shows it as missing
+                continue
+            f["size"] = Path(f["ref"]).stat().st_size
+            files.append(f)
+        return {"files": files, "next_cursor": f"{rows[-1]['created_at']!r}|{rows[-1]['id']}" if more else None}
+
+    def file(self, id: str) -> tuple[dict[str, Any], Path] | None:
+        """An output row and its path, for raw/open/reveal; None unless the row is an output inside a chat's or
+        desk's folder and the file is still there."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT f.*, c.title AS conversation_title, c.project_id, NULL AS doc_name, NULL AS note_title, "
+                          "0 AS pinned, 1 AS chat_count FROM chat_files f JOIN conversations c ON c.id=f.conversation_id "
+                          "WHERE f.id=? AND f.kind='output'", (id,)).fetchone()
+        f = self._shape(r) if r else None
+        if f is None or f["missing"] or not Path(f["ref"]).is_file():
+            return None
+        return f, Path(f["ref"])
 
     def counts(self, scope: str = "all") -> dict[str, int]:
         with self.db.tx() as c:
@@ -263,6 +382,7 @@ def router(cf: ChatFiles) -> Any:
         with cf.db.tx() as c:
             if not c.execute("SELECT 1 FROM conversations WHERE id=? AND deleted_at IS NULL", (id,)).fetchone():
                 raise HTTPException(404, "No such conversation")
+        cf.reconcile()  # outputs a shell wrote straight to disk (throttled)
         return page(conversation_id=id, limit=limit)
 
     @r.get("/chat-files")
@@ -278,5 +398,30 @@ def router(cf: ChatFiles) -> Any:
         if scope not in ("personal", "all"):
             raise HTTPException(400, "scope must be personal or all")
         return {"counts": cf.counts(scope), "projects": cf.project_counts()}
+
+    @r.get("/chat-files/artifacts")
+    def artifacts(limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+        try:
+            return cf.artifacts(limit=limit, cursor=cursor)
+        except ValueError:
+            raise HTTPException(400, "Bad cursor") from None
+
+    @r.get("/chat-files/{id}/raw")
+    def artifact_raw(id: str) -> Any:
+        """The file's bytes for the viewer. Agent-written HTML, SVG and scripts go out as text/plain, never as a page."""
+        import mimetypes
+        import urllib.parse
+        from fastapi.responses import FileResponse
+        hit = cf.file(id)
+        if hit is None:
+            raise HTTPException(404, "No such file")
+        f, p = hit
+        mime = mimetypes.guess_type(f["name"])[0] or "application/octet-stream"
+        if mime in RAW_AS_TEXT or mime.startswith("text/"):
+            mime = "text/plain"
+        ascii_name = re.sub(r'[^\x20-\x7e]|["\\]', "_", f["name"])
+        return FileResponse(p, media_type=mime, headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{urllib.parse.quote(f['name'], safe='')}"})
 
     return r

@@ -7,7 +7,7 @@ import { useChatDesk } from './DeskStrip'
 import { startAutonomy } from '../lib/autonomyDefault'
 
 /**
- * "Work autonomously": the chat hands its task to a desk that keeps working in this same conversation, in
+ * "Mode": the chat hands its task to a desk that keeps working in this same conversation, in
  * turns, until it is done or needs you. Off stops it and the chat answers as a plain chat again; the
  * desk's workspace is kept, and turning it back on picks the same one up. Autonomy changes take effect on the
  * next turn (the backend reads it off the desk row).
@@ -25,7 +25,7 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   const doneGate = useStore((s) => s.settings.deskDoneGate !== false)
   const openSettings = useStore((s) => s.openSettings)
   const { workAutonomously, stopWorkingAutonomously, patchDesk, setDraftAutonomy } = useStore()
-  const draftLevel = useStore((s) => (draft && !convId ? startAutonomy({ autonomousByDefault: s.settings.autonomousByDefault, draft: s.draftAutonomy, mainComposer: true, agent: s.draftChatSettings.agent, private: s.draftPrivate }) : null))
+  const draftLevel = useStore((s) => (draft && !convId ? startAutonomy({ autonomousByDefault: s.settings.autonomousByDefault, draft: s.draftAutonomy, mainComposer: true, agent: s.draftChatSettings.agent }) : null))
   const [open, setOpen] = useState(false)
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('ask')
   const box = useRef<HTMLSpanElement>(null)
@@ -50,13 +50,13 @@ export default function AutonomyToggle({ conversationId, draft = false }: { conv
   return (
     <span className="autonomy-ctl" ref={box}>
       <button className={`composer-ctl autonomy ${on ? 'on' : ''}`} aria-pressed={on} aria-expanded={open} disabled={!convId && !draft}
-        aria-label={on ? undefined : 'Work autonomously'}
-        title={convId || draft ? 'Let it keep working on this on its own, starting in its own folder (it can work anywhere on this Mac), until it is done or needs you' : 'Send a message first: it works on what this chat is about'}
+        aria-label="Mode: how the assistant works in this chat"
+        title={convId || draft ? 'Mode: how the assistant works in this chat' : 'Send a message first: it works on what this chat is about'}
         onClick={() => setOpen((o) => !o)}>
-        <Bot size={13} /> {on ? `Autonomous: ${label}` : 'Autonomous'}
+        <Bot size={13} /> {on ? `Mode: ${label}` : 'Mode'}
       </button>
       {open && (
-        <div className="autonomy-menu" role="dialog" aria-label="Work autonomously">
+        <div className="autonomy-menu" role="dialog" aria-label="Mode">
           <div className="desk-autonomy">
             {AUTONOMY.map((a) => (
               <label key={a.value} className={`desk-autonomy-opt ${current === a.value ? 'on' : ''}`}>

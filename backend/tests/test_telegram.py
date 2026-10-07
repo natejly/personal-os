@@ -466,12 +466,13 @@ async def test_a_process_without_the_poll_lock_sends_nothing(env: Env) -> None:
 # ---------------------------------------------------------------- replies
 
 @case
-async def test_the_reply_comes_back_as_plain_text(env: Env) -> None:
+async def test_the_reply_comes_back_formatted(env: Env) -> None:
     await env.feed(msg("hello"))
     env.texts["m1"] = "## Title\n\nHello **there**, see [docs](https://x.co)."
     env.bridge.on_run_change(env.run(status="done", live=False, replied=True, message_id="m1", run_id="run-1"))
     await until(lambda: env.sent())
-    assert env.sent() == ["Title\n\nHello there, see docs (https://x.co)."]
+    assert env.sent() == ['<b>Title</b>\n\nHello <b>there</b>, see <a href="https://x.co">docs</a>.']
+    assert env.of("sendMessage")[0]["parse_mode"] == "HTML"
     env.bridge.on_run_change(env.run(status="done", live=False, replied=True, message_id="m1", run_id="run-1"))
     await asyncio.sleep(0.05)
     assert len(env.sent()) == 1  # once per run
@@ -552,11 +553,10 @@ def test_split_hard_cuts_when_there_is_no_break_and_leaves_short_text_alone() ->
     assert tg.split_reply("y" * 4096) == ["y" * 4096]
 
 
-def test_split_caps_the_part_count_with_a_pointer_to_the_app() -> None:
+def test_split_never_truncates() -> None:
     parts = tg.split_reply("para one\n\n" * 20000)
-    assert len(parts) == 8 and parts[-1].endswith(tg.TRUNCATED) and all(len(p) <= 4096 for p in parts)
-    full = tg.split_reply("z" * 4096 * 9)
-    assert len(full) == 8 and len(full[-1]) <= 4096 and full[-1].endswith(tg.TRUNCATED)
+    assert all(len(p) <= 4096 for p in parts) and len(parts) > 8 and "".join(parts).count("para one") == 20000
+    assert len(tg.split_reply("z" * 4096 * 9)) == 9
 
 
 def test_to_plain() -> None:

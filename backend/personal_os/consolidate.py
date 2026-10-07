@@ -17,7 +17,7 @@ import time
 from itertools import combinations
 from typing import Any
 
-from . import llm, redact
+from . import llm, providers, redact
 from .db import Database, new_id, now, row_to_dict
 from .learn import _parse_json
 from .repos import ALL, Graph, Memories
@@ -233,7 +233,7 @@ class Consolidator:
                     else:
                         saved = time.strftime("%Y-%m-%d", time.localtime(it["created_at"]))
                         lines.append(f"  [{tag}] saved={saved}: {_shown(it.get('content'))}")
-            extraction_model = settings.get("extractionModel") or model
+            extraction_model = providers.tier_model(settings, "medium")
             try:
                 raw = await llm.complete(settings, extraction_model, [{"role": "system", "content": PROMPT},
                                                                       {"role": "user", "content": "\n".join(lines)}], "learn")

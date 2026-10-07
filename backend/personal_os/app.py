@@ -314,6 +314,12 @@ def settings() -> dict[str, Any]:
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
     if not out.get("defaultModel"):  # nothing saved: Ember 1 as the active provider names it (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
+    # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
+    if not out.get("extractionModel"):
+        out["extractionModel"] = providers.tier_model(out, "low")
+    if not out.get("fastModel"):
+        fast = providers.tier_model(out, "medium")
+        out["fastModel"] = "" if fast == out["defaultModel"] else fast  # same model: nothing for Auto to route to
     return out
 
 
@@ -766,6 +772,9 @@ SETTINGS_READ_ONLY = {"googleTasksSync", "voice"}
 def public_settings() -> dict[str, Any]:
     """What the renderer may see: secret values are blanked and reported as <key>Set booleans instead."""
     out = {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    stored = db.get_settings()
+    for k in ("extractionModel", "fastModel"):  # as saved: the resolved tier model must not be frozen in by the next Save
+        out[k] = stored.get(k, "")
     for k in SECRET_SETTINGS:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
@@ -1896,7 +1905,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "assistant_message", {**pre_am, "context_used": cite_slim(used)}
         yield "status", {"id": pre_am["id"], "kind": "compacting"}
     try:
-        history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
+        history, cinfo = await compaction.prepare_history(compactor, convos, cfg, providers.tier_model(cfg, "medium"), conv_id,
                                                           used["tokens_estimate"], window=win, cancel=stop)
     except asyncio.CancelledError:
         if pre_am:
@@ -2440,7 +2449,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             untrusted = bool(tool_ctx.get("tainted"))
             try:
                 res = await compactor.compact({**cfg, "compactKeepRecent": min(_int_setting(cfg, "compactKeepRecent", 8), 2)},
-                                              str(cfg.get("extractionModel") or model), conv_id, rows, include_untrusted=untrusted,
+                                              providers.tier_model(cfg, "medium"), conv_id, rows, include_untrusted=untrusted,
                                               complete=compaction.bind_supported(llm.complete, cancel=stop))
             except Exception:  # noqa: BLE001 - a summarizer failure leaves the stubs as the only relief
                 log.warning("overflow compaction failed for %s", conv_id, exc_info=True)
@@ -7367,7 +7376,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
                             f"unavailable: {internal['gmail_error']}" if internal.get("gmail_error") else
                             [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10])
     try:
-        content = await generate_recap(cfg, cfg.get("extractionModel") or cfg["defaultModel"], facts)
+        content = await generate_recap(cfg, providers.tier_model(cfg, "medium"), facts)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
     return {**recaps.save(day, content), "cached": False}

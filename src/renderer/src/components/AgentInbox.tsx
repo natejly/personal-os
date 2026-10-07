@@ -9,7 +9,7 @@
  */
 import { splitReport } from '../lib/report'
 import { type RoutineDraft } from '../lib/routine'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Rocket, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -55,10 +55,17 @@ type Tone = 'needs-you' | 'working' | 'done' | 'failed' | 'idle'
 const Dot = ({ tone, label }: { tone: Tone; label: string }): JSX.Element =>
   <span className={`inbox-dot ${tone}`} role="img" aria-label={label} title={label} />
 
-/** The row's disclosure: everything past the one line (arguments, the report) sits behind it. */
-const Disclosure = ({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }): JSX.Element => (
-  <button className="icon-btn sm" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} ${what}`} title={`${open ? 'Hide' : 'Show'} ${what}`} onClick={onToggle}>
-    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+/** The row's body is its own control: clicking the dot, the name or the summary opens the row — it unfolds the
+ * arguments or the report where there is one, and goes to the desk or chat where that is what opening means.
+ * `open` undefined is the second kind; the decisions (Approve, Reject, Resume) stay as buttons beside it. */
+const RowOpen = ({ open, what, onOpen, children }: {
+  open?: boolean; what: string; onOpen: () => void; children: React.ReactNode
+}): JSX.Element => (
+  <button className="inbox-open" aria-expanded={open} aria-label={open === undefined ? `Open ${what}` : `${open ? 'Hide' : 'Show'} ${what}`}
+    title={open === undefined ? `Open ${what}` : `${open ? 'Hide' : 'Show'} ${what}`} onClick={onOpen}>
+    {children}
+    {open === undefined ? <ArrowRight className="inbox-go" size={13} />
+      : open ? <ChevronDown className="inbox-go" size={13} /> : <ChevronRight className="inbox-go" size={13} />}
   </button>
 )
 
@@ -77,20 +84,23 @@ function ApprovalRow({ a, onDesk, onChat }: {
   const [open, setOpen] = useState(false)
   const line = argLine(a.args)
 
+  // Where this one is decided: its desk, else its chat. A card that cannot be decided here opens there instead.
+  const openOnly = !!a.desk_id || OPEN_ONLY.has(a.tool)
+  const go = a.desk_id ? () => onDesk(a.desk_id as string) : a.conversation_id ? () => onChat(a.conversation_id as string) : null
+  const nav = openOnly ? go : null
+
   return (
     <li className="inbox-item">
       <div className="inbox-row">
-        <Dot tone="needs-you" label="Waiting on your approval" />
-        <span className="inbox-tool">{a.tool}</span>
-        <span className="inbox-line" title={line}>{line}</span>
+        <RowOpen what={nav ? (a.desk_id ? 'the desk' : 'the chat') : 'the arguments'} open={nav ? undefined : open}
+          onOpen={nav ?? (() => setOpen((v) => !v))}>
+          <Dot tone="needs-you" label="Waiting on your approval" />
+          <span className="inbox-tool">{a.tool}</span>
+          <span className="inbox-line" title={line}>{line}</span>
+        </RowOpen>
         {a.forced && <span className="chip warn">{tainted ? 'untrusted content in that chat' : 'asks each time'}</span>}
-        <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
-        {a.desk_id || OPEN_ONLY.has(a.tool) ? (
-          <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}
-            onClick={() => { if (a.desk_id) onDesk(a.desk_id); else if (a.conversation_id) onChat(a.conversation_id) }}>
-            Open {a.desk_id ? 'desk' : 'chat'} <ArrowRight size={13} />
-          </button>
-        ) : (
+        <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}{fmtWhen(a.created_at)}</span>
+        {!openOnly && (
           <>
             <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
               <Check size={13} /> Approve
@@ -98,13 +108,16 @@ function ApprovalRow({ a, onDesk, onChat }: {
             <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
               <X size={13} /> Deny
             </button>
-            {/* Arguments cannot be edited here; the chat's card can. */}
-            {a.conversation_id && <button className="link small" onClick={() => onChat(a.conversation_id as string)}>Open chat</button>}
           </>
         )}
-        <Disclosure open={open} what="the arguments" onToggle={() => setOpen((v) => !v)} />
       </div>
-      {open && <pre className="inbox-args">{argText(a.args)}</pre>}
+      {open && !nav && (
+        <>
+          <pre className="inbox-args">{argText(a.args)}</pre>
+          {/* Arguments cannot be edited here; the chat's card can. */}
+          {a.conversation_id && <button className="link small" onClick={() => onChat(a.conversation_id as string)}>Open chat</button>}
+        </>
+      )}
     </li>
   )
 }
@@ -146,16 +159,14 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
   return (
     <li className="inbox-item">
       <div className="inbox-row">
-        <Dot tone="needs-you" label="Waiting on you" />
-        <span className="inbox-tool">{p.tool}</span>
-        <span className="inbox-line" title={line}>{line}</span>
-        <span className="muted small inbox-when">
-          {p.source ? `from ${p.source.kind === 'desk' ? `desk ${p.source.name}` : p.source.name} · ` : ''}proposed {fmtWhen(p.created_at)}
-        </span>
-        {onOpen && <button className="link small" onClick={onOpen}>Open</button>}
+        <RowOpen open={open} what="the details" onOpen={toggle}>
+          <Dot tone="needs-you" label="Waiting on you" />
+          <span className="inbox-tool">{p.tool}</span>
+          <span className="inbox-line" title={line}>{line}</span>
+        </RowOpen>
+        <span className="muted small inbox-when">{p.source ? `${p.source.name} · ` : ''}{fmtWhen(p.created_at)}</span>
         <button className="primary-btn sm" disabled={busy} onClick={() => void decide(true)}><Check size={13} /> Accept</button>
         <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
-        <Disclosure open={open} what="the details" onToggle={toggle} />
       </div>
       {open && (editing ? (
         <div className="inbox-edit">
@@ -177,6 +188,7 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
           {editable.length > 0 && (
             <button className="ghost-btn sm inbox-edit-btn" disabled={busy} onClick={() => setEditing(true)}><Pencil size={12} /> Edit before accepting</button>
           )}
+          {onOpen && <button className="link small" onClick={onOpen}>Open where it came from</button>}
         </>
       ))}
       {err && <p className="error small" role="alert">{err}</p>}
@@ -208,10 +220,18 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
   const chatFace = useChatFaceById(r.conversation_id)
-  // An unread problem opens itself; reading it (Mark all read included) collapses it.
+  // An unread problem opens itself; Mark all read collapses it. A row the user opened stays open — that click
+  // marks it read too, and a click must not undo itself.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
+  const byHand = useRef(false)
   const failed = r.status === 'error' || r.status === 'interrupted'
-  useEffect(() => { if (r.seen) setOpen(false) }, [r.seen])
+  useEffect(() => { if (r.seen && !byHand.current) setOpen(false) }, [r.seen])
+  // Opening a run is what reads it.
+  const show = (): void => {
+    byHand.current = true
+    setOpen((v) => !v)
+    if (!r.seen) void markInboxRunSeen(r.run_id)
+  }
   const tone: Tone = failed ? 'failed' : r.pending_proposals > 0 || r.status === 'awaiting_approval' ? 'needs-you' : r.status === 'running' ? 'working' : 'done'
   const toneLabel = failed
     ? (r.status === 'interrupted' ? 'Interrupted' : 'Failed')
@@ -221,27 +241,23 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   return (
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-row">
-        <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
-        <Dot tone={tone} label={toneLabel} />
-        <span className="inbox-job">{r.job}</span>
-        <span className="inbox-line" title={line}>{line}</span>
-        {r.test ? <span className="chip">test</span> : r.manual && <span className="chip">by hand</span>}
-        {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
+        <RowOpen open={open} what="the report" onOpen={show}>
+          <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
+          <Dot tone={tone} label={toneLabel} />
+          <span className="inbox-job">{r.job}</span>
+          <span className="inbox-line" title={line}>{line}</span>
+        </RowOpen>
+        {/* Only what changes what the user should do stays a chip; how the run came about rides along with its time. */}
+        {failed && <span className="chip bad"><AlertTriangle size={11} /> {r.status === 'interrupted' ? 'interrupted' : 'failed'}</span>}
         {r.late && (
           <span className="chip warn" title={r.due_at ? `Due ${fmtWhen(r.due_at)}, ran ${fmtWhen(r.fired_at)}` : undefined}>
             <Clock size={11} /> {fmtLate(r.late_seconds)}{r.missed_slots > 0 ? ` · ${r.missed_slots} skipped` : ''}
           </span>
         )}
-        {failed && <span className="chip bad"><AlertTriangle size={11} /> {r.status === 'interrupted' ? 'interrupted' : 'failed'}</span>}
         {r.pending_proposals > 0 && <span className="chip needs">{r.pending_proposals} waiting on you</span>}
-        <span className="muted small inbox-when">{fmtWhen(r.fired_at)}</span>
-        {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
-        {!r.seen && (
-          <button className="icon-btn sm" title="Mark read" aria-label={`Mark ${r.job} read`} onClick={() => void markInboxRunSeen(r.run_id)}>
-            <Check size={13} />
-          </button>
-        )}
-        <Disclosure open={open} what="the report" onToggle={() => setOpen((v) => !v)} />
+        <span className="muted small inbox-when" title={r.attempt > 1 ? 'Re-launched after the earlier run ended in an error' : undefined}>
+          {fmtWhen(r.fired_at)}{r.test ? ' · test' : r.manual ? ' · by hand' : ''}{r.attempt > 1 ? ` · retry ${r.attempt}` : ''}
+        </span>
       </div>
       {open && (
         <>
@@ -249,6 +265,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           {r.summary ? <ReportBody text={r.summary} /> : (
             !r.error && <p className="muted">It wrote nothing. {r.tool_calls} tool call{r.tool_calls === 1 ? '' : 's'}.</p>
           )}
+          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open the chat it ran in</button>}
         </>
       )}
     </li>
@@ -829,7 +846,7 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip needs">{box.counts.needs_you} need{box.counts.needs_you === 1 ? 's' : ''} you</span>}
         <span className="spacer" />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
-        {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job; a slot missed while asleep runs as soon as it wakes">Jobs run while the Mac is awake and Grain is open</span>}
+        {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job: jobs run while the Mac is awake and Grain is open, and a slot missed while asleep runs as soon as it wakes">needs Grain open</span>}
         <button className={`ghost-btn sm ${showJobs ? 'on' : ''}`} aria-expanded={showJobs} onClick={toggleJobs}>
           Scheduled ({jobs.length})
         </button>
@@ -861,11 +878,12 @@ export default function AgentInbox(): JSX.Element | null {
             {deskRows.map((e) => (
               <li className="inbox-item" key={e.id}>
                 <div className="inbox-row">
-                  <Dot tone="needs-you" label="Waiting on you" />
-                  <span className="inbox-job"><Users size={12} /> {e.desk_title || 'Desk'}</span>
-                  <span className="inbox-line" title={e.body || e.kind}>{e.body || e.kind}</span>
+                  <RowOpen what={e.kind === 'review' ? 'the review' : 'the desk'} onOpen={() => goDesk(e.desk_id)}>
+                    <Dot tone="needs-you" label="Waiting on you" />
+                    <span className="inbox-job"><Users size={12} /> {e.desk_title || 'Desk'}</span>
+                    <span className="inbox-line" title={e.body || e.kind}>{e.body || e.kind}</span>
+                  </RowOpen>
                   <span className="muted small inbox-when">{fmtWhen(e.created_at)}</span>
-                  <button className="primary-btn sm" onClick={() => goDesk(e.desk_id)}>{e.kind === 'review' ? 'Review' : 'Open'} <ArrowRight size={13} /></button>
                   <button className="icon-btn sm" title="Mark seen" aria-label="Mark seen" onClick={() => void markDeskSeen(e.desk_id)}><X size={13} /></button>
                 </div>
               </li>
@@ -901,10 +919,11 @@ export default function AgentInbox(): JSX.Element | null {
             {elsewhere.map((q) => (
               <li className="inbox-item" key={q.key}>
                 <div className="inbox-row">
-                  <Dot tone="needs-you" label="Waiting on you" />
-                  <span className="inbox-job">{q.label}</span>
-                  <span className="inbox-line">{q.count} waiting</span>
-                  <button className="ghost-btn sm" onClick={() => goQueue(q.key)}>Review <ArrowRight size={13} /></button>
+                  <RowOpen what={`${q.label} for review`} onOpen={() => goQueue(q.key)}>
+                    <Dot tone="needs-you" label="Waiting on you" />
+                    <span className="inbox-job">{q.label}</span>
+                    <span className="inbox-line">{q.count} waiting</span>
+                  </RowOpen>
                 </div>
               </li>
             ))}

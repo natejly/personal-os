@@ -1,10 +1,13 @@
 import type { Conversation } from '@shared/types'
 import { filterCommands } from '../features/notes/slash'
+import { chatSlug } from './chatLink'
 
 /**
  * @mentions in the chat composer: `@` opens the same caret menu `/` does, listing agents. Pure helpers, no UI.
  */
 export interface MentionAgent { name: string; description: string }
+/** A chat the `@` menu can name; the backend resolves `@<chatSlug(title)>` in the sent message. */
+export interface MentionChat { id: string; title: string }
 export interface MentionItem { key: string; label: string; hint: string; /** The whole draft after picking this row. */ insert: string }
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/
@@ -24,15 +27,22 @@ export function detectMention(value: string, caret: number): { start: number; qu
 }
 
 /** The rows of the `@` menu for the draft (at most `max`), or null when it should be closed. Picking one writes `@name ` over what was typed. */
-export function mentionItems(text: string, caret: number, agents: MentionAgent[], max = 8): MentionItem[] | null {
+export function mentionItems(text: string, caret: number, agents: MentionAgent[], max = 8, chats: MentionChat[] = []): MentionItem[] | null {
   const hit = detectMention(text, caret)
   if (!hit) return null
   const rows = filterCommands(agents.map((a) => ({ a, label: a.name, keywords: a.description.split(/\s+/).filter(Boolean) })), hit.query).slice(0, max)
   const rest = text.slice(caret).replace(/^ /, '')
-  return rows.length
-    ? rows.map(({ a }) => ({ key: `agent:${a.name}`, label: `@${a.name}`, hint: a.description.slice(0, 48), insert: `${text.slice(0, hit.start)}@${a.name} ${rest}` }))
-    : null
+  const chatRows = filterCommands(chats.map((c) => ({ c, label: chatSlug(c.title), keywords: c.title.toLowerCase().split(/\s+/).filter(Boolean) })), hit.query)
+  const items = [
+    ...rows.map(({ a }) => ({ key: `agent:${a.name}`, label: `@${a.name}`, hint: a.description.slice(0, 48), insert: `${text.slice(0, hit.start)}@${a.name} ${rest}` })),
+    ...chatRows.map(({ c, label }) => ({ key: `chat:${c.id}`, label: `@${label}`, hint: `Chat · ${c.title}`.slice(0, 48), insert: `${text.slice(0, hit.start)}@${label} ${rest}` })),
+  ].slice(0, max)
+  return items.length ? items : null
 }
+
+/** Chats worth offering in the `@` menu: open, not the current one, not a scheduled job's. */
+export const mentionChats = (conversations: Conversation[], currentId: string | null): MentionChat[] =>
+  conversations.filter((c) => !c.archived_at && c.id !== currentId && !c.settings.job_id).map((c) => ({ id: c.id, title: c.title }))
 
 /** A draft that opens with `@name` for a known agent: who it is for and the message without the mention. Null otherwise. */
 export function routeMention(text: string, names: string[]): { agent: string; text: string } | null {

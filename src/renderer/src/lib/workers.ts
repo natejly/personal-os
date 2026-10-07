@@ -27,8 +27,8 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
 /** Replace or add one worker (an event's payload) in the list. */
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 
-/** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. */
-export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null
+/** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. Messages from another chat ('chat_in', 'chat_reply') are the exception: they render. */
+export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply'
 
 /** The same array when nothing is hidden, so memoised callers keep their identity. */
 export const withoutInternal = <T extends Pick<Message, 'kind'>>(messages: T[] | undefined): T[] | undefined =>

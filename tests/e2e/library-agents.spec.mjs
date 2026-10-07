@@ -63,13 +63,15 @@ test('Library > Agents: a drafted agent is edited, saved, approved, and a chat s
   expect(offered.sort()).toEqual(['current_time', 'web_search'])
   await shot(page, 'agents-chat')
 
-  // A chat that can spawn subagents sees the roster, so it can hand work over by description. (A reply that delegates to
-  // workers is not shown it: the roster names agent_spawn, which that reply does not have.)
-  await api('/settings', { method: 'PUT', body: { tools: { delegate: 'off' } } })
+  // A chat sees the roster, so it can hand work over by description: a delegating reply is told "delegate agent=<name>",
+  // one that spawns subagents itself "agent_spawn role=<name>". This chat delegates (the default), so it gets the first.
+  await api('/settings', { method: 'PUT', body: { toolDeferAbove: 0 } }) // delegate is offered up front, not behind a tool search
   await page.reload()
   await newChat(page)
   await sayAndWait(page, '!!reply ok', 'ok')
-  expect(callFor(llm, '!!reply ok').messages[0].content).toContain('trip-planner: Plans trips')
+  const roster = callFor(llm, '!!reply ok').messages[0].content
+  expect(roster).toContain('trip-planner: Plans trips')
+  expect(roster).toContain('delegate agent=<name>')
   expect(grain.consoleErrors).toEqual([])
 })
 

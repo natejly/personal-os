@@ -39,7 +39,7 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
   // A doc tool names its doc by id; show the title the user knows it by.
   const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
   const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
-  // `forced` also marks a card an autonomous chat asks for on every change, so the taint line needs the taint itself.
+  // `forced` marks a card forced by taint, plan mode or an always-ask tool, so the taint line needs the taint itself.
   const tainted = useChatTainted(conversationId)
   return (
     <div

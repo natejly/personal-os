@@ -492,7 +492,7 @@ class CodingSessions:
         if self.tb is None:
             raise CodingError("OpenCode is not wired into this backend.")
         ctx = {**ctx, "taint_sources": []}  # opencode's own "network" label stays off the caller's ctx; the session's label covers it
-        job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"], state_key=f"coding-{row['id']}",
+        job, _base = await opencode.launch(self.tb, ctx, prompt, cwd=row["worktree"],
                                            continue_session=continue_session, model=row["model"], background=True,
                                            no_timeout=True, conversation_id=f"coding:{row['id']}",
                                            run_id=row.get("run_id"), notify=False, on_timeout="kill",

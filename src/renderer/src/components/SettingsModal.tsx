@@ -377,7 +377,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Per-tool rules and the always-ask list are under Advanced.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Allow everything still asks before permanent deletes outside the Trash, disk wipes, force-pushes and sending email. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
@@ -533,7 +533,7 @@ export default function SettingsModal(): JSX.Element {
                 <p className="muted small"><b>On</b> runs, <b>Ask</b> pauses for you, <b>Off</b> hides the tool.</p>
                 <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
                 <h4>Always ask first</h4>
-                <p className="muted small">Cards that appear every time, in every mode except Allow everything. Keep what you cannot take back here.</p>
+                <p className="muted small">Cards that appear every time, in every mode except Allow everything. Sending email asks in every mode. Keep what you cannot take back here.</p>
                 <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
                 <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
                 <GrantsPanel draft={draft} patch={patch} />

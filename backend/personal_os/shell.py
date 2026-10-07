@@ -8,7 +8,8 @@ default folder is the desk workspace in a desk, else the home folder. The networ
 nothing else. The sandbox is the boundary, the approval card is the courtesy: nothing here relies on parsing the command.
 
 If the sandbox is unavailable (no sandbox-exec, another OS, or the profile fails to apply) the call is refused. The
-only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off.
+only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off
+(Allow everything runs it without one; `floor` is what that mode still cards).
 
 Background commands return a job id; shell_poll reads new output, shell_kill stops one. Jobs belong to the
 conversation that started them, die with its run and with the app, and are never adopted after a restart: the
@@ -144,6 +145,24 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     except ShellError:
         return False
     return any(_inside(where, r) for r in real)
+
+
+def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str] | None:
+    """(card kind, reason) when Allow everything still cards this shell_run (permrules.allow_all_floor), judged from the folder it will run in.
+    Relative paths resolve against cwd, else where the last command ended, else the desk workspace, else home; a desk's
+    work/ folder counts as scratch beside the temp folders."""
+    from . import permrules
+    desk: Path | None = None
+    did = str(ctx.get("desk_id") or "")
+    if did and getattr(tb, "workspace", None) is not None:
+        try:
+            desk = Path(tb.workspace.desk_root(did))
+        except Exception:  # noqa: BLE001 - no desk folder: judge from home
+            desk = None
+    base = str(desk) if desk else str(mac.home())
+    raw = os.path.expanduser(str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or "")
+    cwd = (raw if os.path.isabs(raw) else os.path.join(base, raw)) if raw else base
+    return permrules.allow_all_floor("shell_run", args, cwd, [str(desk / "work")] if desk else [])
 
 
 # ---- environment and output shaping ----
@@ -690,6 +709,9 @@ def register(tb: Any) -> None:
             if dr:
                 writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
             argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None), *argv]
+        if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
+            log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
+                        _scrub(command)[:500])
         if network or unsandboxed:
             # Whatever a networked or unconfined command prints may be third-party text.
             taint(ctx, "shell_run:unsandboxed" if unsandboxed else "shell_run:network")
@@ -784,7 +806,8 @@ def register(tb: Any) -> None:
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
-                    "unsandboxed=true escapes the sandbox and always asks the user.",
+                    "unsandboxed=true escapes the sandbox and asks the user (except under Allow everything). Under Allow everything "
+                    "a command that deletes outside a temp folder, wipes a disk or force-pushes still asks.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
@@ -795,7 +818,7 @@ def register(tb: Any) -> None:
                               {"command": "npm test", "cwd": "app", "timeout_s": 300},
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
-    # Unsandboxed always asks; so does a reply that read untrusted content while a command could reach out, and no
+    # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
     # standing grant, session grant or allow rule buys that card off (it is forced).
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (bool(ctx.get("tainted")) and reaches_out(cfg(ctx)))
     R("shell_run", spec)

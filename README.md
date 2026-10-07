@@ -89,7 +89,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    approve it. Click an agent to open its page: its chats, its routines (jobs
    that run as it), the skills it carries, notes it always remembers and its
    recent activity. Start a chat as an agent, type `@name` in any chat to reach
-   it, or let a reply hand work to subagents with `agent_spawn`.
+   it, or let a reply hand work to a background worker with `delegate` (naming a Library agent runs the worker as it).
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
    delegating agent as a big face with its subagents around it. Longer jobs: turn on **Work
@@ -216,7 +216,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
   or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
-  Ask as it goes (one card per change), and Work and propose (it may plan an external
+  Ask as it goes (no plan up front; risky actions follow the permission mode), and Work and propose (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and
   how many things need you, with Start, Pause, Resume and Stop, and opens a side panel
   with Files, Changes and Review tabs. Questions, parked cards, the plan and interruption notices appear at the
@@ -260,7 +260,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   draft as you type.
   Skills can be imported by URL, and a Popular skills catalog offers presets.
   The memory extractor turns repeated friction in a chat into one suggested skill.
-- **Agents and subagents.** A reply can delegate to subagents (`agent_spawn`).
+- **Agents and subagents.** A reply can hand work to a background worker (`delegate`); desks, workflows and crews start subagents (`agent_spawn`).
   They show as indented rows under that reply with live status; click one to open
   and message it. A crew window shows the delegating agent as a big face with its
   subagents around it. Subagents get the chat's tools minus asking, planning and

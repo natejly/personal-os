@@ -95,7 +95,7 @@ check("Pinned files" not in sys_ and used["pinned"] == [], "unpin removes it")
 
 # ---- hidden views are named, so the model does not send the user to a page they cannot see
 sys_, _ = build(settings={"hiddenViews": ["library", "health", "docs"]})
-check("Library, Health, Files" in sys_ and "Settings → Appearance" in sys_, "hidden views named with where to turn them on")
+check("Library, Health, Files" in sys_ and "Settings → Sidebar" in sys_, "hidden views named with where to turn them on")
 check("Hidden in this app" not in build()[0], "nothing hidden, no line")
 
 pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"

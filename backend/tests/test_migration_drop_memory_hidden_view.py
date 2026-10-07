@@ -61,5 +61,9 @@ def test_the_version_and_the_default() -> None:
     assert llm.DEFAULT_SETTINGS["hiddenViews"] == []  # every sidebar row is on by default
 
 
+def test_sidebar_only_rows_start_shown() -> None:
+    assert llm.DEFAULT_SETTINGS["sidebarHidden"] == []
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

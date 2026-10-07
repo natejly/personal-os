@@ -37,7 +37,7 @@ The slices below are the pilot's original work split, kept as the worked example
 - Tool names, schemas, descriptions, examples, groups, danger levels, **and their position in
   `toolbox.specs`** (todo tools register at the same point, between `todo_write`'s working group and the modules after it).
 - `todos.on_change` still pokes both Google loops; both loops start on startup and are cancelled on shutdown.
-- The sidebar order, the Today card order, the Settings → Appearance → Sidebar toggles and their settings keys
+- The sidebar order, the Today card order, the Settings → Sidebar toggles and their settings keys
   (`homeWidgets.todos`, `hiddenViews: ['todos']`), the badge count, the canvas widget and its drag kind.
 
 ## Slices and ownership (exclusive — if you need a change in a file you do not own, put it in your report)

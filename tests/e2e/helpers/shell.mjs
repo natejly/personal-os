@@ -75,7 +75,7 @@ export async function withGrain(opts, fn) {
   const g = await launchApp(opts)
   try { return await fn(g) } finally { await g.close() }
 }
-export const ALL_VIEWS_ON = { hiddenViews: [] }
+export const ALL_VIEWS_ON = { hiddenViews: [], sidebarHidden: [] }
 
 import { _electron as electron } from '@playwright/test'
 import { execFileSync } from 'node:child_process'

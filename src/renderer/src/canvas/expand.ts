@@ -6,7 +6,7 @@ import { useStore } from '../store'
 /** Kinds with a classic equivalent. Usage has none, so they get no Expand. */
 const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'memory', 'graph', 'documents', 'recap', 'project', 'crew'])
 
-/** Kinds whose classic equivalent is a view the user can hide (Settings → Appearance). Memory lives in
+/** Kinds whose classic equivalent is a view the user can hide (Settings → Sidebar). Memory lives in
  * Settings and uploads in Files, neither of which can be hidden. */
 const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
   todos: 'todos', calendar: 'calendar'

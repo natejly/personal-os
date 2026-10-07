@@ -491,15 +491,18 @@ class Child:
 USER_NOTE = "[Message from the user, not the main agent]\n"  # prefixes text the human typed to a worker
 
 
+def _labelled(message: dict[str, Any]) -> dict[str, Any]:
+    """A user row for display: from "user" (the human, prefix stripped) or "agent" (the main agent). Never sent to a model."""
+    if message.get("role") != "user":
+        return message
+    c = message.get("content")
+    if isinstance(c, str) and c.startswith(USER_NOTE):
+        return {**message, "from": "user", "content": c[len(USER_NOTE):]}
+    return {**message, "from": "agent"}
+
+
 def _public_message(message: dict[str, Any]) -> dict[str, Any]:
-    """A transcript row with credentials removed from its text. The stored row is not changed.
-    User rows also get from: "user" (the human, prefix stripped) or "agent" (the main agent)."""
-    if message.get("role") == "user":
-        c = message.get("content")
-        by_user = isinstance(c, str) and c.startswith(USER_NOTE)
-        message = {**message, "from": "user" if by_user else "agent"}
-        if by_user:
-            message["content"] = c[len(USER_NOTE):]
+    """A transcript row with credentials removed from its text. The stored row is not changed."""
     content = message.get("content")
     if isinstance(content, str):
         return {**message, "content": redact.scrub_command_output(content)}
@@ -1295,7 +1298,7 @@ class Subagents:
         """A child's history with credentials scrubbed: live from memory, otherwise from its tape."""
         ch = self.children.get(run_id)
         msgs = ch.messages if ch is not None else self._load_transcript(run_id)
-        return None if msgs is None else [_public_message(m) for m in msgs]
+        return None if msgs is None else [_labelled(_public_message(m)) for m in msgs]
 
     # ---- stopping --------------------------------------------------------------------------------
     def halt(self, ch: Child, reason: str = "interrupted") -> None:

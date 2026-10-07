@@ -1,6 +1,7 @@
 """Text Grain from your own phone: a two-way bridge over a Telegram bot you own.
 
-Inbound is a long poll of the Bot API (getUpdates); outbound is plain sendMessage. Only one paired private chat is
+Inbound is a long poll of the Bot API (getUpdates): text, plus photos and files (downloaded, stored as uploads and attached
+to the turn). Outbound is sendMessage for text and sendPhoto / sendMediaGroup / sendDocument for images and files. Only one paired private chat is
 ever heard: pairing is a one-time code sent from that chat, and everything else (groups, other users, other chats) is
 dropped without a reply. Everything with side effects (the HTTP caller, the chat/approval routes, state storage) is
 injected, so nothing here imports the app and the tests never touch the network.
@@ -15,6 +16,8 @@ import fcntl
 import hashlib
 import hmac
 import inspect
+import json
+import mimetypes
 import logging
 import random
 import re
@@ -45,6 +48,17 @@ MESSAGE_MAX = 4096
 TYPING_EVERY = 4.5
 SECRET_NAME = "telegramBotToken"
 TOKEN_RE = re.compile(r"\d{5,}:[A-Za-z0-9_-]{30,}")
+PROGRESS_MIN_SECONDS = 20.0  # at most one progress message per conversation in this window; the rest are coalesced
+DOWNLOAD_MAX = 20 * 1024 * 1024  # Bot API: bots can download files up to 20 MB
+PHOTO_MAX = 10 * 1024 * 1024  # sendPhoto
+DOC_MAX = 50 * 1024 * 1024  # sendDocument
+CAPTION_MAX = 1024
+GROUP_MAX = 10  # items in one sendMediaGroup
+PHOTO_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})  # svg is a document
+UNSUPPORTED = "Send text, a photo or a file; voice and video aren't supported yet."
+TOO_BIG = "That file is too big: Telegram lets bots download files up to 20 MB."
+FETCH_FAILED = "Couldn't fetch that attachment from Telegram."
+_OTHER_MEDIA = ("voice", "audio", "video", "video_note", "animation", "sticker")
 ALLOWED_UPDATES = ["message", "callback_query"]
 APP_ONLY_TOOLS = frozenset({"propose_plan", "ask_user", "desk_ask"})  # a plan or a question is answered in the app
 
@@ -74,11 +88,19 @@ class HttpApi:
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
 
-    async def __call__(self, token: str, method: str, params: dict[str, Any], timeout: float = CLIENT_TIMEOUT) -> Any:
+    def _http(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=CLIENT_TIMEOUT)
+        return self._client
+
+    async def __call__(self, token: str, method: str, params: dict[str, Any], timeout: float = CLIENT_TIMEOUT,
+                       files: dict[str, tuple[str, bytes, str]] | None = None) -> Any:
+        """`files` ({field: (filename, bytes, mime)}) makes it a multipart upload; the other params ride as form fields."""
+        kw: dict[str, Any] = {"json": params}
+        if files:
+            kw = {"data": {k: v if isinstance(v, str) else json.dumps(v) for k, v in params.items()}, "files": files}
         try:
-            r = await self._client.post(f"{API}/bot{token}/{method}", json=params, timeout=timeout)
+            r = await self._http().post(f"{API}/bot{token}/{method}", timeout=timeout, **kw)
         except httpx.HTTPError as e:
             raise TelegramError(0, sanitize(f"{type(e).__name__}: {e}", token)) from None
         try:
@@ -91,6 +113,16 @@ class HttpApi:
         retry = (data.get("parameters") or {}).get("retry_after")
         raise TelegramError(int(data.get("error_code") or r.status_code), sanitize(data.get("description") or f"HTTP {r.status_code}", token),
                             float(retry) if retry else None)
+
+    async def download(self, token: str, file_path: str) -> bytes:
+        """The bytes of a file `getFile` named. TelegramError carries only sanitized text."""
+        try:
+            r = await self._http().get(f"{API}/file/bot{token}/{file_path}", timeout=60.0)
+        except httpx.HTTPError as e:
+            raise TelegramError(0, sanitize(f"{type(e).__name__}: {e}", token)) from None
+        if r.status_code != 200:
+            raise TelegramError(r.status_code, f"HTTP {r.status_code}")
+        return r.content
 
     async def aclose(self) -> None:
         c, self._client = self._client, None
@@ -218,7 +250,7 @@ class Deps:
     load_state: Callable[[], dict[str, Any]]
     save_state: Callable[[dict[str, Any]], None]
     get_token: Callable[[], str | None]
-    start_turn: Callable[[str, str], Any]  # (conversation id, text) -> {"run_id": ...}; sync or async
+    start_turn: Callable[..., Any]  # (conversation id, text[, attachment ids]) -> {"run_id": ...}; sync or async. Ids only when the message had a file
     stop: Callable[[str], bool]
     decide: Callable[[str, str], Any]  # (call id, "allow" | "deny") -> {"live": bool}; sync or async, raises if it cannot be recorded
     pending_approvals: Callable[[], list[dict[str, Any]]]
@@ -229,8 +261,12 @@ class Deps:
     message_text: Callable[[str], str | None]
     conversation_title: Callable[[str], str | None]
     app_only_tools: frozenset[str] = APP_ONLY_TOOLS
-    api: Callable[..., Awaitable[Any]] = field(default_factory=HttpApi)  # (token, method, params) -> result; raises TelegramError
+    api: Callable[..., Awaitable[Any]] = field(default_factory=HttpApi)  # (token, method, params, timeout[, files]) -> result; raises TelegramError
     lock_path: Path | None = None  # tests; the default is keyed on the token (lock_path())
+    message_attachments: Callable[[str], list[dict[str, Any]]] = lambda mid: []  # message id -> [{id, name, mime, size}]
+    attachment_path: Callable[[str], Path | None] = lambda doc_id: None  # document id -> its stored original, None if gone
+    store_upload: Callable[[str, str, bytes], Any] | None = None  # (name, mime, data) -> {"id", ...}; sync or async
+    download: Callable[[str, str], Awaitable[bytes]] | None = None  # (token, file_path) -> bytes; default: api.download
 
 
 @dataclass
@@ -249,6 +285,15 @@ class _Texted:
     code: int
     needs_code: bool  # forced by untrusted content, or the preview was shortened: a bare yes is not enough
     at: float  # when we sent it
+
+
+@dataclass
+class _Update:
+    """Progress waiting for its turn in the per-conversation window."""
+    texts: list[str] = field(default_factory=list)
+    atts: list[dict[str, Any]] = field(default_factory=list)
+    last: float | None = None  # monotonic time of the last flush
+    timer: asyncio.Task[None] | None = None
 
 
 async def _maybe(v: Any) -> Any:
@@ -299,6 +344,9 @@ class TelegramBridge:
         self._sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
         self._tasks: set[asyncio.Task[Any]] = set()
         self._send_lock = asyncio.Lock()  # one send at a time keeps replies in order
+        self._order_lock = asyncio.Lock()  # a whole delivery (text + files + notes) before the next one starts
+        self._updates: dict[str, _Update] = {}  # conversation id -> progress waiting out the window
+        self._sent_atts = _Memo()  # attachment ids already sent as progress: the final reply does not repeat them
         self._approval_lock = asyncio.Lock()
         self._runs = _Memo()  # run ids started from Telegram: their reply goes back
         self._answered = _Memo()  # run ids whose end has been handled
@@ -511,7 +559,14 @@ class TelegramBridge:
             return
         if chat.get("id") != st.get("ownerChatId") or frm.get("id") != st.get("ownerUserId"):
             return
-        await self._owner_message(chat["id"], text, float(m.get("date") or 0) or None, st)
+        photo = m.get("photo")
+        media = (("photo", photo[-1]) if isinstance(photo, list) and photo and isinstance(photo[-1], dict)
+                 else ("document", m["document"]) if isinstance(m.get("document"), dict) else None)
+        if media:
+            text = (m.get("caption") or "").strip()
+        elif any(k in m for k in _OTHER_MEDIA):
+            text = ""  # a voice note with a caption is still a voice note
+        await self._owner_message(chat["id"], text, float(m.get("date") or 0) or None, st, media)
 
     # ---- pairing
     async def _pair(self, chat: dict[str, Any], frm: dict[str, Any], text: str, st: dict[str, Any]) -> None:
@@ -528,15 +583,16 @@ class TelegramBridge:
         await self._send(chat["id"], "Paired. Text me anything, or /help.")
 
     # ---- owner messages
-    async def _owner_message(self, chat_id: int, text: str, sent_at: float | None, st: dict[str, Any]) -> None:
+    async def _owner_message(self, chat_id: int, text: str, sent_at: float | None, st: dict[str, Any],
+                             media: tuple[str, dict[str, Any]] | None = None) -> None:
         where = chat_id
-        if not text:
-            await self._send(where, "Attachments aren't supported yet — send text.")
+        if not text and not media:
+            await self._send(where, UNSUPPORTED)
             return
-        if text.split()[0].split("@")[0].lower() == "/start":
+        if not media and text.split()[0].split("@")[0].lower() == "/start":
             await self._send(where, HELP)
             return
-        cmd = parse_command(text)
+        cmd = None if media else parse_command(text)  # a file's caption is a message, never a command
         bare = re.sub(r"^/|[.!]+$", "", text.lower())
         if cmd and cmd[0] in ("approve", "deny") and cmd[1] is None and bare in _BARE_ANSWERS and not self._live_texted():
             cmd = None  # a plain "yes" with nothing waiting is the user answering Grain's own question
@@ -551,12 +607,18 @@ class TelegramBridge:
             log.info("telegram chat=%s command=%s", _mask(chat_id), cmd[0])
             await self._command(cmd, where, sent_at)
             return
-        if _ANSWER_WORD.match(text) and self._live_texted():  # steering would deny the card; make them answer it
+        if not media and _ANSWER_WORD.match(text) and self._live_texted():  # steering would deny the card; make them answer it
             await self._send(where, "Reply yes or no (or yes <code>) to the approval first.")
             return
+        ids: list[str] = []
+        if media:
+            doc_id = await self._fetch_attachment(chat_id, *media)
+            if doc_id is None:  # already told the user why
+                return
+            ids = [doc_id]
         try:
             conv = await self._target()
-            res = await _maybe(self.deps.start_turn(conv, text))
+            res = await _maybe(self.deps.start_turn(conv, text, ids) if ids else self.deps.start_turn(conv, text))
         except Exception as e:  # noqa: BLE001
             log.warning("telegram start failed: %s", type(e).__name__)
             await self._send(where, "Grain couldn't take that message right now. Try again in a moment.")
@@ -564,14 +626,41 @@ class TelegramBridge:
         self._runs.add(res["run_id"])
         self._typing.add(res["run_id"])  # before the task starts: a fast reply must be able to switch it off
         self._spawn(self._typing_loop(res["run_id"], where))
-        log.info("telegram chat=%s started run len=%s", _mask(chat_id), len(text))
+        log.info("telegram chat=%s started run len=%s files=%s", _mask(chat_id), len(text), len(ids))
+
+    async def _fetch_attachment(self, chat_id: int, kind: str, obj: dict[str, Any]) -> str | None:
+        """An inbound photo or file -> the id of its stored upload; None after telling the user what went wrong."""
+        size = obj.get("file_size")
+        if isinstance(size, int) and size > DOWNLOAD_MAX:
+            await self._send(chat_id, TOO_BIG)
+            return None
+        try:
+            token, file_id = self.deps.get_token(), obj.get("file_id")
+            fetch = self.deps.download or getattr(self.deps.api, "download", None)
+            if not token or not file_id or fetch is None or self.deps.store_upload is None:
+                raise TelegramError(0, "not configured")
+            info = await self.deps.api(token, "getFile", {"file_id": file_id}, 15.0) or {}
+            if int(info.get("file_size") or 0) > DOWNLOAD_MAX:
+                await self._send(chat_id, TOO_BIG)
+                return None
+            data = await fetch(token, info["file_path"])
+            name = Path(str(obj.get("file_name") or "")).name or f"photo-{int(time.time())}.jpg"
+            mime = obj.get("mime_type") or ("image/jpeg" if kind == "photo" else mimetypes.guess_type(name)[0] or "application/octet-stream")
+            stored = await _maybe(self.deps.store_upload(name, mime, data))
+            doc_id = str(stored["id"])
+        except Exception as e:  # noqa: BLE001
+            log.info("telegram chat=%s attachment failed: %s", _mask(chat_id), type(e).__name__)
+            await self._send(chat_id, FETCH_FAILED)
+            return None
+        log.info("telegram chat=%s attachment kind=%s bytes=%s", _mask(chat_id), kind, len(data))
+        return doc_id
 
     async def _typing_loop(self, run_id: str, chat_id: int) -> None:
         token = self.deps.get_token()
         end = time.monotonic() + 1800  # a run that never reports its end must not type forever
         while run_id in self._typing and token and time.monotonic() < end:
             with contextlib.suppress(Exception):
-                await self.deps.api(token, "sendChatAction", {"chat_id": chat_id, "action": "typing"}, 10.0)
+                await self._call("sendChatAction", {"chat_id": chat_id, "action": "typing"}, 10.0)
             await self._sleep(TYPING_EVERY)
 
     # ---- commands
@@ -671,36 +760,131 @@ class TelegramBridge:
             await self.deps.api(token, "answerCallbackQuery", {"callback_query_id": cb.get("id"), "text": outcome[:200]}, 10.0)
         if msg.get("message_id") is not None:
             with contextlib.suppress(Exception):
-                await self.deps.api(token, "editMessageText", {"chat_id": msg["chat"]["id"], "message_id": msg["message_id"],
-                                                               "text": f"{msg.get('text') or ''}\n\n{outcome}"}, 10.0)
+                await self._call("editMessageText", {"chat_id": msg["chat"]["id"], "message_id": msg["message_id"],
+                                                     "text": f"{msg.get('text') or ''}\n\n{outcome}"}, 10.0)
 
     # ---- sending
-    async def _send(self, chat_id: int, text: str, markup: dict[str, Any] | None = None) -> bool:
-        token = self.deps.get_token()
+    async def _call(self, method: str, params: dict[str, Any], timeout: float = 15.0, files: dict[str, tuple[str, bytes, str]] | None = None) -> bool:
+        """The one door every outbound call goes through: refuses any chat but the paired owner's, one call at a time, and
+        waits out one 429. `params` carries the chat_id. True when Telegram accepted it."""
+        token, chat_id = self.deps.get_token(), params.get("chat_id")
         if not token:
             return False
-        params: dict[str, Any] = {"chat_id": chat_id, "text": text}
-        if markup:
-            params["reply_markup"] = markup
+        if chat_id is None or chat_id != self._state().get("ownerChatId"):
+            log.warning("telegram send refused: not owner")
+            return False
         async with self._send_lock:
             for attempt in (0, 1):
                 try:
-                    await self.deps.api(token, "sendMessage", params, 15.0)
-                    log.info("telegram send chat=%s len=%s ok=True", _mask(chat_id), len(text))
+                    await (self.deps.api(token, method, params, timeout, files) if files else self.deps.api(token, method, params, timeout))
                     return True
                 except TelegramError as e:
                     if e.code == 429 and attempt == 0:
                         await self._sleep(min(e.retry_after or 1.0, 30.0))
                         continue
-                    log.info("telegram send chat=%s failed: code=%s", _mask(chat_id), e.code)
+                    log.info("telegram send chat=%s %s failed: code=%s", _mask(chat_id), method, e.code)
                 except Exception as e:  # noqa: BLE001
-                    log.info("telegram send chat=%s failed: %s", _mask(chat_id), type(e).__name__)
+                    log.info("telegram send chat=%s %s failed: %s", _mask(chat_id), method, type(e).__name__)
                 return False
         return False
+
+    async def _send(self, chat_id: int, text: str, markup: dict[str, Any] | None = None) -> bool:
+        params: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if markup:
+            params["reply_markup"] = markup
+        ok = await self._call("sendMessage", params)
+        if ok:
+            log.info("telegram send chat=%s len=%s ok=True", _mask(chat_id), len(text))
+        return ok
 
     async def _send_all(self, chat_id: int, text: str) -> None:
         for part in split_reply(text):
             await self._send(chat_id, part)
+
+    @staticmethod
+    def _is_photo(mime: str, data: bytes) -> bool:
+        """Fits sendPhoto: an image type Telegram shows inline, <= 10 MB, sides summing to <= 10000 px, no more than 20:1."""
+        if mime not in PHOTO_MIMES or len(data) > PHOTO_MAX:
+            return False
+        try:
+            import io
+
+            from PIL import Image
+            w, h = Image.open(io.BytesIO(data)).size
+        except ImportError:
+            return True  # cannot measure it; a refused photo falls back to a document
+        except Exception:  # noqa: BLE001 - not a readable image
+            return False
+        return bool(w and h) and w + h <= 10000 and max(w, h) / min(w, h) <= 20
+
+    async def _deliver(self, chat_id: int, text: str, atts: list[dict[str, Any]] | None) -> None:
+        """Text and files to the owner. Short text rides as the first file's caption, longer text goes first on its own."""
+        if not atts:
+            await self._send_all(chat_id, text)
+            return
+        if len(text) > CAPTION_MAX:
+            await self._send_all(chat_id, text)
+            text = ""
+        cap = [text]  # the caption goes out once, with the first thing that gets through
+        failed: list[str] = []
+        photos: list[tuple[str, str, bytes]] = []
+        docs: list[tuple[str, str, Path]] = []
+        for a in atts:
+            name, mime = str(a.get("name") or "file"), str(a.get("mime") or "application/octet-stream")
+            path = self.deps.attachment_path(str(a.get("id") or ""))
+            try:
+                size = path.stat().st_size if path else None
+            except OSError:
+                size = None
+            if size is None or size > DOC_MAX:  # gone, or more than a bot may send
+                failed.append(name)
+            else:
+                try:
+                    data = await asyncio.to_thread(path.read_bytes) if mime in PHOTO_MIMES and size <= PHOTO_MAX else b""
+                except OSError:  # gone between stat and read
+                    failed.append(name)
+                    continue
+                (photos.append((name, mime, data)) if data and self._is_photo(mime, data) else docs.append((name, mime, path)))
+
+        async def one(method: str, field_: str, name: str, mime: str, data: bytes) -> bool:
+            params: dict[str, Any] = {"chat_id": chat_id}
+            if cap[0]:
+                params["caption"] = cap[0]
+            ok = await self._call(method, params, 60.0, {field_: (name, data, mime)})
+            if ok:
+                cap[0] = ""
+            return ok
+
+        async def doc(name: str, mime: str, data: bytes) -> None:
+            if not await one("sendDocument", "document", name, mime, data):
+                failed.append(name)
+
+        for i in range(0, len(photos), GROUP_MAX):
+            group = photos[i:i + GROUP_MAX]
+            if len(group) == 1:
+                name, mime, data = group[0]
+                if not await one("sendPhoto", "photo", name, mime, data):
+                    await doc(name, mime, data)
+                continue
+            media = [{"type": "photo", "media": f"attach://f{j}", **({"caption": cap[0]} if j == 0 and cap[0] else {})} for j in range(len(group))]
+            if await self._call("sendMediaGroup", {"chat_id": chat_id, "media": media}, 60.0,
+                                {f"f{j}": g for j, g in enumerate(group)}):
+                cap[0] = ""
+                continue
+            for name, mime, data in group:
+                await doc(name, mime, data)
+        for name, mime, path in docs:
+            try:
+                data = await asyncio.to_thread(path.read_bytes)
+            except OSError:
+                failed.append(name)
+                continue
+            await doc(name, mime, data)
+        if cap[0]:  # nothing carried it
+            await self._send_all(chat_id, cap[0])
+        for name in failed:
+            await self._send(chat_id, f"Couldn't deliver {name}.")
+        log.info("telegram send chat=%s files=%s failed=%s", _mask(chat_id), len(atts), len(failed))
 
     # ---- run events
     def _spawn(self, coro: Awaitable[Any]) -> None:
@@ -753,7 +937,17 @@ class TelegramBridge:
         text = to_plain((self.deps.message_text(run.message_id) if run.message_id else "") or "")
         if not text:
             text = RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone
-        await self._send_all(chat_id, text)
+        await self.flush_updates(run.conversation_id)  # progress waiting out its window goes before the answer
+        atts = self._unsent(self.deps.message_attachments(run.message_id) if run.message_id else [])
+        async with self._order_lock:  # and a delivery still in flight finishes first
+            await self._send_all(chat_id, text)
+            if atts:
+                await self._deliver(chat_id, "", atts)
+
+    def _unsent(self, atts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        """The attachments not already delivered as a progress update (each id is consumed: a later run may send it again)."""
+        sent = self._sent_atts.seen
+        return [a for a in atts or [] if sent.pop(a.get("id"), None) is None]
 
     async def _long_run_note(self, run: Any, took: float, chat_id: int) -> None:
         title = self.deps.conversation_title(run.conversation_id) or "a chat"
@@ -799,13 +993,67 @@ class TelegramBridge:
         if owner is not None:
             self._spawn(self._notify_approvals(owner, call_id=call_id))
 
-    def push(self, text: str) -> None:
+    def push(self, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
         """Text the owner a reply written outside any run they started (a worker's result, after its wake turn)."""
         if self._lock_fd is None:
             return
-        owner, plain = self._state().get("ownerChatId"), to_plain(text or "")
-        if owner is not None and plain:
-            self._spawn(self._send_all(owner, plain))
+        owner, plain, atts = self._state().get("ownerChatId"), to_plain(text or ""), self._unsent(attachments)
+        if owner is not None and (plain or atts):
+            self._spawn(self._deliver_in_order(owner, plain, atts))
+
+    def is_texts_conversation(self, conv_id: str | None) -> bool:
+        return bool(conv_id) and conv_id == self._state().get("textsConversationId")
+
+    def send_update(self, conversation_id: str | None, text: str, attachments: list[dict[str, Any]] | None = None) -> bool:
+        """Progress from a tool mid-run, sent to the phone when this process polls and the conversation is the Texts one.
+        True when accepted. At most one message per PROGRESS_MIN_SECONDS: sooner ones are joined and flushed by one timer."""
+        plain, atts = to_plain(text or ""), [a for a in attachments or [] if a.get("id")]
+        if self._lock_fd is None or not self.is_texts_conversation(conversation_id) or self._state().get("ownerChatId") is None \
+                or not (plain or atts):
+            return False
+        for a in atts:
+            self._sent_atts.add(a["id"])  # now, not at flush: a final reply that lands first must not repeat it
+        self._spawn(self._queue_update(conversation_id, plain, atts))  # type: ignore[arg-type]
+        return True
+
+    async def _queue_update(self, conv_id: str, text: str, atts: list[dict[str, Any]]) -> None:
+        u = self._updates.setdefault(conv_id, _Update())
+        if text:
+            u.texts.append(text)
+        u.atts += [a for a in atts if a["id"] not in {x["id"] for x in u.atts}]
+        if u.timer:  # one is already waiting for the window to end
+            return
+        wait = PROGRESS_MIN_SECONDS - (time.monotonic() - u.last) if u.last is not None else 0.0
+        if wait <= 0:
+            await self.flush_updates(conv_id)
+        else:
+            u.timer = asyncio.create_task(self._flush_later(conv_id, wait))
+            self._tasks.add(u.timer)
+            u.timer.add_done_callback(self._tasks.discard)
+
+    async def _flush_later(self, conv_id: str, wait: float) -> None:
+        await self._sleep(wait)
+        self._updates[conv_id].timer = None  # this task is finishing: flush_updates must not cancel it
+        await self.flush_updates(conv_id)
+
+    async def flush_updates(self, conv_id: str | None) -> None:
+        """Send whatever progress is waiting for this conversation now."""
+        u = self._updates.get(conv_id or "")
+        if not u:
+            return
+        if u.timer and u.timer is not asyncio.current_task():
+            u.timer.cancel()
+        u.timer = None
+        texts, atts, u.texts, u.atts = u.texts, u.atts, [], []
+        owner = self._state().get("ownerChatId")
+        if owner is None or not (texts or atts):
+            return
+        u.last = time.monotonic()
+        await self._deliver_in_order(owner, "\n\n".join(texts), atts)
+
+    async def _deliver_in_order(self, chat_id: int, text: str, atts: list[dict[str, Any]] | None) -> None:
+        async with self._order_lock:
+            await self._deliver(chat_id, text, atts)
 
     # ---- surface for the app
     def status(self) -> dict[str, Any]:

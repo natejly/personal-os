@@ -136,6 +136,7 @@ export default function TelegramSettings({ draft, patch }: { draft: Settings; pa
         <span className="toggle-text"><b>Send worker results to Telegram</b><small>When a background worker finishes, the assistant's reply to it is also sent to your chat.</small></span>
         <input type="checkbox" checked={!!draft.telegramPushWorkerResults} onChange={(e) => patch({ telegramPushWorkerResults: e.target.checked })} /><span className="switch" />
       </label>
+      <p className="muted small">Replies, worker results and progress updates can include screenshots and files; photos you send the bot reach the chat.</p>
 
       <div className="workspace-roots-add">
         <button type="button" className="ghost-btn" disabled={busy || !st?.paired} onClick={() => void test()}>Send test message</button>

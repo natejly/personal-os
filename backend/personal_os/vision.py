@@ -18,12 +18,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import llm, mac, redact
+from . import blobs, llm, mac, redact
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_EDGE = 1568                 # long edge sent to the model
 MAX_ENCODED = 1_000_000         # bytes of JPEG sent to the model
 MAX_DESCRIPTION = 6_000
+MAX_TURN_IMAGES = 4              # pictures per message that go to the chat model itself
 OCR_TIMEOUT_S = 30
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 _FORMATS = {"PNG", "JPEG", "GIF", "WEBP", "BMP", "TIFF", "MPO"}
@@ -161,6 +162,30 @@ async def describe(settings: dict[str, Any], data: bytes, question: str = "", ch
     return {"error": "no vision model is configured and tesseract is not installed"}
 
 
+def image_parts(documents: Any, atts: list[dict[str, Any]] | None, chat_model: str | None) -> list[dict[str, Any]]:
+    """`image_url` parts for the pictures attached to a turn, when the chat model itself reads images (the `visionModel`
+    setting does not count: that model never sees the conversation). Up to MAX_TURN_IMAGES, from the stored originals;
+    a missing or unreadable file is skipped. [] otherwise, and the turn carries only the attachment's text."""
+    if not atts or not model_for({}, chat_model):
+        return []
+    out: list[dict[str, Any]] = []
+    for a in atts:
+        if len(out) >= MAX_TURN_IMAGES:
+            break
+        mime = str(a.get("mime") or "")
+        if not mime.startswith("image/") or "svg" in mime:
+            continue
+        d = documents.get(str(a.get("id") or ""))
+        p = blobs.inside_uploads(documents.db.data_dir, d and d.get("path"))
+        try:
+            jpeg = prepare(p.read_bytes())[0] if p else b""
+        except (ImageError, OSError):
+            continue
+        if jpeg:
+            out.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")}})
+    return out
+
+
 def allowed_image_path(raw: str) -> Path:
     """mac.allowed_path, plus the folder MCP tool results save pictures to (mcp_client._save_media). That folder
     sits in the app data folder, which every other file tool must keep refusing, so the exception lives here."""
@@ -200,7 +225,18 @@ def register(tb: Any) -> None:
                 raise mac.LocalPathError(str(e)) from e
         return allowed_image_path(raw)
 
-    async def view_image(ctx: dict[str, Any], path: str = "", question: str = "") -> Any:
+    def stored(ctx: dict[str, Any], doc_id: str) -> Path:
+        """The stored original of an Uploads document (an upload, a screenshot, a generated picture) in this chat's project."""
+        d = tb.documents.get(doc_id.strip())
+        pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
+        if not d or (d["project_id"] and d["project_id"] != pid):
+            raise mac.LocalPathError(f"no document {doc_id}")
+        p = blobs.inside_uploads(tb.documents.db.data_dir, d.get("path"))
+        if p is None:
+            raise mac.LocalPathError(f"{d['name']} has no stored original")
+        return p
+
+    async def view_image(ctx: dict[str, Any], path: str = "", question: str = "", document_id: str = "") -> Any:
         fix = dict(field="path", expected="a PNG, JPEG, GIF, WebP, BMP or TIFF file: a desk path like outputs/chart.png, or a path anywhere on this Mac",
                    example={"path": "outputs/chart.png", "question": "what does the y axis show?"})
 
@@ -211,7 +247,7 @@ def register(tb: Any) -> None:
             return tool_error(redact.scrub_command_output(msg), **kw)
 
         try:
-            p = resolve(ctx, path)
+            p = stored(ctx, document_id) if (document_id or "").strip() else resolve(ctx, path)
         except (mac.LocalPathError, OSError) as e:
             return fail(f"view_image: {e}", "list the folder (desk_list_files or find_files) and use a path it returned")
         if p.suffix.lower() == ".svg":
@@ -258,11 +294,12 @@ def register(tb: Any) -> None:
         "view_image",
         "Look at a picture file and get text back: a description of it (layout, charts, tables), every visible word transcribed, "
         "and an answer to your question about it. Use it on charts you made, screenshots, rendered slides or pages, photos and scans. "
-        "PNG, JPEG, GIF, WebP, BMP, TIFF up to 20 MB. In a desk the path is relative to the workspace. When no vision model is available "
+        "PNG, JPEG, GIF, WebP, BMP, TIFF up to 20 MB. Pass `document_id` for a screenshot or an attached picture. In a desk the path is relative to the workspace. When no vision model is available "
         "you get OCR text only.",
         _obj({"path": {"type": "string", "description": "Desk path (outputs/chart.png) or a path anywhere on this Mac"},
+              "document_id": {"type": "string", "description": "Instead of path: the id of a picture in Uploads (a screenshot, a generated image, an attached file)"},
               "question": {"type": "string", "description": "What to find out about the picture (optional). Ask about the specific thing you need."}},
-             ["path"]),
+             []),
         view_image, "vision", "safe",
         examples=[{"path": "outputs/chart.png", "question": "does the legend match the series colours?"}, {"path": "~/Desktop/screenshot.png"}],
         taints=True)

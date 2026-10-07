@@ -56,7 +56,31 @@ def test_long_file_is_capped_with_a_pointer() -> None:
         assert "500 more characters" in body and f"read_document id={doc['id']}" in body
 
 
+def test_finish_message_keeps_the_files_a_reply_sent() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        db = Database(d)
+        convos, docs = Conversations(db), Documents(db)
+        doc = docs.create(None, "shot.png", "image/png", 10, "/x/shot.png", "")
+        cid = convos.create(None, "New chat", "m")["id"]
+        att = [{"id": doc["id"], "name": "shot.png", "mime": "image/png", "size": 10}]
+        am = convos.add_message(cid, "assistant", "", model="m")
+        convos.finish_message(am["id"], "here", None, None, attachments=att)
+        row = convos.get(cid)["messages"][0]
+        assert row["attachments"] == att and row["content"] == "here"
+        # A later finish without the kwarg (a steer's next segment, an error) leaves them as they were.
+        convos.finish_message(am["id"], "here, done", None, None)
+        assert convos.get(cid)["messages"][0]["attachments"] == att
+        # They are files the assistant sent, not text for the model: replay carries the words only.
+        assert convos.history(cid) == [{"role": "assistant", "content": "here, done"}]
+        assert convos.for_model(convos.get(cid)["messages"][0]) == "here, done"
+        # A reply that is only a file has nothing to replay.
+        only = convos.add_message(cid, "assistant", "", model="m")
+        convos.finish_message(only["id"], "", None, None, attachments=att)
+        assert len(convos.history(cid)) == 1 and all(r["role"] == "assistant" and "attached_file" not in r["content"] for r in convos.history_rows(cid))
+
+
 if __name__ == "__main__":
     test_attachments_stored_and_inlined_for_the_model()
+    test_finish_message_keeps_the_files_a_reply_sent()
     test_long_file_is_capped_with_a_pointer()
     print("ok")

@@ -15,7 +15,7 @@ Mental model:
 
 - **Chats** run a tool loop. Tools read and write the app, Google, the Mac and a sandbox.
 - **Memory and graph**: auto-learn saves memories and graph links after replies. **Projects** group chats with their own instructions, files and memories.
-- **Files** (⌘4) holds notes you write and uploads. Settings → Memory (⌘6) reviews memory and the writing Voice profile.
+- **Files** (⌘4) holds notes you write, uploads, and Artifacts: what the assistant made in any chat, by chat. A project's **Context** tab is the same for one project (its chats' files, notes and uploads). Settings → Memory (⌘6) reviews memory and the writing Voice profile.
 - **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Modules hides any view. The top-right title-bar button opens the ⌘I panel.
 - **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.

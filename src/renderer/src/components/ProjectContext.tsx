@@ -7,11 +7,11 @@ import { ChatFileRow } from './ChatFilesPanel'
 import './chatFiles.css'
 
 /**
- * A project's Artifacts tab: its chats' files, notes and uploads in one list, by type or by chat, with search
+ * A project's Context tab: its chats' files, notes and uploads in one list, by type or by chat, with search
  * and upload. Reloads from the top when a chat, note or upload changes. Files open the way they do anywhere
  * else: in their chat's side panel, in the editor, in Finder, or (an upload no chat used) in the upload viewer.
  */
-export default function ProjectArtifacts({ projectId }: { projectId: string }): JSX.Element {
+export default function ProjectContext({ projectId }: { projectId: string }): JSX.Element {
   const conversations = useStore((s) => s.conversations)
   const docs = useStore((s) => s.docs)
   const documents = useStore((s) => s.documents)
@@ -54,7 +54,7 @@ export default function ProjectArtifacts({ projectId }: { projectId: string }): 
   const uploadBtn = <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload</button>
 
   return (
-    <div className={`page-body pf${drag ? ' dragging' : ''}`} title="Drop files to upload"
+    <div className={`page-body pf${drag ? ' dragging' : ''}`} title="Drop files to upload" data-testid="project-context"
       onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files) }}>
       <input id="doc-upload-input-project" ref={fileRef} type="file" multiple hidden onChange={(e) => { upload(e.target.files); e.target.value = '' }} />
@@ -63,7 +63,7 @@ export default function ProjectArtifacts({ projectId }: { projectId: string }): 
       {files?.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
-          <h2>No artifacts yet</h2>
+          <h2>No context yet</h2>
           <p>Uploads, notes and what this project&apos;s chats make or read show up here. Drop files anywhere on this page.</p>
           {uploadBtn}
         </div>
@@ -71,14 +71,14 @@ export default function ProjectArtifacts({ projectId }: { projectId: string }): 
       {!!files?.length && (
         <div className="pf-bar">
           {uploadBtn}
-          <input type="search" className="pf-search" placeholder="Search artifacts" aria-label="Search artifacts" value={q} onChange={(e) => setQ(e.target.value)} />
-          <span className="cf-seg" role="group" aria-label="Group artifacts">
+          <input type="search" className="pf-search" placeholder="Search context" aria-label="Search context" value={q} onChange={(e) => setQ(e.target.value)} />
+          <span className="cf-seg" role="group" aria-label="Group context">
             <button className={byChat ? '' : 'on'} aria-pressed={!byChat} onClick={() => setByChat(false)}>By type</button>
             <button className={byChat ? 'on' : ''} aria-pressed={byChat} onClick={() => setByChat(true)}>By chat</button>
           </span>
         </div>
       )}
-      {!!files?.length && !shown.length && <p className="empty-hint">No artifacts match.</p>}
+      {!!files?.length && !shown.length && <p className="empty-hint">Nothing in this project's context matches.</p>}
       {byChat
         ? groupByChat(shown).map((g) => <section key={g.conversationId}><h4>{g.title}</h4>{g.files.map((f) => row(f, false))}</section>)
         : groupByKind(shown).map((g) => <section key={g.kind}><h4>{g.label}</h4>{g.files.map((f) => row(f, true))}</section>)}

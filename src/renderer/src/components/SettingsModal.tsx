@@ -573,7 +573,7 @@ export default function SettingsModal(): JSX.Element {
               <AdvGroup id="search" title="Search" {...gp}>
                 <IndexStatusLine />
                 <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
-                <AdvancedRetrieval draft={draft} patch={patch} models={models} />
+                <AdvancedRetrieval draft={draft} patch={patch} />
                 <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup>
 

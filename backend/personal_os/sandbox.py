@@ -47,7 +47,7 @@ def _warm_mpl(py: str) -> None:
         os.makedirs(MPL_CACHE, exist_ok=True)
         if any(n.startswith("fontlist-") for n in os.listdir(MPL_CACHE)):
             return
-        cmd = [py, "-I", "-c", "import matplotlib.font_manager"]
+        cmd = [py, "-I", "-B", "-c", "import matplotlib.font_manager"]
         if sys.platform == "darwin" and shutil.which("sandbox-exec"):
             cmd = ["sandbox-exec", "-p", _mac_profile(MPL_CACHE, py), *cmd]
         subprocess.run(cmd, capture_output=True, timeout=180,
@@ -457,7 +457,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
     started_ns = time.time_ns()
     cwd = os.path.realpath(workspace) if workspace else work
     pre = _limits_for(timeout) if workspace else _limits
-    cmd = [py, "-I", script]
+    cmd = [py, "-I", "-B", script]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg"}
     sock = None
     if bridge is not None:
@@ -467,7 +467,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         sock = bridge.socket_path
         env["GRAIN_TOOLS_SOCK"] = sock
         # -I keeps the script's own folder off sys.path, so put it back for the client module and run main.py by path.
-        cmd = [py, "-I", "-c", "import sys, runpy; sys.path.insert(0, %r); runpy.run_path(%r, run_name='__main__')" % (work, script)]
+        cmd = [py, "-I", "-B", "-c", "import sys, runpy; sys.path.insert(0, %r); runpy.run_path(%r, run_name='__main__')" % (work, script)]
     if any(k in code for k in ("matplotlib", "pyplot", "seaborn")):
         _warm_mpl(py)
     env["MPLCONFIGDIR"] = _seed_mpl(work)

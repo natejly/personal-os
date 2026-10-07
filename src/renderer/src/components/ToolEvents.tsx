@@ -305,7 +305,10 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   // The context panel only ever shows the main view's chat, so "See why" is offered there alone.
   const inMainChat = useStore((s) => s.view === 'chat' && s.focusedConversationId === conversationId)
   // A chat working autonomously shows its desk's plan card at the foot of the transcript (DeskInline), so not twice.
-  const deskPlanShown = useStore((s) => inMainChat && s.activeDesk?.conversation_id === conversationId && !!s.activeDesk.plan)
+  // That includes the moment before the desk row has loaded: the card is not drawn here first and moved a frame later.
+  const deskPlanShown = useStore((s) => inMainChat && (s.activeDesk?.conversation_id === conversationId
+    ? !!s.activeDesk.plan
+    : !!s.sessions[conversationId]?.conversation.settings.deskId))
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
 

@@ -13,6 +13,8 @@ export interface ProviderInfo {
   defaultModel: string
   models: string[]
   /** The provider's default reranker; absent when it has no rerank route. */
+  /** The provider's default model per tier; absent when it has none. */
+  tiers?: Partial<Record<'high' | 'medium' | 'low', string>>
   rerankModel?: string
   note: string | null
 }

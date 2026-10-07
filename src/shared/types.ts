@@ -1463,6 +1463,10 @@ export interface Settings {
   autoRoute: boolean
   systemPrompt: string
   extractionModel: string
+  /** Model tiers; empty means the active provider's default for the tier. */
+  modelHigh?: string
+  modelMedium?: string
+  modelLow?: string
   autoLearn: boolean
   /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean

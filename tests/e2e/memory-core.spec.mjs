@@ -84,7 +84,7 @@ test('blank memory is refused, Enter adds, whitespace-only add is disabled, mark
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
   await addBox(page).fill('<img src=x onerror=alert(1)> **not bold**')
   await addBox(page).press('Enter')
-  await expect(page.getByText('<img src=x onerror=alert(1)> **not bold**')).toBeVisible()
+  await expect(pane(page).getByText('<img src=x onerror=alert(1)> **not bold**')).toBeVisible() // the Today card behind the dialog lists it too
   await expect(page.locator('.mem-row img')).toHaveCount(0)
   await expect(api('/memories', { method: 'POST', body: { content: '  ' } })).rejects.toThrow(/400/)
   clean(grain)

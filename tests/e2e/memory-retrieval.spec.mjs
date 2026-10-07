@@ -117,7 +117,7 @@ test('Advanced retrieval settings persist across relaunch and clamp out-of-range
   const { page, api } = grain
   await openAdvanced(page, 'Search')
   await page.getByLabel('Search by').selectOption('bm25')
-  await page.getByRole('checkbox', { name: /Re-rank search results/ }).check({ force: true })
+  await page.getByRole('checkbox', { name: /Re-rank document search/ }).check({ force: true })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(async () => (await api('/settings')).retrievalMode).toBe('bm25')
   expect(await api('/settings')).toMatchObject({ retrievalMode: 'bm25', retrievalRerank: true })
@@ -132,7 +132,7 @@ test('Advanced retrieval settings persist across relaunch and clamp out-of-range
   expect(await api('/settings')).toMatchObject({ retrievalPerDocCap: 4, retrievalMinSimilarity: 0.6, retrievalCandidates: 30 })
   await openAdvanced(p, 'Search')
   await expect(p.getByLabel('Search by')).toHaveValue('bm25')
-  await expect(p.getByRole('checkbox', { name: /Re-rank search results/ })).toBeChecked()
+  await expect(p.getByRole('checkbox', { name: /Re-rank document search/ })).toBeChecked()
   clean(grain)
 })
 

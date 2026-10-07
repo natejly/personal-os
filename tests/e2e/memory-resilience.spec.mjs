@@ -52,7 +52,7 @@ test('Settings memory scope filter lists a project memory only under that projec
   await page.reload()
   await openMemory(page)
   await expect(pane(page).locator('.mem-row')).toHaveCount(2)
-  const scope = pane(page).locator('.knowledge-controls select')
+  const scope = page.getByRole('dialog', { name: 'Settings' }).locator('.knowledge-controls select') // the scope picker sits in the section head, above the panel
   await scope.selectOption({ label: 'Scoped' })
   await expect(pane(page).getByText('project scope fact')).toBeVisible()
   await expect(pane(page).getByText('personal scope fact')).toBeVisible() // shared project: personal memories ride along

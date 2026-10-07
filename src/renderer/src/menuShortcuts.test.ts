@@ -236,3 +236,11 @@ test('⌘0…⌘n are contiguous, each used once, each a distinct target', async
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
   assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
 })
+
+test('the Quick chat button and the ⌘I menu item are the same toggle', () => {
+  const was = useStore.getState().pageAgentOpen
+  fire('page-agent')
+  assert.equal(useStore.getState().pageAgentOpen, !was)
+  useStore.getState().togglePageAgent()
+  assert.equal(useStore.getState().pageAgentOpen, was)
+})

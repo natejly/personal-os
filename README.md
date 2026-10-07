@@ -25,9 +25,9 @@ instructions, files, memories and graph.
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
-Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
-every view. Settings → Modules puts any of them in the sidebar, in the title bar,
-or out of sight. Bars are 40 px and
+Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
+Settings → Modules hides any of them. A **Quick chat** button at the top right of
+every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
 ## How to use
@@ -67,7 +67,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    panel; a note has its own chat there, and opening another note switches to
    that one's chat. The assistant can edit a note (you accept each diff) and can
    delete one after asking; Settings → Trash restores it.
-4. **Lists, Calendar, Mail.** These are apps at the top right of the title bar
+4. **Lists, Calendar, Mail.** These are rows in the sidebar
    (⌘2, ⌘3, ⌘5). Lists holds your todos in a rail of lists, with a one-line add
    row. With Google connected, todos sync both ways with Google Tasks. Double-click the
    calendar to add an event; Mail drafts and sends with a 90 s undo.
@@ -106,7 +106,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 8. **Settings you will touch.** Tools: each tool's mode (on, ask, off), Allowed
    hosts, and Workspace folders. When a reply that read the web wants to fetch a
    page, approve the card or click **Allow <host> from now on**. Modules: which
-   views appear, and whether each sits in the sidebar, the title bar or nowhere.
+   views get a sidebar row.
    Data: daily backups (the newest 7 plus one a week), **Back up now**, restore
    on next start, and **Export all data** as a zip. Behavior → Appearance: theme, accent and Zoom (80-160%, ⌘= / ⌘−, ⌥⌘0 to reset).
 
@@ -155,7 +155,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   background run only records the verdict. Off by default. Web search retries a failed key, then falls back to keyless engines
   rather than failing. A Firecrawl key (Settings, or `FIRECRAWL_API_KEY` in `.env`) makes Firecrawl the first engine for web search and page reads, with the other engines as the fallback. Fetching a URL after the reply read untrusted content
   asks once; the card can also add the host to Settings → Permissions → Allowed hosts.
-  Hovering a tool row or a title-bar app button shows what it does. Tool calls
+  Hovering a tool row or a sidebar row shows what it does. Tool calls
   render inline with arguments, results and timing, and every reply carries an
   execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project

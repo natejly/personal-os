@@ -10,7 +10,7 @@ export const todosModule: ModuleDef = {
   description: 'Your to-dos in lists, synced with Google Tasks',
   icon: <ListChecks size={15} />,
   view: { id: 'todos', Component: TodosView, optional: true },
-  nav: { section: 'apps', order: 0, badge: (s) => s.dashboard?.todo_stats?.open ?? null },
+  nav: { order: 12, badge: (s) => s.dashboard?.todo_stats?.open ?? null },
   widget: todosWidget,
   home: { key: 'todos', label: 'Lists', Card: TodosCard },
 }

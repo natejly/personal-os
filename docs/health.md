@@ -1,6 +1,6 @@
 # Health
 
-The Health page (title-bar app strip, heart icon) tracks a small set of daily metrics, shows a Today
+The Health page (sidebar row, heart icon) tracks a small set of daily metrics, shows a Today
 card, and gives the assistant `health_summary` / `health_log` / `health_delete_entry` (tool group `health`).
 
 ## Metrics

@@ -56,9 +56,9 @@ test('Today: the quick-ask box starts a chat and ⌘↵ adds a todo', async ({ g
 
 test('Settings → Advanced → Layout hides and shows each Today card and sidebar view', async ({ grain }) => {
   const { page, api } = grain
-  const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) + (await page.locator(`.app-switcher button[aria-label="${name}"]`).count()) > 0
+  const shown = async (name) => (await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^${name}`) }).count()) > 0
   await openAdvanced(page, 'Layout')
-  // One row per view: Sidebar, Title bar or Hidden.
+  // One row per view: Sidebar or Hidden.
   const views = dialog(page).locator('.place-row')
   const names = await views.locator('b').allInnerTexts()
   expect(names).toEqual(expect.arrayContaining(['Lists', 'Calendar', 'Mail', 'Library', 'Health', 'Memory']))
@@ -73,8 +73,10 @@ test('Settings → Advanced → Layout hides and shows each Today card and sideb
   await setAll('Sidebar')
   expect((await api('/settings')).hiddenViews).toEqual([])
   for (const n of names) expect(await shown(n), `${n} shown`).toBe(true)
-  expect(await page.locator('.app-switcher button[aria-label="Calendar"]').count()).toBe(0)
-  // One at a time: hide it, then bring it back in the title bar.
+  // The title bar holds no per-view icons: nothing but the Quick chat button.
+  await expect(page.locator('.app-switcher button')).toHaveCount(1)
+  await expect(dialog(page).getByRole('button', { name: 'Title bar' })).toHaveCount(0)
+  // One at a time: hide it, then bring it back to the sidebar.
   for (const n of ['Library', 'Mail']) {
     await openAdvanced(page, 'Layout')
     await views.filter({ hasText: n }).getByRole('button', { name: 'Hidden' }).click()
@@ -82,10 +84,9 @@ test('Settings → Advanced → Layout hides and shows each Today card and sideb
     expect(await shown(n), `${n} off`).toBe(false)
     for (const o of names.filter((x) => x !== n)) expect(await shown(o), `${o} untouched`).toBe(true)
     await openAdvanced(page, 'Layout')
-    await views.filter({ hasText: n }).getByRole('button', { name: 'Title bar' }).click()
+    await views.filter({ hasText: n }).getByRole('button', { name: 'Sidebar' }).click()
     await save(page)
     expect(await shown(n), `${n} on`).toBe(true)
-    expect(await page.locator(`.app-switcher button[aria-label="${n}"]`).count(), `${n} in the title bar`).toBe(1)
   }
 
   // Today cards that need no Google account.

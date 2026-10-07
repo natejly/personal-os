@@ -10,6 +10,6 @@ export const healthModule: ModuleDef = {
   icon: <HeartPulse size={15} />,
   view: { id: 'health', Component: HealthView, optional: true },
   // After Calendar (0) and Mail (10) in the title-bar strip.
-  nav: { section: 'apps', order: 20 },
+  nav: { order: 18 },
   home: { key: 'health', label: 'Health', Card: HealthCard },
 }

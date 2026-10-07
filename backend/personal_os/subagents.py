@@ -1439,7 +1439,7 @@ def _short(args: dict[str, Any], limit: int = 300) -> dict[str, Any]:
 
 # ---- tool registration -----------------------------------------------------------------------------
 
-DESK_MODES = ("plan", "propose")  # never looser than 'plan': 'ask' cards each change instead of planning first
+DESK_MODES = ("plan", "propose")  # never looser than 'plan': 'ask' works without a plan, so a scheduled desk never uses it (nobody is watching)
 
 
 def register(tb: Any) -> None:

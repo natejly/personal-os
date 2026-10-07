@@ -36,8 +36,9 @@ log = logging.getLogger(__name__)
 FRONT_TOOLS = ("delegate", "message_worker", "check_worker", "stop_worker", "resume_worker")
 SPAWN_TOOLS = ("agent_spawn", "agent_wait", "agent_stop")
 # What a reply may still use once it has to hand work on (delegation_forced): the hand-off tools, the task list, and the two
-# tools that exist to hand a decision to the user (a plan card, a question), which are not the reply doing the work itself.
-FORCED_ALLOW = frozenset({*FRONT_TOOLS, "todo_write", "propose_plan", "ask_user"})
+# tools that exist to hand a decision to the user (a plan card, a question; a desk asks and finishes with its own), which are not
+# the reply doing the work itself.
+FORCED_ALLOW = frozenset({*FRONT_TOOLS, "todo_write", "propose_plan", "ask_user", "desk_ask", "desk_done"})
 ENDED = ("done", "error", "interrupted", "stopped")
 NO_REPLY = "NO_REPLY"
 WAKE_REPORT_CHARS = 12_000
@@ -57,7 +58,8 @@ FRONT_AGENT_HINT = (
     "lines, then work. Do quick lookups yourself. Anything that needs more than a couple of steps goes to a background "
     "worker with delegate: write a self-contained brief (goal, context, constraints, done criteria, report format), "
     "because the worker cannot see this conversation, and tell the user in one line what you started. Keep todo_write "
-    "current for multi-step work (it is re-sent to you every round). Follow-ups on work a worker already did go to resume_worker or message_worker, not a "
+    "current for multi-step work (it is re-sent to you every round). "
+    "In an autonomous chat, desk_done is optional: a reply that answers and hands the rest to workers is complete. Follow-ups on work a worker already did go to resume_worker or message_worker, not a "
     "new worker. Do not poll workers: when one finishes its report arrives by itself as a hidden message from the "
     "system. Tell the user the result in plain words; never narrate workers, tools or briefs. If a report is stale or "
     "repeats what the user already has, answer with exactly NO_REPLY and nothing else. "
@@ -85,8 +87,8 @@ WAKE_HEADER = (
 # ---- pure helpers: what the chat loop asks -------------------------------------------------------
 
 def arrange_tools(modes: dict[str, str], front: bool) -> dict[str, str]:
-    """The tool map a reply is offered. A plain chat turn that has `delegate` loses agent_spawn/wait/stop (delegate
-    replaces them); every other lane (a desk, a scheduled run, a persona without it) never gets the hand-off tools."""
+    """The tool map a reply is offered. A chat or desk turn that has `delegate` loses agent_spawn/wait/stop (delegate
+    replaces them); a scheduled run or a persona without it never gets the hand-off tools."""
     m = dict(modes)
     drop = SPAWN_TOOLS if front and m.get("delegate") in ("on", "ask") else FRONT_TOOLS
     for n in drop:
@@ -94,9 +96,12 @@ def arrange_tools(modes: dict[str, str], front: bool) -> dict[str, str]:
     return m
 
 
+LOOKUP_TOOLS = frozenset({"tool_search", "mcp_tool_search"})  # finding a tool is not using one
+
+
 def counts_as_work(names: Iterable[str]) -> bool:
-    """A round that called anything beyond delegating and keeping the task list is the reply doing the work itself."""
-    return any(n not in FORCED_ALLOW for n in names)
+    """A round that called anything beyond delegating, keeping the task list and looking tools up is the reply doing the work itself."""
+    return any(n not in FORCED_ALLOW and n not in LOOKUP_TOOLS for n in names)
 
 
 def delegation_forced(settings: dict[str, Any], work_rounds: int, offered: Iterable[str]) -> bool:
@@ -123,7 +128,7 @@ def forced_refusal(name: str) -> dict[str, Any]:
 
 def lane_refusal(name: str, front: bool, forced: bool) -> dict[str, Any] | None:
     """An error for a call that does not belong in this lane, else None. A delegating chat has no agent_spawn (delegate
-    replaces it); a desk or scheduled run has no hand-off tools; and once delegation is forced only the hand-off tools run."""
+    replaces it); a scheduled run has no hand-off tools; and once delegation is forced only the hand-off tools run."""
     if front and name in SPAWN_TOOLS:
         return tool_error(f"{name} is not offered in this chat: workers do that work.", alternative="delegate, with a self-contained brief")
     if not front and name in FRONT_TOOLS:
@@ -279,6 +284,8 @@ class Workers:
         (the approval and bridge callbacks), taint copied as it stands."""
         ctx = {k: parent[k] for k in self.KEEP if k in parent}
         modes = arrange_tools(parent.get("modes") or {}, False)
+        # A worker has no desk workspace, so the desk's own file tools are not offered.
+        modes = {n: v for n, v in modes.items() if (sp := self.sub.toolbox.specs.get(n)) is None or sp.group != "desk"}
         if not allow_subworkers:
             for n in SPAWN_TOOLS:
                 modes.pop(n, None)
@@ -294,7 +301,7 @@ class Workers:
         """Queue (and, with a free slot, start) one worker. -> {'worker_id', 'state'} or a tool error dict."""
         allow = bool(a.get("allow_subworkers"))
         ctx = self.worker_ctx(parent, allow)
-        args: dict[str, Any] = {"task": a.get("task") or render_brief(a), "role": "general"}
+        args: dict[str, Any] = {"task": a.get("task") or render_brief(a), "role": str(a.get("agent") or "general")}
         if resume:
             args["resume_id"] = resume
         got = self.sub._start(ctx, args, kind="worker", defer=True, prompt=WORKER_PROMPT,
@@ -555,14 +562,14 @@ def register(tb: Any) -> None:
         return getattr(tb, "workers", None)
 
     async def delegate(ctx: dict[str, Any], goal: str = "", context: str = "", constraints: str = "", done_criteria: str = "",
-                       report_format: str = "", title: str = "", allow_subworkers: bool = False) -> Any:
+                       report_format: str = "", title: str = "", allow_subworkers: bool = False, agent: str = "") -> Any:
         w = _w()
         if w is None:
             return tool_error("Workers are not available.")
         if not str(goal or "").strip():
             return tool_error("delegate needs a goal.", field="goal", example={"goal": "Compare the three vendor quotes in the Quotes doc"})
         out = w.start(ctx, {"goal": goal, "context": context, "constraints": constraints, "done_criteria": done_criteria,
-                            "report_format": report_format, "title": title, "allow_subworkers": allow_subworkers})
+                            "report_format": report_format, "title": title, "allow_subworkers": allow_subworkers, "agent": agent})
         if "worker_id" in out:
             out["note"] = ("Started in the background" if out["state"] == "running" else "Queued; it starts when a slot is free") + \
                 ". Its report arrives by itself as a hidden message when it finishes; do not poll for it. Tell the user in one line what you started."
@@ -580,7 +587,8 @@ def register(tb: Any) -> None:
               "done_criteria": {"type": "string", "description": "How the worker knows it is finished"},
               "report_format": {"type": "string", "description": "What its final report should contain and how it is laid out"},
               "title": {"type": "string", "description": "Two to five words naming the job"},
-              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it fan parts of its work out to subagents"}},
+              "allow_subworkers": {"type": "boolean", "default": False, "description": "Let it fan parts of its work out to subagents"},
+              "agent": {"type": "string", "description": "The name of one of the user's Library agents to run the worker as (its instructions, tools and skills). Leave empty for a general worker."}},
              ["goal"]),
         delegate, GROUP, "executes",
         examples=[{"goal": "Find the three cheapest direct flights from SFO to JFK next Friday and compare them",

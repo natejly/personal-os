@@ -46,6 +46,8 @@ from .graph_learn import LITERAL_PREDICATES, PREDICATES, SINGLE_VALUED, TYPES as
 from . import webread
 from . import websearch
 from . import outbox as outbox_mod
+from . import blobs as blob_store, mail_attachments
+from .extract_text import safe_upload_name
 from . import scheduling, verify
 from .jobs import check_watch_dir, local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
@@ -90,7 +92,8 @@ PROPOSAL_ONLY_DANGER = ("external", "schedules")
 # undo exists (extundo), still a proposal in an unattended run, and still a card on an ask-as-it-goes desk.
 ASK_LOCKED_DANGER = ("external", "schedules")
 # Locked whatever the setting says: the call is itself the user's review card.
-ALWAYS_CARD = frozenset({"calendar_propose"})
+# gmail_send: an agent never sends mail on its own. Its card is the user's own editable email: Send, Save as draft or Discard.
+ALWAYS_CARD = frozenset({"calendar_propose", "gmail_send"})
 # Lasting text, and destructive edits to the user's lists. Untrusted content must not plant or
 # erase those unnoticed.
 PROMPT_WRITES = frozenset({
@@ -291,6 +294,9 @@ def checked(name: str, out: Any) -> Any:
     if not isinstance(out, dict) or out.get("error") or "verification" not in out:
         return out
     return out if verify.ok(out["verification"]) else unverified(name, out)
+
+
+DISCARDED = "discarded by the user on the email card; nothing was sent and no draft was saved"
 
 
 def denied(name: str, reason: str) -> dict[str, Any]:
@@ -2154,14 +2160,62 @@ def _register_google(self: Toolbox) -> None:
         _obj({"message_id": {"type": "string"}}, ["message_id"]), gmail_read, "google",
         examples=[{"message_id": "18f2c1a9b7e4d0aa"}], taints=True))
 
+    _ATTACH_PARAM = {"type": "array", "items": {"type": "string"}, "description": "Uploads document ids or file paths on this Mac to attach (25 MB total)"}
+
+    _ADDR_PARAM = {"type": "string", "description": "Optional address list, same format as `to`"}
+
     def _mail_shown(out: Any) -> Any:
         return _scrub_strings(out) if isinstance(out, dict) else out
 
-    async def gmail_draft(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> Any:
-        return _mail_shown(await run(g.gmail_draft, to, subject, body, reply_to_message_id))
-    R("gmail_draft", ToolSpec("gmail_draft", "Create a Gmail draft (never sends). Prefer this over gmail_send unless the user explicitly asked to send.",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}}, ["to", "subject", "body"]), gmail_draft, "google", "external",
-        examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks"},
+    def _attach(ctx: dict[str, Any], entries: list[str]) -> list[dict[str, Any]]:
+        """Each entry (an Uploads document id, or a file path on this Mac, which is copied into Uploads) as a resolved
+        attachment. ValueError names the entry that cannot be attached."""
+        pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
+        ids = []
+        for raw in (str(e).strip() for e in entries):
+            try:
+                d = self.documents.get(raw)
+                if d and d["project_id"] and d["project_id"] != pid:
+                    raise ValueError("that file belongs to another project")
+                if not d:
+                    p = mac.readable_path(raw)
+                    if not p.is_file():
+                        raise ValueError("not a file")
+                    if p.stat().st_size > mail_attachments.MAX_TOTAL_BYTES:
+                        raise mail_attachments.AttachmentError(f"{p.name} is over Gmail's 25 MB limit.")
+                    data = p.read_bytes()
+                    name = safe_upload_name(p.name)
+                    dest, digest = blob_store.store(self.documents.db.data_dir, name, data)
+                    d = self.documents.find_by_hash(pid, digest) or self.documents.create(
+                        pid, name, mimetypes.guess_type(name)[0] or "application/octet-stream", len(data), str(dest), "", content_hash=digest)
+                ids.append(d["id"])
+            except (mac.LocalPathError, OSError) as e:
+                raise ValueError(f"{raw}: {e if isinstance(e, mac.LocalPathError) else 'no such document id or file'}") from e
+            except ValueError as e:
+                raise ValueError(f"{raw}: {e}") from e
+        return ids
+
+    async def _attachments(ctx: dict[str, Any], entries: list[str] | None) -> tuple[list[str], list[dict[str, Any]]] | Any:
+        """(document ids, resolved items), or a tool_error for the first entry that cannot be attached."""
+        if not entries:
+            return [], []
+        try:
+            ids = await run(_attach, ctx, list(entries))
+            return ids, await run(mail_attachments.resolve, self.documents, self.documents.db.data_dir, ids)
+        except ValueError as e:
+            return tool_error(redact.scrub_command_output(f"attachments: {e}"), field="attachments",
+                              expected="Uploads document ids or readable file paths on this Mac, 25 MB in total")
+
+    async def gmail_draft(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                          attachments: list[str] | None = None, cc: str | None = None, bcc: str | None = None) -> Any:
+        got = await _attachments(ctx, attachments)
+        if isinstance(got, dict):
+            return got
+        return _mail_shown(await run(lambda: g.gmail_draft(to, subject, body, reply_to_message_id, **outbox_mod.extras(got[1], cc, bcc))))
+    R("gmail_draft", ToolSpec("gmail_draft", "Create a Gmail draft (never sends). Prefer this over gmail_send unless the user explicitly asked to send. Files can be attached (25 MB in total).",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}, "attachments": _ATTACH_PARAM,
+              "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_draft, "google", "external",
+        examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks", "attachments": ["<document id>"]},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
     async def propose_times_draft(ctx: dict[str, Any], to: str, subject: str, duration_minutes: int, window_start: str, window_end: str,
@@ -2188,19 +2242,27 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"to": "mira@example.com", "subject": "Catch up", "duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"}]))
 
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
-                         as_draft: bool = False) -> Any:
+                         as_draft: bool = False, attachments: list[str] | None = None, cc: str | None = None,
+                         bcc: str | None = None) -> Any:
+        got = await _attachments(ctx, attachments)
+        if isinstance(got, dict):
+            return got
+        ids, items = got
         if as_draft:
             # The user chose "Save as draft" on the approval card: the same email, written to Drafts and never sent.
             # It still goes through gmail_draft's read-back, so the card can say "Saved to Drafts, verified".
-            return _mail_shown(await run(g.gmail_draft, to, subject, body, reply_to_message_id))
+            return _mail_shown(await run(lambda: g.gmail_draft(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
         if self.outbox is None:
-            return _mail_shown(await run(g.gmail_send, to, subject, body, reply_to_message_id))
-        row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"))
+            return _mail_shown(await run(lambda: g.gmail_send(to, subject, body, reply_to_message_id, **outbox_mod.extras(items, cc, bcc))))
+        row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"), ids, cc, bcc)
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Leave as_draft unset: the user sets it on the approval card.",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Files can be attached (25 MB in total), with optional cc and bcc. The user always reviews and edits the email on a card first, and only their Send click sends it, so an approved send may differ from what you wrote: the result says what was finally sent, or that it was discarded or saved as a draft. Leave as_draft unset: the user sets it on the card.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
-              "as_draft": {"type": "boolean", "default": False}}, ["to", "subject", "body"]), gmail_send, "google", "external",
-        examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."}]))
+              "as_draft": {"type": "boolean", "default": False}, "attachments": _ATTACH_PARAM, "cc": _ADDR_PARAM, "bcc": _ADDR_PARAM}, ["to", "subject", "body"]), gmail_send, "google", "external",
+        examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."},
+                  {"to": "mira@example.com", "subject": "Invoice 42", "body": "Attached.", "attachments": ["~/Documents/invoice-42.pdf"]}]))
+    # Never sent unasked, in any permission mode: no allow rule, grant, plan step or reviewer stands in for the user's click.
+    self.specs["gmail_send"].force_ask = self.specs["gmail_send"].force_card = lambda args, ctx: True
 
     async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
         if self.outbox is None:

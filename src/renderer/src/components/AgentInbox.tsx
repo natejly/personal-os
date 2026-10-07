@@ -23,6 +23,7 @@ import { SAFE_MD } from './Message'
 import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
+import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -124,6 +125,17 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
     // A refused decision leaves the proposal pending: the message shows here and the draft stays open to fix.
     setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
+  }
+  // A proposed email is the same editable card as in the chat; Accept there is Send (or Save draft), Reject is Discard.
+  const MailCard = p.tool === 'gmail_send' || p.tool === 'gmail_draft' ? TOOL_CARDS[p.tool] : undefined
+  if (MailCard) {
+    const event = { id: p.id, name: p.tool, arguments: p.args, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+    return (
+      <li className="inbox-item">
+        <MailCard event={event} pending conversationId={p.conversation_id ?? undefined}
+          decide={async (ok, edited) => { const e = await decideProposal(p.id, ok, edited); if (e) useStore.getState().toast(e, 'error') }} />
+      </li>
+    )
   }
   // Closing the row ends the edit too: Accept must never send text from boxes that are not on screen.
   const toggle = (): void => {

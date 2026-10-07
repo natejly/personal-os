@@ -338,8 +338,37 @@ def render(m: dict, fmt: str, meta_headers=None) -> dict:
     return out
 
 
+def parse_raw(raw: str) -> tuple[Any, str, list[str]]:
+    """The message, its text/plain body and the file names of its attachments (the raw may be multipart)."""
+    msg = email.message_from_bytes(base64.urlsafe_b64decode(raw))
+    text, names = None, []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        if part.get_filename():
+            names.append(part.get_filename())
+        elif text is None and part.get_content_type() == "text/plain":
+            text = part.get_payload(decode=True)
+    return msg, text.decode("utf-8", "replace") if text else "", names
+
+
+class Attachments:
+    def __init__(self, s): self.s = s
+
+    def get(self, userId, messageId, id, **_):
+        def go():
+            self.s.gate("gmail")
+            if not any("att-" + a["filename"] == id for a in self.s.messages.get(messageId, {}).get("attachments", [])):
+                raise ApiError(404, "Not Found")
+            data = b"%PDF-1.4\n" + b"x" * 2000
+            return {"data": base64.urlsafe_b64encode(data).decode(), "size": len(data)}
+        return Call(go)
+
+
 class Msgs:
     def __init__(self, s): self.s = s
+
+    def attachments(self): return Attachments(self.s)
 
     def list(self, userId, q="", maxResults=100, pageToken=None, **_):
         def go():
@@ -376,15 +405,14 @@ class Msgs:
     def send(self, userId, body):
         def go():
             self.s.gate("gmail")
-            msg = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]))
+            msg, text, names = parse_raw(body["raw"])
             mid = self.s.nid("sent")
-            text = msg.get_payload(decode=True)
             m = {"id": mid, "threadId": body.get("threadId") or mid, "labelIds": ["SENT"], "snippet": "",
                  "internalDate": str(int(dt.datetime.now().timestamp() * 1000)), "headers": list(msg.items()),
-                 "text": text.decode("utf-8", "replace") if text else "", "attachments": []}
+                 "text": text, "attachments": []}
             self.s.messages[mid] = m
             self.s.sent.append({"id": mid, "to": msg["To"], "subject": msg["Subject"], "body": m["text"], "threadId": m["threadId"]})
-            self.s.write("mail.send", id=mid, to=msg["To"], subject=msg["Subject"])
+            self.s.write("mail.send", id=mid, to=msg["To"], subject=msg["Subject"], attachments=names)
             return {"id": mid, "threadId": m["threadId"]}
         return Call(go)
 
@@ -419,8 +447,8 @@ class Drafts:
         def go():
             did = self.s.nid("draft")
             self.s.drafts[did] = body["message"]
-            msg = email.message_from_bytes(base64.urlsafe_b64decode(body["message"]["raw"]))
-            self.s.write("mail.draft", id=did, to=msg["To"], subject=msg["Subject"])
+            msg, _text, names = parse_raw(body["message"]["raw"])
+            self.s.write("mail.draft", id=did, to=msg["To"], subject=msg["Subject"], attachments=names)
             return {"id": did}
         return Call(go)
 

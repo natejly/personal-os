@@ -96,18 +96,19 @@ def test_the_always_ask_setting_moves_the_lock() -> None:
         assert appmod.settings()["alwaysAsk"] == ["gmail_modify", "calendar_propose"], "deduplicated"
         assert tb.ask_locked(tb.specs["gmail_modify"]) and tb.effective({"gmail_modify": "on"}, None, None)["gmail_modify"] == "ask"
         assert tb.gate("gmail_modify", "on", {"tainted": True}) == "ask"
-        assert not tb.ask_locked(tb.specs["gmail_send"]) and tb.effective({}, None, None)["gmail_send"] == "on", "unlisted mail send runs"
+        assert not tb.ask_locked(tb.specs["gmail_draft"]) and tb.effective({}, None, None)["gmail_draft"] == "on", "an unlisted external tool runs"
         assert tb.ask_locked(tb.specs["calendar_propose"])
         j("PUT", "/settings", {"alwaysAsk": []})
         assert tb.ask_locked(tb.specs["calendar_propose"]), "the review card cannot be unlisted"
-        assert not tb.ask_locked(tb.specs["gmail_send"])
+        assert not tb.ask_locked(tb.specs["gmail_draft"])
+        assert tb.ask_locked(tb.specs["gmail_send"]), "an email send is a card whatever the setting says"
         assert not tb.ask_locked(tb.specs["todo_delete"]), "an in-app tool is never locked"
         j("PUT", "/settings", {"alwaysAsk": ["todo_delete"]})
         assert not tb.ask_locked(tb.specs["todo_delete"]) and tb.effective({}, None, None)["todo_delete"] == "on"
         j("PUT", "/settings", {"alwaysAsk": "gmail_send"}, expect=422)
         j("PUT", "/settings", {"alwaysAsk": [1]}, expect=422)
         tools = {t["name"]: t for t in j("GET", "/tools")["tools"]}
-        assert tools["gmail_send"]["ask_locked"] is False and tools["gmail_send"]["default_mode"] == "on"
+        assert tools["gmail_draft"]["ask_locked"] is False and tools["gmail_draft"]["default_mode"] == "on"
     finally:
         j("PUT", "/settings", {"alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
     tools = {t["name"]: t for t in j("GET", "/tools")["tools"]}

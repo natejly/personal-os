@@ -43,6 +43,7 @@ class FakeServer:
         self.events: dict[tuple[str, str], dict[str, Any]] = {}
         self.messages: dict[str, dict[str, Any]] = {}
         self.drafts: dict[str, dict[str, Any]] = {}
+        self.attachments: dict[tuple[str, str], bytes] = {}  # (message id, attachment id) -> file bytes
         self.tasks: dict[tuple[str, str], dict[str, Any]] = {}
         self.n = 0
         self.versions = 0
@@ -113,7 +114,7 @@ class FakeServer:
         mid = self._id("msg")
         msg = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]))
         m = {"id": mid, "threadId": body.get("threadId") or mid, "labelIds": list(self.send_labels),
-             "payload": {"headers": [{"name": k, "value": v} for k, v in msg.items()]}}
+             "payload": {"headers": [{"name": k, "value": v} for k, v in msg.items()]}, "raw": body["raw"]}
         self.messages[mid] = m
         return {"id": mid, "threadId": m["threadId"]}
 
@@ -123,6 +124,12 @@ class FakeServer:
         if m is None:
             raise ApiError(404, "Not Found")
         return {**m, **self.corrupt.get(message_id, {})}
+
+    def read_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any]:
+        data = self.attachments.get((message_id, attachment_id))
+        if data is None:
+            raise ApiError(404, "Not Found")
+        return {"data": base64.urlsafe_b64encode(data).decode().rstrip("="), "size": len(data)}
 
     def modify_message(self, message_id: str, body: dict[str, Any]) -> dict[str, Any]:
         m = self.messages.get(message_id)
@@ -216,6 +223,17 @@ class _GmailMessages:
 
     def modify(self, userId: str, id: str, body: dict[str, Any]) -> _Call:
         return _Call(lambda: self.s.modify_message(id, body))
+
+    def attachments(self) -> "_GmailAttachments":
+        return _GmailAttachments(self.s)
+
+
+class _GmailAttachments:
+    def __init__(self, s: FakeServer):
+        self.s = s
+
+    def get(self, userId: str, messageId: str, id: str) -> _Call:
+        return _Call(lambda: self.s.read_attachment(messageId, id))
 
 
 class _GmailDrafts:

@@ -1,13 +1,18 @@
 // Fixtures for the Google-backed views. `test` gives `grain` on the fake-Google backend (connected, seeded);
 // `test.disconnected` is the plain harness. `fake.state()` reads the fake's store back through its debug routes.
 import { test as base, expect } from '@playwright/test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { launchApp, ROOT } from '../harness.mjs'
 
 export const FAKE_ENTRY = [join(ROOT, 'tests', 'e2e', 'backend_fake_google.py')]
 
 async function run(use, testInfo, opts) {
-  const g = await launchApp({ name: testInfo.title.replace(/\W+/g, '-').slice(0, 40), ...opts })
+  // Saved attachments land here, never in the real Downloads folder.
+  const downloads = mkdtempSync(join(tmpdir(), 'grain-e2e-downloads-'))
+  const g = await launchApp({ name: testInfo.title.replace(/\W+/g, '-').slice(0, 40), ...opts, backendEnv: { PERSONAL_OS_DOWNLOADS_DIR: downloads, ...opts?.backendEnv } })
+  g.downloads = downloads
   g.page.setDefaultTimeout(40_000)
   const reopen = g.relaunch
   g.relaunch = async () => { const p = await reopen(); p.setDefaultTimeout(40_000); return p }

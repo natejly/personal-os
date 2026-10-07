@@ -29,8 +29,8 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
     id: approval.call_id, name: approval.tool, arguments: approval.args ?? {}, result_preview: '', duration_ms: 0, error: null,
     pending: true, needs_approval: true, forced: approval.forced
   }
-  const decide = async (ok: boolean, edited?: Record<string, unknown>): Promise<void> =>
-    approveTool(ev.id, ok ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
+  const decide = async (ok: boolean, edited?: Record<string, unknown>, note?: string): Promise<void> =>
+    approveTool(ev.id, ok ? 'allow' : 'deny', conversationId, edited || note ? { ...(edited ? { arguments: edited } : {}), ...(note ? { note } : {}) } : undefined)
   const parked = approval.parked_at && !approval.live
   const note = parked ? <p className="muted small">The desk let go of this while it waited. Answering wakes it.</p> : null
 

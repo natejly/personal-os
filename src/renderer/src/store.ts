@@ -161,6 +161,17 @@ const newSession = (conversation: Conversation): ChatSession =>
 const countApprovals = (c: Conversation): number =>
   (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
 
+export interface MailComposePrefill {
+  to: string
+  cc: string
+  bcc: string
+  subject: string
+  body: string
+  /** Gmail id of the message being replied to, so the send stays in its thread. */
+  replyToMessageId: string | null
+  attachments: { id: string; name: string; mime: string; size: number }[]
+}
+
 export interface State {
   ready: boolean
   backendError: string | null
@@ -274,6 +285,8 @@ export interface State {
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   /** The upload the standalone viewer shows (an upload opened with no chat to put it beside). */
   uploadPreview: string | null
+  /** A draft handed to the Mail compose window (an assistant's email card moved there); MailView takes it and clears it. */
+  mailComposePrefill: MailComposePrefill | null
   toasts: Toast[]
   /** The ⌘K command palette. */
   paletteOpen: boolean
@@ -378,6 +391,7 @@ export interface State {
   openSettings: (tab: SettingsTab | LegacySettingsTab, group?: AdvancedGroup) => void
   setProjectModal: (m: State['projectModal']) => void
   openUploadPreview: (id: string | null) => void
+  openMailCompose: (prefill: MailComposePrefill) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
@@ -1770,6 +1784,7 @@ export const useStore = create<State>((set, get) => {
     settingsGroup: null,
     projectModal: null,
     uploadPreview: null,
+    mailComposePrefill: null,
     toasts: [],
     paletteOpen: false,
     helpOpen: false,
@@ -1965,6 +1980,7 @@ export const useStore = create<State>((set, get) => {
     openSettings: (id, group) => { const r = resolveTab(id); set({ settingsOpen: true, settingsTab: r.tab, settingsGroup: group ?? r.group ?? null }) },
     setProjectModal: (projectModal) => set({ projectModal }),
     openUploadPreview: (uploadPreview) => set({ uploadPreview }),
+    openMailCompose: (mailComposePrefill) => { set({ mailComposePrefill }); get().setView('mail') },
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))

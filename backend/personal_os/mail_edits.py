@@ -14,6 +14,7 @@ MAX_RECIPIENTS = 50
 MAX_SUBJECT = 998          # RFC 5322 line limit
 MAX_BODY = 200_000
 MAX_ADDRESS = 254
+MAX_ATTACHMENTS = 20
 
 _ADDR = re.compile(r"^[\w.!#$%&'*+/=?^`{|}~-]+@[\w-]+(?:\.[\w-]+)+$")
 _NAMED = re.compile(r"^(?P<name>.*?)<(?P<addr>[^<>]+)>$")
@@ -41,13 +42,13 @@ def parse_recipients(raw: str) -> list[str]:
     return out
 
 
-def check_send(to: str, subject: str) -> list[str]:
-    """The recipients of a send, or ApprovalEditError. Outbox.queue runs it too, so a bad address
-    fails before the hold starts rather than when Gmail rejects it later."""
+def check_send(to: str, subject: str, cc: str | None = None, bcc: str | None = None) -> list[str]:
+    """The To recipients of a send, or ApprovalEditError. Outbox.queue runs it too, so a bad address
+    fails before the hold starts rather than when Gmail rejects it later. Cc and Bcc count toward the cap."""
     rcpt = parse_recipients(str(to or ""))
     if not rcpt:
         raise ApprovalEditError("Add at least one recipient.")
-    if len(rcpt) > MAX_RECIPIENTS:
+    if len(rcpt) + len(parse_recipients(str(cc or ""))) + len(parse_recipients(str(bcc or ""))) > MAX_RECIPIENTS:
         raise ApprovalEditError(f"At most {MAX_RECIPIENTS} recipients.")
     subject = str(subject or "")
     if "\n" in subject or "\r" in subject:  # a newline here is header injection, not a long subject
@@ -59,7 +60,14 @@ def check_send(to: str, subject: str) -> list[str]:
 
 def _clean(args: dict[str, Any], *, allow_draft_flag: bool) -> dict[str, Any]:
     out = dict(args)
-    out["to"] = ", ".join(check_send(str(out.get("to") or ""), str(out.get("subject") or "")))
+    out["to"] = ", ".join(check_send(str(out.get("to") or ""), str(out.get("subject") or ""), out.get("cc"), out.get("bcc")))
+    for key in ("cc", "bcc"):
+        if key in out:
+            if not isinstance(out[key], str):
+                raise ApprovalEditError(f"{key} must be a list of email addresses.")
+            out[key] = ", ".join(parse_recipients(out[key]))
+            if not out[key]:
+                out.pop(key)
     out["subject"] = str(out.get("subject") or "").strip()
     body = str(out.get("body") or "")
     if len(body) > MAX_BODY:
@@ -71,6 +79,13 @@ def _clean(args: dict[str, Any], *, allow_draft_flag: bool) -> dict[str, Any]:
             raise ApprovalEditError("reply_to_message_id is not a Gmail message id.")
         if not rid:
             out.pop("reply_to_message_id")
+    if "attachments" in out:
+        att = out["attachments"]
+        if (not isinstance(att, list) or len(att) > MAX_ATTACHMENTS
+                or not all(isinstance(a, str) and a.strip() and len(a) <= 1024 for a in att)):
+            raise ApprovalEditError(f"attachments must be a list of at most {MAX_ATTACHMENTS} file ids or paths.")
+        if not att:
+            out.pop("attachments")
     if "as_draft" in out:
         if not allow_draft_flag:
             raise ApprovalEditError("as_draft only applies to gmail_send.")

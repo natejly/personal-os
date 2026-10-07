@@ -243,7 +243,11 @@ class MailMixin:
             raise
 
     @invalidates("gmail")
-    def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+    def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                    attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
+                    bcc: str | None = None) -> dict[str, Any]:
+        if attachments or cc or bcc:
+            raise ValueError("Attachments, Cc and Bcc are not supported for Outlook mail yet.")
         d = (self._reply_draft(reply_to_message_id, to, subject, body) if reply_to_message_id
              else self._req("POST", "/me/messages", json=self._message(to, subject, body))) or {}
         did = d.get("id") or ""
@@ -264,13 +268,17 @@ class MailMixin:
         return verify.attach(out, verify.check(f"draft {did} in Outlook", read_back, compare=compare, compared=["exists", "subject", "to"]))
 
     @invalidates("gmail")
-    def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+    def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                   attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
+                   bcc: str | None = None) -> dict[str, Any]:
         """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
 
         Anything that fails before Graph is asked to send is raised as NotSent (or not-connected, kept as is):
         nothing went out. Once sendMail/send is called its 202 carries no message, so the read-back looks the
         message up in Sent Items.
         """
+        if attachments or cc or bcc:
+            raise NotSent("Attachments, Cc and Bcc are not supported for Outlook mail yet.")
         want_to = _addrs(_to_graph(to))
         since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
         thread_id: str | None = None

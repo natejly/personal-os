@@ -63,7 +63,7 @@ function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
   )
 }
 
-/** Rows shown under a project group before the "View all" link takes over. */
+/** Rows shown under a project group; the group header opens the project for the rest. */
 const PROJECT_ROWS = 4
 /**
  * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav').
@@ -303,7 +303,6 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-rows">
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {rows.slice(0, PROJECT_ROWS).map((c) => <ChatRow key={c.id} conv={c} sub active={c.id === focusedId && view === 'chat'} />)}
-                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
                   </div>
                 )}
               </div>

@@ -57,8 +57,12 @@ def test_a_malformed_value_is_left_alone() -> None:
 
 
 def test_the_version_and_the_default() -> None:
-    assert migrations.latest() == 28
+    assert migrations.latest() >= 28  # later migrations land on top
     assert llm.DEFAULT_SETTINGS["hiddenViews"] == []  # every sidebar row is on by default
+
+
+def test_sidebar_only_rows_start_shown() -> None:
+    assert llm.DEFAULT_SETTINGS["sidebarHidden"] == []
 
 
 if __name__ == "__main__":

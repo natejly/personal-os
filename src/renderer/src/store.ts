@@ -980,8 +980,8 @@ export const useStore = create<State>((set, get) => {
       else if (action.startsWith('desk:')) void s.goToDesk(action.slice(5))
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
-        // A view turned off in Settings → Appearance stays off: its shortcut says how to turn it back on.
-        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('appearance') })
+        // A view turned off in Settings → Sidebar stays off: its shortcut says how to turn it back on.
+        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('sidebar') })
         else s.setView(v)
       } else if (action === 'upload') {
         s.openFiles('uploads')

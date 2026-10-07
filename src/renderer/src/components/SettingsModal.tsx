@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { X, Download, Upload, Plug, Cpu, MessageSquare, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Plug, Cpu, MessageSquare, Palette, ShieldCheck, ShieldAlert, SlidersHorizontal, RotateCcw, RefreshCw, KeyRound, Gauge, Brain, PanelLeft, type LucideIcon } from 'lucide-react'
 import { useStore, type View } from '../store'
 import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
@@ -50,12 +50,13 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'texting', label: 'Texting', icon: MessageSquare },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
   { id: 'system', label: 'System access', icon: KeyRound },
   { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal }
 ]
 
 /** Tabs where every control acts at once. They hold no draft, so their footer is a single Done. */
-const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage'])
+const IMMEDIATE: ReadonlySet<Tab> = new Set<Tab>(['system', 'usage', 'sidebar'])
 
 const THEMES: { id: Settings['theme']; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -304,6 +305,11 @@ export default function SettingsModal(): JSX.Element {
       if (!on && view === v) setView('home')
     } catch (e) { toast((e as Error).message, 'error') }
   }
+  const sbHidden = draft.sidebarHidden ?? []
+  /** A row that only leaves the sidebar (still reachable by ⌘K and shortcuts): saved at once. */
+  const setSectionShown = async (k: string, on: boolean): Promise<void> => {
+    try { await saveEarly({ sidebarHidden: [...sbHidden.filter((x) => x !== k), ...(on ? [] : [k])] }) } catch (e) { toast((e as Error).message, 'error') }
+  }
   const homeOn = (k: string): boolean => homeModuleOn(draft, k)
   const toggleHome = (k: string): void =>
     patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
@@ -472,16 +478,6 @@ export default function SettingsModal(): JSX.Element {
                   <button type="button" onClick={() => void saveEarly({ uiZoom: 100 })}>Reset</button>
                 </div>
               </div>
-              <h4>Sidebar</h4>
-              <p className="muted small">Rows in the left sidebar. ⌘K and the Go menu still reach a hidden one.</p>
-              <div className="setting-list">
-                {navEntries().map((e) => (
-                  <label key={e.view} className="toggle-row">
-                    <span className="toggle-text"><b>{e.label}</b></span>
-                    <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
-                  </label>
-                ))}
-              </div>
               <h4>Today cards</h4>
               <div className="setting-list">
                 {HOME_MODULES.map((m) => (
@@ -496,6 +492,30 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Default file font</b><small>How files read and edit unless a file has its own choice. Auto keeps the app's own size and line width.</small></span>
                 <TypographyControls value={draft.docTypography ?? {}} onChange={(t) => patch({ docTypography: { ...(draft.docTypography ?? {}), ...t } })}
                   onReset={draft.docTypography && Object.keys(draft.docTypography).length ? () => patch({ docTypography: {} }) : undefined} />
+              </div>
+            </section>}
+            {tab === 'sidebar' && <section>
+              <h3>Sidebar</h3>
+              <p className="muted small">New chat, your chats and Settings always show. Hiding Today, Files, Spaces, Projects or Jobs only removes the row: ⌘K and shortcuts still open them. Hiding Lists, Calendar, Mail, Health or Library turns that view off.</p>
+              <div className="setting-list">
+                {([['home', 'Today'], ['docs', 'Files']] as const).map(([k, label]) => (
+                  <label key={k} className="toggle-row">
+                    <span className="toggle-text"><b>{label}</b></span>
+                    <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
+                  </label>
+                ))}
+                {navEntries().map((e) => (
+                  <label key={e.view} className="toggle-row">
+                    <span className="toggle-text"><b>{e.label}</b></span>
+                    <input type="checkbox" aria-label={e.label} checked={!hidden.includes(e.view)} onChange={(ev) => void setRowShown(e.view, ev.target.checked)} /><span className="switch" />
+                  </label>
+                ))}
+                {([['spaces', 'Spaces'], ['projects', 'Projects'], ['jobs', 'Jobs']] as const).map(([k, label]) => (
+                  <label key={k} className="toggle-row">
+                    <span className="toggle-text"><b>{label}</b></span>
+                    <input type="checkbox" aria-label={label} checked={!sbHidden.includes(k)} onChange={(ev) => void setSectionShown(k, ev.target.checked)} /><span className="switch" />
+                  </label>
+                ))}
               </div>
             </section>}
 

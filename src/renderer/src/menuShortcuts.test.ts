@@ -137,7 +137,7 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'appearance')
+  assert.equal(useStore.getState().settingsTab, 'sidebar')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')

@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.mjs'
+import { openAdvanced } from './helpers/home.mjs'
 import { callWith, send, shrink, sleep, systemOf, upload } from './helpers/kb.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
@@ -114,30 +115,24 @@ test('a deleted upload is no longer retrieved; a chat with no match sends no exc
 
 test('Advanced retrieval settings persist across relaunch and clamp out-of-range input', async ({ grain }) => {
   const { page, api } = grain
-  await page.locator('.settings-btn').click()
-  await page.getByRole('tab', { name: 'Memory' }).click()
-  await page.getByText('Advanced retrieval').click()
-  await page.getByLabel('Search mode').selectOption('bm25')
-  const per = page.getByLabel(/Passages per document/)
-  await per.fill('99')
-  await expect(per).toHaveValue('10')
-  await per.fill('4')
-  await page.getByLabel(/Minimum similarity/).fill('0.6')
-  await page.getByLabel(/Candidates per ranker/).fill('1')
-  await expect(page.getByLabel(/Candidates per ranker/)).toHaveValue('5')
-  await page.getByLabel(/Candidates per ranker/).fill('30')
-  await page.getByRole('checkbox', { name: /Rerank results/ }).check({ force: true })
+  await openAdvanced(page, 'Memory and search')
+  await page.getByLabel('Search by').selectOption('bm25')
+  await page.getByRole('checkbox', { name: /Re-rank search results/ }).check({ force: true })
   await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect.poll(async () => (await api('/settings')).retrievalPerDocCap).toBe(4)
-  const s = await api('/settings')
-  expect(s).toMatchObject({ retrievalMode: 'bm25', retrievalMinSimilarity: 0.6, retrievalCandidates: 30, retrievalRerank: true })
+  await expect.poll(async () => (await api('/settings')).retrievalMode).toBe('bm25')
+  expect(await api('/settings')).toMatchObject({ retrievalMode: 'bm25', retrievalRerank: true })
+  // The per-document cap, similarity floor and candidate count have no controls any more; the API still holds their ranges.
+  for (const body of [{ retrievalPerDocCap: 99 }, { retrievalCandidates: 1 }, { retrievalMinSimilarity: 7 }]) {
+    const r = await api('/settings', { method: 'PUT', body, raw: true })
+    expect(r.status, JSON.stringify(body)).toBeGreaterThanOrEqual(400)
+    expect(r.status).toBeLessThan(500)
+  }
+  await api('/settings', { method: 'PUT', body: { retrievalPerDocCap: 4, retrievalMinSimilarity: 0.6, retrievalCandidates: 30 } })
   const p = await grain.relaunch()
-  await p.locator('.settings-btn').click()
-  await p.getByRole('tab', { name: 'Memory' }).click()
-  await p.getByText('Advanced retrieval').click()
-  await expect(p.getByLabel('Search mode')).toHaveValue('bm25')
-  await expect(p.getByLabel(/Passages per document/)).toHaveValue('4')
-  await expect(p.getByLabel(/Candidates per ranker/)).toHaveValue('30')
+  expect(await api('/settings')).toMatchObject({ retrievalPerDocCap: 4, retrievalMinSimilarity: 0.6, retrievalCandidates: 30 })
+  await openAdvanced(p, 'Memory and search')
+  await expect(p.getByLabel('Search by')).toHaveValue('bm25')
+  await expect(p.getByRole('checkbox', { name: /Re-rank search results/ })).toBeChecked()
   clean(grain)
 })
 

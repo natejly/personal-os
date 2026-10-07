@@ -197,6 +197,7 @@ test('wizard: Settings → Run setup reopens it seeded with the current provider
     await cont(page).click()
     await cont(page, 'Skip for now').click()
     await cont(page, 'Skip for now').click()
+    await cont(page, 'Skip for now').click()
     await expect(w.getByText(/Grain is connected/)).toBeVisible()
     await page.getByRole('button', { name: /Start chatting/ }).click()
     expect((await api('/setup/status')).onboardedAt).toBeTruthy()

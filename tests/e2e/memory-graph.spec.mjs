@@ -30,9 +30,11 @@ test('graph: empty state, add an entity, select it, edit label/type, add and del
   let g = await api('/graph')
   expect(g.nodes.map((n) => n.label).sort()).toEqual(['Ada Lovelace', 'Notes'])
   expect(g.edges).toHaveLength(1)
-  expect(g.edges[0].relation).toBe('wrote')
+  // the predicate set is closed: an unknown phrase is stored as related_to with the phrase kept as the edge's note
+  expect(g.edges[0].relation).toBe('related_to')
+  expect(g.edges[0].fact).toBe('wrote')
   await expect(page.getByText(/^2 memories|^0 memories · 2 entities, 1 relation$/)).toBeVisible().catch(() => {})
-  await panel.getByRole('button', { name: /Delete relation "wrote"/ }).click()
+  await panel.getByRole('button', { name: /Delete relation "related_to"/ }).click()
   await expect.poll(async () => (await api('/graph')).edges.length).toBe(0)
   await panel.getByRole('button', { name: /Delete entity and its relations/ }).click()
   await expect(panel).toBeHidden()

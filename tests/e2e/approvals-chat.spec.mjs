@@ -2,6 +2,7 @@ import { test } from './fixtures.mjs'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 test.describe.configure({ timeout: 300_000 })
+import { openAdvanced } from './helpers/home.mjs'
 import { expect, newChat, say, homeScratch, rmScratch, pending, realErrors, resize } from './helpers/cowork.mjs'
 
 // shell_run is `ask` by default and `touch` is not on the read-only list, so it always gets a card.
@@ -80,9 +81,8 @@ test('always allow in this chat: grant listed in Settings, next call runs withou
     await expect.poll(() => existsSync(join(ws, 'a2.txt')), { timeout: 60_000 }).toBe(true)
     await expect(card(page)).toHaveCount(0)
 
-    // Settings → Tools lists it, and Revoke takes it away
-    await page.getByRole('button', { name: 'Settings' }).click()
-    await page.getByRole('tab', { name: 'Permissions' }).click()
+    // Settings → Advanced → Approvals lists it, and Revoke takes it away
+    await openAdvanced(page, 'Approvals')
     const revoke = page.getByRole('button', { name: /^Revoke shell_run in / })
     await expect(revoke).toBeVisible()
     await revoke.click()

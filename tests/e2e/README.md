@@ -4,6 +4,7 @@ Playwright drives the built Electron app against an isolated backend (own data d
 and a mock OpenAI-compatible provider, so nothing here can touch the real data directory or the Keychain.
 
 ```bash
+PLAYWRIGHT_NODE_MODULES=<dir> tests/e2e/setup-worktree.sh [source-checkout]   # fresh worktree: deps, Playwright link, build
 npm run build                                    # the harness loads out/main/index.js
 ln -sfn <dir with @playwright/test>/node_modules tests/e2e/node_modules
 node tests/e2e/node_modules/.bin/playwright test -c tests/e2e/playwright.config.mjs [file-or-grep]

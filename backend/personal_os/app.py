@@ -819,6 +819,13 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "pimProvider" and v not in ("google", "microsoft"):
             raise HTTPException(400, "pimProvider must be 'google' or 'microsoft'")
+        elif k == "baseUrl":
+            try:
+                clean[k] = providers.check_base_url(v)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+        elif k == "provider" and v is not None and (not isinstance(v, str) or not providers.get(v)):
+            raise HTTPException(422, f"Unknown provider {v!r}")
         elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
             raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "docTypography":
@@ -1164,7 +1171,10 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 async def delete_project(id: str) -> dict[str, Any]:
     # async so each run's stop Event is set on the loop that owns it. Stop is cooperative: the replies wind down and
     # persist what they wrote, and the chats are still there to restore.
-    stopped = sum(1 for c in convos.list(id, include_jobs=True, include_desks=True) if bus.stop(c["id"]))
+    stopped = 0
+    for c in (*convos.list(id, include_jobs=True, include_desks=True), *convos.list(id, include_jobs=True, include_desks=True, archived=True)):
+        stopped += bool(bus.stop(c["id"]))
+        await workers_mgr.stop_conversation(c["id"])  # its background workers end with it, unannounced
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
     return {"ok": True, "stopped": stopped}
@@ -2565,7 +2575,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 blocked.clear()
                 tool_errors.clear()
                 if detector is not None:
-                    detector.obs.clear()
+                    detector.reset()
 
             _round += 1
             meter.rounds = _round - 1  # rounds already completed, for display
@@ -3326,12 +3336,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          **({"review": review} if review else {})}
                 stuck = None
-                if detector is not None and ran:
-                    detector.observe(c["name"], args, result)
+                if detector is not None:
+                    if ran or (c["name"] in QUESTION_TOOLS and isinstance(result, dict) and result.get("status") == "answered"):
+                        detector.observe(c["name"], args, result)  # an answered question is the user's input, not a refused call
+                    else:
+                        detector.skip(c["name"])  # a streak of calls that never ran ends the run like any other stuck shape
                     stuck = detector.check()
                     if stuck and stuck_hits == 0:
                         stuck_hits = 1
-                        detector.obs.clear()  # the model gets a fresh run at it; the same shape again ends tool use
+                        detector.reset()  # the model gets a fresh run at it; the same shape again ends tool use
                         event["breaker"] = "stuck_nudge"
                     elif stuck:
                         stuck_hits += 1

@@ -37,9 +37,10 @@ test('uploads: pick a file, view its text, pin, delete + undo, drop a file, unre
   await expect(card).toBeVisible()
   await expect(card).toContainText('alpha bravo charlie')
   await card.click()
-  await expect(page.locator('.doc-text')).toContainText('alpha bravo charlie')
+  const viewer = page.getByRole('dialog', { name: 'notes.txt' })
+  await expect(viewer).toContainText('alpha bravo charlie')
   await page.keyboard.press('Escape')
-  await expect(page.locator('.doc-text')).toHaveCount(0)
+  await expect(viewer).toHaveCount(0)
   await card.getByRole('button', { name: 'Pin notes.txt' }).click()
   await expect(card.getByRole('button', { name: 'Unpin notes.txt' })).toBeVisible()
   // dropping a file on the page uploads it
@@ -119,6 +120,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
   await expect(body(page)).toHaveValue(/dropped\.png\)/)
   // a text file dropped in the editor does not navigate the window or touch the body
   const url = page.url()
+  await expect(body(page)).not.toHaveValue(/describing image/) // the alt text settles once the image has been described
   const text = await body(page).inputValue()
   await page.evaluate(() => {
     const dt = new DataTransfer()

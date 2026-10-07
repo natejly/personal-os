@@ -120,13 +120,18 @@ def test_fence_rule_is_sent_only_with_tools() -> None:
     assert FENCE_RULE not in "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
 
 
-def test_proactive_hint_is_sent_only_with_tools() -> None:
+def test_agent_stance_hint_is_sent_only_with_tools() -> None:
     def system() -> str:
         return "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
+    # A tool chat that can delegate is the front agent: it gets FRONT_AGENT_HINT, never PROACTIVE_HINT.
     run([])
-    assert appmod.PROACTIVE_HINT in system()
+    assert appmod.FRONT_AGENT_HINT in system() and appmod.PROACTIVE_HINT not in system()
+    # One that cannot delegate keeps the plain proactive stance.
+    run([], settings={"tools": {"delegate": "off"}})
+    assert appmod.PROACTIVE_HINT in system() and appmod.FRONT_AGENT_HINT not in system()
+    # Without tools neither is sent.
     run([], settings={"useTools": False})
-    assert appmod.PROACTIVE_HINT not in system()
+    assert appmod.PROACTIVE_HINT not in system() and appmod.FRONT_AGENT_HINT not in system()
 
 
 def test_escape_covers_both_wrappers_case_insensitively() -> None:

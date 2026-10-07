@@ -144,6 +144,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   }
   // Skip the first-run wizard and seed anything the test wants before the renderer loads.
   try {
+    // The suite never runs permissionMode 'auto' (the shipped default): the mock cannot answer the safety reviewer. pytest covers it.
     await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', ...settings } })
     if (beforeApp) await beforeApp({ api, backend, dataDir })
   } catch (e) { await abandon(e) }

@@ -32,6 +32,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import redact
+from .telegram_format import html_to_plain, plan, render, split_plain, to_plain  # noqa: F401 - to_plain is re-exported
 
 log = logging.getLogger("personal_os.telegram")
 for _n in ("httpx", "httpcore"):
@@ -130,65 +131,11 @@ class HttpApi:
             await c.aclose()
 
 
-# ---------------------------------------------------------------- formatting
+# ---------------------------------------------------------------- formatting (see telegram_format.py)
 
-_FENCE = re.compile(r"^\s*(```|~~~)")
-
-
-def to_plain(md: str) -> str:
-    """Markdown to what a plain text message can show: markers gone, content kept."""
-    out: list[str] = []
-    in_fence = False
-    for line in (md or "").replace("\r\n", "\n").split("\n"):
-        if _FENCE.match(line):
-            in_fence = not in_fence
-            continue
-        if in_fence:
-            out.append(line)
-            continue
-        line = re.sub(r"^\s{0,3}#{1,6}\s+", "", line)
-        line = re.sub(r"^\s{0,3}>\s?", "", line)
-        line = re.sub(r"^(\s*)[-*+]\s+", r"\1• ", line)
-        line = re.sub(r"!\[[^\]]*\]\(([^)\s]+)[^)]*\)", r"\1", line)
-        line = re.sub(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)",
-                      lambda m: m.group(2) if m.group(1).strip() == m.group(2) else f"{m.group(1)} ({m.group(2)})", line)
-        line = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), line)
-        line = re.sub(r"~~(.+?)~~", r"\1", line)
-        line = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"\1", line)
-        line = re.sub(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])", r"\1", line)
-        line = re.sub(r"`([^`]+)`", r"\1", line)
-        out.append(line)
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
-
-
-TRUNCATED = "…full reply in Grain"
-_CUTS = ("\n\n", "\n", ". ", "! ", "? ", " ")
-
-
-def _cut(s: str, size: int) -> int:
-    window = s[:size]
-    for sep in _CUTS:
-        i = window.rfind(sep)
-        if i > size // 3:
-            return i + len(sep)
-    return size
-
-
-def split_reply(text: str, size: int = MESSAGE_MAX, max_parts: int = 8) -> list[str]:
-    """Messages of at most `size` characters, cut at a paragraph, line, sentence or word where one is near the end."""
-    rest = (text or "").strip()
-    parts: list[str] = []
-    while len(rest) > size:
-        cut = _cut(rest, size)
-        parts.append(rest[:cut].rstrip())
-        rest = rest[cut:].lstrip()
-    if rest:
-        parts.append(rest)
-    if len(parts) > max_parts:
-        parts = parts[:max_parts]
-        room = size - len(TRUNCATED) - 1
-        parts[-1] = f"{parts[-1][:room].rstrip()}\n{TRUNCATED}"
-    return parts
+def split_reply(text: str, size: int = MESSAGE_MAX) -> list[str]:
+    """Plain-text messages of at most `size` characters, cut at a paragraph, line, sentence or word where one is near the end."""
+    return split_plain(text, size)
 
 
 # ---------------------------------------------------------------- commands and limits
@@ -267,6 +214,7 @@ class Deps:
     attachment_path: Callable[[str], Path | None] = lambda doc_id: None  # document id -> its stored original, None if gone
     store_upload: Callable[[str, str, bytes], Any] | None = None  # (name, mime, data) -> {"id", ...}; sync or async
     download: Callable[[str, str], Awaitable[bytes]] | None = None  # (token, file_path) -> bytes; default: api.download
+    mark_texts_conversation: Callable[[str, bool], None] = lambda cid, flag: None  # (conversation id, is the Texts chat): the app labels it
 
 
 @dataclass
@@ -375,6 +323,8 @@ class TelegramBridge:
         self._stale_before = time.time() - STALE_SECONDS
         self.health, self.last_error = "", None
         self._token_fp = self._fp(self.deps.get_token())
+        if self.paired():  # a Texts chat from before the flag existed gets it now
+            self._mark(self._peek_target(), True)
         self._task = asyncio.create_task(self._run(), name="telegram-poller")
 
     async def poll_once(self) -> None:
@@ -487,11 +437,21 @@ class TelegramBridge:
         self._save(pairing=pairing)
         return pairing
 
+    def _mark(self, cid: str | None, flag: bool) -> None:
+        if not cid:
+            return
+        try:
+            self.deps.mark_texts_conversation(cid, flag)
+        except Exception as e:  # noqa: BLE001 - a label must never break the bridge
+            log.warning("telegram chat flag failed: %s", type(e).__name__)
+
     def unpair(self) -> None:
+        self._mark(self._peek_target(), False)  # it stays as an ordinary chat
         self._save(ownerChatId=None, ownerUserId=None, ownerName=None)
         self.issue_pairing()
 
     def clear(self) -> None:
+        self._mark(self._peek_target(), False)
         self.deps.save_state({})
 
     async def check_token(self, token: str) -> dict[str, Any]:
@@ -508,6 +468,7 @@ class TelegramBridge:
         st = self._state()
         if st.get("botId") != me.get("id"):
             st = {"textsConversationId": st.get("textsConversationId")}
+            self._mark(st.get("textsConversationId"), False)  # unpaired again: pairing re-labels it
         st.update(botId=me.get("id"), botUsername=me.get("username"))
         self.deps.save_state(st)
         if st.get("ownerChatId") is None:
@@ -523,6 +484,7 @@ class TelegramBridge:
             return cid
         cid = await _maybe(self.deps.create_texts_conversation())
         self._save(textsConversationId=cid)
+        self._mark(cid, True)
         return cid
 
     # ---- polling
@@ -580,6 +542,10 @@ class TelegramBridge:
         name = frm.get("first_name") or (f"@{frm['username']}" if frm.get("username") else "owner")
         self._save(ownerChatId=chat["id"], ownerUserId=frm.get("id"), ownerName=name, pairing=None)
         log.info("telegram paired chat=%s", _mask(chat["id"]))
+        try:
+            self._mark(await self._target(), True)  # the chat is in Grain as soon as pairing works (an unpaired one is flagged again)
+        except Exception as e:  # noqa: BLE001 - a DB hiccup must not break pairing
+            log.warning("telegram chat create failed: %s", type(e).__name__)
         await self._send(chat["id"], "Paired. Text me anything, or /help.")
 
     # ---- owner messages
@@ -685,8 +651,11 @@ class TelegramBridge:
                 self._typing.discard(i)
             await self._send(where, "Stopped." if stopped else "Nothing is running.")
         elif word == "new":
+            old = self._peek_target()
             cid = await _maybe(self.deps.create_texts_conversation())
             self._save(textsConversationId=cid)
+            self._mark(old, False)
+            self._mark(cid, True)
             await self._send(where, "Started a new conversation.")
         else:
             await self._answer(word, code, where, sent_at)
@@ -764,9 +733,10 @@ class TelegramBridge:
                                                      "text": f"{msg.get('text') or ''}\n\n{outcome}"}, 10.0)
 
     # ---- sending
-    async def _call(self, method: str, params: dict[str, Any], timeout: float = 15.0, files: dict[str, tuple[str, bytes, str]] | None = None) -> bool:
+    async def _call(self, method: str, params: dict[str, Any], timeout: float = 15.0, files: dict[str, tuple[str, bytes, str]] | None = None,
+                    errs: list[int] | None = None) -> bool:
         """The one door every outbound call goes through: refuses any chat but the paired owner's, one call at a time, and
-        waits out one 429. `params` carries the chat_id. True when Telegram accepted it."""
+        waits out one 429. `params` carries the chat_id. True when Telegram accepted it; a refusal's code goes into `errs`."""
         token, chat_id = self.deps.get_token(), params.get("chat_id")
         if not token:
             return False
@@ -783,23 +753,63 @@ class TelegramBridge:
                         await self._sleep(min(e.retry_after or 1.0, 30.0))
                         continue
                     log.info("telegram send chat=%s %s failed: code=%s", _mask(chat_id), method, e.code)
+                    if errs is not None:
+                        errs.append(e.code)
                 except Exception as e:  # noqa: BLE001
                     log.info("telegram send chat=%s %s failed: %s", _mask(chat_id), method, type(e).__name__)
                 return False
         return False
 
-    async def _send(self, chat_id: int, text: str, markup: dict[str, Any] | None = None) -> bool:
+    async def _send(self, chat_id: int, text: str, markup: dict[str, Any] | None = None, errs: list[int] | None = None) -> bool:
         params: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if markup:
             params["reply_markup"] = markup
-        ok = await self._call("sendMessage", params)
+        ok = await self._call("sendMessage", params, errs=errs)
         if ok:
             log.info("telegram send chat=%s len=%s ok=True", _mask(chat_id), len(text))
         return ok
 
+    async def _send_doc(self, chat_id: int, name: str, mime: str, data: bytes) -> bool:
+        return await self._call("sendDocument", {"chat_id": chat_id}, 60.0, {"document": (name, data, mime)})
+
+    async def _send_part(self, chat_id: int, part: str, errs: list[int]) -> bool:
+        """One HTML message. When Telegram answers 400 (it could not parse it) the same text goes again as plain text.
+        False when it could not be sent; `errs` then ends with the last refusal's code."""
+        plain = html_to_plain(part)
+        if plain == part:  # no markup and nothing escaped: nothing to parse
+            return await self._send(chat_id, part, errs=errs)
+        params = {"chat_id": chat_id, "text": part, "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}
+        if await self._call("sendMessage", params, errs=errs):
+            log.info("telegram send chat=%s len=%s html ok=True", _mask(chat_id), len(part))
+            return True
+        if errs[-1:] != [400]:
+            return False
+        errs.clear()
+        for piece in split_plain(plain):
+            if not await self._send(chat_id, piece, errs=errs):
+                return False
+        return True
+
     async def _send_all(self, chat_id: int, text: str) -> None:
-        for part in split_reply(text):
-            await self._send(chat_id, part)
+        """A reply (markdown) to the owner as formatted messages. Too long: a short summary and the whole reply as reply.md.
+        If Telegram refuses even the plain text of a part (400), the whole reply goes as reply.md instead."""
+        md = (text or "").strip()
+        if not md:
+            return
+        pl = plan(md)
+        full = ("reply.md", "text/markdown", md.encode())
+        if pl.summary is not None:
+            if await self._send(chat_id, pl.summary):
+                await self._send_doc(chat_id, *full)
+            return
+        for part in pl.parts:
+            errs: list[int] = []
+            if not await self._send_part(chat_id, part, errs):
+                if errs[-1:] == [400]:
+                    await self._send_doc(chat_id, *full)
+                return
+        for name, mime, data in pl.files:
+            await self._send_doc(chat_id, name, mime, data)
 
     @staticmethod
     def _is_photo(mime: str, data: bytes) -> bool:
@@ -822,10 +832,11 @@ class TelegramBridge:
         if not atts:
             await self._send_all(chat_id, text)
             return
-        if len(text) > CAPTION_MAX:
-            await self._send_all(chat_id, text)
-            text = ""
-        cap = [text]  # the caption goes out once, with the first thing that gets through
+        md, r = text, render(text)
+        if len(r.plain) > CAPTION_MAX or r.files:  # too long for a caption, or it carries a table: the text goes first on its own
+            await self._send_all(chat_id, md)
+            md, r = "", render("")
+        cap = [r.plain]  # the caption (plain text) goes out once, with the first thing that gets through
         failed: list[str] = []
         photos: list[tuple[str, str, bytes]] = []
         docs: list[tuple[str, str, Path]] = []
@@ -881,7 +892,7 @@ class TelegramBridge:
                 continue
             await doc(name, mime, data)
         if cap[0]:  # nothing carried it
-            await self._send_all(chat_id, cap[0])
+            await self._send_all(chat_id, md)
         for name in failed:
             await self._send(chat_id, f"Couldn't deliver {name}.")
         log.info("telegram send chat=%s files=%s failed=%s", _mask(chat_id), len(atts), len(failed))
@@ -934,8 +945,8 @@ class TelegramBridge:
     async def _reply_final(self, run: Any, chat_id: int) -> None:
         if run.run_id in self._muted.seen or run.status == "interrupted":  # a backend going down sends nothing
             return
-        text = to_plain((self.deps.message_text(run.message_id) if run.message_id else "") or "")
-        if not text:
+        text = ((self.deps.message_text(run.message_id) if run.message_id else "") or "").strip()
+        if not to_plain(text):
             text = RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone
         await self.flush_updates(run.conversation_id)  # progress waiting out its window goes before the answer
         atts = self._unsent(self.deps.message_attachments(run.message_id) if run.message_id else [])
@@ -997,23 +1008,43 @@ class TelegramBridge:
         """Text the owner a reply written outside any run they started (a worker's result, after its wake turn)."""
         if self._lock_fd is None:
             return
-        owner, plain, atts = self._state().get("ownerChatId"), to_plain(text or ""), self._unsent(attachments)
-        if owner is not None and (plain or atts):
-            self._spawn(self._deliver_in_order(owner, plain, atts))
+        owner, md, atts = self._state().get("ownerChatId"), (text or "").strip(), self._unsent(attachments)
+        if owner is not None and (to_plain(md) or atts):
+            self._spawn(self._deliver_in_order(owner, md, atts))
 
     def is_texts_conversation(self, conv_id: str | None) -> bool:
         return bool(conv_id) and conv_id == self._state().get("textsConversationId")
 
+    def texts_conversation_id(self) -> str | None:
+        """The Texts chat while the bot is paired (it exists in Grain from pairing on), else None."""
+        return self._peek_target() if self.paired() else None
+
+    def from_app(self, conversation_id: str | None, run_id: str, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
+        """A message typed in Grain into the Texts chat: it runs like a Telegram turn (its reply and files go to the phone)
+        and the message itself is shown there first as "From Grain: ...". Returns at once; a no-op unless this process polls,
+        the chat is the Texts one and an owner is paired. Only ever sent to the owner's chat."""
+        owner = self._state().get("ownerChatId")
+        if self._lock_fd is None or owner is None or not self.is_texts_conversation(conversation_id):
+            return
+        self._runs.add(run_id)
+        if run_id not in self._typing:  # a steer into a reply already typing keeps its one loop
+            self._typing.add(run_id)  # before the task starts: a fast reply must be able to switch it off
+            self._spawn(self._typing_loop(run_id, owner))
+        atts = [a for a in attachments or [] if a.get("id")]
+        if text or atts:
+            self._spawn(self._deliver_in_order(owner, f"From Grain: {text}".rstrip(), atts))
+        log.info("telegram chat=%s app turn len=%s files=%s", _mask(owner), len(text), len(atts))
+
     def send_update(self, conversation_id: str | None, text: str, attachments: list[dict[str, Any]] | None = None) -> bool:
         """Progress from a tool mid-run, sent to the phone when this process polls and the conversation is the Texts one.
         True when accepted. At most one message per PROGRESS_MIN_SECONDS: sooner ones are joined and flushed by one timer."""
-        plain, atts = to_plain(text or ""), [a for a in attachments or [] if a.get("id")]
+        md, atts = (text or "").strip(), [a for a in attachments or [] if a.get("id")]
         if self._lock_fd is None or not self.is_texts_conversation(conversation_id) or self._state().get("ownerChatId") is None \
-                or not (plain or atts):
+                or not (to_plain(md) or atts):
             return False
         for a in atts:
             self._sent_atts.add(a["id"])  # now, not at flush: a final reply that lands first must not repeat it
-        self._spawn(self._queue_update(conversation_id, plain, atts))  # type: ignore[arg-type]
+        self._spawn(self._queue_update(conversation_id, md, atts))  # type: ignore[arg-type]
         return True
 
     async def _queue_update(self, conv_id: str, text: str, atts: list[dict[str, Any]]) -> None:

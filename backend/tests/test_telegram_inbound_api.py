@@ -203,7 +203,7 @@ def test_a_stranger_or_an_oversize_photo_starts_nothing() -> None:
     assert fake.downloads == [] and all(m == "getUpdates" for m, _, _ in fake.calls)
     fake.queue.append([fake.photo("big one", size=25 * 1024 * 1024)])
     wait_until(lambda: any("20 MB" in t for t in fake.sent()), "the refusal")
-    assert fake.downloads == [] and not appmod.db.get_settings()["telegramState"].get("textsConversationId")  # no turn, no chat
+    assert fake.downloads == [] and not appmod.convos.get(appmod.db.get_settings()["telegramState"]["textsConversationId"])["messages"]  # no turn: the chat exists from pairing, empty
 
 
 def test_a_file_the_agent_sends_reaches_the_reply_row_the_done_event_and_the_phone() -> None:
@@ -248,7 +248,7 @@ def test_a_wake_reply_carries_the_workers_files_and_pushes_them(monkeypatch: pyt
     doc = appmod._store_upload(None, "worker.png", "image/png", PNG + b"\0\0\0")
     att = {"id": doc["id"], "name": "worker.png", "mime": "image/png", "size": doc["size"]}
     pushed: list[tuple[str, Any]] = []
-    monkeypatch.setattr(appmod, "_push_wake_reply", lambda text, attachments=None: pushed.append((text, attachments)))
+    monkeypatch.setattr(appmod, "_push_wake_reply", lambda text, attachments=None, conv_id=None: pushed.append((text, attachments)))
     events = _drive(cid, appmod.ChatIn(content="Worker finished.", wake={"ids": [], "tainted": False, "title": "t", "attachments": [att]}))
     assert next(d for e, d in events if e == "done")["attachments"] == [att]
     assert appmod.convos.get(cid)["messages"][-1]["attachments"] == [att] and pushed == [("All done", [att])]

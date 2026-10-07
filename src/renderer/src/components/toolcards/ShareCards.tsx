@@ -4,8 +4,8 @@ import CardShell from './CardShell'
 import { Badge, ErrorLine, Meta, unreadable, useParsed } from './blocks'
 import { registerToolCard, type ToolCardProps } from './registry'
 
-/** The pictures a call produced, in the markup every image-making tool shares. */
-function Images({ event }: Pick<ToolCardProps, 'event'>): JSX.Element | null {
+/** The pictures a call produced, in the markup every image-making tool shares (screenshot, send_files, the browser). */
+export function Images({ event }: Pick<ToolCardProps, 'event'>): JSX.Element | null {
   if (!event.images?.length) return null
   return (
     <div className="tool-images">

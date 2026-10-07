@@ -1145,19 +1145,21 @@ straight into `REPEAT_LIMIT = 5` (`app.py`).
 `opencode_run(prompt, cwd?, timeout_s=300, background?, continue_session?, model?)` (`opencode.py`, group `shell`,
 danger `executes`, default `ask`) hands a whole coding task to the opencode CLI inside the working folder. It runs
 exactly the way `shell_run` does — under `sandbox.shell_profile`, writes confined to the granted root plus the desk
-workspace, under `ShellJobs` so timeouts, background promotion, `shell_poll` and `shell_kill` apply — with two
-differences that make it its own tool:
+workspace, under `ShellJobs` so timeouts, background promotion, `shell_poll` and `shell_kill` apply.
 
-- **Model.** opencode talks to the endpoint Grain itself uses (`baseUrl` / `apiKey` / `defaultModel`) through an inline
-  config (`OPENCODE_CONFIG_CONTENT`) declaring one OpenAI-compatible provider, `grain/<model>`. No second login. The
-  sandbox opens the network to loopback (opencode spawns a private local server and talks to it, `--standalone`) and
-  to https; whatever comes back is marked tainted like a networked `shell_run`, and a tainted reply must ask first.
-- **State.** Sessions, cache and config live under `<data>/opencode/<desk or conversation id>/` through the XDG
-  variables, never in the home folder; `continue_session=true` resumes the previous session there.
+Grain links to the opencode the user installed; it does not bundle, configure or sandbox away that installation:
+
+- **Model and sign-in.** opencode's own, from `opencode auth login` and `~/.config/opencode`. Grain passes `-m` only
+  when the caller names a model, and otherwise lets opencode's default stand; no provider is injected, so a model id
+  here is opencode's own rather than a Grain alias. The sandbox opens the network to loopback (opencode spawns a
+  private local server and talks to it, `--standalone`) and to https; whatever comes back is marked tainted like a
+  networked `shell_run`, and a tainted reply must ask first.
+- **State.** Sessions, cache and config stay in the user's own XDG dirs, so a session started from a chat is the same
+  session `opencode` shows in a terminal and `continue_session=true` resumes the last one for that folder.
 
 The binary is found in the usual install folders (Homebrew, `~/.opencode/bin`, npm); without it the tool is not
-offered and a call explains how to install it. Permissions inside opencode are all `allow`: nobody sits at its
-prompt, and the OS sandbox is the boundary.
+offered and a call explains how to install it. Permissions are whatever the user's own opencode config sets; the OS
+sandbox is Grain's boundary around it.
 
 ### 5.2 The chat's working folder
 

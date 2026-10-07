@@ -35,6 +35,7 @@ from . import compaction, followups, otel_export, router, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
+from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
 from . import learn, memory_limits, provider_keys, providers
@@ -63,7 +64,7 @@ from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validato
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
-from .cowork import (AUTO_RESUME_FROM, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -1216,8 +1217,8 @@ def create_conversation(body: ConvIn) -> dict[str, Any]:
 
 
 def _said(m: dict[str, Any]) -> bool:
-    """A message the user wrote. A hidden wake row (a worker's report handed to the assistant) has the user role but is not theirs."""
-    return m["role"] == "user" and m.get("kind") != "wake"
+    """A message the user wrote. An internal row (a worker's report, a desk's nudge: any non-NULL kind) has the user role but is not theirs."""
+    return m["role"] == "user" and not is_internal(m)
 
 
 @app.get("/conversations/search")
@@ -1389,6 +1390,7 @@ class ChatIn(BaseModel):
     replace_from: str | None = None  # id of an earlier user message this one replaces: it and everything after it are hidden
     attachments: list[str] | None = None  # ids of uploaded documents sent with this turn; their text is inlined for the model
     wake: dict[str, Any] | None = None  # set only by the backend: this turn hands finished workers' reports to the assistant (workers.build_wake)
+    kind: str | None = None  # set only by the backend: this turn's content is an internal control message (nudge, continue, resume, handoff, report), stored hidden from the user
 
 
 def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[dict[str, Any]]:
@@ -1711,6 +1713,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         return
     cfg = settings()
     is_wake = bool(body.wake)  # a hidden turn that hands finished workers' reports to the assistant: not the user's words
+    internal = is_wake or bool(body.kind)  # any turn whose "user" text is the backend's: never titled from, learned from or trusted as the user's
     # A chat opened on an agent (Library > Agents > Chat) speaks as that agent: its prompt leads the system prompt and
     # its tool list bounds the chat's. An unapproved definition is inert here as it is for agent_spawn.
     persona = subagent_mgr.role_for(str(conv["settings"].get("agent") or "")) if conv["settings"].get("agent") else None
@@ -1784,10 +1787,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if first_user and first_user["id"] in hidden and conv["title"] == _title_from(first_user["content"]):
                 convos.update(conv_id, {"title": "New chat"})
                 conv = {**conv, "title": "New chat"}
-        um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None, kind="wake" if is_wake else None)
+        um = convos.add_message(conv_id, "user", user_text, attachments=attachments or None, kind="wake" if is_wake else body.kind)
         user_msg_id = um["id"]
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
-        if conv["title"] == "New chat" and not is_wake and not [m for m in conv["messages"] if _said(m)]:
+        if conv["title"] == "New chat" and not internal and not [m for m in conv["messages"] if _said(m)]:
             title = _title_from(user_text or attachments[0]["name"])
             convos.update(conv_id, {"title": title})
             placeholder_title = title
@@ -1941,11 +1944,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
             # a chat tainted with no recorded source: no tool's own-subject exemption may read its taint as explained
             "taint_unsourced": bool(conv["settings"].get("tainted")) and not conv["settings"].get("taint_sources"),
-            "allowed_urls": set() if is_wake else _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
+            "allowed_urls": set() if internal else _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"], "user_message_id": user_msg_id,
-            "skip_permissions": skip_permissions, "permission_mode": pmode, "user_text": "" if is_wake else user_text,  # a worker report is not what the user said
+            "skip_permissions": skip_permissions, "permission_mode": pmode, "user_text": "" if internal else user_text,  # a worker report or a nudge is not what the user said
             "review_cache": review_cache,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
@@ -3492,7 +3495,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # that did nothing — and never leaves a span open for the UI to show as still running.
     # A tainted chat may still bank the user's own prose: only the user's half ever reaches this, and
     # looks_like_prose already rejects pastes and quotes. The voice profile is injected into later chats.
-    if (not error and not gone and not is_wake and cfg.get("learnStyle", True)
+    if (not error and not gone and not internal and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -3519,7 +3522,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     # A tainted reply has read someone else's text, so only the user's own words this run are mined: the
     # reply, its tool calls and the procedures it followed are withheld (they could plant that text in later chats).
-    if (not error and text and not gone and not proposal_only(run) and not is_wake  # a wake turn's "user" text is the system's, not the user's words
+    if (not error and text and not gone and not proposal_only(run) and not internal  # an internal turn's "user" text is the system's, not the user's words
             and (not tool_ctx["tainted"] or any(t.strip() for t in run_user_texts))  # an attachment-only message has no words to mine
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
             and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
@@ -3534,14 +3537,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         ))
 
     # Follow-up chips: after a finished reply only (not an error, a Stop, or an unattended run), off the run.
-    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id and not is_wake
+    if (not error and text and not gone and not stop.is_set() and not proposal_only(run) and not desk_id and not internal
             and cfg.get("followUps", True)):
         followup_jobs.spawn(conv_id, am["id"], conv["project_id"], user_text, text, model, cfg)
 
     # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
     # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
     # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
-    if not error and not gone and not is_wake and not proposal_only(run) and cfg.get("autoTitle", True):
+    if not error and not gone and not internal and not proposal_only(run) and cfg.get("autoTitle", True):
         user_texts = [m["content"] for m in conv["messages"] if _said(m)] + [user_text]
         fresh = convos.get(conv_id, with_messages=False)
         fs = (fresh or {}).get("settings") or {}
@@ -3679,11 +3682,12 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
 
 def _answered(desk: dict[str, Any], run: Run, error: str | None = None) -> bool:
     """A turn of an `ask`-autonomy desk that answered: it ended on its own (no stop, no error), consumed no plan
-    step, and the desk has no plan. With the front-agent stance the reply answers first and hands longer work to
+    step, and the desk has no plan left to carry out (none, or every approved step already claimed: a plan that was
+    finished earlier in the chat does not turn each later plain reply into a stalled one). With the front-agent stance the reply answers first and hands longer work to
     workers, whose reports wake the desk, so a reply that ended is the answer whatever tools it used: the desk
     settles done with no nudge and no self-review, and the user's next message relaunches it. A continuation turn
     (a nudge, a resume) is not a plain answer: it picks up work."""
-    return (desk.get("autonomy") == "ask" and not str(run.input.get("content") or "").startswith(tuple(CONTINUE_MESSAGES.values())) and not desk.get("plan_id") and not error and not run.error and not run.stop.is_set()
+    return (desk.get("autonomy") == "ask" and not str(run.input.get("content") or "").startswith(tuple(CONTINUE_MESSAGES.values())) and not plans.remaining(str(desk.get("plan_id") or "")) and not error and not run.error and not run.stop.is_set()
             and run.partial is None and run.steps_consumed == 0
             and desk.get("status") in ("working", "planning"))
 
@@ -3756,7 +3760,7 @@ async def _desk_supervisor(desk_id: str, run: Run) -> None:
                 if not state:
                     return
                 kind = "continue"
-            body = ChatIn(content=_desk_message(desk_id, kind))
+            body = ChatIn(content=_desk_message(desk_id, kind), kind=kind)
             run = bus.start(state["conversation_id"], lambda r, b=body: _run_desk(r, desk_id, b),
                             kind="desk", desk_id=desk_id, turn=int(state["turn"] or 0),
                             input={"content": body.content})
@@ -3778,7 +3782,8 @@ def _over_live_cap() -> bool:
     return desks.live_count() >= cap
 
 
-def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None) -> Run | dict[str, Any] | None:
+def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None,
+                 kind: str | None = None) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
     the chain to a supervisor task. None means the claim was lost or a run is already live. Over
     deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
@@ -3801,7 +3806,9 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
     claimed = desks.claim_run(desk_id, from_statuses)
     if not claimed:
         return None
-    body = ChatIn(content=(content or "").strip() or claimed["brief"], wake=wake)
+    text = (content or "").strip() or claimed["brief"]
+    # An explicit kind wins; a queued turn lost it when its messages were joined, so the leading backend text names it.
+    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text))
     run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
                     desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content, **({"wake": wake} if wake else {})})
     _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
@@ -3839,7 +3846,8 @@ def _wake_desk(desk_id: str) -> Run | dict[str, Any] | None:
     desk = desks.get(desk_id, with_outputs=False)
     if not desk or desk["status"] not in RESUME_FROM:
         return None
-    return _launch_desk(desk_id, _desk_message(desk_id, "resume" if desk["status"] == "interrupted" else "continue"), RESUME_FROM)
+    kind = "resume" if desk["status"] == "interrupted" else "continue"
+    return _launch_desk(desk_id, _desk_message(desk_id, kind), RESUME_FROM, kind=kind)
 
 
 def _shell_wake(conversation_id: str | None) -> None:
@@ -3853,7 +3861,7 @@ def _shell_wake(conversation_id: str | None) -> None:
     notes = toolbox.shell.drain_notes(conversation_id)
     if notes:
         # Over the cap this queues the notes as the desk's next turn rather than dropping them.
-        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done", "queued"))
+        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done", "queued"), kind="report")
 
 
 toolbox.shell.on_note = _shell_wake
@@ -8506,7 +8514,8 @@ def _desk_on_chat(body: DeskIn) -> dict[str, Any]:
     convos.update(cid, {"settings": {"deskId": desk["id"]}})
     out: dict[str, Any] = {"desk": desk, "conversation_id": cid}
     if body.start:
-        run = _launch_desk(desk["id"], (body.brief or "").strip() or CHAT_HANDOFF, MESSAGE_FROM)
+        brief = (body.brief or "").strip()
+        run = _launch_desk(desk["id"], brief or CHAT_HANDOFF, MESSAGE_FROM, kind=None if brief else "handoff")
         if isinstance(run, Run):
             out["run_id"], out["seq"] = run.run_id, run.seq
         elif run is not None:

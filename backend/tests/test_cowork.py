@@ -1130,7 +1130,7 @@ def test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge() -> None:
           "and lands in the same transcript")
 
 
-def test_an_answer_that_consumed_a_plan_step_or_has_a_plan_is_not_a_plain_answer() -> None:
+def test_an_answer_that_consumed_a_plan_step_or_has_unfinished_plan_steps_is_not_a_plain_answer() -> None:
     from personal_os.app import _answered, _chain_kind
     import types
 
@@ -1143,8 +1143,20 @@ def test_an_answer_that_consumed_a_plan_step_or_has_a_plan_is_not_a_plain_answer
           "a reply that used tools and ended is still the answer: nothing follows it")
     check(_answered(row, fake(tool_ok=1, tool_calls=1)) and _chain_kind(row, fake(tool_ok=1, tool_calls=1)) is None, "so is one whose calls ran")
     check(not _answered(row, fake(steps_consumed=1)), "a consumed plan step is not a plain answer")
-    check(not _answered({**row, "plan_id": "p1"}, fake()), "a desk with a plan is not")
-    check(_chain_kind({**row, "plan_id": "p1"}, fake()) == "nudge", "and still gets its nudge")
+    def plan_with(*statuses: str) -> str:
+        cid = j("POST", "/conversations", {"title": "plan"})["id"]
+        p = plans.open(f"c-{time.time_ns()}", {"title": "t", "steps": [{"tool": "gmail_send", "arguments": {"i": i}} for i, _ in enumerate(statuses)]},
+                       conversation_id=cid)
+        with db.tx() as c:
+            for i, st in enumerate(statuses):
+                c.execute("UPDATE plan_steps SET status=? WHERE plan_id=? AND idx=?", (st, p["plan_id"], i))
+            c.execute("UPDATE action_plans SET status='approved' WHERE plan_id=?", (p["plan_id"],))
+        return p["plan_id"]
+    unfinished, finished = plan_with("consumed", "approved"), plan_with("consumed", "consumed")
+    check(not _answered({**row, "plan_id": unfinished}, fake()), "a desk with approved steps nobody claimed is not")
+    check(_chain_kind({**row, "plan_id": unfinished}, fake()) == "nudge", "and still gets its nudge")
+    check(_answered({**row, "plan_id": finished}, fake()) and _chain_kind({**row, "plan_id": finished}, fake()) is None,
+          "a plan carried out earlier in the chat does not turn every later plain reply into a nudge")
     check(not _answered({**row, "autonomy": "plan"}, fake()) and not _answered({**row, "autonomy": "propose"}, fake()), "only `ask` desks answer plainly")
     check(not _answered(row, fake(partial="rounds")) and not _answered(row, fake(error="x")), "a budget stop or an error is not an answer")
     from personal_os.cowork import DESK_NUDGE
@@ -1196,7 +1208,7 @@ TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_chat_works_autonomously_in_its_own_conversation,
          test_a_tool_using_reply_that_just_ends_is_the_answer_in_an_ask_desk,
          test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge,
-         test_an_answer_that_consumed_a_plan_step_or_has_a_plan_is_not_a_plain_answer,
+         test_an_answer_that_consumed_a_plan_step_or_has_unfinished_plan_steps_is_not_a_plain_answer,
          test_a_chats_first_message_can_start_a_desk_through_the_message_route,
          test_a_message_over_the_live_cap_queues_instead_of_starting,
          test_a_desk_is_told_it_is_a_desk,

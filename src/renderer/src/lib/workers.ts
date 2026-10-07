@@ -30,9 +30,9 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
 /** Replace or add one worker (an event's payload) in the list. */
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 
-/** Wake turns tell the assistant a worker ended; they are not the user's words and never show. */
-export const isWake = (m: Pick<Message, 'kind'>): boolean => m.kind === 'wake'
+/** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. */
+export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null
 
 /** The same array when nothing is hidden, so memoised callers keep their identity. */
-export const withoutWake = <T extends Pick<Message, 'kind'>>(messages: T[] | undefined): T[] | undefined =>
-  messages?.some(isWake) ? messages.filter((m) => !isWake(m)) : messages
+export const withoutInternal = <T extends Pick<Message, 'kind'>>(messages: T[] | undefined): T[] | undefined =>
+  messages?.some(isInternal) ? messages.filter((m) => !isInternal(m)) : messages

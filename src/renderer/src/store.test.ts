@@ -879,6 +879,15 @@ test('a user_message settles the matching pending bubble in the same session', (
   assert.ok(after.conversation.messages?.some((m) => m.id === 'u1'))
 })
 
+test('a user_message carrying an internal kind adds no row', () => {
+  const s = session()
+  const n = s.conversation.messages?.length
+  for (const kind of ['nudge', 'wake', 'xyz']) {
+    const ev = { event: 'user_message', data: msg({ id: `k-${kind}`, role: 'user', content: 'You ended your reply without calling `desk_done`', kind }) } as unknown as ChatEvent
+    assert.equal(applyEvent(s, ev, true).conversation.messages?.length, n)
+  }
+})
+
 test('a user_message with other content leaves the pending bubble alone', () => {
   const after = applyEvent(session({ pendingSends: [{ key: 1, text: 'hello', at: 0 }] }), userEv('u1', 'other'), true)
   assert.equal(after.pendingSends?.length, 1)

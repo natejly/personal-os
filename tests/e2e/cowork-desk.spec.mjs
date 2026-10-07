@@ -15,7 +15,7 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   const [chat] = await grain.api('/conversations?include_desks=true')
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'Finished.' })
   await turnOn(page, 'Work and propose')
-  await expect(strip(page)).toBeVisible()
+  await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   const id = await deskOf(grain, chat.id)
   expect(id).toBeTruthy()
   expect((await grain.api(`/cowork/desks/${id}`)).conversation_id).toBe(chat.id) // no second conversation

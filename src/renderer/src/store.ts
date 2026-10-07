@@ -26,14 +26,14 @@ import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { ShowItem, UploadResult } from '@shared/types'
-import type { Attention, CodingSession, RunInfo, ShipChecklist } from '@shared/types'
+import type { Attention, CodingSession, WorkerInfo, RunInfo, ShipChecklist } from '@shared/types'
 import { attention, chatAttention, wantsYou } from './lib/attention'
 import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { stepZoom } from './lib/zoom'
-import { isWake, withoutWake } from './lib/workers'
+import { isWake, upsertWorker, withoutWake } from './lib/workers'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -189,6 +189,9 @@ export interface State {
   upsertShip: (c: ShipChecklist) => void
   /** Coding sessions by id, kept live by the `coding_session` event (coding_session_* cards and the Coding sessions list read it). */
   codingSessions: Record<string, CodingSession>
+  /** Each chat's background workers (the `delegate` tool), by conversation id: the Workers panel and the desk strip read it. */
+  workers: Record<string, WorkerInfo[]>
+  loadWorkers: (conversationId: string) => Promise<void>
   upsertCodingSession: (c: CodingSession) => void
   refreshCodingSessions: () => Promise<void>
   /** "Schedule as routine" on a reply: the Agent inbox opens its task editor with this, switched off until a test run. */
@@ -1218,7 +1221,8 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'shell_jobs') {
             window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'workers') {
-            window.dispatchEvent(new CustomEvent('grain-workers', { detail: ev.data }))
+            const { conversation_id: cid, worker } = ev.data
+            set((st) => ({ workers: { ...st.workers, [cid]: upsertWorker(st.workers[cid] ?? [], worker) } }))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
             window.dispatchEvent(new Event('grain-crew'))
@@ -1686,6 +1690,13 @@ export const useStore = create<State>((set, get) => {
     shipChecklists: {},
     upsertShip: (c) => set((st) => ({ shipChecklists: { ...st.shipChecklists, [c.id]: c } })),
     codingSessions: {},
+    workers: {},
+    loadWorkers: async (conversationId) => {
+      try {
+        const { workers } = await api.workers.list(conversationId)
+        set((st) => ({ workers: { ...st.workers, [conversationId]: workers } }))
+      } catch { /* the panel stays as it was; the event stream or the next poll refills it */ }
+    },
     upsertCodingSession: (c) => set((st) => ({ codingSessions: { ...st.codingSessions, [c.id]: c } })),
     refreshCodingSessions: async () => {
       try {
@@ -3726,6 +3737,9 @@ export const useStreamingMessageId = (convId?: string): string | null =>
   })
 export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.stopping)
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)
+const EMPTY_WORKERS: readonly WorkerInfo[] = []
+/** A chat's background workers; a stable empty list while it has none so selectors do not re-render. */
+export const useWorkers = (convId?: string): readonly WorkerInfo[] => useStore((s) => (convId && s.workers[convId]) || EMPTY_WORKERS)
 const EMPTY_SUBS: Record<string, SubagentInfo> = {}
 /** The current run's subagents, by id (the `subagent` stream event), for the crew ring and the run cards. */
 export const useSubagents = (convId?: string): Record<string, SubagentInfo & { message_id?: string | null }> => useStore((s) => pick(s, convId)?.subagents ?? EMPTY_SUBS)

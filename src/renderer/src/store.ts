@@ -50,7 +50,6 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** Which tab a project page shows. */
-export type ProjectTab = 'chats' | 'context' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'agents' | 'automations' | 'connectors'
 export type FilesSection = 'notes' | 'uploads' | 'artifacts'
@@ -219,7 +218,6 @@ export interface State {
   /** Layout of the Memory panel (list + graph live in one panel). */
   memoryMode: MemoryMode
   projectViewId: string | null
-  projectTab: ProjectTab
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
   /**
@@ -402,7 +400,7 @@ export interface State {
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
-  openProject: (id: string, tab?: ProjectTab) => void
+  openProject: (id: string) => void
   createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => Promise<void>
   updateProject: (id: string, patch: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
@@ -1743,7 +1741,6 @@ export const useStore = create<State>((set, get) => {
     lastClassicView: 'home',
     memoryMode: 'split',
     projectViewId: null,
-    projectTab: 'chats',
     draftProjectId: null,
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
@@ -2038,7 +2035,7 @@ export const useStore = create<State>((set, get) => {
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
     // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
-    openProject: (id, tab) => set((s) => ({ view: 'project', projectViewId: id, projectTab: tab ?? (s.projectViewId === id ? s.projectTab : 'chats'), draftProjectId: null, settingsOpen: false })),
+    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()

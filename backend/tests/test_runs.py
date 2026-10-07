@@ -457,33 +457,38 @@ def test_stop_and_steer_cut_a_blocked_provider_read() -> None:
 
 
 def test_reasoning_stays_out_of_the_reply() -> None:
-    """A reasoning model's chain-of-thought is shown and stored, and is not the answer."""
-    prev = llm.stream_chat
+    """Raw chain-of-thought is never streamed or stored: a low-tier model's summary line is, and it is not the answer."""
+    prev, prev_complete = llm.stream_chat, llm.complete
 
     async def _think(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                      tools: list[dict[str, Any]] | None = None, kind: str = "chat",
                      effort: str = "default", tool_choice: str = "auto", fast: bool = False,
                      cancel: asyncio.Event | None = None) -> Any:
-        yield {"type": "reasoning", "text": "weighing it"}
+        yield {"type": "reasoning", "text": "weighing it " * 60}
+        await asyncio.sleep(0.2)  # the summary call lands while the model is still going
         yield {"type": "delta", "text": "the answer"}
         yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
 
-    llm.stream_chat = _think
+    async def _summary(*a: Any, **k: Any) -> str:
+        return "Weighing the options"
+
+    llm.stream_chat, llm.complete = _think, _summary
     try:
         cid = new_conv()
         j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
         drain(cid)
         evs = events(read_streams([f"/conversations/{cid}/stream?since=0"])[0])
         names = [e for e, _ in evs]
-        check(names.index("reasoning") < names.index("delta"), f"thinking arrives before the answer, got {names}")
+        check("reasoning" not in names, f"raw thinking is not streamed, got {names}")
+        check(names.index("thinking_summary") < names.index("delta"), f"the summary arrives before the answer, got {names}")
         done = next(d for e, d in evs if e == "done")
-        check(done["reasoning"] == "weighing it", f"done carries the thought, got {done.get('reasoning')!r}")
+        check(done["reasoning"] == "Weighing the options", f"done carries the summary, got {done.get('reasoning')!r}")
         m = message(cid)
         check(m["content"] == "the answer", f"the reply is only the answer, got {m['content']!r}")
-        check(m["reasoning"] == "weighing it", f"the thought is stored on the message, got {m.get('reasoning')!r}")
-        check("weighing it" not in m["content"], "the thought did not leak into the reply")
+        check(m["reasoning"] == "Weighing the options", f"the summary is stored on the message, got {m.get('reasoning')!r}")
+        check("weighing it" not in (m["content"] + m["reasoning"]), "the raw thought did not leak")
     finally:
-        llm.stream_chat = prev
+        llm.stream_chat, llm.complete = prev, prev_complete
 
 
 def test_a_dropped_effort_is_noticed_once_on_the_final_done() -> None:

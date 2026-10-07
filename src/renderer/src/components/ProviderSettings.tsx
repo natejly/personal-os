@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Eye, EyeOff, Plug, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -9,8 +9,11 @@ import type { ModelInfo, Settings } from '@shared/types'
 
 const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
   defaultModel: { help: 'Used for new chats.', placeholder: 'Model id' },
-  fastModel: { help: 'Used for short, simple messages. Leave empty to always use the chat model.', placeholder: 'None' },
-  extractionModel: { help: 'Writes titles, memories and suggestions. Empty uses the chat model.', placeholder: 'Same as the chat model' },
+  modelHigh: { help: 'Chat and agent turns, planning and drafting skills.', placeholder: 'Provider default' },
+  modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
+  modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
+  fastModel: { help: '', placeholder: '' },
+  extractionModel: { help: '', placeholder: '' },
   embeddingModel: { help: 'Turns notes and files into vectors for search. After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
   retrievalRerankModel: { help: "Reorders memory and document search results by relevance. Empty uses the provider's default reranker.", placeholder: 'Not available on this provider' },
   visionModel: { help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.', placeholder: 'Same as the chat model' },
@@ -24,7 +27,7 @@ function inferProvider(providers: ProviderInfo[], baseUrl: string): string {
   return (h && providers.find((p) => p.baseUrl && host(p.baseUrl) === h)?.id) || 'custom'
 }
 
-/** The Model tab: provider, address, key, a connection test and the seven model pickers. Edits go to the modal's draft. */
+/** The Model tab: provider, address, key, a connection test and the model pickers. Edits go to the modal's draft. */
 export default function ProviderSettings({ draft, settings, patch, models }: { draft: Settings; settings: Settings; patch: (p: Partial<Settings>) => void; models: ModelInfo[] }): JSX.Element {
   const saveSettings = useStore((s) => s.saveSettings)
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -123,13 +126,17 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
         <button className="ghost-btn" type="button" onClick={() => void runTest()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
         {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
       </div>
-      {MODEL_FIELDS.map((f) => {
+      {MODEL_FIELDS.filter((f) => !('hidden' in f)).map((f) => {
         const value = draft[f.key] ?? ''
+        const tier = 'tier' in f ? f.tier : undefined
         return (
-          <label key={f.key}><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+          <Fragment key={f.key}>
+            {tier === 'high' && <p className="muted small"><b>Model tiers</b> trade cost for quality. Leave a tier empty to use the provider's default.</p>}
+          <label><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
+            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
+          </Fragment>
         )
       })}
       <datalist id="provider-model-options">{options.map((m) => <option key={m} value={m} />)}</datalist>

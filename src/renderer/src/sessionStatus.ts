@@ -26,7 +26,7 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
     case 'user_message':
     case 'assistant_message':
     case 'delta':
-    case 'reasoning':
+    case 'thinking_summary':
       return prev === 'idle' || prev === 'done' ? 'working' : prev
     // A `remember` tool's toast can land beside `done`, and a trailing span after it; reacting to
     // either would resurrect `working`. (Auto-learn itself reports on `/events`, not here.)

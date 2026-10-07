@@ -7,7 +7,7 @@ from __future__ import annotations
 
 # ---- Retrieval (memory_index.py) ----
 RANK_DEPTH = 50          # how deep each ranker reads; well past the few lines a turn's window share can carry
-VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans (a numpy dot over 5k short rows stays under ~10 ms)
+VECTOR_CAP = 5000        # rows the brute-force cosine ranker scans, newest first (a numpy dot over 5k short rows stays under ~10 ms); older rows past it are not scanned
 QUERY_TIMEOUT = 2.0      # seconds a chat turn waits for the query embedding before going lexical-only
 INDEX_BATCH = 200        # memories embedded per index() call, so a backfill never holds the route for long
 QUERY_CHARS = 2000       # characters of the query that are embedded; the head of a message carries its topic
@@ -96,7 +96,7 @@ GRAPH_CONTEXT_MAX_SEEDS = 8         # entities a message may seed; past this the
 GRAPH_CONTEXT_MAX_EDGES = 24        # live 1-hop edges considered before the "graph" window share trims
 GRAPH_RECENCY_HALF_LIFE_DAYS = 90   # an edge's recency weight halves every this many days since it became true
 GRAPH_QUALIFIER_CHARS = 120         # the role or relationship note shown after an edge line; longer is a sentence, not a qualifier
-GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher
+GRAPH_NODE_VECTOR_CAP = 5000        # node vectors scanned by the brute-force cosine matcher, most recently updated first
 
 # ---- Graph backfill ----
 GRAPH_BACKFILL_DELAY_SECONDS = 1.0  # pause between extraction calls, so a backfill never crowds out live chat on the proxy

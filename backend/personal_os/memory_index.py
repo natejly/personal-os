@@ -132,7 +132,7 @@ class MemoryIndex:
             with self.db.tx() as c:
                 rows = c.execute(
                     f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
-                        WHERE v.model=? AND m.pinned=0 AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
+                        WHERE v.model=? AND m.pinned=0 AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
                     (model, *args, ml.VECTOR_CAP)).fetchall()
             best = max(((float(unpack(r["vec"]) @ qv), r["memory_id"]) for r in rows if r["dim"] == qv.shape[0]), default=None)
             return self.memories.get(best[1]) if best and best[0] >= ml.NEAR_DUP_SIMILARITY else None
@@ -147,7 +147,7 @@ class MemoryIndex:
             return []
         rows = c.execute(
             f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
-                WHERE v.model=? AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
+                WHERE v.model=? AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
             (model, *args, ml.VECTOR_CAP)).fetchall()
         scored = [(float(unpack(r["vec"]) @ qvec), r["memory_id"]) for r in rows if r["dim"] == qvec.shape[0]]
         scored = [s for s in scored if s[0] >= ml.MEMORY_MIN_SIMILARITY]
@@ -156,17 +156,23 @@ class MemoryIndex:
 
     def _graph_seeded(self, c: Any, where: str, args: list[Any], project_id: str | None, query: str,
                       qvec: np.ndarray | None = None, model: str = "") -> list[str]:
-        """Memories that name an entity the query seeds. The self node and value nodes are left out: every
+        """Memories that name an entity the query seeds, best graph position first (a memory naming a seed itself beats
+        one naming only a neighbour), ties newest first. The self node and value nodes are left out: every
         "User prefers ..." memory would otherwise match "User"."""
         vec_hits = self.recall.similar(project_id, qvec, model) if self.recall is not None and qvec is not None else None
-        labels = {nm.lower() for n in graph_recall.subgraph(self.graph, project_id, query, vec_hits)["nodes"]
-                  if not (graph_recall.is_self(n) or graph_recall.is_literal(n)) for nm in graph_recall.names(n) if len(nm) > 2}
-        if not labels:
+        rank: dict[str, int] = {}  # name -> position of the best node carrying it: seeds first, then neighbours as subgraph orders them
+        for pos, n in enumerate(graph_recall.subgraph(self.graph, project_id, query, vec_hits)["nodes"]):
+            if not (graph_recall.is_self(n) or graph_recall.is_literal(n)):
+                for nm in graph_recall.names(n):
+                    if len(nm) > 2:
+                        rank.setdefault(nm.lower(), pos)
+        if not rank:
             return []
         # Whole words, as graph_recall.mentions matches: "Sam" must not seed every memory that says "same".
-        named = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(lb) for lb in sorted(labels, key=len, reverse=True)) + r")(?!\w)")
+        named = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(lb) for lb in sorted(rank, key=len, reverse=True)) + r")(?!\w)")
         rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND {live_mem()} ORDER BY updated_at DESC", args).fetchall()
-        return [r["id"] for r in rows if named.search(r["content"].lower())][:ml.RANK_DEPTH]
+        best = {r["id"]: min(rank[m.group(0)] for m in named.finditer(r["content"].lower())) for r in rows if named.search(r["content"].lower())}
+        return sorted(best, key=best.get)[:ml.RANK_DEPTH]  # stable: ties keep newest first
 
     def _temporal(self, c: Any, where: str, args: list[Any], window: temporal_query.Window, lexical: list[str],
                   qvec: np.ndarray | None, model: str) -> list[str]:
@@ -181,7 +187,7 @@ class MemoryIndex:
             return [i for i in lexical if i in ok]
         rows = c.execute(
             f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
-                WHERE v.model=? AND {span} AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
+                WHERE v.model=? AND {span} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
             (model, lo, hi, *args, ml.VECTOR_CAP)).fetchall()
         scored = [(float(unpack(r["vec"]) @ qvec), r["memory_id"]) for r in rows if r["dim"] == qvec.shape[0]]
         scored.sort(key=lambda s: -s[0])

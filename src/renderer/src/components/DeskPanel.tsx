@@ -10,6 +10,7 @@ import PlanPanel from './PlanPanel'
 import DeskPlan from './DeskPlan'
 import WorkersPanel from './WorkersPanel'
 import { useStore, useWorkers } from '../store'
+import { workerIsLive } from '../lib/workers'
 
 type Tab = 'files' | 'changes' | 'checklist' | 'workers' | 'review'
 const TABS: { key: Tab; label: string }[] = [{ key: 'files', label: 'Files' }, { key: 'changes', label: 'Changes' }, { key: 'checklist', label: 'Checklist' }, { key: 'workers', label: 'Workers' }, { key: 'review', label: 'Review' }]
@@ -21,10 +22,12 @@ const TABS: { key: Tab; label: string }[] = [{ key: 'files', label: 'Files' }, {
  * progress has no status card (lib/statusChrome). Without a desk, Files is the chat's own list.
  */
 export default function DeskPanel({ desk, conversationId, onClose }: { desk?: FullDesk | null; conversationId: string; onClose: () => void }): JSX.Element {
-  const [picked, setTab] = useState<Tab>(desk?.status === 'review' ? 'review' : 'files')
+  const workers = useWorkers(conversationId)
+  // Opened while workers are in flight, that is what you came to see; otherwise Files (the chat's artifacts).
+  const [picked, setTab] = useState<Tab>(desk?.status === 'review' ? 'review' : workers.some(workerIsLive) ? 'workers' : 'files')
   useEffect(() => { if (desk?.status === 'review') setTab('review') }, [desk?.id, desk?.status])
   const hasChecklist = useStore((s) => (s.plans[conversationId]?.length ?? 0) > 0) || (!!desk?.plan && desk.plan.status !== 'pending')
-  const hasWorkers = useWorkers(conversationId).length > 0
+  const hasWorkers = workers.length > 0
   const shown = (k: Tab): boolean => k === 'files' || k === 'changes' || (k === 'checklist' && hasChecklist) || (k === 'workers' && hasWorkers) || (k === 'review' && !!desk)
   const tabs = TABS.filter((t) => shown(t.key))
   const tab = shown(picked) ? picked : 'files'

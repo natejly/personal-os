@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, Files } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from 'lucide-react'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -142,14 +142,17 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
         </div>
         <div className="no-drag header-right">
-          {conversationId
-            ? <ChatFilesButton conversationId={convo?.id} />
-            : <button className={`icon-btn no-drag${deskPanel ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-pressed={deskPanel} disabled={!convo?.id}
-              onClick={() => setDeskPanel((o) => !o)}><Files size={15} /></button>}
+          {conversationId && <ChatFilesButton conversationId={convo?.id} />}
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
-        <AppSwitcher />
+        {/* The full-window chat gives the last title-bar slot to its own workspace panel; ⌘I still opens the quick chat. */}
+        {conversationId ? <AppSwitcher /> : (
+          <div className="app-switcher no-drag">
+            <button className={`icon-btn${deskPanel ? ' on' : ''}`} title="Workspace panel" aria-label="Workspace panel" aria-pressed={deskPanel} disabled={!convo?.id}
+              onClick={() => setDeskPanel((o) => !o)}><PanelRight size={15} /></button>
+          </div>
+        )}
       </header>
 
       <div className="chat-body">

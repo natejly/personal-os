@@ -198,6 +198,17 @@ CHAT_HANDOFF = ("The user has asked you to carry on with the task in this conver
                 "so far is your brief. Work it through to done in your workspace; call `desk_ask` if only the user can "
                 "decide something, and `desk_done` when it is finished.")
 CONTINUE_MESSAGES = {"continue": DESK_CONTINUE, "resume": DESK_RESUME, "nudge": DESK_NUDGE}
+# The kind a desk turn's user row carries when its content starts with one of the backend's own texts. Queued
+# wakes concatenate their messages (a user's words may come first), so only the leading text decides.
+_INTERNAL_PREFIXES = ((DESK_NUDGE, "nudge"), (DESK_CONTINUE, "continue"), (DESK_RESUME, "resume"), (CHAT_HANDOFF, "handoff"))
+
+
+def internal_kind(content: str | None) -> str | None:
+    """'nudge' / 'continue' / 'resume' / 'handoff' when `content` opens with that backend text, else None (a person's words)."""
+    text = (content or "").lstrip()
+    return next((k for p, k in _INTERNAL_PREFIXES if text.startswith(p)), None)
+
+
 NOTES_CAP = 3000
 NOTES_FILE = "work/PROGRESS.md"
 

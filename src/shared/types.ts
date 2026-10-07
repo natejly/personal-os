@@ -790,7 +790,7 @@ export interface Message {
   followups?: string[] | null
   /** Set on a user message that replaced an earlier one (edit-and-resend). */
   edited_from?: string | null
-  /** 'wake': a hidden user-role turn that tells the assistant a background worker ended. Never rendered as a user message. */
+  /** Null for something a person said. Any other value ('wake', 'nudge', ...) is a hidden control turn for the model, never rendered. */
   kind?: string | null
 }
 

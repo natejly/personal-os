@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from . import graph_recall, limits, memory_limits, redact
+from .kinds import is_internal
 from .repos import Documents, Graph, Memories
 from .style_presets import styleBlock
 from .style import STYLE_HINT, context_block as style_block, voice_wanted
@@ -38,7 +39,7 @@ def retrieval_query(prior: list[dict[str, Any]], text: str) -> str:
     the history is clipped, so its own terms survive fts_query's term cap and the embedder's character cut."""
     if len(text.split()) >= 12 and not _ANAPHOR.search(text):
         return text
-    prev_user = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "user" and m.get("kind") != "wake"), "")
+    prev_user = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "user" and not is_internal(m)), "")
     if not prev_user.strip():
         return text
     reply = next((str(m.get("content") or "") for m in reversed(prior) if m.get("role") == "assistant"), "")

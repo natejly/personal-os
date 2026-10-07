@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { isWake, liveWorkerCount, sortWorkers, upsertWorker, withoutWake, workerActions, workerLine } from './workers'
+import { isInternal, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerLine } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -32,13 +32,18 @@ test('live workers sort first and upsert replaces by id', () => {
   assert.equal(upsertWorker(next, w('w9', 'queued')).length, 5)
 })
 
-test('wake rows are hidden, other rows keep their identity', () => {
+test('any non-null kind is hidden, null and absent kinds are kept, identity holds when nothing is hidden', () => {
   const m = (id: string, kind?: string): Message => ({ id, conversation_id: 'c', role: 'user', content: id, model: null, error: null, context_used: null, tool_events: null, trace: null, created_at: 1, kind })
   const plain = [m('a'), m('b', null as unknown as string)]
-  assert.equal(withoutWake(plain), plain)
-  assert.equal(isWake(m('x', 'wake')), true)
-  assert.deepEqual(withoutWake([m('a'), m('x', 'wake'), m('b')])?.map((x) => x.id), ['a', 'b'])
-  assert.equal(withoutWake(undefined), undefined)
+  assert.equal(withoutInternal(plain), plain)
+  assert.equal(isInternal(m('x', 'wake')), true)
+  assert.deepEqual(withoutInternal([m('a'), m('x', 'wake'), m('b')])?.map((x) => x.id), ['a', 'b'])
+  assert.equal(isInternal(m('x', 'nudge')), true)
+  assert.equal(isInternal(m('x', 'xyz')), true)
+  assert.equal(isInternal(m('x')), false)
+  assert.equal(isInternal(m('x', null as unknown as string)), false)
+  assert.deepEqual(withoutInternal([m('a'), m('n', 'nudge'), m('z', 'xyz'), m('b')])?.map((x) => x.id), ['a', 'b'])
+  assert.equal(withoutInternal(undefined), undefined)
 })
 
 test('live worker count', () => {

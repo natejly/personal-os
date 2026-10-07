@@ -35,6 +35,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from . import migrations
+from .kinds import is_internal
 
 log = logging.getLogger("personal_os")
 
@@ -301,7 +302,7 @@ def render_conversation_md(conv: dict[str, Any], msgs: list[dict[str, Any]], pro
     if exported is None:
         out.append(f"{project} · {conv.get('model') or ''} · {_when(conv['created_at'])}\n\n")
     for m in msgs:
-        if m.get("kind") == "wake":
+        if is_internal(m):
             continue
         who = "You" if m["role"] == "user" else "Grain"
         head = f"## {who} · {_when(m['created_at'])}" + (f" · {m['model']}" if m["role"] != "user" and m.get("model") else "")
@@ -344,7 +345,7 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
 
     by_conv: dict[str, list[dict[str, Any]]] = {}
     for m in msgs:
-        if m.get("kind") != "wake":  # a worker's report handed to the assistant: not something either side said
+        if not is_internal(m):  # a worker's report or a desk's own nudge: not something either side said
             by_conv.setdefault(m["conversation_id"], []).append(m)
     md: list[str] = []
     for cv in convs:

@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import egress, mac, permissions
+from .kinds import is_internal
 from .embed import rrf
 from . import fsx
 from . import skillbuild
@@ -914,7 +915,7 @@ class Toolbox:
         if cid and self.conversations is not None:
             conv = self.conversations.get(cid) or {}
             typed += [str(m.get("content") or "") for m in conv.get("messages") or []
-                      if m.get("role") == "user" and m.get("kind") != "wake"]  # a worker report never vouches for a save
+                      if m.get("role") == "user" and not is_internal(m)]  # a worker report or a desk nudge never vouches for a save
         return max(len(mine & words(t)) for t in typed) / len(mine) >= TAINT_SAVE_MIN_OVERLAP
 
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:

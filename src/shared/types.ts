@@ -777,7 +777,7 @@ export interface Message {
   context_used: ContextUsed | null
   tool_events: ToolEvent[] | null
   trace: Span[] | null
-  /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
+  /** Short summary lines (one per line) of a reasoning model's thinking, never the raw chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
   /** Live only, never persisted: what a streaming reply is waiting on (a provider retry, a history summary). Set and cleared by `status` events. */
@@ -1732,7 +1732,8 @@ export type ChatEvent =
   | { event: 'restored_message'; data: { message: Message; reason: string | null } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
-  | { event: 'reasoning'; data: { id: string; text: string } }
+  /** One short model-written status line about the reply's thinking; the raw chain-of-thought is never sent. */
+  | { event: 'thinking_summary'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */

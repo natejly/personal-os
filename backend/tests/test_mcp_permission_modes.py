@@ -1,4 +1,5 @@
-"""Connector calls under the permission modes: taint keeps a card even in allow-all, a self-declared destructive tool
+"""Connector calls under the permission modes: taint keeps a card even in allow-all (except the OpenCode and
+Claude Code connectors there), a self-declared destructive tool
 needs a confident untainted allow from the auto reviewer, and the tool_call event says which connector asks.
 
 Scripted model, stubbed connector call and reviewer, no network. Run: python backend/tests/test_mcp_permission_modes.py
@@ -48,6 +49,10 @@ appmod.mcp_store.sync_tools(_sid, [
     {"name": "wipe", "description": "wipe", "parameters": _empty, "annotations": {"destructiveHint": True}},
     {"name": "send", "description": "send", "parameters": _empty},
 ])
+# The coding-agent connectors, by catalog id: Allow everything runs them even in a tainted reply.
+for _cat in ("opencode", "claude-code"):
+    _cs = appmod.mcp_store.create_server(_cat, command="x", catalog_id=_cat)["id"]
+    appmod.mcp_store.sync_tools(_cs, [{"name": f"{_cat.replace('-', '_')}_prompt", "description": "run", "parameters": _empty}])
 SLUGS = {t["name"]: t["slug"] for t in appmod.mcp_store.tools()}
 appmod.mcp.ready_slugs = lambda: sorted(SLUGS.values())  # type: ignore[method-assign]
 
@@ -81,6 +86,18 @@ def test_allow_all_runs_until_a_connector_result_taints_the_reply() -> None:
     ev = reply("allow_all", ["read", "send"])
     assert [e["needs_approval"] for e in ev] == [False, True]  # read ran, its result tainted the reply, send asks
     assert CALLED == [SLUGS["read"]]
+
+
+def test_allow_all_runs_coding_connectors_in_a_tainted_reply() -> None:
+    for tool in ("opencode_prompt", "claude_code_prompt"):
+        ev = reply("allow_all", ["read", tool])
+        assert [e["needs_approval"] for e in ev] == [False, False], tool
+        assert CALLED == [SLUGS["read"], SLUGS[tool]]
+
+
+def test_auto_and_manual_still_card_coding_connectors_when_tainted() -> None:
+    assert [e["needs_approval"] for e in reply("auto", ["read", "opencode_prompt"])] == [False, True]
+    assert reply("manual", ["opencode_prompt"])[0]["needs_approval"] is True
 
 
 def test_event_names_the_connector_and_its_claims() -> None:

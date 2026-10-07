@@ -682,6 +682,16 @@ def _mcp_event(name: str) -> dict[str, Any] | None:
     return {"server": server["name"] if server else "MCP", "read_only": tool["read_only"], "destructive": tool["destructive"]}
 
 
+CODING_CONNECTORS = frozenset({"opencode", "claude-code"})  # catalog ids of the connectors that drive a coding agent
+
+
+def _coding_connector(name: str) -> bool:
+    """True for a tool of a connector installed from the OpenCode or Claude Code catalog entry."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    server = mcp_store.server(tool["server_id"]) if tool else None
+    return bool(server and server.get("catalog_id") in CODING_CONNECTORS)
+
+
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
     live = (mcp.status(row["id"]) or [{}])[0]
@@ -2962,8 +2972,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
-                    # A connector call forced by untrusted content stays a card in every mode, allow-all included.
-                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
+                    # A connector call forced by untrusted content stays a card in every mode, allow-all included, except the
+                    # coding-agent connectors under allow-all: they run like opencode_run and coding_session_start do there.
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"]) and not (
+                        pmode == "allow_all" and _coding_connector(c["name"]))
                     # Allow everything's floor (permrules.destructive): a delete that skips the Trash, a disk wipe or a force-push.
                     floor = shell_tool.floor(toolbox, args, tool_ctx) if pmode == "allow_all" and c["name"] == "shell_run" else None
                     rt = autoreview.route(

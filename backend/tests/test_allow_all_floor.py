@@ -86,9 +86,24 @@ for n, d in LOCKED.items():
     appmod.toolbox.specs[n] = ToolSpec(n, n, _obj({"x": {"type": "string"}}, []), _tool, "misc", d)
 
 
-def go(pmode: str, call: dict[str, Any], rules: dict | None = None, shell_mode: str | None = None) -> list[dict[str, Any]]:
+async def _coding(ctx: dict[str, Any], x: str = "", permission_mode: str | None = None) -> Any:
+    return await _tool(ctx, x)
+
+
+# The coding agents keep their real gates (force_ask on taint, the bypass card) around a stand-in run.
+CODING = ("opencode_run", "coding_session_start")
+for n in CODING:
+    real = appmod.toolbox.specs[n]
+    s = ToolSpec(n, n, _obj({"x": {"type": "string"}, "permission_mode": {"type": "string"}}, []), _coding, real.group, real.danger)
+    s.default, s.force_ask, s.force_card, s.taint_ok = real.default, real.force_ask, real.force_card, real.taint_ok
+    appmod.toolbox.specs[n] = s
+
+
+def go(pmode: str, call: dict[str, Any], rules: dict | None = None, shell_mode: str | None = None,
+       tainted: bool = False) -> list[dict[str, Any]]:
     cid = T.setup(rules, permissionMode=pmode, alwaysAsk=permissions.DEFAULTS["alwaysAsk"])
-    appmod.convos.update(cid, {"settings": {"tools": {"shell_run": shell_mode} if shell_mode else {}}})
+    appmod.convos.update(cid, {"settings": {"tools": {"shell_run": shell_mode} if shell_mode else {},
+                                            **({"tainted": True, "taint_sources": ["fetch_url"]} if tainted else {})}})
     CALLS.clear()
     return T.cards(T.drive(cid, [[call], []], ["deny"] * 3))
 
@@ -163,3 +178,26 @@ def test_grain_data_folder_still_cards_under_allow_all() -> None:
         assert len(c) == 1 and not T.RAN, unsandboxed
     assert permrules.touches_protected(f"sqlite3 {data}/grain.db .dump")
     assert permrules.touches_protected("ls -la ~/proj") is None
+
+
+@pytest.mark.parametrize("name", CODING)
+def test_allow_all_runs_coding_agents_in_a_tainted_reply(name: str) -> None:
+    assert not go("allow_all", tool(name), tainted=True) and CALLS == ["a"], name
+
+
+@pytest.mark.parametrize("pmode", ["manual", "auto"])
+@pytest.mark.parametrize("name", CODING)
+def test_auto_and_manual_still_card_coding_agents_when_tainted(pmode: str, name: str) -> None:
+    c = go(pmode, tool(name), tainted=True)
+    assert len(c) == 1 and c[0]["forced"] and not CALLS, (pmode, name)
+
+
+@pytest.mark.parametrize("pmode", ["manual", "auto"])
+def test_auto_and_manual_still_card_a_bypass_session(pmode: str) -> None:
+    call = {"id": "c0", "name": "coding_session_start", "arguments": json.dumps({"x": "a", "permission_mode": "bypassPermissions"})}
+    assert len(go(pmode, call)) == 1 and not CALLS
+
+
+def test_floor_still_cards_in_a_tainted_reply() -> None:
+    c = go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True)
+    assert len(c) == 1 and not T.RAN and c[0]["permission"]["kind"] == "destructive"

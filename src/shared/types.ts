@@ -228,6 +228,8 @@ export interface ShowItem {
   size?: number
   /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
   documentId?: string
+  /** kind=file: a chat's output (Files → Artifacts); its bytes come from this backend route, since /local/raw refuses the data folder. */
+  rawPath?: string
   /** An upload only: the original bytes were kept (false = just the extracted text is left). */
   hasOriginal?: boolean
   /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */

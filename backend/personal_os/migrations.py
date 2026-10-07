@@ -411,6 +411,16 @@ def _internal_message_kinds(c: sqlite3.Connection) -> None:
         c.execute("UPDATE messages SET kind=? WHERE role='user' AND kind IS NULL AND substr(content, 1, ?) = ?", (kind, len(prefix), prefix))
 
 
+def _chat_artifacts_backfill(c: sqlite3.Connection) -> None:
+    """Files → Artifacts lists every chat's outputs from chat_files, so the outboxes and desk workspaces already on
+    disk are indexed once here (chat_files.backfill_outputs). The data dir is the database file's folder."""
+    from pathlib import Path
+    from . import chat_files
+    row = next((r for r in c.execute("PRAGMA database_list") if r[1] == "main"), None)
+    if row and row[2]:
+        chat_files.backfill_outputs(c, Path(row[2]).parent)
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -439,6 +449,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (24, "drop_nav_placement", _drop_nav_placement),
     (25, "allow_all_connections_for_existing", _allow_all_connections_for_existing),
     (26, "internal_message_kinds", _internal_message_kinds),
+    (27, "chat_artifacts_backfill", _chat_artifacts_backfill),
 ]
 
 

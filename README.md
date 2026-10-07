@@ -26,7 +26,7 @@ instructions, files, memories and graph.
 ```
 
 Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
-Settings → Modules hides any of them. A **Quick chat** button at the top right of
+Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
 every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
@@ -48,11 +48,6 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    From any app, press ⌥Space (or the menubar item) for a small ask bar: type a
    line, optionally attach your clipboard text, and the reply streams in place.
    Open in chat continues it in the main window.
-   The speaker button on a reply reads it aloud (voice and speed in Settings →
-   Chat). `/voice`, or the waveform button by the mic, starts hands-free voice
-   chat: speak, pause, and the message is sent and the reply read back, then it
-   listens again until Esc, the button, or the turn cap; an open approval card
-   pauses it.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
    chat if the assistant should read or write files there; the **Style** picker
@@ -61,7 +56,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.
-3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
+3. **Files.** ⌘4 opens Files, with three sections: *Notes*, *Uploads* (⌘U) and *Artifacts*.
    ⌘⇧N makes a note, ⌘⇧D opens today's. Paste or drop an image into
    a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
@@ -92,9 +87,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    it, or let a reply hand work to a background worker with `delegate` (naming a Library agent runs the worker as it).
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
-   delegating agent as a big face with its subagents around it. Longer jobs: turn on **Work
-   autonomously** under the composer, pick Plan first, Ask as it goes or Work and
-   propose, and watch the strip above the composer; its side panel holds the
+   delegating agent as a big face with its subagents around it. Longer jobs: open **Mode**
+   under the composer and pick Plan first, Ask as it goes or Autonomous, and watch the strip above the composer; its side panel holds the
    workspace files, changes and review. Library
    → Automations holds workflows, which you approve once. `/schedule` or the
    `schedule_task` tool books a run for later; its results arrive in the Agent
@@ -162,7 +156,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   memories and a project graph, layered on top of your personal ones.
 - **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
   scope filter and search box — the first two halves side by side, either alone,
-  or the voice profile on its own:
+  or the voice profile on its own (Split is the default):
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget, see a memory's past versions, and export or import
@@ -198,6 +192,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
+  - *Artifacts* — everything the assistant made in any chat (documents, data,
+    images, code, browser downloads), from plain chats and autonomous sessions
+    alike, grouped by chat, newest first, with a link back to the chat. Nothing is
+    copied: the list is an index of the files where they were saved. A chat in the
+    trash keeps its artifacts here until it is erased for good.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
   docs, memory, graph, uploads, recap, project, usage, face and crew
@@ -211,12 +210,12 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Work autonomously** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
+- **Mode** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
   once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
   or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
-  Ask as it goes (no plan up front; risky actions follow the permission mode), and Work and propose (it may plan an external
+  Ask as it goes (no plan up front; risky actions follow the permission mode), and Autonomous (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and
   how many things need you, with Start, Pause, Resume and Stop, and opens a side panel
   with Files, Changes and Review tabs. While a lone agent is working the strip stays out of the way
@@ -523,11 +522,11 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Data |
+| ⌘, | Settings: Model, Usage, Permissions, Integrations, Texting, Memory, Appearance, System access, Advanced |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
-A view turned off in Settings → Modules keeps its shortcut, which then offers
+A view turned off in Settings → Appearance keeps its shortcut, which then offers
 to turn the view back on instead of opening it.
 
 ## How a reply is built

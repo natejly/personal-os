@@ -228,6 +228,8 @@ export interface ShowItem {
   size?: number
   /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
   documentId?: string
+  /** kind=file: a chat's output (Files → Artifacts); its bytes come from this backend route, since /local/raw refuses the data folder. */
+  rawPath?: string
   /** An upload only: the original bytes were kept (false = just the extracted text is left). */
   hasOriginal?: boolean
   /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */
@@ -324,7 +326,7 @@ export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global
 
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {
-  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | null
+  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | 'destructive' | null
   /** The subject the card is about, e.g. `Bash(git push origin)` or `doom_loop(fs_grep)`. */
   subject: string | null
   rule: string | null
@@ -811,6 +813,12 @@ export interface WorkerInfo {
   /** An ended worker with a stored transcript can continue with its history. */
   resumable: boolean
   pending_approvals: { call_id: string; tool: string; args: Record<string, unknown> }[]
+  /** The role or Library agent it runs as ('general' for the chat's own tools). */
+  agent?: string
+  /** The id of the worker this one continues (through any chain of resumes), else its own: the face's seed. */
+  origin?: string
+  /** An ended worker's final report, else ''. */
+  report?: string
   depth: number
   /** Info only. */
   cost: number | null
@@ -828,9 +836,6 @@ export interface ConversationSettings {
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
-  /** Set only when the chat is created. Memory, graph, voice and auto-learn are then forced off for good,
-   *  and the chat is left out of chat search. */
-  private?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
@@ -846,7 +851,7 @@ export interface ConversationSettings {
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
   skipPermissions?: boolean
   autoLearn: boolean
-  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. Unlike `private`, it can be switched at any time. */
+  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. It can be switched at any time. */
   learn?: boolean
   /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
   titleSource?: 'auto' | 'user'
@@ -866,6 +871,8 @@ export interface ConversationSettings {
   docId?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
+  /** Set on the Telegram bridge's conversation: the sidebar pins it first under the label "Telegram". */
+  telegram?: boolean
 }
 
 /** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */
@@ -1300,6 +1307,13 @@ export interface DriveFile {
   owner: string | null
 }
 
+export interface GmailAttachment {
+  id: string
+  name: string
+  mime: string
+  size: number
+}
+
 export interface GmailFullMessage {
   id: string
   thread_id: string
@@ -1308,6 +1322,7 @@ export interface GmailFullMessage {
   subject: string | null
   date: string | null
   body: string
+  attachments?: GmailAttachment[]
 }
 
 export interface GmailLabel {
@@ -1455,6 +1470,9 @@ export interface Settings {
   retrievalMode?: 'hybrid' | 'bm25'
   /** Reorder fused candidates with retrievalRerankModel before trimming. */
   retrievalRerank?: boolean
+  /** Also reorder recalled memories with the rerank model. On unless false. */
+  memoryRerank?: boolean
+  /** Rerank model shared by document search and memory recall; blank means the provider's default. */
   retrievalRerankModel?: string
   /** 0-1: vector-only hits below this similarity are dropped. */
   retrievalMinSimilarity?: number
@@ -1483,12 +1501,6 @@ export interface Settings {
   quickCaptureShortcut?: string
   /** Electron accelerator for the global quick-ask bar (a one-line prompt that starts a new chat). */
   quickAskShortcut?: string
-  /** Read-aloud voice (a speechSynthesis voice URI); empty is the system default. */
-  ttsVoice?: string
-  /** Read-aloud speaking rate, 0.8 to 1.5. */
-  ttsRate?: number
-  /** Voice chat ends itself after this many replies. */
-  voiceLoopMaxTurns?: number
   /** Hold-to-talk dictation chord for the chat composer mic, e.g. 'Control+Alt+D'. */
   dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork defaults off. */
@@ -1950,6 +1962,8 @@ export interface GrainApi {
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
+  /** Bring the main window forward (a notification was clicked while it was hidden). */
+  showMain: () => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
   /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
@@ -2442,6 +2456,10 @@ export interface RunInfo {
   ended_at?: number | null
   error?: string | null
   attention?: Attention
+  /** True once the run published a visible assistant reply; a silent control turn never sets it. */
+  replied?: boolean
+  /** The user stopped it. */
+  stopped?: boolean
 }
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------

@@ -268,12 +268,12 @@ def test_settings_validate_and_hide_the_state() -> None:
 def test_an_owner_text_runs_a_real_turn_and_the_reply_comes_back() -> None:
     pair()
     fake.push(fake.update("ping"))
-    wait_until(lambda: "Hello there" in fake.sent(), "the reply")
+    wait_until(lambda: "Hello <b>there</b>" in fake.sent(), "the reply")
     sends = fake.of("sendMessage")
-    assert sends[-1] == {"chat_id": OWNER, "text": "Hello there"}  # markdown stripped, sent to the owner's chat
+    assert sends[-1]["chat_id"] == OWNER and sends[-1]["text"] == "Hello <b>there</b>" and sends[-1]["parse_mode"] == "HTML"  # formatted, sent to the owner's chat
     conv = target()
     c = j("GET", f"/conversations/{conv}")
-    assert c["title"] == "Texts"
+    assert c["title"] == "Telegram" and c["settings"]["telegram"] is True
     assert [m["content"] for m in c["messages"] if m["role"] == "user"] == ["ping"]
     assert [m["content"] for m in c["messages"] if m["role"] == "assistant"] == ["Hello **there**"]
     runs = appmod.run_store.list(None, conv)
@@ -283,7 +283,7 @@ def test_an_owner_text_runs_a_real_turn_and_the_reply_comes_back() -> None:
     fake.push(fake.update("let me in", chat=777), {"update_id": 5000, "message": {"message_id": 9, "chat": {"id": -100, "type": "supergroup"},
                                                                                   "from": {"id": OWNER}, "date": int(time.time()) + 1, "text": "group"}})
     time.sleep(0.3)
-    assert len(appmod.run_store.list(None, conv)) == 1 and fake.sent() == ["Hello there"]
+    assert len(appmod.run_store.list(None, conv)) == 1 and fake.sent() == ["Hello <b>there</b>"]
 
 
 def test_a_text_during_a_reply_steers_it_instead_of_starting_a_second_run() -> None:
@@ -298,9 +298,9 @@ def test_a_text_during_a_reply_steers_it_instead_of_starting_a_second_run() -> N
     wait_until(lambda: [m["content"] for m in j("GET", f"/conversations/{conv}")["messages"] if m["role"] == "user"][-2:]
                == ["first thing", "and also this"], "both texts in the conversation")
     assert len(appmod.run_store.list(None, conv, limit=200)) == 1
-    wait_until(lambda: any(t.endswith("Hello there") for t in fake.sent()), "the one reply")
+    wait_until(lambda: any(t.endswith("Hello <b>there</b>") for t in fake.sent()), "the one reply")
     time.sleep(0.2)
-    assert sum(t.endswith("Hello there") for t in fake.sent()) == 1
+    assert sum(t.endswith("Hello <b>there</b>") for t in fake.sent()) == 1
 
 
 def test_an_approval_answered_by_a_button_is_decided_as_telegram() -> None:

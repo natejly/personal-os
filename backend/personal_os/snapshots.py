@@ -490,6 +490,18 @@ def router(snaps: Snapshots, run_exists: Callable[[str], bool]) -> Any:
             return {"available": available(), "count": 0, "state": "applied", "files": [], "skipped": []}
         return {"run_id": row["run_id"], **snaps.summary(row["run_id"])}
 
+    @r.get("/conversations/{conversation_id}/changes")
+    def conversation_changes(conversation_id: str) -> dict[str, Any]:
+        """What every recent run of a chat changed, newest first: each item is a run's summary plus its ids and start time."""
+        with snaps.db.tx() as c:
+            runs = [dict(x) for x in c.execute(
+                "SELECT a.run_id, a.message_id, a.started_at FROM agent_runs a WHERE a.conversation_id=? "
+                "AND EXISTS (SELECT 1 FROM run_snapshots s WHERE s.run_id=a.run_id) ORDER BY a.started_at DESC LIMIT 20",
+                (conversation_id,))]
+        for x in runs:
+            _settle(x["run_id"])
+        return {"available": available(), "runs": [{**x, **snaps.summary(x["run_id"])} for x in runs]}
+
     def _check(run_id: str) -> None:
         if not run_exists(run_id):
             raise HTTPException(404, "No such run")

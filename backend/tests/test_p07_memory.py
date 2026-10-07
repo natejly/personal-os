@@ -32,9 +32,6 @@ def test_learn_false_turns_auto_learn_off_but_keeps_the_chat_listed() -> None:
     assert not A.learner._alive(c["id"])  # a queued job for it is dropped
     assert any(x["id"] == c["id"] for x in A.convos.list(None))
     assert client.post(f"/conversations/{c['id']}/skills/induce").json()["candidate"] is None
-    # private is untouched: still fixed at creation, still forces everything off
-    p = _chat(private=True)
-    assert p["settings"]["autoLearn"] is False and A.learner._alive(p["id"])
 
 
 def test_forget_learned_removes_this_chats_rows_only() -> None:

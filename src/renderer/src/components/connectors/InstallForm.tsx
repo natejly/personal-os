@@ -49,7 +49,6 @@ export function InstallForm({ entry, busy, error, onSubmit, onCancel }: {
           <button type="submit" className="primary-btn" disabled={busy}>{busy ? 'Installing…' : 'Install'}</button>
           <button type="button" className="ghost-btn" onClick={onCancel}>Cancel</button>
         </div>
-        <small className="muted">Its tools ask before they run until you say otherwise.</small>
       </div>
     </form>
   )

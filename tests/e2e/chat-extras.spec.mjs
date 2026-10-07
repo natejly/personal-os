@@ -76,3 +76,35 @@ test('a message with markdown-looking and html text is shown literally in the us
   await expect(users(page).first().locator('img')).toHaveCount(0)
   await expect(users(page).first().locator('strong')).toHaveCount(0)
 })
+
+test('every chat has a side panel: Files and Changes, and no Review without a desk', async ({ grain }) => {
+  const { page } = grain
+  await newChat(page)
+  await sayAndWait(page, '!!tool current_time {}', '')
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  const panel = page.locator('.desk-panel')
+  await expect(panel).toBeVisible()
+  const tabs = panel.locator('.desk-tabs')
+  await expect(tabs.getByRole('button', { name: 'Files' })).toBeVisible()
+  await expect(tabs.getByRole('button', { name: 'Changes' })).toBeVisible()
+  await expect(tabs.getByRole('button', { name: /^Review/ })).toHaveCount(0)
+  await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
+  await tabs.getByRole('button', { name: 'Changes' }).click()
+  await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await expect(panel).toHaveCount(0)
+})
+
+test('the checklist is never above the composer; it is the Checklist tab of the side panel', async ({ grain }) => {
+  const { page } = grain
+  await newChat(page)
+  const plan = { steps: [{ text: 'first step', status: 'in_progress' }, { text: 'second step', status: 'pending' }] }
+  await say(page, '!!tool todo_write ' + JSON.stringify(plan))
+  await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
+  await expect(page.getByRole('region', { name: 'Checklist' })).toHaveCount(0) // no status card for the main agent
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' }).click()
+  const list = page.locator('.desk-panel').getByRole('region', { name: 'Checklist' })
+  await expect(list).toContainText('0/2 done')
+  await expect(list.locator('.plan-steps .plan-step')).toHaveCount(2)
+})

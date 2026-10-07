@@ -3,7 +3,7 @@ import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
 import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
+import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -12,17 +12,18 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
+import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import MemoryChips from './MemoryChips'
-import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
+import { nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
-import ReadAloudButton from './ReadAloudButton'
 import ResearchTrail from './ResearchTrail'
 import { trailFromEvents } from '../lib/researchTrail'
 
@@ -228,17 +229,6 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 }
 
 /** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
-function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
-  const [now, setNow] = useState(() => Date.now())
-  const ticking = statusTicks(status, now)
-  useEffect(() => {
-    if (!ticking) return
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [ticking])
-  return <div className="run-status" role="status">{statusText(status, now)}</div>
-}
-
 /** The three dots for a reply with nothing to show yet; past 5s they gain the elapsed time, so a slow model does not look hung. */
 export function Thinking(): JSX.Element {
   const [start] = useState(() => Date.now())
@@ -271,9 +261,10 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
 export type ChatFace = { name: string; hue?: number; tone?: number }
 
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
+  const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
   // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
   const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
@@ -286,10 +277,13 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
-  const events = message.tool_events
+  // Hand-offs to workers are not cards: the app shows the workers themselves.
+  const events = useMemo(() => quietEvents(message.tool_events), [message.tool_events])
   const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
   const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
+  // A reply that only handed work on has nothing to draw (the backend removes it once the turn ends).
+  if (!isUser && !streaming && !message.content && !message.reasoning && !message.error && !message.attachments?.length && !events.length && message.tool_events?.length) return null
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
@@ -299,7 +293,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <UserText content={message.content} />}</div>
+            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
           )
         ) : (
           <div className="msg-body">
@@ -323,7 +317,6 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             <ReplyAttachments files={message.attachments} />
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
-            {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
@@ -352,7 +345,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               </button>
             )}
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && (message.tool_events?.length ?? 0) > 0 && (
+            {!isUser && events.length > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
             {!isUser && !streaming && message.content.trim() && (
@@ -363,8 +356,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
-            {!bare && !isUser && message.content.trim() && <ReadAloudButton id={message.id} text={message.content} />}
-            {resendable && isUser && (
+            {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />
               </button>
@@ -430,6 +422,16 @@ export function ReplyAttachments({ files }: { files?: Attachment[] | null }): JS
     <>
       {images.length > 0 && <div className="reply-images">{images.map((a) => <ReplyImage key={a.id} file={a} />)}</div>}
       <AttachmentChips files={rest} />
+    </>
+  )
+}
+
+/** A message another chat sent (or answered with): "From <title>" opens that chat, then the body. */
+function ChatMessageText({ content, from }: { content: string; from: NonNullable<ReturnType<typeof parseChatMessage>> }): JSX.Element {
+  return (
+    <>
+      <div className="user-from">From <button type="button" className="link-btn" onClick={() => void useStore.getState().selectChat(from.fromChat)}>{from.title}</button></div>
+      <UserText content={from.body || content} />
     </>
   )
 }

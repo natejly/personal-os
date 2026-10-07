@@ -41,26 +41,28 @@ test('Voice input settings act at once and persist through /voice/config', async
 test('toggles and fields persist through PUT /settings and survive relaunch', async ({ grain }) => {
   const { page, api } = grain
   // Advanced groups
-  await openAdvanced(page, 'Assistant behaviour')
+  await openAdvanced(page, 'Assistant')
   await dialog(page).getByLabel('Standing instructions').fill('Always answer in haiku.')
   await field(page, 'Name new chats').setChecked(false, { force: true })
-  await openAdvanced(page, 'Desks and background')
-  await field(page, 'Notify me about chats').setChecked(false, { force: true })
+  await openAdvanced(page, 'Desks and workers')
+  await field(page, 'Notify me when a chat finishes').setChecked(false, { force: true })
   await field(page, 'Notify me about scheduled jobs').setChecked(false, { force: true })
   await openAdvanced(page, 'Voice and shortcuts')
   await field(page, 'Dictation key').fill('Control+Alt+K')
   await openAdvanced(page, 'Developer')
   await field(page, 'Developer tools').setChecked(true, { force: true })
-  await openAdvanced(page, 'Memory and search')
+  await openSettings(page, 'Memory')
+  await dialog(page).locator('summary', { hasText: 'Learning' }).click()
   await field(page, 'Learn from chats').setChecked(false, { force: true })
   await field(page, 'Learn how I write').setChecked(false, { force: true })
+  await openAdvanced(page, 'Search')
   await field(page, 'Smarter memory search').setChecked(false, { force: true })
   await openAdvanced(page, 'Approvals')
   await dialog(page).getByRole('button', { name: 'Accept all', exact: true }).click()
   await field(page, 'Plan first').selectOption('auto')
   await openAdvanced(page, 'Files and web')
   await field(page, 'Your own search server').fill('http://localhost:8080')
-  await openAdvanced(page, 'Mail, calendar and plans')
+  await openSettings(page, 'Integrations')
   await field(page, 'Hold outgoing email so I can undo').setChecked(false, { force: true })
   // Model
   await dialog(page).getByRole('tab', { name: 'Model' }).click()
@@ -81,7 +83,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
 
   const p2 = await grain.relaunch()
   await check()
-  await openAdvanced(p2, 'Assistant behaviour')
+  await openAdvanced(p2, 'Assistant')
   await expect(field(p2, 'Name new chats')).not.toBeChecked()
   await expect(dialog(p2).getByLabel('Standing instructions')).toHaveValue('Always answer in haiku.')
   await openAdvanced(p2, 'Approvals')
@@ -109,7 +111,7 @@ test('the permission mode saves at once and survives relaunch', async ({ grain }
 
 test('dirty modal asks before discarding; Esc answers the question', async ({ grain }) => {
   const { page, api } = grain
-  await openAdvanced(page, 'Assistant behaviour')
+  await openAdvanced(page, 'Assistant')
   await dialog(page).getByLabel('Standing instructions').fill('draft only')
   await page.keyboard.press('Escape')
   await expect(dialog(page).getByText('Discard unsaved changes?')).toBeVisible()
@@ -129,7 +131,7 @@ test('invalid values are clamped or rejected without breaking the modal', async 
   // (Each value differs from the one saved before it, or Save stays disabled.)
   const rounds = 'Delegate after this many tool rounds'
   for (const [v, want] of [['999', 20], ['-5', 1], ['0', 2], ['2.6', 3], ['', 2]]) {
-    await openAdvanced(page, 'Desks and background')
+    await openAdvanced(page, 'Desks and workers')
     await field(page, rounds).fill(v)
     await dialog(page).getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)
@@ -265,7 +267,7 @@ test('Esc closes, the menu shortcut opens, rapid open/close leaves no duplicate 
 test('a 200 KB system prompt saves and reloads; junk in view toggles cannot brick the shell', async ({ grain }) => {
   const { page, api } = grain
   const big = 'lorem ipsum '.repeat(17_000)
-  await openAdvanced(page, 'Assistant behaviour')
+  await openAdvanced(page, 'Assistant')
   await dialog(page).getByLabel('Standing instructions').fill(big)
   await save(page)
   expect((await api('/settings')).systemPrompt.length).toBe(big.length)
@@ -275,8 +277,8 @@ test('a 200 KB system prompt saves and reloads; junk in view toggles cannot bric
   }
   const p2 = await grain.relaunch()
   await expect(p2.locator('.sidebar').first()).toBeVisible()
-  await openAdvanced(p2, 'Layout')
-  await expect(dialog(p2).getByRole('group', { name: 'Where Library shows' })).toBeVisible()
+  await openSettings(p2, 'Appearance')
+  await expect(dialog(p2).getByRole('checkbox', { name: 'Library', exact: true })).toBeVisible()
   await closeSettings(p2)
   noErrors(grain)
 })
@@ -285,7 +287,7 @@ test('modal is usable and scrolls at 820x520', async ({ grain }) => {
   const { page } = grain
   await setWindowSize(grain, 820, 520)
   await page.waitForTimeout(500)
-  await openAdvanced(page, 'Assistant behaviour')
+  await openAdvanced(page, 'Assistant')
   const box = await dialog(page).boundingBox()
   const vp = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }))
   expect(box.width).toBeLessThanOrEqual(vp.w + 1)

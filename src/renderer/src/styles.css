@@ -566,6 +566,7 @@ kbd {
   max-width: 100%;
 }
 .msg.user { flex-direction: row-reverse; }
+.user-from { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
 .user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 /* A quoted selection in the user's bubble: set off from the task text, rendered as markdown. */
 .user-quote { margin: 6px 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--border-strong); color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
@@ -618,7 +619,9 @@ kbd {
 .jump-latest:hover { background: var(--hover); }
 .jump-count { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
 .regen-row.followup-chips { flex-wrap: wrap; margin-top: 0; }
-.regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 46px; margin-top: -10px; }
+.regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 46px; margin-top: -4px; }
+/* Regenerate is a quiet text control under the reply, not a boxed button fighting the hover actions above it. */
+.regen-row:not(.followup-chips) > .ghost-btn { border: 0; padding: 2px 6px; font-size: 12px; }
 .variant-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .variant-switcher .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 46px; font-size: 13px; color: var(--text-muted); }
@@ -746,16 +749,17 @@ kbd {
   text-overflow: ellipsis;
 }
 .composer-wrap:not(.compact) .composer-footer { padding: 3px 6px 0; }
-.skip-perms.on {
+/* Every footer chip is the same quiet 24px control (model, reasoning, plan and autonomy already are); only
+   state colours it. Three classes on the red pill: the generic .ghost-btn.on (same specificity as the old
+   .skip-perms.on, declared later) used to win and left it grey. */
+.composer-footer .ghost-btn { height: 24px; padding: 0 8px; border: 0; font-size: 12px; }
+.ghost-btn.skip-perms.on {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 70%, transparent);
   font-weight: 600;
 }
-.skip-perms.on:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); }
-.private-chat.on { color: var(--accent); }
-.convo-private { flex: none; color: var(--text-faint); }
-.private-banner { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
+.ghost-btn.skip-perms.on:hover { background: color-mix(in srgb, var(--danger) 24%, transparent); }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }
 /* The composer holds focus almost all the time, so its focused state is a firmer edge and not the
@@ -959,9 +963,15 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .knowledge-head { display: flex; align-items: center; gap: 10px; }
 .knowledge-head h3 { margin: 0 auto 0 0; }
 .knowledge-controls { display: flex; align-items: center; gap: 8px; }
+.knowledge-section > details { margin: 8px 0 10px; font-size: 13px; }
+.knowledge-section > details > summary { cursor: pointer; color: var(--text-muted); }
+.knowledge-section > details .toggle-row { padding: 6px 0; }
+.knowledge-section > details .toggle-text { display: flex; flex-direction: column; gap: 2px; }
+.knowledge-section > details .toggle-text small { color: var(--text-muted); }
 .knowledge-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .knowledge-body .memory-panel.embedded .memory-body { min-height: 0; }
-.knowledge-body .memory-toolbar { padding: 8px 12px; }
+.knowledge-body .memory-toolbar { padding: 8px 12px; flex-wrap: wrap; row-gap: 4px; }
+.knowledge-body .memory-body.mode-split .mem-pane { width: 340px; }
 .knowledge-body > .page-body { padding: 12px 14px 24px; max-width: none; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
@@ -1231,6 +1241,7 @@ button.tag:disabled { cursor: default; }
 /* Secondary tools under the add row: history on the left, tidy-up on the right. */
 .mem-tools { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
 .mem-tools .muted { margin: 0; }
+.mem-tools .chip-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 /* A tidy-up suggestion is waiting on the user, so it wears the waiting border and keeps its two
    answers under the text, where a narrow split pane still has room for them. */
 .mem-row.proposal { flex-direction: column; border: 1px dashed var(--await-border); background: var(--await-fill); }
@@ -1402,16 +1413,28 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body .graph-body { flex: 1; min-width: 0; }
 .mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
 .memory-body.mode-list .mem-pane { flex: 1; }
+.memory-body.mode-split .mem-pane { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); }
+.memory-body.mode-split .mem-body { max-width: none; padding: 14px 16px 32px; }
+.memory-body.mode-split .mem-body .add-row { flex-wrap: wrap; }
+.memory-body.mode-split .mem-body .add-row > input { flex: 1 1 100%; }
+.memory-body.mode-split .mem-body .add-row select { margin-left: auto; }
+.memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
+.memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
+.memory-body.mode-split .mem-tools { flex-wrap: wrap; }
+.memory-body.mode-split .empty-hint.big { padding: 32px 0; }
 /* Voice takes the whole panel: a profile has nothing to sit beside. */
 .memory-body.mode-style { overflow: hidden; }
 .memory-body.mode-style .style-body { max-width: 760px; }
 
+/* Three columns (graph + inspector + memories) need a narrower list on small windows. */
+@media (max-width: 1400px) { .memory-body.mode-split .mem-pane { width: 340px; } }
+/* Too narrow for two columns: Split shows the list alone, the Graph button still opens the graph. */
+@media (max-width: 900px) { .memory-body.mode-split .graph-body { display: none; } .knowledge-body .memory-body.mode-split .mem-pane { flex: 1; width: auto; border-left: 0; } }
 .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }
 .memory-toolbar > .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .memory-panel.embedded { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.memory-page-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .memory-panel.embedded .memory-body { min-height: 520px; }
 
 /* Segmented split / list / graph switch */
@@ -1582,8 +1605,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-add .primary-btn { min-height: 28px; padding: 4px 12px; }
 .todo-add-more { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px 0 36px; }
 .todo-add-more input, .todo-add-more select { min-height: 26px; font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; outline: 0; }
-/* Settings → Modules: one row per view with where it lives. */
-.place-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; }
 
 /* ---------- Todos ---------- */
 .todo { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; background: var(--bg-elev); margin: 0; }
@@ -2366,6 +2387,21 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .widget-bar .smart-ta-hint { right: 6px; bottom: 4px; }
 
 /* ---------- Mail compose ---------- */
+/* Attachments: chips in the compose window, rows under a message body. */
+.mail-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.mail-compose .mail-attachments { margin-top: 0; }
+.mail-attach-chip, .mail-attach-row { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12.5px; }
+.mail-attach-chip { padding: 3px 4px 3px 8px; }
+.mail-attach-chip.pending { opacity: 0.7; padding-right: 8px; }
+.mail-attach-icon { flex: none; color: var(--text-muted); }
+.mail-attach-name { min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-attach-x { display: inline-flex; padding: 3px; border-radius: 50%; color: var(--text-muted); cursor: pointer; }
+.mail-attach-x:hover { background: var(--hover); color: var(--text); }
+.mail-attach-row { padding: 0 2px 0 0; }
+.mail-attach-row[aria-busy="true"] { opacity: 0.6; }
+.mail-attach-open { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 4px 6px 10px; border-radius: 8px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.mail-attach-open:hover:not(:disabled) { background: var(--hover); }
+.mail-compose.dragging { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .mail-compose section { display: flex; flex-direction: column; gap: 10px; }
 .mail-compose .smart-ta { flex: 0 1 auto; }
 .mail-review { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-elev); font-size: 13px; }
@@ -2482,25 +2518,11 @@ select:focus-visible {
 /* ---------- Plan panel (the chat's plan artifact) ---------- */
 /* Scoped to .plan-panel throughout: the plan approval card uses the same .plan-head / .plan-steps /
    .plan-step names for a different layout, and unscoped rules here used to restyle it. */
-.plan-panel {
-  max-width: var(--chat-col); width: 100%; margin: 0 auto; padding: 8px 24px 0;
-  font-size: 12.5px;
-}
-.plan-panel > header { display: flex; align-items: center; gap: 10px; }
-.plan-panel .plan-head {
-  display: flex; align-items: center; gap: 6px; min-height: 24px;
-  border: 0; background: none; padding: 2px 0; cursor: pointer;
-  color: var(--text-muted); font: inherit;
-}
-.plan-panel .plan-head:hover { color: var(--text); }
-.plan-panel .plan-head b { font-weight: 600; }
-.plan-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
-.plan-panel .plan-steps {
-  list-style: none; margin: 6px 0 0; padding: 8px 10px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
-  max-height: 180px; overflow-y: auto;
-}
+.plan-panel { font-size: 12.5px; }
+/* In the chat's side panel (Checklist tab): a count and Clear, then the steps. Nothing above the composer. */
+.plan-panel > header { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.plan-panel .plan-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-panel .plan-steps { list-style: none; margin: 6px 0 0; padding: 0; }
 .plan-panel .plan-step { display: flex; align-items: flex-start; gap: 7px; padding: 3px 0; }
 /* 13px to look at, 24px to hit: the expander keeps the step rows as dense as they were. */
 .plan-check { position: relative; border: 0; background: none; padding: 1px 0 0; cursor: pointer; color: var(--text-faint); line-height: 1; }
@@ -2513,13 +2535,17 @@ select:focus-visible {
 .plan-step.done .plan-text { color: var(--text-faint); text-decoration: line-through; }
 .plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
 
-/* Workers sit under the checklist, so they drop its top gap. */
+/* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
-.worker-panel .worker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
-.worker-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
-.worker-open small { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-panel .worker-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 0; }
+.worker-line { display: flex; align-items: center; gap: 8px; }
+.worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
+.worker-open small { color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.worker-approval { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding-left: 16px; color: var(--text-muted); }
+.worker-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 36px; }
+.worker-detail p { margin: 0; }
+.worker-report { margin: 0; max-width: 100%; max-height: 160px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 12px; color: var(--text-muted); }
+.worker-approval { display: flex; align-items: center; gap: 8px; padding-left: 36px; color: var(--text-muted); }
 .worker-approval span { flex: 1; min-width: 0; }
 
 /* ---------- Skills review (procedural memory) ---------- */

@@ -152,7 +152,7 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         )}
         {project && <span className="space-hint">{project.name}</span>}
         {locked && <Lock size={11} className="space-lock" />}
-        <span className="count">{count}</span>
+        {count > 0 && <span className="count">{count}</span>}
         <button
           className="icon-btn ghost xs"
           aria-label={`Actions for ${name}`}

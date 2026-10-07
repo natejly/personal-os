@@ -32,6 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
+from . import chatlink, fsx
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -60,7 +61,7 @@ from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
                    Scheduler, local_tz_name, next_fire, spent, valid_cron, valid_tz)
 from . import guide, skillbuild, skillmd
-from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
+from . import mail_attachments, mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
@@ -76,7 +77,7 @@ from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
-from .outbox import Outbox, router as outbox_router
+from .outbox import Outbox, extras as mail_extras, router as outbox_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
@@ -218,6 +219,9 @@ def _run_changed(run: Run) -> None:
     telegram_bridge.on_run_change(run)  # bound near the end of this module; it never raises
     if run.conversation_id in _wake_waiting and not run.answering:
         _schedule_wake(run.conversation_id)  # a worker finished while this reply was being written: its report goes in now
+    if _chat_waiting and not run.answering:  # any run ending may free the chat (or the desk slot) a cross-chat turn waits on
+        for cid in list(_chat_waiting):
+            _schedule_chat_delivery(cid)
 
 
 bus.on_change = _run_changed
@@ -444,7 +448,7 @@ sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
 # A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
 sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
-outbox = Outbox(db, pim, settings)
+outbox = Outbox(db, pim, settings, documents=documents)
 app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
@@ -501,6 +505,7 @@ app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
 if toolbox.chat_outputs is not None:
     toolbox.chat_outputs.on_save = chat_files.record_output
+workspace.on_save = chat_files.record_desk_output  # a desk's files are its chat's artifacts too
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -678,6 +683,16 @@ def _mcp_event(name: str) -> dict[str, Any] | None:
         return None
     server = mcp_store.server(tool["server_id"])
     return {"server": server["name"] if server else "MCP", "read_only": tool["read_only"], "destructive": tool["destructive"]}
+
+
+CODING_CONNECTORS = frozenset({"opencode", "claude-code"})  # catalog ids of the connectors that drive a coding agent
+
+
+def _coding_connector(name: str) -> bool:
+    """True for a tool of a connector installed from the OpenCode or Claude Code catalog entry."""
+    tool = mcp_store.tool(name) if mcp_is(name) else None
+    server = mcp_store.server(tool["server_id"]) if tool else None
+    return bool(server and server.get("catalog_id") in CODING_CONNECTORS)
 
 
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
@@ -1186,7 +1201,6 @@ class ConvIn(BaseModel):
     project_id: str | None = None
     title: str = "New chat"
     model: str | None = None
-    private: bool = False  # only settable here: memory, graph, voice and auto-learn stay off for the chat's life
 
 
 class ConvPatch(BaseModel):
@@ -1210,7 +1224,7 @@ def list_conversations(project_id: str | None = None, include_jobs: bool = False
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
     cfg = settings()
-    out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"], private=body.private)
+    out = convos.create(wsid(body.project_id), body.title, body.model or cfg["defaultModel"])
     if cfg.get("responseStyle", "default") != "default":  # the global choice seeds a new chat; the chat owns it from then on
         out = convos.update(out["id"], {"settings": {"responseStyle": cfg["responseStyle"], "responseStyleText": cfg.get("responseStyleText", "")}}) or out
     return out
@@ -1391,6 +1405,7 @@ class ChatIn(BaseModel):
     attachments: list[str] | None = None  # ids of uploaded documents sent with this turn; their text is inlined for the model
     wake: dict[str, Any] | None = None  # set only by the backend: this turn hands finished workers' reports to the assistant (workers.build_wake)
     kind: str | None = None  # set only by the backend: this turn's content is an internal control message (nudge, continue, resume, handoff, report), stored hidden from the user
+    chat_link: dict[str, Any] | None = None  # set only by the backend: this turn carries another chat's message or reply (chatlink.ChatLinks.turn)
 
 
 def _resolve_attachments(conv: dict[str, Any], ids: list[str] | None) -> list[dict[str, Any]]:
@@ -1429,8 +1444,6 @@ TELEGRAM_HINT = ("You are talking over Telegram on the user's phone. Reply first
 # Always on, every path (chats, desks, subagents, scheduled jobs, drafts, Telegram): static, so it sits in the cached prefix.
 NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the user explicitly asks for them."
 
-# Tool groups a private chat is never offered (see repos.PRIVATE_OFF).
-PRIVATE_TOOL_GROUPS = ("memory", "graph", "style")
 TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
               "the user's own data; answer directly only when nothing you could look up would change it. "
               "After using tools, write the final answer for the user. " + FENCE_RULE)
@@ -1602,6 +1615,8 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
+    if (keys := fsx.claim_keys(toolbox, ctx, name, args)) and (held := fsx.CLAIMS.held_by_other(keys)):
+        return fsx.claimed_refusal(held)  # a worker is writing that file right now
     if run is not None and snaps.wants(name, args, run.desk_id, ctx.get("settings")):
         await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id, ctx.get("settings")))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
@@ -1958,10 +1973,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             "run_id": run.run_id if run else None,
+            # A turn in the Telegram chat: what the agent makes rides on the reply without a send_files step (sendfiles.attach_made).
+            "auto_attach": telegram_bridge.is_texts_conversation(conv_id),
         }
         if is_wake and body.wake.get("tainted"):  # the worker read untrusted text; its report carries that into this turn
             tool_ctx["tainted"] = True
             tool_ctx["taint_sources"].append("worker")
+        if body.chat_link:  # another chat's message or reply: untrusted like a tool result, and its depth bounds the next hop
+            tool_ctx["tainted"] = True
+            tool_ctx["taint_sources"].append("chat")
+            tool_ctx["chat_link"] = dict(body.chat_link)
         if is_wake and body.wake.get("attachments"):  # files the workers sent: they ride on this reply
             tool_ctx["reply_attachments"] = list(body.wake["attachments"])
         use_tools = conv["settings"].get("useTools", True)
@@ -1971,8 +1992,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
-        if conv["settings"].get("private"):  # no memory, graph or voice tools either: they read and write across chats
-            modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
@@ -2021,6 +2040,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
+            # Allow everything's floor: a shell command that deletes for good, wipes a disk or force-pushes still asks.
+            if pmode == "allow_all" and name == "shell_run" and shell_tool.floor(toolbox, args, tool_ctx):
+                fenced = forced = True
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
             if pmode == "allow_all" and not fenced:
                 if danger != "safe":
@@ -2270,6 +2292,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             run_notes.append({"role": "system", "content": parked_note})
         if regen_done:
             run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
+        if not internal and "@" in user_text and (mnote := chatlink.mention_note(user_text, chat_links.chats(), conv_id)):
+            run_notes.append({"role": "system", "content": mnote})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
@@ -2335,7 +2359,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         plan_msg: dict[str, Any] | None = None
         nudged = False
         work_rounds = 0  # rounds in which this reply called something beyond delegating and the task list (workers.counts_as_work)
-        ack_nudged = False
 
         def _front_active() -> bool:
             return _front() and any(sc["function"]["name"] == "delegate" for sc in tool_schemas)
@@ -2587,7 +2610,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if partial == "loop":
                     partial = None
                 repeats, last_sig, stuck_hits, stop_text = 0, None, 0, None
-                work_rounds, ack_nudged = 0, False
+                work_rounds = 0
                 if delegation_forced:
                     delegation_forced = False
                     tool_schemas = _schemas()
@@ -2729,11 +2752,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
-            if _front_active() and workers_mod.ack_inject_due(work_rounds, bool("".join(buf).strip()), True, is_wake):
-                # The user has been told nothing and this is not the first round of calls: the backend says it for the model.
-                buf.append(workers_mod.ACK_LINE + "\n")
-                turn["content"] = workers_mod.ACK_LINE
-                yield "delta", {"id": am["id"], "text": workers_mod.ACK_LINE + "\n"}
             # Read-only agent_spawn calls of this round start together; never in plan mode.
             subagent_mgr.prestart(calls, tool_ctx, start=not planning and not stop.is_set())
             if buf and buf[-1] and not buf[-1].endswith("\n"):
@@ -2959,8 +2977,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
-                    # A connector call forced by untrusted content stays a card in every mode, allow-all included.
-                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
+                    # A connector call forced by untrusted content stays a card in every mode, allow-all included, except the
+                    # coding-agent connectors under allow-all: they run like opencode_run and coding_session_start do there.
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"]) and not (
+                        pmode == "allow_all" and _coding_connector(c["name"]))
+                    # Allow everything's floor (permrules.destructive): a delete that skips the Trash, a disk wipe or a force-push.
+                    floor = shell_tool.floor(toolbox, args, tool_ctx) if pmode == "allow_all" and c["name"] == "shell_run" else None
                     rt = autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
@@ -2970,8 +2992,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
                         # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted or bool(floor),
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
+                    if floor and rt == "card":
+                        # One card, no rule or session grant behind it: the user reads what will be lost.
+                        mode, forced = "ask", True
+                        perm.mode, perm.forced, perm.kind, perm.display = "ask", True, floor[0], floor[1]
                     if rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False
@@ -3276,7 +3302,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A note typed with the denial goes back as the result and the reply carries on.
                     result = (tools.tool_error(f"{c['name']} was declined by the user, who said: {deny_note}",
                                                alternative="follow what the user said, or ask them what they would like instead")
-                              if deny_note else tools.denied(c["name"], "just declined by the user"))
+                              if deny_note else tools.denied(c["name"], tools.DISCARDED if c["name"] == "gmail_send" else "just declined by the user"))
                 elif asks and c["name"] in QUESTION_TOOLS and (answer := ((run_store.approval(uid) or {}).get("note")
                                                                        or deny_note or "").strip()):
                     # The card was answered while this reply was still holding it, so the answer goes
@@ -3425,9 +3451,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     delegation_forced = True
                     tool_schemas = _schemas()
                     messages.append({"role": "system", "content": workers_mod.FORCE_DELEGATE_NUDGE.format(n=work_rounds)})
-                if workers_mod.ack_nudge_due(work_rounds, bool("".join(buf).strip()), ack_nudged, True, is_wake):
-                    ack_nudged = True
-                    messages.append({"role": "system", "content": workers_mod.ACK_NUDGE})
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -3475,8 +3498,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     reasoning = "".join(rbuf).strip() or None
     outcome = None if error else ("stopped" if stop.is_set() else partial)
     # A wake turn the assistant answers with NO_REPLY (or nothing) is silent: its reply row goes, and nothing is pushed anywhere.
-    silent = is_wake and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say
+    silent = (is_wake or bool(body.chat_link)) and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say
+    # A front turn that only handed work on (hand-off tools, the task list) and has nothing to say is silent too: the app shows the work.
+    silent = silent or (not is_wake and not error and not stop.is_set() and _front() and workers_mod.dispatch_only(e.get("name") for e in tool_events)
+                        and workers_mod.is_silent(text))
     if silent:
+        if run is not None:
+            run.silent = True  # the Telegram bridge reads this: a removed reply is not "Stopped."
         with db.tx() as c:
             c.execute("DELETE FROM messages WHERE id=?", (am["id"],))
         convos.touch(conv_id)
@@ -3499,7 +3527,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if is_wake:
         workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
         if text and not error and not silent and not stop.is_set():
-            _push_wake_reply(text, tool_ctx.get("reply_attachments"))
+            _push_wake_reply(text, tool_ctx.get("reply_attachments"), conv_id)
+    if body.chat_link:
+        chat_links.ended(body.chat_link, text, error, silent=silent, stopped=stop.is_set())
     if tool_ctx.get("learned"):
         yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
@@ -3801,7 +3831,7 @@ def _over_live_cap() -> bool:
 
 
 def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None,
-                 kind: str | None = None) -> Run | dict[str, Any] | None:
+                 kind: str | None = None, chat_link: dict[str, Any] | None = None) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
     the chain to a supervisor task. None means the claim was lost or a run is already live. Over
     deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
@@ -3826,7 +3856,7 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
         return None
     text = (content or "").strip() or claimed["brief"]
     # An explicit kind wins; a queued turn lost it when its messages were joined, so the leading backend text names it.
-    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text))
+    body = ChatIn(content=text, wake=wake, kind=None if wake else kind or internal_kind(text), chat_link=chat_link)
     run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
                     desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content, **({"wake": wake} if wake else {})})
     _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
@@ -3950,7 +3980,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
     if body.content is not None and (too_long := _message_too_long(body.content, settings(), str(row.get("model") or ""))):
         raise HTTPException(413, too_long)
-    _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
+    atts = _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
     # A chat with a live run is never hidden: writing in an archived one brings it back.
     if row.get("archived_at"):
         convos.update(id, {"archived": False})
@@ -3970,9 +4000,12 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
         target = next((m for m in conv["messages"] if m["id"] == body.replace_from), None)
         if not target or target["role"] != "user":
             raise HTTPException(404, "No such message to edit")
-    if body.wake is not None:
+    if body.wake is not None or body.chat_link is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
+    # Typed in Grain into the Texts chat: it runs as a Telegram turn and shows on the phone. Internal turns (wake, ...) never get here.
+    if body.origin != "telegram" and body.wake is None and body.kind is None and not body.replace_from and telegram_bridge.is_texts_conversation(id):
+        telegram_bridge.from_app(id, run.run_id, body.content or "", atts)
     return {"run_id": run.run_id, "seq": run.seq}
 
 
@@ -4032,10 +4065,66 @@ async def _wake_conversation(conv_id: str) -> None:
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
 
 
-def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None) -> None:
-    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on."""
-    if settings().get("telegramPushWorkerResults"):
-        telegram_bridge.push(text, attachments or None)
+# ---------------- chats messaging each other (chatlink.py) ----------------
+_chat_waiting: set[str] = set()  # chats owed a cross-chat turn that could not start yet (a reply was being written there)
+
+
+def _schedule_chat_delivery(conv_id: str) -> None:
+    try:
+        asyncio.get_running_loop().call_soon(_deliver_chat, conv_id)
+    except RuntimeError:  # called from the threadpool
+        if _loop is not None and not _loop.is_closed():
+            _loop.call_soon_threadsafe(_deliver_chat, conv_id)
+
+
+def _deliver_chat(conv_id: str) -> None:
+    """Start the oldest cross-chat turn owed to this chat (a message to it, or the reply to one it sent) as a hidden-kind
+    user row and a reply run under the chat's own settings, as a worker's wake does. Synchronous, so nothing can start a
+    second run between the check and the start."""
+    nxt = chat_links.next_for(conv_id)
+    if nxt is None:
+        _chat_waiting.discard(conv_id)
+        return
+    row = convos.get(conv_id, with_messages=False)
+    if row is None:  # the chat is gone: a message to it is dropped, a reply to it has nobody to tell
+        chat_links.ended({"id": nxt[1]["id"], "kind": "chat_reply"}, "")
+        _chat_waiting.discard(conv_id)
+        return _schedule_chat_delivery(conv_id)
+    desk_id = row["settings"].get("deskId")
+    if bus.answering(conv_id) or (desk_id and (bus.live(conv_id) or _over_live_cap())):
+        _chat_waiting.add(conv_id)  # _run_changed retries; a queued desk turn would lose the link and its fence, so it never queues
+        return
+    _chat_waiting.discard(conv_id)
+    kind, link = nxt
+    got = chat_links.turn(kind, link)
+    if got is None:
+        return _schedule_chat_delivery(conv_id)
+    text, cl = got
+    chat_links.started(kind, link["id"])
+    if desk_id:
+        started = _launch_desk(desk_id, text, MESSAGE_FROM, kind=kind, chat_link=cl)
+        if not isinstance(started, Run):
+            chat_links.unstarted(kind, link["id"])
+            _chat_waiting.add(conv_id)
+        return
+    body = ChatIn(content=text, kind=kind, chat_link=cl)
+    bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
+
+
+chat_links = chatlink.ChatLinks(db, convos, deliver=_schedule_chat_delivery)
+toolbox.chat_links = chat_links
+
+
+def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
+    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
+    and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
+    if not settings().get("telegramPushWorkerResults"):
+        return
+    telegram_bridge.push(text, attachments or None)
+    texts = telegram_bridge.texts_conversation_id()
+    src = convos.get(conv_id, with_messages=False) if conv_id else None
+    if texts and texts != conv_id:
+        _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
 
 
 def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
@@ -4048,15 +4137,13 @@ def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     maps = (permissions.get(cfg, "tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"), None)
     modes = toolbox.effective(*maps) if conv["settings"].get("useTools", True) else {}
-    if conv["settings"].get("private"):
-        modes = {n: "off" if toolbox.specs[n].group in PRIVATE_TOOL_GROUPS else v for n, v in modes.items()}
     srcs = list(conv["settings"].get("taint_sources") or [])
     return {"project_id": conv["project_id"], "conversation_id": conv_id, "agent_id": None, "settings": cfg, "conv_settings": conv["settings"],
             "permission_mode": autoreview.mode_of(cfg), "skip_permissions": autoreview.mode_of(cfg) == "allow_all", "user_text": "",
             "explicit_modes": toolbox.explicit(*maps), "tool_overrides": {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})},
             "model": router.concrete(str(conv["model"] or cfg["defaultModel"]), cfg), "effort": str(conv["settings"].get("effort") or "default"),
             "allowed_urls": set(), "modes": modes, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": srcs,
-            "taint_unsourced": bool(conv["settings"].get("tainted")) and not srcs}
+            "desk_id": conv["settings"].get("deskId") or None, "taint_unsourced": bool(conv["settings"].get("tainted")) and not srcs}
 
 
 @app.get("/conversations/{id}/workers")
@@ -4099,6 +4186,7 @@ async def resume_worker_route(worker_id: str, body: WorkerResumeIn | None = None
 class SteerIn(BaseModel):
     content: str
     attachments: list[str] | None = None
+    origin: Literal["telegram"] | None = None  # a steer sent from the phone is not echoed back to it
 
 
 @app.post("/conversations/{id}/steer")
@@ -4132,6 +4220,8 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     run.publish("user_message", um)
     run.steers.append(um)
     run.poke()
+    if body.origin != "telegram" and telegram_bridge.is_texts_conversation(id):
+        telegram_bridge.from_app(id, run.run_id, text, attachments)
     return {"ok": True, "run_id": run.run_id, "message": um}
 
 
@@ -4982,6 +5072,11 @@ async def _workers_startup() -> None:
             _schedule_wake(cid)
     except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
         log.warning("worker recovery failed", exc_info=True)
+    try:
+        for cid in chat_links.recover():
+            _schedule_chat_delivery(cid)
+    except Exception:  # noqa: BLE001
+        log.warning("chat link recovery failed", exc_info=True)
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------
@@ -5988,7 +6083,7 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
-        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
+        return await memory_index.search_reranked(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -6672,6 +6767,27 @@ def document_open(id: str) -> dict[str, bool]:
     return _run_open(str(p))
 
 
+def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
+    hit = chat_files.file(id)
+    if hit is None:
+        raise HTTPException(404, "No such file")
+    return hit
+
+
+@app.post("/chat-files/{id}/reveal")
+def artifact_reveal(id: str) -> dict[str, bool]:
+    """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
+    return _run_open("-R", str(_artifact_or_404(id)[1]))
+
+
+@app.post("/chat-files/{id}/open")
+def artifact_open(id: str) -> dict[str, bool]:
+    f, p = _artifact_or_404(id)
+    if p.suffix.lower() in _RUNS_CODE or p.stat().st_mode & 0o111:
+        raise HTTPException(400, f"{f['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
+    return _run_open(str(p))
+
+
 @app.on_event("startup")
 async def _blobs_startup() -> None:
     """Uploads from before content-addressed storage move once, off the loop and off the boot path."""
@@ -6954,11 +7070,17 @@ class GmailComposeIn(BaseModel):
     subject: str = ""
     body: str = ""
     reply_to_message_id: str | None = None
+    attachments: list[str] = []  # Uploads document ids
+    cc: str | None = None
+    bcc: str | None = None
 
 
 @app.post("/integrations/google/gmail/draft")
 def google_gmail_draft(body: GmailComposeIn) -> Any:
-    return _gcall(pim.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
+    def draft() -> Any:
+        items = mail_attachments.resolve(documents, db.data_dir, body.attachments)  # ValueError -> 400 in _gcall
+        return pim.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
+    return _gcall(draft)
 
 
 class SuggestTimesIn(BaseModel):
@@ -6980,7 +7102,41 @@ async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
 @app.post("/integrations/google/gmail/send")
 def google_gmail_send(body: GmailComposeIn) -> Any:
     # Queued, not sent: the hold is what makes Undo possible (see outbox.py). The response says so.
-    return _gcall(outbox.queue, body.to, body.subject, body.body, body.reply_to_message_id, "app")
+    return _gcall(outbox.queue, body.to, body.subject, body.body, body.reply_to_message_id, "app", None, body.attachments, body.cc, body.bcc)
+
+
+def _gmail_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+    """The attachment's name and mime as Gmail lists them for the message (never the client's), and its bytes."""
+    att = next((a for a in pim.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
+    if att is None:
+        raise HTTPException(404, "That message has no such attachment.")
+    return att, pim.gmail_attachment(message_id, attachment_id)
+
+
+async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+    try:
+        return await asyncio.to_thread(_gmail_attachment, message_id, attachment_id)
+    except HTTPException:
+        raise
+    except GoogleNotConnected as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+
+
+@app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/import")
+async def google_gmail_attachment_import(message_id: str, attachment_id: str) -> dict[str, Any]:
+    """Copy a received attachment into Uploads so the app can preview it."""
+    att, data = await _fetch_attachment(message_id, attachment_id)
+    return await asyncio.to_thread(_store_upload, None, att["name"], att["mime"], data)
+
+
+@app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/save")
+async def google_gmail_attachment_save(message_id: str, attachment_id: str) -> dict[str, str]:
+    """Save a received attachment into the Downloads folder."""
+    att, data = await _fetch_attachment(message_id, attachment_id)
+    dest = await asyncio.to_thread(mail_attachments.save_to_folder, data, att["name"], mail_attachments.downloads_dir())
+    return {"path": str(dest), "name": dest.name}
 
 
 # ---------------- assist (inline completion + draft review) ----------------
@@ -8662,9 +8818,14 @@ def _desk_report(desk: dict[str, Any]) -> None:
     _tell_chat(origin, origin_report(desk, desks.outputs(desk["id"])))
 
 
-def _tell_chat(cid: str, text: str) -> None:
+def _tell_chat(cid: str, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
     """Add one assistant message to a chat and tell any open window to re-read it (callable from any thread)."""
-    convos.add_message(cid, "assistant", text)
+    convos.add_message(cid, "assistant", text, attachments=attachments or None)
+    _announce_conversation(cid)
+
+
+def _announce_conversation(cid: str) -> None:
+    """Tell any open window to re-read a chat (callable from any thread)."""
     try:
         running = asyncio.get_running_loop()
     except RuntimeError:
@@ -9293,7 +9454,7 @@ def _telegram_message_text(message_id: str) -> str | None:
 
 
 def _telegram_create_conversation() -> str:
-    return create_conversation(ConvIn(title="Texts"))["id"]
+    return create_conversation(ConvIn(title="Telegram"))["id"]
 
 
 def _telegram_message_attachments(message_id: str) -> list[dict[str, Any]]:
@@ -9321,7 +9482,7 @@ async def _telegram_turn(conv_id: str, text: str, attachment_ids: list[str] | No
     for _ in range(2):
         try:
             if bus.answering(conv_id):
-                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None))
+                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None, origin="telegram"))
             return await chat(conv_id, ChatIn(content=text, origin="telegram", attachments=attachment_ids or None))
         except HTTPException as e:
             if e.status_code != 409:
@@ -9336,6 +9497,11 @@ async def _telegram_decide(call_id: str, decision: str) -> dict[str, Any]:
 def _telegram_conversation_title(conv_id: str) -> str | None:
     row = convos.get(conv_id, with_messages=False)
     return row["title"] if row else None
+
+
+def _telegram_mark_conversation(cid: str, flag: bool) -> None:
+    convos.update(cid, {"settings": {"telegram": flag}})
+    _announce_conversation(cid)  # the sidebar only re-reads a chat on this event
 
 
 telegram_bridge = telegram.TelegramBridge(telegram.Deps(
@@ -9357,6 +9523,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     message_attachments=_telegram_message_attachments,
     attachment_path=_telegram_attachment_path,
     store_upload=_telegram_store_upload,
+    mark_texts_conversation=_telegram_mark_conversation,
 ))
 
 

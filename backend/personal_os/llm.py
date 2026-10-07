@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, VOICE_LOOP_MAX_TURNS, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -116,10 +116,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "quickAskShortcut": "Alt+Space",
     # Hold this in the chat box to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
-    # Read aloud (the platform speech engine) and the hands-free voice chat loop's safety cap.
-    "ttsVoice": "",
-    "ttsRate": 1.0,
-    "voiceLoopMaxTurns": VOICE_LOOP_MAX_TURNS,
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
     "hiddenViews": [],
@@ -265,10 +261,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalCandidates": RETRIEVAL_CANDIDATES,
     # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
     # its document, which is then indexed and embedded with the chunk. Rerank: reorder the fused candidates
-    # with a rerank model (/v1/rerank, else one completion) before trimming; blank model = off.
+    # with a rerank model (/v1/rerank, else one completion) before trimming. The model is shared by documents and memory;
+    # blank = the provider's default (providers.rerank_model), and none known = reranking is skipped.
     "contextualChunks": False,
     "retrievalRerank": False,
     "retrievalRerankModel": "",
+    # Memories: reorder the fused candidates with the rerank model; the fused order stands on a timeout or error.
+    "memoryRerank": True,
     # Also retrieve from the user's own editor files (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.

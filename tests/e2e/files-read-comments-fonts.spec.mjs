@@ -114,7 +114,7 @@ test('per-doc font and the global default', async ({ grain: g }) => {
   await page.getByRole('button', { name: 'Use default' }).click()
   await expect.poll(async () => (await g.api(`/docs/${d.id}`)).typography).toBeNull()
   // The window reads settings at startup and after its own Save, so the global default is set through Settings.
-  await openAdvanced(page, 'Layout')
+  await openSettings(page, 'Appearance')
   await dialog(page).locator('.doc-type .seg button', { hasText: 'Mono' }).click()
   await save(page)
   await expect.poll(async () => (await g.api('/settings')).docTypography?.font).toBe('mono')

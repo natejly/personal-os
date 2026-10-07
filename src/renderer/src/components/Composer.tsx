@@ -5,8 +5,8 @@ import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
-import { mentionItems, routeMention } from '../lib/mentions'
-import { ArrowUp, AudioLines, Square, Paperclip, Loader2, EyeOff, Sparkles, Download, FileText, X } from 'lucide-react'
+import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
+import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
 import { PermissionModePill } from './PermissionMode'
@@ -15,8 +15,6 @@ import { hasModelKey } from '../lib/modelLabel'
 import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import MicButton from './MicButton'
-import { useVoiceLoop } from './useVoiceLoop'
-import { VOICE_LABEL } from '../lib/voiceLoop'
 import { dictationText } from '../lib/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
@@ -71,14 +69,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   // Only the main new-chat composer starts a chat autonomous (lib/autonomyDefault.ts): not the chat widget, page agent or a pop-out.
   const newChat = !onSend && !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
-    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent, private: st.draftPrivate })
+    startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent })
   // A draft that starts autonomous becomes a desk, which plans by its own autonomy and ignores this chat's plan mode.
   const startsAsDesk = useStore((s) => newChatAutonomy(s) !== null)
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
-  // Private is fixed when the chat is created, so it is a switch only on a draft and a label after.
-  const chatPrivate = useStore((s) => (activeId ? !!s.sessions[activeId]?.conversation.settings.private : s.draftPrivate))
   const setChatSettings = useStore((s) => s.setChatSettings)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
@@ -89,15 +85,16 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const [commands, setCommands] = useState<Command[]>([])
   useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
   const skills = useStore((s) => s.skills)
-  const voice = useVoiceLoop(activeId, !onSend)
   const [slashActive, setSlashActive] = useState(0)
   const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
   // '@' opens the same menu over the agents (lib/mentions.ts). A draft opening with `@name` goes to that agent's chat on send.
   const agentDefs = useStore((s) => s.agentDefs)
   const agentRows = useMemo(() => [...agentDefs.builtin, ...agentDefs.custom.filter((d) => d.approved && !d.hidden)], [agentDefs])
+  const conversations = useStore((s) => s.conversations)
+  const chatRows = useMemo(() => mentionChats(conversations, activeId), [conversations, activeId])
   const caret = box.current?.querySelector('textarea')?.selectionStart ?? text.length
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows))
+    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows, 8, chatRows))
   useEffect(() => setSlashActive(0), [text])
 
   // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,
@@ -142,8 +139,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       return
     }
     dropDraft(k0)
-    if (name === 'voice') voice.toggle()
-    else if (name === 'skills' || name === 'commands') {
+    if (name === 'skills' || name === 'commands') {
       s.setLibraryTab(name === 'skills' ? 'skills' : 'automations')
       s.setView('library')
     } else if (name === 'plan') {
@@ -433,16 +429,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
             typing mid-reply never changes the width of the text box; Stop sits beside it. */}
         <div className="composer-actions">
-          {voice.state.phase !== 'idle' && <span className="mic-pill" role="status" title="Voice chat. Esc or the button ends it.">{VOICE_LABEL[voice.state.phase]}</span>}
-          {voice.state.phase === 'idle' && <MicButton scope={box} onText={dictate} />}
-          {!onSend && (
-            <button className={voice.state.phase !== 'idle' ? 'icon-btn mic-btn recording' : 'icon-btn mic-btn'} type="button" aria-pressed={voice.state.phase !== 'idle'}
-              aria-label={voice.state.phase !== 'idle' ? 'End voice chat' : 'Start voice chat'}
-              title={voice.state.phase !== 'idle' ? 'End voice chat (Esc)' : 'Voice chat: talk, and the reply is read aloud (/voice)'}
-              onMouseDown={(e) => e.preventDefault()} onClick={voice.toggle}>
-              <AudioLines size={16} />
-            </button>
-          )}
+          <MicButton scope={box} onText={dictate} />
           {streaming && (
             <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
@@ -456,11 +443,6 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           nothing sits after it to be pushed. An empty page-agent panel has no chat for either toggle to set. */}
       <div className="composer-footer">
         {footer}
-        {!onSend && (activeId
-          ? chatPrivate && <span className="ghost-btn private-chat on" title="Nothing in this chat is remembered, learned from, or found by chat search"><EyeOff size={13} /> Private</span>
-          : <button className={`ghost-btn private-chat ${chatPrivate ? 'on' : ''}`} aria-pressed={chatPrivate}
-              title="Private: this chat reads no memories and teaches nothing, and chat search skips it. Fixed once the first message is sent."
-              onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
         {conversationId !== '\u0000page-agent' && (
           <>
             <PermissionModePill />

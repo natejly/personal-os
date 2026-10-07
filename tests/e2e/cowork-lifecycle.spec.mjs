@@ -83,8 +83,8 @@ test('turning autonomy off stops the desk and the chat answers as a plain chat; 
   const { desk, chat } = await deskChat(grain, { brief: 'switch me off', title: 'Switchable' })
   await openChat(page, 'Switchable')
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toMatch(/working|planning/)
-  await page.getByRole('button', { name: /Autonomous:/ }).click()
-  await page.getByRole('dialog', { name: 'Work autonomously' }).getByRole('button', { name: 'Turn off' }).click()
+  await page.getByRole('button', { name: /^Mode/ }).click()
+  await page.getByRole('dialog', { name: 'Mode' }).getByRole('button', { name: 'Turn off' }).click()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
   await expect(strip(page)).toHaveCount(0)
   expect(await deskOf(grain, chat.id)).toBe('')
@@ -94,7 +94,7 @@ test('turning autonomy off stops the desk and the chat answers as a plain chat; 
   await expect(page.locator('.msg.assistant').last()).toContainText('plain-chat-reply', { timeout: 60_000 })
   expect(await deskStatus(grain, desk.id)).toBe('stopped') // the message did not wake the desk
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' })
-  await turnOn(page, 'Work and propose')
+  await turnOn(page, 'Autonomous')
   await expect.poll(() => deskOf(grain, chat.id)).toBe(desk.id)
   await waitStatus(grain, desk.id, 'review', 90_000)
   expect(realErrors(grain)).toEqual([])
@@ -118,12 +118,12 @@ test('pause over the API, resume from the strip', async ({ grain }) => {
   expect(realErrors(grain)).toEqual([])
 })
 
-test('the Work autonomously menu: arms a draft, sets autonomy on a chat, and autonomy changes later', async ({ grain }) => {
+test('the Mode menu: arms a draft, sets autonomy on a chat, and autonomy changes later', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
   const { page } = grain
   await newChat(page)
-  await expect(page.getByRole('button', { name: /Work autonomously/ })).toBeEnabled() // a draft can be armed before its first message
+  await expect(page.getByRole('button', { name: /^Mode/ })).toBeEnabled() // a draft can be armed before its first message
   llm.push({ text: 'Noted.' })
   await say(page, 'Summarise the thing')
   await expect(page.locator('.msg.assistant').last()).toContainText('Noted.', { timeout: 60_000 })
@@ -136,10 +136,11 @@ test('the Work autonomously menu: arms a draft, sets autonomy on a chat, and aut
   expect(d).toMatchObject({ autonomy: 'ask', conversation_id: chat.id })
   expect(d.brief).toBe('Summarise the thing') // the chat's own ask is the brief
   // change autonomy while it works: takes effect on its next turn
-  await page.getByRole('button', { name: /Autonomous: Ask as it goes/ }).click()
-  await page.getByRole('dialog', { name: 'Work autonomously' }).getByLabel(/Work and propose/).click() // saved, then shown
+  await expect(page.getByRole('button', { name: /^Mode/ })).toHaveText(/Mode: Ask as it goes/)
+  await page.getByRole('button', { name: /^Mode/ }).click()
+  await page.getByRole('dialog', { name: 'Mode' }).getByLabel(/Autonomous/).click() // saved, then shown
   await expect.poll(async () => (await grain.api(`/cowork/desks/${id}`)).autonomy).toBe('propose')
-  await expect(page.getByRole('button', { name: /Autonomous: Work and propose/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Mode/ })).toHaveText(/Mode: Autonomous/)
   // plan mode steps aside while the chat works autonomously
   await expect(page.locator('.composer-footer .plan-mode')).toHaveCount(0)
   expect(realErrors(grain)).toEqual([])

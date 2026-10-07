@@ -629,6 +629,22 @@ def test_child_allow_all_lifts_asks() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
+def test_a_child_never_holds_the_email_tools() -> None:
+    """Workers cannot send mail at all, under any permission mode: only the front chat's gmail_send reaches the user's email card."""
+    check({"gmail_send", "gmail_draft"} <= sa.CHILD_BLOCK, "mail is blocked for every child, whatever its definition names")
+    reset(permissionMode="allow_all")
+    google_ok = appmod.toolbox._google_ok
+    appmod.toolbox._google_ok = lambda: True  # type: ignore[method-assign]  # the mail tools would be offered if a child could hold them
+    try:
+        SCRIPTS["mail"] = [{"text": "done"}]
+        ctx = mkctx(new_conv(), modes={**appmod.toolbox.effective({}, None, None), "gmail_send": "on"}, run=FakeRun(), message_id=None, permission_mode="allow_all")
+        run(appmod.toolbox.call("agent_spawn", {"task": "mail", "role": "general"}, ctx))
+    finally:
+        appmod.toolbox._google_ok = google_ok  # type: ignore[method-assign]
+    offered = SEEN[-1]["tools"]
+    check("gmail_search" in offered and "gmail_send" not in offered and "gmail_draft" not in offered, "a general child is offered mail reads, never a send")
+
+
 def test_tainted_child_external_ask_stays_forced() -> None:
     """On a tainted child, an allow rule cannot lift the ask on an external tool: the card is still raised."""
     root = tempfile.mkdtemp()

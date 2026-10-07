@@ -13,9 +13,9 @@ export interface ToolCardProps {
   /**
    * Answer the approval. `editedArgs` is the user's rewrite of the call's arguments: send it only for a tool in the
    * backend's EDITABLE_TOOLS, and only when something actually changed. The server re-validates it and runs
-   * exactly those arguments; a Deny never carries an edit.
+   * exactly those arguments; a Deny never carries an edit. `note` rides back to the agent with the decision.
    */
-  decide: (approve: boolean, editedArgs?: Record<string, unknown>) => Promise<void>
+  decide: (approve: boolean, editedArgs?: Record<string, unknown>, note?: string) => Promise<void>
   /** The chat this call ran in. Absent where a card renders outside a conversation's message list. */
   conversationId?: string
   /** The reply is still streaming, so the run is in progress. */

@@ -11,7 +11,7 @@ const inWindow = async (page, locator) => {
   return b && b.x >= 0 && b.x + b.width <= vp.w + 1 && b.y >= 0 && b.y + b.height <= vp.h + 1
 }
 
-test('820x520: a waiting plan, an ask-as-it-goes card, and the review panel keep their buttons reachable', async ({ grain }) => {
+test('820x520: a waiting plan, the review panel and a tool-mode card keep their buttons reachable', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   await resize(grain)
   const llm = await scriptLLM(grain)
@@ -31,23 +31,6 @@ test('820x520: a waiting plan, an ask-as-it-goes card, and the review panel keep
   await expect.poll(async () => (await grain.api(`/cowork/desks/${plan.id}`)).plan?.status, { timeout: 60_000 }).toBe('rejected')
 
   await expect.poll(async () => (await grain.api('/cowork/desks/' + plan.id)).status, { timeout: 90_000 }).not.toMatch(/working|planning|awaiting_plan/)
-  // ask desk
-  llm.queue.length = 0
-  llm.push({ calls: [WRITE] })
-  const ask = (await deskChat(grain, { brief: 'ask', title: 'Narrow ask desk', autonomy: 'ask' })).desk
-  await waitStatus(grain, ask.id, 'needs_approval', 90_000)
-  await openChat(page, 'Narrow ask desk')
-  const allow = page.locator('.messages').getByRole('button', { name: /^(Approve|Allow once|Allow)$/ }).first()
-  await expect(allow).toBeVisible()
-  // a forced card offers no standing grants: nothing to click that would silently switch the mode off
-  await expect(page.locator('.messages').getByRole('button', { name: /in this chat|in every chat/ })).toHaveCount(0)
-  expect(await inWindow(page, allow)).toBe(true)
-  expect(await noHScroll(page)).toBe(true)
-  llm.push({ text: 'done' })
-  await allow.click()
-  await expect.poll(async () => (await grain.api('/approvals?status=approved')).length, { timeout: 60_000 }).toBe(1)
-
-  await expect.poll(async () => (await grain.api('/cowork/desks/' + ask.id)).status, { timeout: 90_000 }).not.toMatch(/working|planning|needs_approval/)
   // review pane
   llm.queue.length = 0
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'ok' }, { text: 'final' })
@@ -58,5 +41,25 @@ test('820x520: a waiting plan, an ask-as-it-goes card, and the review panel keep
   const accept = panel(page).getByRole('button', { name: /Accept selected/ })
   expect(await inWindow(page, accept)).toBe(true)
   expect(await noHScroll(page)).toBe(true)
+  await panel(page).getByRole('button', { name: 'Close the workspace panel' }).click()  // it stays open across chats and would squeeze the next one
+  // ask desk: an autonomous desk follows the permission mode, so its card comes from the written tool's own mode ('ask')
+  await grain.api('/settings', { method: 'PUT', body: { ...settingsFor, permissionMode: 'manual', tools: { desk_write_file: 'ask' } } })
+  llm.queue.length = 0
+  llm.push({ calls: [WRITE] })
+  const ask = (await deskChat(grain, { brief: 'ask', title: 'Narrow ask desk', autonomy: 'ask' })).desk
+  await waitStatus(grain, ask.id, 'needs_approval', 90_000)
+  await openChat(page, 'Narrow ask desk')
+  const allow = page.locator('.messages').getByRole('button', { name: /^(Approve|Allow once|Allow)$/ }).first()
+  await expect(allow).toBeVisible()
+  // a tool-mode card offers the standing grants, and they have to be reachable too
+  const grants = page.locator('.messages').getByRole('button', { name: /in this chat|in every chat/ })
+  await expect(grants).toHaveCount(2)
+  expect(await inWindow(page, allow)).toBe(true)
+  expect(await inWindow(page, grants.last())).toBe(true)
+  expect(await noHScroll(page)).toBe(true)
+  llm.push({ text: 'done' })
+  await allow.click()
+  await expect.poll(async () => (await grain.api('/approvals?status=approved')).length, { timeout: 60_000 }).toBe(1)
+  await expect.poll(async () => (await grain.api('/cowork/desks/' + ask.id)).status, { timeout: 90_000 }).not.toMatch(/working|planning|needs_approval/)
   expect(realErrors(grain)).toEqual([])
 })

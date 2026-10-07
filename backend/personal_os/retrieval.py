@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from . import llm
+from . import llm, providers
 from .chunker import contextualize
 from .db import Database
 from .embed import Embedder, pack, rrf, unpack  # noqa: F401 - rrf re-exported for callers
@@ -315,7 +315,7 @@ class Retriever:
             # No vectors: bm25 only. One store keeps its own order; several interleave by rank (rrf).
             fused = rrf(bm25_lists, [1.0] * len(bm25_lists), k=RRF_K) if len(bm25_lists) > 1 else \
                 [(k, -float(by_key[k].get("score") or 0.0)) for k in (bm25_lists[0] if bm25_lists else [])]
-        if settings.get("retrievalRerank") and settings.get("retrievalRerankModel") and len(fused) > 1:
+        if settings.get("retrievalRerank") and providers.rerank_model(settings) and len(fused) > 1:
             fused = await (self.rerank_fn or rerank)(settings, query, fused, by_key)
         floor = float(settings.get("retrievalMinSimilarity") or 0.0)
         cap = int(settings.get("retrievalPerDocCap") or 0)

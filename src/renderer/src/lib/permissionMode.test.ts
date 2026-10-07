@@ -24,8 +24,19 @@ test('three modes with pills', () => {
   assert.equal(pillLabel('auto'), 'Auto')
 })
 
+test('the allow_all description names what still asks', () => {
+  const d = MODES.find((m) => m.id === 'allow_all')!.description
+  assert.match(d, /^Allow everything — /)
+  assert.match(d, /permanent/)
+  assert.match(d, /email/)
+  assert.match(d, /\(dangerous\)$/)
+})
+
 test('the pill title names Dangerously allow all when it is on', () => {
   assert.match(pillTitle('allow_all'), /^Dangerously allow all is on/)
+  assert.match(pillTitle('allow_all'), /permanent/)
+  assert.match(pillTitle('allow_all'), /email/)
+  assert.match(pillTitle('allow_all'), /Click to change it in Settings\.$/)
   assert.equal(pillTitle('auto'), 'Permission mode: Auto. Click to change it in Settings.')
   assert.doesNotMatch(pillTitle('manual'), /Dangerously/)
 })

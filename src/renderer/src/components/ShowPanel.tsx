@@ -93,7 +93,7 @@ function Pane({ conversationId, state, pane, entry, split, children }: { convers
         </span>
       </header>
       <div className="show-body">
-        <ShowBody key={item.kind === 'file' ? item.documentId ?? item.path : item.source} item={item} tick={tick} toolbar={toolbar} onPages={setPages} />
+        <ShowBody key={item.kind === 'file' ? item.documentId ?? item.rawPath ?? item.path : item.source} item={item} tick={tick} toolbar={toolbar} onPages={setPages} />
       </div>
       {children}
     </section>

@@ -1006,7 +1006,7 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   assert.equal(route.conversation?.messages?.[0].status?.why, 'short follow-up')
   const clears: ChatEvent[] = [
     { event: 'delta', data: { id: 'm1', text: 'x' } },
-    { event: 'reasoning', data: { id: 'm1', text: 'x' } },
+    { event: 'thinking_summary', data: { id: 'm1', text: 'x' } },
     { event: 'tool_call', data: { message_id: 'm1', id: 't1', name: 'web_search', arguments: {} } },
     { event: 'status', data: { id: 'm1', kind: null } },
     DONE

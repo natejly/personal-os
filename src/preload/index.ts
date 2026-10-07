@@ -12,6 +12,7 @@ const api: GrainApi = {
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),
+  previewPut: (source) => ipcRenderer.invoke('preview:put', source),
   backendInfo: () => ipcRenderer.invoke('backend:info'),
   restartBackend: () => ipcRenderer.invoke('backend:restart'),
   onBackendState: (cb) => listen<BackendInfo>('backend:state', cb),

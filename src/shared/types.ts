@@ -1876,6 +1876,8 @@ export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>
+  /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
+  previewPut: (source: string) => Promise<string>
   /** Supervisor state and restart history; `restartBackend` also works from `failed`. */
   backendInfo: () => Promise<BackendInfo>
   restartBackend: () => Promise<BackendInfo>

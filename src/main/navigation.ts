@@ -25,6 +25,8 @@ export function guardNavigation(contents: Electron.WebContents): void {
     if (details.isMainFrame) return // the main frame is handled by will-navigate
     if (frameNavigationAllowed(details.url, process.env.ELECTRON_RENDERER_URL)) return
     details.preventDefault()
+    // A link clicked inside an HTML preview leaves the frame for the system browser.
+    if (details.frame?.url.startsWith('grain-preview://')) openExternal(details.url)
   })
   contents.setWindowOpenHandler(({ url }) => {
     openExternal(url)

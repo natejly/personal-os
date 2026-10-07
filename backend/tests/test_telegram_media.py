@@ -243,7 +243,7 @@ async def test_send_update_only_for_the_texts_conversation_while_polling(env: En
     assert env.bridge.is_texts_conversation(CONV) and not env.bridge.is_texts_conversation("other-conv")
     assert env.bridge.send_update(CONV, "**halfway**") is True
     await until(lambda: env.sent())
-    assert env.sent() == ["halfway"]
+    assert env.sent() == ["<b>halfway</b>"]
     env.state["ownerChatId"] = None
     assert env.bridge.send_update(CONV, "x") is False
 

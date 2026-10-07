@@ -379,7 +379,16 @@ def register(tb: Any) -> None:
             return await call("browser_manage", "manage", {"action": "dialog", "accept": bool(accept), "promptText": prompt_text}, ctx, 20)
         if action == "screenshot":
             res = await mac.page_bridge.browser("manage", {"session": sess, "action": "screenshot", "fullPage": bool(full_page)}, 30)
-            return await save_screenshot(ctx, res) if res.get("ok") else _fail("browser_manage", res)
+            if not res.get("ok"):
+                return _fail("browser_manage", res)
+            out = await save_screenshot(ctx, res)
+            hook = getattr(tb, "user_update", None)
+            if ctx.get("auto_attach") and hook is not None and isinstance(out.get("attachment"), dict):  # a Telegram chat turn: on the phone now; the bridge dedups the final reply
+                try:
+                    await hook(ctx, "", [out["attachment"]])
+                except Exception:  # noqa: BLE001 - a failed live send must not fail the tool; the picture still rides on the reply
+                    pass
+            return out
         if action == "upload":
             if not ref:
                 return tool_error("browser_manage(upload): ref of the file input is required", field="ref",

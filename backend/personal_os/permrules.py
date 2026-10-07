@@ -750,6 +750,70 @@ def _destructive_tokens(tokens: list[str], raw: list[str], cwd: str | None, root
     return None
 
 
+def _cd_to(tokens: list[str], here: str | None) -> str | None:
+    """Where `cd <literal folder>` leaves the shell (judged from `here`, else home), or None when this subcommand is not
+    one: `cd /repo && ln -s x node_modules` makes the link in /repo, so later relative words are judged from there."""
+    if not tokens or tokens[0] != "cd" or len(tokens) > 2:
+        return None
+    t = tokens[1] if len(tokens) == 2 else "~"
+    if t == "-" or "$" in t.replace("$HOME", "").replace("$TMPDIR", ""):
+        return None
+    t = _expand_home(t.replace("$TMPDIR", os.environ.get("TMPDIR") or "/tmp"))
+    return os.path.normpath(t if os.path.isabs(t) else os.path.join(here or os.path.expanduser("~"), t))
+
+
+def desk_folders(roots: Iterable[str]) -> list[str]:
+    """The desk workspaces (`<data>/cowork/<desk id>`, resolved) these roots sit in. A desk's own folder is the agent's
+    to work in, so the shell checks do not count it as Grain's own data; the rest of the data folder still is."""
+    from . import mac
+    data = mac._app_data_dir()
+    if data is None:
+        return []
+    base = os.path.realpath(data / "cowork")
+    out: list[str] = []
+    for r in roots:
+        rr = os.path.realpath(_expand_home(str(r))) if r else ""
+        if rr.startswith(base + "/"):
+            d = os.path.join(base, rr[len(base) + 1:].split("/")[0])
+            if d not in out:
+                out.append(d)
+    return out
+
+
+def _path_words(seg: Seg, tokens: list[str]) -> list[str]:
+    """The words of one subcommand that may name a file: redirect targets, path-like arguments (`--flag=path` too), and
+    every operand of the PATH_COMMANDS (`mkdir build`)."""
+    words = [w.split("=", 1)[1] if w.startswith("-") and "=" in w else w for w in tokens[1:]]
+    out = [t for _, t in seg.redirects]
+    out += [w for w in words if w.startswith(("/", "~", "$HOME", "${HOME}", ".")) or "/" in w]
+    name = os.path.basename(tokens[0]) if tokens else ""
+    if name in PATH_COMMANDS:
+        pos = [w for w in tokens[1:] if not w.startswith("-")]
+        if name in LEADING_ARG_COMMANDS and pos:
+            pos = pos[1:]
+        out += pos or (["~"] if name == "cd" else [])
+    return list(dict.fromkeys(w for w in out if w and w != "-" and w not in EXEMPT_PATHS))
+
+
+def _guarded(w: str, cwd: str | None, desks: list[str]) -> tuple[str, str] | None:
+    """(resolved path, why) when this word names a credential store or Grain's own data folder or app, judged as spelled
+    and as resolved (the folder, for a glob). Inside one of `desks` (resolved, so a link out of it is still judged)
+    only the credential check applies. Best effort: a path built at run time is not seen."""
+    from . import mac
+    if "$" in w.replace("${HOME}", "").replace("$HOME", ""):
+        return None  # an unresolved variable cannot be judged
+    if re.search(r"[*?\[]", w):
+        w = os.path.dirname(re.split(r"[*?\[]", w)[0] + "x") or "."
+    spelled = _expand_home(w)
+    if not os.path.isabs(spelled) and cwd:
+        spelled = os.path.join(cwd, spelled)
+    p = _real(w, cwd)
+    why = mac.sensitive_reason(os.path.normpath(spelled), p)
+    if not why and not any(p == d or p.startswith(d + "/") for d in desks):
+        why = mac.protected_reason(spelled, p)
+    return (p, why) if why else None
+
+
 def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -> str | None:
     """Why this shell command cannot be taken back (a delete that skips the Trash, a disk wipe, a force-push), or None.
     Looks through chains, pipes, env/sudo/nohup wrappers, $() and backticks, `sh -c` / `eval` strings and, best effort,
@@ -765,11 +829,8 @@ def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -
             segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
         for seg in segs:
             tokens = strip_wrappers(seg.words, True)
-            if len(tokens) == 2 and tokens[0] == "cd" and "$" not in tokens[1].replace("$HOME", "").replace("$TMPDIR", ""):
-                # `cd /tmp/x && rm -rf build`: later relative paths are judged from there (a literal folder only)
-                t = tokens[1].replace("$TMPDIR", os.environ.get("TMPDIR") or "/tmp")
-                t = _expand_home(t)
-                here = os.path.normpath(t if os.path.isabs(t) else os.path.join(here or os.path.expanduser("~"), t))
+            if (to := _cd_to(tokens, here)) is not None:
+                here = to  # `cd /tmp/x && rm -rf build`: later relative paths are judged from there
                 continue
             why = _destructive_tokens(tokens, seg.words, here, roots)
             if why:
@@ -786,49 +847,44 @@ def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -
 KEYCHAIN_SUBCOMMANDS = re.compile(r"^(find-|dump-keychain|export|delete-|add-|set-|unlock-keychain|import)")
 
 
-def touches_protected(cmd: str, cwd: str | None = None) -> str | None:
+def touches_protected(cmd: str, cwd: str | None = None, roots: Iterable[str] = ()) -> str | None:
     """Why a command run OUTSIDE the sandbox reaches what the sandbox would have kept it from: a credential store, Grain's
-    own data folder or app (mac.sensitive_reason / protected_reason) named by any path-like word, or the Keychain CLI.
-    Best effort: a path built at run time is not seen."""
-    from . import mac
-    text = normalize(cmd or "")
-    p = split_command(text)
-    segs = p.segments + p.nested
-    if p.opaque:
-        segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
-    for seg in segs:
-        tokens = strip_wrappers(seg.words, True)
-        if tokens and os.path.basename(tokens[0]) == "security" and len(tokens) > 1 and KEYCHAIN_SUBCOMMANDS.match(tokens[1]):
-            return "Keychain access (security " + tokens[1] + ")"
-        if (inner := _shell_c(tokens)) is not None and (why := touches_protected(inner, cwd)):
-            return why
-        words = [w.split("=", 1)[1] if w.startswith("-") and "=" in w else w for w in tokens[1:]]
-        for w in words + [t for _, t in seg.redirects]:
-            if not w or w in EXEMPT_PATHS or not (w.startswith(("/", "~", "$HOME", "${HOME}", ".")) or "/" in w):
-                continue
-            if "$" in w.replace("${HOME}", "").replace("$HOME", ""):
-                continue
-            if re.search(r"[*?\[]", w):
-                w = os.path.dirname(re.split(r"[*?\[]", w)[0] + "x") or "."
-            spelled = _expand_home(w)
-            if not os.path.isabs(spelled) and cwd:
-                spelled = os.path.join(cwd, spelled)
-            real = _real(w, cwd)
-            why = mac.sensitive_reason(os.path.normpath(spelled), real) or mac.protected_reason(spelled, real)
-            if why:
-                return f"{w}: {why}"
-    return None
+    own data folder or app (`_guarded`) named by any path-like word, or the Keychain CLI. A `cd <folder>` moves where
+    later relative words are judged from; the desk workspace `roots` sit in is the agent's own (desk_folders)."""
+    desks = desk_folders(roots)
+
+    def walk(text: str, depth: int, here: str | None) -> str | None:
+        if depth > 4:
+            return None
+        p = split_command(text)
+        segs = p.segments + p.nested
+        if p.opaque:
+            segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
+        for seg in segs:
+            tokens = strip_wrappers(seg.words, True)
+            if tokens and os.path.basename(tokens[0]) == "security" and len(tokens) > 1 and KEYCHAIN_SUBCOMMANDS.match(tokens[1]):
+                return "Keychain access (security " + tokens[1] + ")"
+            if (inner := _shell_c(tokens)) is not None and (why := walk(inner, depth + 1, here)):
+                return why
+            for w in _path_words(seg, tokens):
+                if g := _guarded(w, here, desks):
+                    return f"{w}: {g[1]}"
+            if (to := _cd_to(tokens, here)) is not None:
+                here = to
+        return None
+    return walk(normalize(cmd or ""), 0, cwd)
 
 
 def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
                     scratch: Iterable[str] = ()) -> tuple[str, str] | None:
     """What Allow everything still cards for this call, as (card kind, reason): an unsandboxed command that names a
     credential store or Grain's own data or app ("external_directory"), or a command `destructive` flags
-    ("destructive"), sandboxed or not. None for anything else."""
+    ("destructive"), sandboxed or not. None for anything else. `scratch` (the desk's work folder) also marks the desk
+    whose own folder is not Grain's data."""
     if tool != "shell_run" or not isinstance(args, dict):
         return None
     cmd = str(args.get("command") or "")
-    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd)):
+    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd, scratch)):
         return "external_directory", why
     why = destructive(cmd, cwd, scratch)
     return ("destructive", why) if why else None
@@ -951,31 +1007,12 @@ def _roots(roots: Iterable[str]) -> list[str]:
     return [os.path.realpath(_expand_home(r)) for r in roots if r]
 
 
-def _guarded_paths(seg: Seg, tokens: list[str], cwd: str | None) -> list[str]:
-    """Paths this subcommand names that are a credential store or Grain's own data folder or app (mac.sensitive_reason /
-    mac.protected_reason), judged as spelled and as resolved: the file itself, or the folder for a glob."""
-    from . import mac
+def _guarded_paths(seg: Seg, tokens: list[str], cwd: str | None, desks: list[str] = ()) -> list[str]:
+    """Paths this subcommand names that are a credential store or Grain's own data folder or app (`_guarded`), resolved."""
     out: list[str] = []
-    targets: list[str] = [t for op, t in seg.redirects if t not in EXEMPT_PATHS]
-    name = os.path.basename(tokens[0]) if tokens else ""
-    if name in PATH_COMMANDS:
-        pos = [w for w in tokens[1:] if not w.startswith("-")]
-        if name in LEADING_ARG_COMMANDS and pos:
-            pos = pos[1:]
-        if name == "cd" and not pos:
-            pos = ["~"]
-        targets += [w for w in pos if w != "-"]
-    for t in targets:
-        if "$" in t and not t.startswith(("$HOME", "${HOME}")):
-            continue  # an unresolved variable cannot be judged
-        if re.search(r"[*?\[]", t):
-            t = os.path.dirname(re.split(r"[*?\[]", t)[0] + "x") or "."
-        spelled = _expand_home(t)
-        if not os.path.isabs(spelled) and cwd:
-            spelled = os.path.join(cwd, spelled)
-        p = _real(t, cwd)
-        if (mac.sensitive_reason(os.path.normpath(spelled), p) or mac.protected_reason(spelled, p)) and p not in out:
-            out.append(p)
+    for w in _path_words(seg, tokens):
+        if (g := _guarded(w, cwd, list(desks))) and g[0] not in out:
+            out.append(g[0])
     return out
 
 
@@ -1009,7 +1046,7 @@ class Verdict:
     external: list[str] = field(default_factory=list)
 
 
-def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None) -> Verdict:
+def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None, desks: list[str] = ()) -> Verdict:
     v = Verdict(subjects=[f"Bash({cmd})"])
     why = hardline(cmd)
     if why:
@@ -1018,10 +1055,21 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None) -> Verd
     parsed = split_command(cmd)
     # deny / ask see every command there is, including those inside $() and sh -c strings.
     extra: list[Seg] = list(parsed.nested)
+    # Where each subcommand runs: a literal `cd` moves the ones after it; an sh -c string starts where it is run.
+    where: dict[int, str | None] = {}
+
+    def track(segs: list[Seg], here: str | None) -> None:
+        for s in segs:
+            where[id(s)] = here
+            here = _cd_to(strip_wrappers(s.words, True), here) or here
+    track(parsed.segments, cwd)
+    track(parsed.nested, cwd)
     for seg in parsed.segments + parsed.nested:
         inner = _shell_c(strip_wrappers(seg.words, True))
         if inner is not None:
             sub = split_command(inner)
+            track(sub.segments, where[id(seg)])
+            track(sub.nested, where[id(seg)])
             extra += sub.segments + sub.nested
             parsed.opaque = parsed.opaque or sub.opaque
     judged = parsed.segments + extra
@@ -1049,7 +1097,7 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None) -> Verd
     # A credential store or Grain's own data is judged by the agg tokens, wrappers and all.
     outside: list[str] = []
     for seg in judged:
-        for d in _guarded_paths(seg, strip_wrappers(seg.words, True), cwd):
+        for d in _guarded_paths(seg, strip_wrappers(seg.words, True), where.get(id(seg), cwd), desks):
             for r in rules.deny:
                 if _matches(r, Subject("external_directory", d), tool, cwd):
                     v.action, v.rule = "deny", r.text
@@ -1107,7 +1155,8 @@ def _suggest_bash(parsed: Parsed, rules: RuleSet, outside: list[str]) -> list[st
 def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | None, *,
              roots: Iterable[str] = (), cwd: str | None = None) -> Verdict:
     """The rule verdict for one call: deny > ask > allow, None when no rule has an opinion. `roots` only names where a
-    relative path in a shell command starts (the first entry, the desk workspace); it limits nothing."""
+    relative path in a shell command starts (the first entry, the desk workspace) and which desk's own folder a shell
+    command may name without it counting as Grain's data (desk_folders); it limits nothing."""
     rs = rules if isinstance(rules, RuleSet) else load_rules(rules)
     rl = _roots(roots)
     if cwd is None and rl:
@@ -1115,7 +1164,8 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
     args = args if isinstance(args, dict) else {}
     if tool == "shell_run":
         c = args.get("cwd")
-        return _evaluate_bash(tool, str(args.get("command") or ""), rs, _real(c) if isinstance(c, str) and c else cwd)
+        start = _real(c, rl[0] if rl else cwd) if isinstance(c, str) and c else cwd  # an explicit cwd starts from the desk
+        return _evaluate_bash(tool, str(args.get("command") or ""), rs, start, desk_folders(rl))
     subs = subject_for(tool, args)
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])
     verdict, rule = _decide(rs, subs, tool, cwd)

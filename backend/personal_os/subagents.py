@@ -1024,15 +1024,16 @@ class Subagents:
             lockable = bool(self.toolbox.ask_locked(spec) or self.toolbox.forces_ask(name, args, ch.ctx))
             hard_forced = hard_forced or taint_only or self.toolbox.forces_card(name, args, ch.ctx) or (lockable and tainted)
             pre_mode = mode
+            from . import shell as shell_mod
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id,
+                                     cwd=shell_mod.perm_where(self.toolbox, ch.ctx)[1] if name == "shell_run" else None,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
             bad = perm.refusal or self._confine(ch, name, args)
             if not bad and pmode != "manual" and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)
-                from . import shell as shell_mod
                 floor = shell_mod.floor(self.toolbox, args, ch.ctx) if pmode == "allow_all" and name == "shell_run" else None
                 rt = autoreview.route(
                     pmode, mode=mode, danger=spec.danger, explicit_on=explicit == "on",
@@ -1151,7 +1152,15 @@ class Subagents:
         return None
 
     def _perm_roots(self, ch: Child) -> list[str]:
-        return [str(r) for r in ch.roots]
+        """Where a worker's relative shell paths start (its desk workspace, where shell_run runs by default) and which desk's
+        own folder its commands may name without carding as Grain's data; then the folder it was narrowed to."""
+        out: list[str] = []
+        if ch.desk_id and self.workspace is not None:
+            try:
+                out.append(str(self.workspace.desk_root(ch.desk_id)))
+            except Exception:  # noqa: BLE001 - a malformed id just means no desk root
+                pass
+        return list(dict.fromkeys([*out, *(str(r) for r in ch.roots)]))
 
     async def _snapshot_before(self, ch: Child, name: str, args: dict[str, Any]) -> None:
         """A child's writes belong to the parent's reply, so they land in the parent run's folder snapshot and

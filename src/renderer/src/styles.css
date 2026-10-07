@@ -2539,9 +2539,14 @@ select:focus-visible {
 .worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
 .worker-open small { color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.worker-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 36px; }
-.worker-detail p { margin: 0; }
-.worker-report { margin: 0; max-width: 100%; max-height: 160px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 12px; color: var(--text-muted); }
+/* A worker's chat: its history in the main chat's message rows, and a small composer to steer it. */
+.worker-chat { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.worker-panel .worker-chat { margin: 4px 0 6px; padding: 8px 0 0; border-top: 1px solid var(--border); }
+.worker-chat-log { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; }
+.subagent-panel .worker-chat { flex: 1; padding: 0 20px 14px; }
+.subagent-panel .worker-chat-log { max-height: none; flex: 1; }
+.worker-composer { margin: 0; }
+.user-from { display: flex; align-items: center; gap: 6px; }
 .worker-approval { display: flex; align-items: center; gap: 8px; padding-left: 36px; color: var(--text-muted); }
 .worker-approval span { flex: 1; min-width: 0; }
 
@@ -2604,13 +2609,6 @@ select:focus-visible {
 /* The subagent panel: a transcript that grows, and a one-line box to talk to it. */
 .subagent-panel { width: 640px; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
 .subagent-panel header h2 { display: flex; align-items: center; gap: 8px; }
-.subagent-panel header .muted.small { margin-left: auto; margin-right: 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.subagent-transcript { flex: 1; overflow-y: auto; padding: 12px 20px; display: flex; flex-direction: column; gap: 10px; }
-.sa-msg.user { align-self: flex-end; max-width: 80%; background: var(--bg-input); border-radius: 12px; padding: 6px 12px; }
-.sa-msg.user p { margin: 0; white-space: pre-wrap; }
-.sa-msg.assistant { max-width: 100%; }
-.subagent-compose { display: flex; gap: 8px; padding: 10px 20px; border-top: 1px solid var(--border); }
-.subagent-compose input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; outline: 0; }
 .reasoning { display: flex; flex-wrap: wrap; align-items: center; }
 .reasoning .reasoning-head { flex: 1 1 0; width: auto; }
 .reasoning .reasoning-body, .reasoning .activity-tools { flex-basis: 100%; }

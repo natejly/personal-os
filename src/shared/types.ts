@@ -2944,5 +2944,13 @@ export interface AgentHomeData {
 export interface SubagentView {
   run: { run_id: string; status: string; parent_run_id: string | null; input?: Record<string, unknown>; budget?: Record<string, number> | null }
   agent: SubagentInfo | null
-  messages: { role: 'system' | 'user' | 'assistant' | 'tool'; content: string | null; tool_calls?: { function: { name: string; arguments: string } }[] }[]
+  messages: {
+    role: 'system' | 'user' | 'assistant' | 'tool'
+    content: string | null
+    tool_calls?: { id?: string; function: { name: string; arguments: string } }[]
+    /** A tool row: the call it answers. */
+    tool_call_id?: string
+    /** A user row: 'user' when the person sent it from the app, 'agent' when the main agent did (the task, its steers). */
+    from?: 'user' | 'agent'
+  }[]
 }

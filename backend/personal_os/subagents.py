@@ -488,6 +488,19 @@ class Child:
             self.tool_since = None
 
 
+USER_NOTE = "[Message from the user, not the main agent]\n"  # prefixes text the human typed to a worker
+
+
+def _labelled(message: dict[str, Any]) -> dict[str, Any]:
+    """A user row for display: from "user" (the human, prefix stripped) or "agent" (the main agent). Never sent to a model."""
+    if message.get("role") != "user":
+        return message
+    c = message.get("content")
+    if isinstance(c, str) and c.startswith(USER_NOTE):
+        return {**message, "from": "user", "content": c[len(USER_NOTE):]}
+    return {**message, "from": "agent"}
+
+
 def _public_message(message: dict[str, Any]) -> dict[str, Any]:
     """A transcript row with credentials removed from its text. The stored row is not changed."""
     content = message.get("content")
@@ -1269,13 +1282,13 @@ class Subagents:
         return out
 
     # ---- talking to a child ----------------------------------------------------------------------
-    def steer(self, ch: Child, text: str) -> bool:
+    def steer(self, ch: Child, text: str, by_user: bool = False) -> bool:
         """Queue a user message for a running child and cut its current model read short, so it answers soon.
         False once the child has finished: a finished child is continued through its parent (agent_spawn resume_id)."""
         text = str(text or "").strip()
         if not text or ch.finished.is_set():
             return False
-        ch.steers.append(text[:MAX_TASK_CHARS])
+        ch.steers.append((USER_NOTE if by_user else "") + text[:MAX_TASK_CHARS])
         ch.cancel.set()
         ch.touch()
         self._emit(ch, "steer", {"text": text[:2000]})
@@ -1285,7 +1298,7 @@ class Subagents:
         """A child's history with credentials scrubbed: live from memory, otherwise from its tape."""
         ch = self.children.get(run_id)
         msgs = ch.messages if ch is not None else self._load_transcript(run_id)
-        return None if msgs is None else [_public_message(m) for m in msgs]
+        return None if msgs is None else [_labelled(_public_message(m)) for m in msgs]
 
     # ---- stopping --------------------------------------------------------------------------------
     def halt(self, ch: Child, reason: str = "interrupted") -> None:

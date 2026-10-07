@@ -604,8 +604,9 @@ class Desks:
     @_notifies
     def claim_run(self, id: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
         """The start lock: the UPDATE's rowcount decides, so a double Start makes one run, not two.
-        None means somebody else already started this desk. A desk with no plan claims into
-        `planning`, one with a plan into `working` — the CASE keeps it a single statement, because a
+        None means somebody else already started this desk. A plan-autonomy desk with no plan claims into
+        `planning`; any other desk into `working` (an ask or propose desk works from its first turn, so the rail
+        never says Planning for it) — the CASE keeps it a single statement, because a
         SELECT before the UPDATE would make the losing caller fail with a snapshot error instead of
         waiting for the winner to commit."""
         if not from_statuses:
@@ -614,7 +615,7 @@ class Desks:
         marks = ",".join("?" for _ in from_statuses)
         with self.db.tx() as c:
             cur = c.execute(
-                "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' THEN 'planning' ELSE 'working' END,"
+                "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' AND autonomy='plan' THEN 'planning' ELSE 'working' END,"
                 " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, queued_at=NULL, queued_message='',"
                 " updated_at=?"
                 f" WHERE id=? AND status IN ({marks})",

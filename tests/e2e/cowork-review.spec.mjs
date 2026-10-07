@@ -3,6 +3,8 @@ import { scriptLLM } from './helpers/scriptllm.mjs'
 import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, panel, openPanel, chatRow, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
+// The card comes from the written tool's own mode ('ask'), not from the desk's autonomy level: an 'ask' desk follows the permission mode.
+const askWrites = { ...settingsFor, permissionMode: 'manual', tools: { desk_write_file: 'ask' } }
 const REVIEWED = (llm, ...steps) => llm.push(...steps, { text: 'reviewer ok' }, { text: 'final' })
 const deskFile = async (grain, id, path) => (await grain.api(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}`, { raw: true })).status
 
@@ -17,8 +19,8 @@ async function reviewDesk(grain, title, extra = []) {
   return { llm, desk }
 }
 
-test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwritten and the desk alive; Approve writes it', async ({ grain }) => {
-  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+test('autonomous desk: a tool set to ask shows a card (from the tool mode, not the autonomy level); Deny leaves the file unwritten and the desk alive; Approve writes it', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: askWrites })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain
@@ -38,8 +40,8 @@ test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwri
   expect(realErrors(grain)).toEqual([])
 })
 
-test('ask-as-it-goes desk: Approve writes the file once', async ({ grain }) => {
-  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+test('autonomous desk: approving a tool-mode card writes the file once', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: askWrites })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain

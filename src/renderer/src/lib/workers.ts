@@ -3,6 +3,9 @@ import type { Message, WorkerInfo, WorkerStatus } from '@shared/types'
 /** A worker that still holds (or waits for) a slot: the panel polls while any is. */
 export const workerIsLive = (w: Pick<WorkerInfo, 'status'>): boolean => w.status === 'queued' || w.status === 'running' || w.status === 'awaiting_approval'
 
+/** How many of a chat's workers are live. */
+export const liveWorkerCount = (ws: readonly Pick<WorkerInfo, 'status'>[]): number => ws.filter(workerIsLive).length
+
 /** The buttons a worker row offers. Resume needs a stored transcript; a live worker can only be stopped. */
 export function workerActions(w: Pick<WorkerInfo, 'status' | 'resumable'>): { stop: boolean; resume: boolean } {
   return { stop: workerIsLive(w), resume: !workerIsLive(w) && (w.status === 'interrupted' || w.resumable) }

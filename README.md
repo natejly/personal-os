@@ -219,7 +219,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Ask as it goes (no plan up front; risky actions follow the permission mode), and Work and propose (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and
   how many things need you, with Start, Pause, Resume and Stop, and opens a side panel
-  with Files, Changes and Review tabs. Questions, parked cards, the plan and interruption notices appear at the
+  with Files, Changes and Review tabs. While a lone agent is working the strip stays out of the way
+  (the composer's Stop covers it); it appears once a background worker is live or the desk needs you. Questions, parked cards, the plan and interruption notices appear at the
   end of the transcript. Autonomous chats are listed with the other chats with a status dot, and the Chats header
   carries the Needs-you count. Nothing it writes reaches the app until you accept
   it: it works in `cowork/<desk>/` and nominates files for review, and every

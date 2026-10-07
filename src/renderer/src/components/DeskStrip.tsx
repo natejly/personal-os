@@ -1,7 +1,8 @@
 import { CircleHelp, PanelRight, Pause, Play, ShieldQuestion, Square, TriangleAlert } from 'lucide-react'
 import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
-import { useStore } from '../store'
-import { STATUS_LABEL, deskElapsed, fmtDur, useTick } from '../lib/deskStatus'
+import { useStore, useWorkers } from '../store'
+import { STATUS_LABEL, deskElapsed, fmtDur, stripHidden, useTick } from '../lib/deskStatus'
+import { liveWorkerCount } from '../lib/workers'
 import { queuePositions } from '../lib/deskFiles'
 import DeskPlan from './DeskPlan'
 import DeskApprovalCard from './DeskApprovalCard'
@@ -15,7 +16,7 @@ export const useChatDesk = (deskId?: string): Desk | FullDesk | null =>
 
 /**
  * The slim line above the composer while a chat works autonomously: what it is doing, how far it has got, what is
- * waiting on you, and the run controls. Buttons are gated on `desk.actions`, which the backend reads off the same
+ * waiting on you, and the run controls. Hidden while a lone agent plans or works (see `stripHidden`). Buttons are gated on `desk.actions`, which the backend reads off the same
  * transition tables its routes enforce, so a button is never offered for a route that 409s.
  */
 export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: string; panelOpen?: boolean; onPanel?: () => void }): JSX.Element | null {
@@ -23,8 +24,9 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
   const approvals = useStore((s) => (desk ? s.sessions[desk.conversation_id]?.pendingApprovals ?? 0 : 0))
   const position = useStore((s) => (desk?.status === 'queued' ? queuePositions(s.desks).get(deskId) : undefined))
   const { startDesk, pauseDesk, resumeDesk, stopDesk } = useStore()
+  const liveWorkers = liveWorkerCount(useWorkers(desk?.conversation_id))
   useTick(Boolean(desk?.live))
-  if (!desk) return null
+  if (!desk || stripHidden(desk.status, liveWorkers)) return null
   const detail = position ? `#${position} in line` : desk.headline || desk.status_reason
   return (
     <div className={`desk-strip desk-ring-${desk.status}`} role="status" aria-label="Working autonomously">

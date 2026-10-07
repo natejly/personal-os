@@ -522,7 +522,7 @@ export default function SettingsModal(): JSX.Element {
                 <Switch title="Learn how I write" help="Keep a profile of your writing so drafts sound like you." checked={draft.learnStyle !== false} onChange={(learnStyle) => patch({ learnStyle })} />
                 <IndexStatusLine />
                 <Switch title="Smarter memory search" help="Combine keywords, meaning, recency and links. Off means keywords only." checked={draft.hybridRetrieval !== false} onChange={(hybridRetrieval) => patch({ hybridRetrieval })} />
-                <AdvancedRetrieval draft={draft} patch={patch} models={models} />
+                <AdvancedRetrieval draft={draft} patch={patch} />
                 <Switch title="Describe each file passage when indexing" help="One extra model call per passage. Off by default." checked={draft.contextualChunks === true} onChange={(contextualChunks) => patch({ contextualChunks })} />
               </AdvGroup>
 

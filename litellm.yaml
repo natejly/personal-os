@@ -58,6 +58,12 @@ model_list:
       api_key: os.environ/FIREWORKS_API_KEY
     model_info:
       mode: embedding
+  - model_name: qwen3-reranker-8b
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/qwen3-reranker-8b
+      api_key: os.environ/FIREWORKS_API_KEY
+    model_info:
+      mode: rerank
 
   # ---------------------------------------------------------------- speech to text
   # Nothing above answers /v1/audio/transcriptions, so voice input has no transcription route on a

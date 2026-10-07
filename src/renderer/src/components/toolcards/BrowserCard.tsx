@@ -6,6 +6,7 @@ import { browserLine, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'
 import { registerToolCard, type ToolCardProps } from './registry'
+import { Images } from './ShareCards'
 
 const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_scroll', 'browser_manage', 'browser_handoff']
 
@@ -20,7 +21,7 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
   const line = browserLine(event.name, event.arguments, d)
   const snapshot = str(d?.snapshot)
   const notes = d ? strList(d.notes) : []
-  const shot = event.name === 'browser_manage' && str(d?.path) ? str(d?.path) : ''
+  const shot = event.name === 'browser_manage' && Array.isArray(d?.saved) ? (d?.saved[0] as Record<string, unknown> | undefined) : undefined
   const tabs = num(d?.tabs)
   const [watch, setWatch] = useState(false)
   const [out, setOut] = useState(false) // the user holds the window
@@ -37,9 +38,8 @@ function BrowserCard(props: ToolCardProps): JSX.Element {
           ['Tabs', tabs !== null && tabs > 1 ? String(tabs) : null]
         ]} />
       )}
-      {shot && (
-        <Meta items={[['Screenshot saved', <span className="mono" key="p">{shot}</span>], ['Size', num(d?.width) && num(d?.height) ? `${num(d?.width)} × ${num(d?.height)}` : null]]} />
-      )}
+      {shot && <Meta items={[['Screenshot', 'saved in Uploads'], ['Size', num(shot.width) && num(shot.height) ? `${num(shot.width)} × ${num(shot.height)}` : null]]} />}
+      <Images event={event} />
       {notes.length > 0 && <ul className="tc-list tc-notes">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
       {snapshot && (
         <details className="tc-snapshot">

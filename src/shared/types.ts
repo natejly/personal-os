@@ -1457,6 +1457,9 @@ export interface Settings {
   retrievalMode?: 'hybrid' | 'bm25'
   /** Reorder fused candidates with retrievalRerankModel before trimming. */
   retrievalRerank?: boolean
+  /** Also reorder recalled memories with the rerank model. On unless false. */
+  memoryRerank?: boolean
+  /** Rerank model shared by document search and memory recall; blank means the provider's default. */
   retrievalRerankModel?: string
   /** 0-1: vector-only hits below this similarity are dropped. */
   retrievalMinSimilarity?: number

@@ -159,6 +159,25 @@ def _config_from(store: McpServers, server_id: str) -> _Config | None:
                    env=env, url=row.get("url") or "", headers=headers)
 
 
+def is_grain_python(command: str) -> bool:
+    """True when `command` is the interpreter this backend runs on (or a venv link to it). In the packaged app that
+    interpreter and its stdlib sit inside the signed bundle."""
+    try:
+        real = os.path.realpath(command)
+        home = os.path.realpath(sys.base_prefix)
+        return real == os.path.realpath(sys.executable) or os.path.commonpath([real, home]) == home
+    except (OSError, ValueError):
+        return False
+
+
+def no_bytecode(command: str, env: dict[str, str]) -> None:
+    """A stdio server started on Grain's own Python must not write .pyc files: inside the app bundle that rewrites
+    sealed files and breaks the code signature. The stdio launcher builds a fresh environment, so the backend's own
+    PYTHONDONTWRITEBYTECODE is not inherited and has to be set here."""
+    if is_grain_python(command):
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+
 @contextlib.asynccontextmanager
 async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_in: SignIn | None = None,
                 redirect_uri: str | None = None) -> Any:
@@ -176,6 +195,7 @@ async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_
         command = mcp_path.resolve(config.command, env)
         if command is None:
             raise McpMissingCommand(mcp_path.missing_message(config.command))
+        no_bytecode(command, env)
         params = StdioServerParameters(command=command, args=config.args, env=env, cwd=config.cwd or None)
         async with stdio_client(params, errlog=err.file) as streams:
             yield streams

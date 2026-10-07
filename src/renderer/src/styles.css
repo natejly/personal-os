@@ -2533,6 +2533,7 @@ select:focus-visible {
 
 /* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
+.chat-main > .worker-panel { margin: 0 auto; width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; }
 .worker-panel .worker-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 0; }
 .worker-line { display: flex; align-items: center; gap: 8px; }
 .worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }

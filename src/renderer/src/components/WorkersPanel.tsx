@@ -54,7 +54,7 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
         <button className="plan-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <b>Workers</b>
-          <span className="muted">{live ? `${live} running` : workers.length}</span>
+          <span className="muted">· {live ? `${live} running` : workers.length}</span>
         </button>
       </header>
       {open && (

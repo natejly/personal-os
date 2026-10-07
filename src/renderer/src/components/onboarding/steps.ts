@@ -12,6 +12,8 @@ export interface ProviderInfo {
   keyUrl: string | null
   defaultModel: string
   models: string[]
+  /** The provider's default reranker; absent when it has no rerank route. */
+  rerankModel?: string
   note: string | null
 }
 

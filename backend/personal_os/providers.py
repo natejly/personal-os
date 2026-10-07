@@ -15,26 +15,33 @@ PROVIDERS: list[dict[str, Any]] = [
      "models": ["accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
                 "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
                 "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
-     "note": None},
+     "note": None,
+     "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b"},
     {"id": "openai", "name": "OpenAI", "baseUrl": "https://api.openai.com/v1", "needsKey": True,
      "keyUrl": "https://platform.openai.com/api-keys", "defaultModel": "gpt-5-mini",
-     "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1"], "note": None},
+     "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1"], "note": None,
+     "rerankModel": ""},
     {"id": "anthropic", "name": "Anthropic", "baseUrl": "https://api.anthropic.com/v1/", "needsKey": True,
      "keyUrl": "https://console.anthropic.com/settings/keys", "defaultModel": "claude-sonnet-5-5",
      "models": ["claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-opus-5-5"],
-     "note": "Uses Anthropic's OpenAI-compatible endpoint."},
+     "note": "Uses Anthropic's OpenAI-compatible endpoint.",
+     "rerankModel": ""},
     {"id": "openrouter", "name": "OpenRouter", "baseUrl": "https://openrouter.ai/api/v1", "needsKey": True,
      "keyUrl": "https://openrouter.ai/keys", "defaultModel": "anthropic/claude-sonnet-5-5",
      "models": ["anthropic/claude-sonnet-5-5", "openai/gpt-5-mini", "google/gemini-2.5-flash"],
-     "note": "One key for many providers."},
+     "note": "One key for many providers.",
+     "rerankModel": ""},
     {"id": "ollama", "name": "Ollama (local)", "baseUrl": "http://localhost:11434/v1", "needsKey": False,
      "keyUrl": None, "defaultModel": "llama3.2", "models": ["llama3.2", "qwen3", "gpt-oss:20b"],
-     "note": "Runs on this Mac; pull the model first (ollama pull llama3.2)."},
+     "note": "Runs on this Mac; pull the model first (ollama pull llama3.2).",
+     "rerankModel": ""},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
      "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "kimi-k3", "deepseek-v4-flash"],
-     "note": "Your own proxy; model names are whatever its config defines."},
+     "note": "Your own proxy; model names are whatever its config defines.",
+     "rerankModel": "qwen3-reranker-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
-     "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API."},
+     "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API.",
+     "rerankModel": ""},
 ]
 BY_ID = {p["id"]: p for p in PROVIDERS}
 
@@ -54,6 +61,12 @@ def default_model(settings: dict[str, Any]) -> str:
     if not p:
         return ""
     return next((m for m in p["models"] if m.rsplit("/", 1)[-1] == DEFAULT_CHAT_MODEL), p["defaultModel"])
+
+
+def rerank_model(settings: dict[str, Any]) -> str:
+    """The saved rerank model, else the active provider's default; blank = reranking is skipped."""
+    saved = str(settings.get("retrievalRerankModel") or "").strip()
+    return saved or (get(effective(settings)) or {}).get("rerankModel", "")
 
 
 def _hostport(url: str) -> str:

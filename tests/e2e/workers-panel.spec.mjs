@@ -16,8 +16,9 @@ test('a delegated worker shows in the Workers panel of the main chat view', asyn
   const panel = page.locator('section.worker-panel')
   await expect(panel).toBeVisible({ timeout: 30_000 })
   await expect(panel).toContainText('Alpha job')
-  // A finished worker's row unfolds to its final report.
+  // A finished worker's row unfolds to its chat: the main agent's task, labelled, then its reply.
   await expect(panel.locator('.worker-row', { hasText: 'Done' })).toBeVisible({ timeout: 60_000 })
   await panel.locator('.worker-open', { hasText: 'Alpha job' }).click()
-  await expect(panel.locator('.worker-report')).toContainText('look something up')
+  await expect(panel.locator('.worker-chat .msg.user').first()).toContainText('look something up')
+  await expect(panel.locator('.worker-chat .user-from').first()).toContainText('Main agent')
 })

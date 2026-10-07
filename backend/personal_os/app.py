@@ -89,7 +89,7 @@ from . import shell as shell_tool
 from . import ship as ship_mod
 from . import codingagents
 from . import workers as workers_mod
-from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
+from .subagents import UNATTENDED_KINDS, USER_NOTE, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
@@ -4174,7 +4174,8 @@ async def resume_worker_route(worker_id: str, body: WorkerResumeIn | None = None
     """Continue a finished or interrupted worker with its history, as a new worker (its input.resume_of is this id)."""
     row = _worker_row(worker_id)
     cid = (row.get("input") or {}).get("conversation_id") or ""
-    out = workers_mgr.resume(_worker_parent_ctx(cid), worker_id, (body.text if body else None) or "")
+    text = ((body.text if body else None) or "").strip()
+    out = workers_mgr.resume(_worker_parent_ctx(cid), worker_id, USER_NOTE + text if text else "")
     if "worker_id" not in out:
         raise HTTPException(409, out.get("error") or "That worker cannot be resumed")
     return {"worker": workers_mgr.info(workers_mgr.row(out["worker_id"]))}  # type: ignore[arg-type]
@@ -4691,7 +4692,7 @@ async def message_subagent(run_id: str, body: SteerIn) -> dict[str, Any]:
     """Speak to a running subagent: the message lands before its next model turn. A finished one answers 409 with
     its parent conversation, and the client continues it there (the parent can agent_spawn it with resume_id)."""
     live = subagent_mgr.children.get(run_id)
-    if live is not None and subagent_mgr.steer(live, body.content):
+    if live is not None and subagent_mgr.steer(live, body.content, by_user=True):
         return {"ok": True, "agent": subagent_mgr.info(live)}
     row = run_store.get(run_id)
     if not row or row.get("kind") not in ("subagent", "worker"):

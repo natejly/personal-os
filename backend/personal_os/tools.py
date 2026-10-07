@@ -31,6 +31,7 @@ from . import egress, mac, permissions
 from .kinds import is_internal
 from .embed import rrf
 from . import fsx
+from . import sendfiles
 from . import skillbuild
 from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
@@ -1011,7 +1012,13 @@ class Toolbox:
             ctx.setdefault("taint_sources", []).append(name)  # every taint is sourced (Toolbox.tainted_for relies on it)
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
-        return checked(name, out)
+        res = checked(name, out)
+        if ctx.get("auto_attach"):  # a Telegram chat turn: whatever the agent just made (and the check accepted) rides on the reply
+            try:
+                await sendfiles.attach_made(self, ctx, name, res)
+            except Exception:  # noqa: BLE001 - the file is still where the tool put it; only the attaching failed
+                log.warning("auto-attach after %s failed", name, exc_info=True)
+        return res
 
     # ---- tool implementations ----
     def _register(self) -> None:
@@ -1122,8 +1129,8 @@ class Toolbox:
             q = query.strip()
             if q and self.memory_index is not None:
                 cfg = self.settings()  # a None vector still ranks lexically and through the graph
-                found = self.memory_index.search(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
-                                                 limit=SEARCH_HITS, settings=cfg)
+                found = await self.memory_index.search_reranked(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
+                                                                limit=SEARCH_HITS, settings=cfg)
             elif q:
                 found = self.memories.list(ctx["project_id"], query)
             else:  # a filter-only listing, newest first

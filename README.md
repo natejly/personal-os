@@ -26,7 +26,7 @@ instructions, files, memories and graph.
 ```
 
 Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
-Settings → Modules hides any of them. A **Quick chat** button at the top right of
+Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
 every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
@@ -61,7 +61,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.
-3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
+3. **Files.** ⌘4 opens Files, with three sections: *Notes*, *Uploads* (⌘U) and *Artifacts*.
    ⌘⇧N makes a note, ⌘⇧D opens today's. Paste or drop an image into
    a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
@@ -162,7 +162,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   memories and a project graph, layered on top of your personal ones.
 - **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
   scope filter and search box — the first two halves side by side, either alone,
-  or the voice profile on its own:
+  or the voice profile on its own (Split is the default):
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget, see a memory's past versions, and export or import
@@ -198,6 +198,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
+  - *Artifacts* — everything the assistant made in any chat (documents, data,
+    images, code, browser downloads), from plain chats and autonomous sessions
+    alike, grouped by chat, newest first, with a link back to the chat. Nothing is
+    copied: the list is an index of the files where they were saved. A chat in the
+    trash keeps its artifacts here until it is erased for good.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
   docs, memory, graph, uploads, recap, project, usage, face and crew
@@ -523,11 +528,11 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Data |
+| ⌘, | Settings: Model, Usage, Permissions, Integrations, Texting, Memory, Appearance, System access, Advanced |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
-A view turned off in Settings → Modules keeps its shortcut, which then offers
+A view turned off in Settings → Appearance keeps its shortcut, which then offers
 to turn the view back on instead of opening it.
 
 ## How a reply is built

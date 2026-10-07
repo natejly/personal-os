@@ -77,7 +77,7 @@ CAL_POLL_S = 300.0
 CAL_LOOKAHEAD_S = 24 * 3600.0
 CAL_SEEN_KEEP = 200
 # What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
-# target. A scheduled desk may plan first or propose at the end, never 'ask' (cards each change while nobody watches).
+# target. A scheduled desk may plan first or propose at the end, never 'ask' (it works without a plan, and nobody is watching).
 TARGETS = ("run", "desk")
 DESK_JOB_AUTONOMY = ("plan", "propose")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.

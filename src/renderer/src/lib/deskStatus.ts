@@ -4,7 +4,7 @@ import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 /** Words and clocks for a desk's state, shared by the chat strip, the crew widget and the Agent inbox. */
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
   { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
-  { value: 'ask', label: 'Ask as it goes', hint: 'No plan up front; every consequential tool still shows a card.' },
+  { value: 'ask', label: 'Ask as it goes', hint: 'No plan up front; risky actions follow the permission mode.' },
   { value: 'propose', label: 'Work and propose', hint: 'Works in its own folder and brings the result back for review.' }
 ]
 

@@ -2141,8 +2141,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         delegation_forced = False  # set once the reply's own tool use has to turn into delegating (see the round loop)
 
         def _front() -> bool:
-            """A plain chat (or wake) turn that can delegate: not a desk, not a scheduled run, and delegate is on."""
-            return not desk_id and not proposal_only(run) and modes.get("delegate") in ("on", "ask")
+            """A plain chat, an autonomous chat (an 'ask' desk) or a wake turn that can delegate: not a scheduled/background run,
+            not a desk that plans or proposes (its approved steps are its own to carry out), and delegate is on."""
+            return not proposal_only(run) and autonomy in ("", "ask") and modes.get("delegate") in ("on", "ask")
 
         def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
             out = _schemas_all(withheld)
@@ -2179,7 +2180,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if desk_id:
                 m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own autonomy)
                 m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
-            m = workers_mod.arrange_tools(m, not desk_id and not proposal_only(run))  # delegate replaces agent_spawn in a plain chat turn
+            m = workers_mod.arrange_tools(m, not proposal_only(run) and autonomy in ("", "ask"))  # delegate replaces agent_spawn in a chat or desk turn
             # Past toolDeferAbove the model gets the core tools, what earlier searches loaded and tool_search; the
             # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
             # the run_python bridge, agent_spawn and a plan's step check read every enabled tool from it.
@@ -2236,7 +2237,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (NO_EMOJI_HINT, RENDER_HINT, tools_hint,
                  FRONT_AGENT_HINT if front_hint else PROACTIVE_HINT if tool_schemas and not desk and not proposal_only(run) else "",
-                 _agents_hint({} if front_hint else modes), JOB_HINT if proposal_only(run) else "",
+                 _agents_hint(modes, front=front_hint), JOB_HINT if proposal_only(run) else "",
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
@@ -2272,7 +2273,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
             """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
-            hist = expand_commands(hist, command_store, skills, _mentionable())  # `/name args` turns carry their filled command (commands.py)
+            hist = expand_commands(hist, command_store, skills, _mentionable(), front=front_hint)  # `/name args` turns carry their filled command (commands.py)
             head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
                 else [{"role": "system", "content": system}] + hist
             return head + [dict(n) for n in run_notes]
@@ -2558,7 +2559,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "assistant_message", {**am, "context_used": cite_slim(used), "trace": tracer.spans}
                 for um in steered:
                     if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
-                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable())})})
+                        messages.append({"role": "user", "content": convos.for_model({**um, "content": expand_command(um["content"], command_store, skills, _mentionable(), front=front_hint)})})
                     user_text = um["content"]
                     user_msg_id = tool_ctx["user_message_id"] = um["id"]
                     run_user_texts.append(um["content"])
@@ -2715,8 +2716,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 buf.append(workers_mod.ACK_LINE + "\n")
                 turn["content"] = workers_mod.ACK_LINE
                 yield "delta", {"id": am["id"], "text": workers_mod.ACK_LINE + "\n"}
-            # Read-only agent_spawn calls of this round start together; never in plan mode or when every change cards.
-            subagent_mgr.prestart(calls, tool_ctx, start=not planning and autonomy != "ask" and not stop.is_set())
+            # Read-only agent_spawn calls of this round start together; never in plan mode.
+            subagent_mgr.prestart(calls, tool_ctx, start=not planning and not stop.is_set())
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
@@ -2835,11 +2836,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # consume nothing. A web fetch is included: its address can carry what was read.
                         # Checked before any claim, because a step burnt on a call the
                         # user then denies can never be reclaimed.
-                        mode, forced, hard_forced = "ask", True, True
-                    elif autonomy == "ask" and danger in MUTATING:
-                        # 'Ask as it goes': a desk that does not plan first cards every change instead,
-                        # one at a time. Forced, so the card cannot buy a standing grant that would
-                        # quietly switch the mode back off.
                         mode, forced, hard_forced = "ask", True, True
                 # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
@@ -3682,12 +3678,13 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
 
 
 def _answered(desk: dict[str, Any], run: Run, error: str | None = None) -> bool:
-    """A turn of an `ask`-autonomy desk that only answered: it ended on its own (no stop, no error), made
-    no tool call at all (not just none that worked), consumed no plan step, and the desk has no plan. That is a quick
-    question, not unfinished work: the desk settles done with no nudge and no self-review, and the chat's next message
-    relaunches it like any other. A continuation turn (a nudge, a wake, a resume) is not a plain answer: it picks up work."""
+    """A turn of an `ask`-autonomy desk that answered: it ended on its own (no stop, no error), consumed no plan
+    step, and the desk has no plan. With the front-agent stance the reply answers first and hands longer work to
+    workers, whose reports wake the desk, so a reply that ended is the answer whatever tools it used: the desk
+    settles done with no nudge and no self-review, and the user's next message relaunches it. A continuation turn
+    (a nudge, a resume) is not a plain answer: it picks up work."""
     return (desk.get("autonomy") == "ask" and not str(run.input.get("content") or "").startswith(tuple(CONTINUE_MESSAGES.values())) and not desk.get("plan_id") and not error and not run.error and not run.stop.is_set()
-            and run.partial is None and run.tool_calls == 0 and run.tool_ok == 0 and run.steps_consumed == 0
+            and run.partial is None and run.steps_consumed == 0
             and desk.get("status") in ("working", "planning"))
 
 
@@ -3781,7 +3778,7 @@ def _over_live_cap() -> bool:
     return desks.live_count() >= cap
 
 
-def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...]) -> Run | dict[str, Any] | None:
+def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...], wake: dict[str, Any] | None = None) -> Run | dict[str, Any] | None:
     """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
     the chain to a supervisor task. None means the claim was lost or a run is already live. Over
     deskMaxLive the desk joins the queue instead and the queued row comes back (a dict, status
@@ -3804,9 +3801,9 @@ def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ..
     claimed = desks.claim_run(desk_id, from_statuses)
     if not claimed:
         return None
-    body = ChatIn(content=(content or "").strip() or claimed["brief"])
+    body = ChatIn(content=(content or "").strip() or claimed["brief"], wake=wake)
     run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
-                    desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content})
+                    desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content, **({"wake": wake} if wake else {})})
     _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
     return run
 
@@ -3994,6 +3991,15 @@ async def _wake_conversation(conv_id: str) -> None:
             workers_mgr.mark_delivered(r["run_id"] for r in pending)
         return
     text, wake = workers_mod.build_wake(_wake_reports(pending))
+    if desk_id := row["settings"].get("deskId"):
+        # A desk-bound chat is woken through its desk, so the turn runs under the desk runtime, supervisor and settle.
+        started = _launch_desk(desk_id, text, MESSAGE_FROM, wake=wake)
+        if started is None:  # a run is still live on the conversation (its learn tail), or the desk is in no status that takes a message
+            _wake_waiting.add(conv_id)
+        elif isinstance(started, Run):
+            _wake_inflight.update(wake["ids"])
+            started.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
+        return
     body = ChatIn(content=text, wake=wake)
     _wake_inflight.update(wake["ids"])
     run = bus.start(conv_id, lambda r: _run_chat(r, body), input=body.model_dump())
@@ -4183,17 +4189,17 @@ def _mentionable() -> list[str]:
     return [*(n for n, r in BUILTIN_ROLES.items() if not r.hidden), *(d["name"] for d in agent_defs.list(approved_only=True) if not d["hidden"])]
 
 
-def _agents_hint(modes: dict[str, str]) -> str:
+def _agents_hint(modes: dict[str, str], front: bool = False) -> str:
     """The user's approved agents, by description, so the reply can delegate to the right one. Stable across turns (it
     changes only when a definition does), so it sits in the cacheable prefix beside tools_hint."""
-    if modes.get("agent_spawn") not in ("on", "ask"):
+    if modes.get("delegate" if front else "agent_spawn") not in ("on", "ask"):
         return ""
     rows = [d for d in agent_defs.list(approved_only=True) if not d["hidden"]]
     if not rows:
         return ""
     lines = "\n".join(f"- {d['name']}: {' '.join(str(d['description']).split())[:200]}" for d in rows[:40])
     return ("## Your agents\nBesides researcher, worker and reviewer, these agents exist; hand a task to one with "
-            "agent_spawn role=<name> when its description fits:\n" + lines)
+            + ("delegate agent=<name>" if front else "agent_spawn role=<name>") + " when its description fits:\n" + lines)
 
 
 # ---------------- the crew tree (Spaces' crew widget) ----------------
@@ -8447,9 +8453,9 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
         convos.delete(conv["id"])
         raise HTTPException(400, f"Could not copy the inputs: {e}") from e
     # Marked here rather than in Desks: `deskId` is what keeps the conversation out of Recent
-    # chats. planMode follows the autonomy the user picked — 'ask as it goes' cards each change
-    # instead of planning first, so writing 'always' for it would make the two modes identical and
-    # the chat view's own plan toggle a lie. _chat_stream reads the desk's autonomy, not this, so a
+    # chats. planMode follows the autonomy the user picked — 'ask as it goes' works from the first
+    # turn and its calls follow the permission mode, so planMode is "off" for it; writing 'always'
+    # would make it a plan desk and the chat view's own plan toggle a lie. _chat_stream reads the desk's autonomy, not this, so a
     # later change of autonomy still takes effect; this keeps the stored setting honest.
     convos.update(conv["id"], {"settings": {"deskId": desk["id"],
                                             "planMode": "off" if desk["autonomy"] == "ask" else "always"}})

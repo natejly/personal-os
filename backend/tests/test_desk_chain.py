@@ -59,8 +59,10 @@ def test_guards() -> None:
 
 
 def test_ask_desk_without_a_plan_is_working() -> None:
-    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of(None, tools=1)) == "nudge",
-          "claim_run leaves a plan-less ask desk in `planning`; it still chains")
+    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of(None, steps=1)) == "nudge",
+          "claim_run leaves a plan-less ask desk in `planning`; a turn that consumed a plan step still chains")
+    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of(None, tools=1)) is None,
+          "an ask desk's reply that ended is the answer, whatever tools it used: no nudge")
     check(_chain_kind({**BASE, "status": "planning", "autonomy": "plan"}, run_of(None, tools=1)) is None,
           "a plan-autonomy desk still drafting its plan does not")
 

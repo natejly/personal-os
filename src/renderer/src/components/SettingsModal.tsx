@@ -528,9 +528,9 @@ export default function SettingsModal(): JSX.Element {
               </AdvGroup>
 
               <AdvGroup id="approvals" title="Approvals" {...gp}>
-                <p className="muted small">The permission mode is under Permissions. These are overrides on top of it. A chat, agent or project can narrow or widen a tool for itself; a deny rule and the always-ask list beat all of them.</p>
+                <p className="muted small">Overrides on top of the permission mode. A deny rule and the always-ask list beat everything else.</p>
                 <h4>Per-tool access</h4>
-                <p className="muted small"><b>On</b> runs automatically, <b>Ask</b> pauses the reply for your approval, <b>Off</b> hides the tool.</p>
+                <p className="muted small"><b>On</b> runs, <b>Ask</b> pauses for you, <b>Off</b> hides the tool.</p>
                 <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
                 <h4>Always ask first</h4>
                 <p className="muted small">Cards that appear every time, in every mode except Allow everything. Keep what you cannot take back here.</p>

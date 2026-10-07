@@ -104,7 +104,7 @@ def register(tb: Any) -> None:
 
     spec = ToolSpec(
         "send_files",
-        "Show the user a screenshot, chart or file: pass document ids (from screenshot, generate_image or an upload) or paths on this Mac, and an "
+        "Show the user a screenshot, chart or file: pass document ids (from screenshot, browser_manage(screenshot), generate_image or an upload) or paths on this Mac, and an "
         "optional short text. Up to 20 files, 50 MB each. In the app the files appear on your reply. In a Telegram chat they are also delivered "
         "to the user's phone at once as a progress update: send one at meaningful milestones, not every step, and attach a screenshot when it "
         "shows more than words. Files always ride on the final reply in the app.",

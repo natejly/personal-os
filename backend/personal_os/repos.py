@@ -363,7 +363,7 @@ class Conversations:
     def for_model(self, row: dict[str, Any]) -> str:
         """A message dict's content as the model reads it, attachments inlined (see model_content)."""
         atts = row.get("attachments")
-        if not atts:
+        if not atts or row.get("role") == "assistant":
             return row.get("content") or ""
         with self.db.tx() as c:
             return self.model_content(c, row.get("content") or "", json.dumps(atts))
@@ -469,7 +469,7 @@ class Conversations:
 
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
                        trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
-                       outcome: str | None = None, error_kind: str | None = None) -> None:
+                       outcome: str | None = None, error_kind: str | None = None, attachments: list[dict[str, Any]] | None = None) -> None:
         if context_used and context_used.get("chunks"):
             # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
             # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
@@ -480,9 +480,9 @@ class Conversations:
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "
-                "outcome=COALESCE(?, outcome), error_kind=COALESCE(?, error_kind) WHERE id=?",
+                "outcome=COALESCE(?, outcome), error_kind=COALESCE(?, error_kind), attachments=COALESCE(?, attachments) WHERE id=?",
                 (content, error, json.dumps(context_used) if context_used else None, json.dumps(tool_events) if tool_events else None,
-                 json.dumps(trace) if trace else None, reasoning or None, outcome, error_kind, mid),
+                 json.dumps(trace) if trace else None, reasoning or None, outcome, error_kind, json.dumps(attachments) if attachments else None, mid),
             )
 
     def set_followups(self, mid: str, items: list[str]) -> None:
@@ -559,12 +559,12 @@ class Conversations:
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT role, content, attachments FROM messages WHERE conversation_id=?\n"
-                "AND (content != '' OR attachments IS NOT NULL)\n"
+                "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL))\n"  # an assistant row's attachments are files it sent, not text to read
                 "AND superseded_at IS NULL\n"
                 "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-            return [{"role": r["role"], "content": self.model_content(c, r["content"], r["attachments"])} for r in rows]
+            return [{"role": r["role"], "content": self.model_content(c, r["content"], r["attachments"] if r["role"] == "user" else None)} for r in rows]
 
     def history_rows(self, conv_id: str) -> list[dict[str, Any]]:
         """history() with the ids and timestamps compaction needs to say where a summary ends, and the tool events
@@ -572,7 +572,7 @@ class Conversations:
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT id, role, content, created_at, tool_events, attachments FROM messages WHERE conversation_id=?\n"
-                "AND (content != '' OR attachments IS NOT NULL OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
+                "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL) OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
                 "AND superseded_at IS NULL\n"
                 "ORDER BY created_at, rowid",
                 (conv_id,),
@@ -585,7 +585,8 @@ class Conversations:
                 except ValueError:
                     ev = None
                 d["tool_events"] = ev if isinstance(ev, list) else None
-                d["content"] = self.model_content(c, d["content"], d.pop("attachments"))
+                atts = d.pop("attachments")
+                d["content"] = self.model_content(c, d["content"], atts if d["role"] == "user" else None)
                 out.append(d)
         return out
 

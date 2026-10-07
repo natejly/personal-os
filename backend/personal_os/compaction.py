@@ -101,6 +101,9 @@ def estimate_messages(msgs: list[dict[str, Any]]) -> int:
     total = 0
     for m in msgs:
         c = m.get("content")
+        if isinstance(c, list):  # a picture is a flat ~1k tokens, not the length of its base64
+            total += 1000 * sum(1 for p in c if isinstance(p, dict) and p.get("type") == "image_url")
+            c = [p for p in c if not (isinstance(p, dict) and p.get("type") == "image_url")]
         if not isinstance(c, str):
             c = json.dumps(c) if c is not None else ""
         total += estimate_tokens(c) + 4 if c else 4

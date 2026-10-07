@@ -34,6 +34,7 @@ import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 import { stepZoom } from './lib/zoom'
+import { inputChip } from './lib/deskFiles'
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 
 /**
@@ -1041,14 +1042,16 @@ export const useStore = create<State>((set, get) => {
   /** A message for a chat working autonomously: it goes to its desk, which steers a live turn or wakes the next one,
    *  and attached files are copied into the desk's inputs/ folder rather than inlined. */
   const sendToDesk = async (convId: string, deskId: string, text: string, ids: string[] | undefined, key: number): Promise<boolean> => {
+    let added: string[] = []
     try {
-      if (ids) await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))
+      if (ids) added = (await api.cowork.desks.addInputs(deskId, ids.map((d) => ({ kind: 'document' as const, id: d })))).added.map((a) => a.path)
     } catch (e) {
       get().toast((e as Error).message, 'error')
       dropPending(convId, key)
       return false
     }
-    const ok = await get().messageDesk(deskId, text.trim() || 'I added files to your inputs/ folder.')
+    // The files show as a chip under whatever the user typed, rather than as words put in their mouth.
+    const ok = await get().messageDesk(deskId, [text.trim(), inputChip(added)].filter(Boolean).join('\n\n'))
     dropPending(convId, key)
     return ok
   }

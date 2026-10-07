@@ -36,7 +36,7 @@ PROVIDERS: list[dict[str, Any]] = [
      "note": "Runs on this Mac; pull the model first (ollama pull llama3.2).",
      "rerankModel": ""},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "kimi-k3", "deepseek-v4-flash"],
+     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "glm-5.3", "kimi-k3", "deepseek-v4-flash"],
      "note": "Your own proxy; model names are whatever its config defines.",
      "rerankModel": "qwen3-reranker-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
@@ -50,17 +50,48 @@ def get(provider_id: str | None) -> dict[str, Any] | None:
     return BY_ID.get(provider_id or "")
 
 
-# Grain's default chat model, by base name: each preset spells it its own way (accounts/fireworks/models/ember-1 on Fireworks,
-# ember-1 behind the LiteLLM proxy), and a provider that does not list it keeps its own default.
-DEFAULT_CHAT_MODEL = "ember-1"
+# Three model tiers, spelled the way each preset names them. A preset with no row (ollama, custom) uses its defaultModel.
+TIER_DEFAULTS: dict[str, dict[str, str]] = {
+    "fireworks": {"high": "accounts/fireworks/models/ember-1", "medium": "accounts/fireworks/models/glm-5p3",
+                  "low": "accounts/fireworks/models/deepseek-v4p1-flash"},
+    "litellm": {"high": "ember-1", "medium": "glm-5.3", "low": "deepseek-v4-flash"},
+    "openai": {"high": "gpt-5", "medium": "gpt-5-mini", "low": "gpt-5-nano"},
+    "anthropic": {"high": "claude-opus-5-5", "medium": "claude-sonnet-5-5", "low": "claude-haiku-4-5-20251001"},
+    "openrouter": {"high": "anthropic/claude-sonnet-5-5", "medium": "openai/gpt-5-mini", "low": "google/gemini-2.5-flash"},
+}
+
+# Which tier each kind of work runs on: cost against quality. The one place to change it.
+#   high   - what the user reads and what acts: chat and agent turns, planning, drafting skills and agents.
+#   medium - quality matters but the user does not watch it: Auto's fast path (still a visible reply), the auto-review
+#            of tool calls, compaction and recaps (a bad summary poisons later turns), memory consolidation.
+#   low    - high-volume and checkable: memory and graph extraction, auto-learn, style learning, titles, follow-ups,
+#            the thinking summariser.
+# `settings()` in app.py resolves the legacy keys from these: a blank extractionModel is the low tier, a blank fastModel
+# the medium tier (an explicit saved value still wins). Medium sites call tier_model(cfg, "medium") directly.
+TASK_TIERS: dict[str, str] = {
+    "chat": "high", "planning": "high", "draft_skill": "high", "draft_agent": "high",
+    "auto_route_fast": "medium", "auto_review": "medium", "compaction": "medium", "recap": "medium", "consolidation": "medium",
+    "extraction": "low", "auto_learn": "low", "style": "low", "title": "low", "followups": "low", "thinking_summary": "low",
+}
+for _p in PROVIDERS:  # shipped to the Settings pickers as the blank-state placeholder
+    _p["tiers"] = TIER_DEFAULTS.get(_p["id"], {})
+TIERS = ("high", "medium", "low")
+TIER_KEYS = {"high": "modelHigh", "medium": "modelMedium", "low": "modelLow"}
+
+
+def tier_model(settings: dict[str, Any], tier: str) -> str:
+    """The model for a tier: the saved one, else the active provider's default for it, else the chat model."""
+    saved = str(settings.get(TIER_KEYS[tier]) or "").strip()
+    if saved:
+        return saved
+    p = get(effective(settings))
+    return (TIER_DEFAULTS.get(p["id"], {}).get(tier) if p else None) or str(settings.get("defaultModel") or (p or {}).get("defaultModel") or "")
 
 
 def default_model(settings: dict[str, Any]) -> str:
-    """The chat model when none is saved: Ember 1 as the active provider names it, else that provider's own default."""
+    """The chat model when none is saved: the high tier for the active provider, else that provider's own default."""
     p = get(effective(settings))
-    if not p:
-        return ""
-    return next((m for m in p["models"] if m.rsplit("/", 1)[-1] == DEFAULT_CHAT_MODEL), p["defaultModel"])
+    return tier_model({**settings, "defaultModel": ""}, "high") if p else ""
 
 
 def rerank_model(settings: dict[str, Any]) -> str:

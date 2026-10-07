@@ -248,10 +248,10 @@ def query_text(case: dict[str, Any]) -> str:
 
 
 async def run_case(idx: MemoryIndex, settings: dict[str, Any], case: dict[str, Any], now: datetime) -> list[str]:
-    """Memory ids for one case, best first. `now` is the fixed eval clock (unused until retrieval reads a date window)."""
+    """Memory ids for one case, best first. `now` is the fixed eval clock that date phrases resolve against."""
     q = query_text(case)
     qvec = await idx.query_vec(settings, q)
-    hits = await idx.search_reranked(case.get("project_id"), q, qvec, limit=memory_limits.CONTEXT_HITS, settings=settings)
+    hits = await idx.search_reranked(case.get("project_id"), q, qvec, limit=memory_limits.CONTEXT_HITS, settings=settings, now=now)
     return [m["id"] for m in hits]
 
 

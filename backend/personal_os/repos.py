@@ -204,7 +204,7 @@ class Conversations:
                 scope += f" AND c.id NOT IN ({','.join('?' * len(ex))})"
                 sargs = [*sargs, *ex]
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
-                "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL AND COALESCE(m.kind,'') != 'wake' "
+                "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL AND m.kind IS NULL "
                 "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
                 "AND COALESCE(json_extract(c.settings,'$.private'),0)=0" + scope)
         cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "

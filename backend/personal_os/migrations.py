@@ -396,6 +396,21 @@ def _allow_all_connections_for_existing(c: sqlite3.Connection) -> None:
         permissions._write(c, {"allowAllConnections": True})
 
 
+# Frozen prefixes of the backend's own desk messages that were stored as plain user rows before they carried a kind.
+_INTERNAL_PREFIXES_BEFORE_KIND = (("nudge", "You ended your reply without calling"), ("continue", "Continuing this desk."),
+                                  ("resume", "Resuming this desk after an interruption"),
+                                  ("handoff", "The user has asked you to carry on with the task in this conversation"))
+
+
+def _internal_message_kinds(c: sqlite3.Connection) -> None:
+    """Hide desk nudges, continues, resumes and hand-offs that leaked into transcripts as the user's words: they get a kind
+    (the model still reads them; the transcript, search and exports skip them). Nothing is deleted."""
+    if "kind" not in {r[1] for r in c.execute("PRAGMA table_info(messages)")}:
+        return
+    for kind, prefix in _INTERNAL_PREFIXES_BEFORE_KIND:
+        c.execute("UPDATE messages SET kind=? WHERE role='user' AND kind IS NULL AND substr(content, 1, ?) = ?", (kind, len(prefix), prefix))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -423,6 +438,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (23, "messages_kind", _messages_kind),
     (24, "drop_nav_placement", _drop_nav_placement),
     (25, "allow_all_connections_for_existing", _allow_all_connections_for_existing),
+    (26, "internal_message_kinds", _internal_message_kinds),
 ]
 
 

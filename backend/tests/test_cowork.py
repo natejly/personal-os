@@ -43,7 +43,6 @@ from personal_os import llm  # noqa: E402
 from personal_os.app import (AUTH_TOKEN, _desk_tasks, _missed_wake, _should_chain, app,  # noqa: E402
                              bus, db, plans, desks, docs, google, run_store, todos, toolbox, workspace)
 from personal_os.app import events as topic  # noqa: E402
-from personal_os.plans import PLAN_SAFE_DANGER  # noqa: E402
 from personal_os.cowork import LIVE, NEEDS_YOU, checklist_items  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
@@ -214,7 +213,7 @@ def test_a_desk_is_a_conversation_the_chat_list_hides() -> None:
     did, cid = made["desk"]["id"], made["conversation_id"]
     conv = j("GET", f"/conversations/{cid}")
     check(conv["settings"]["deskId"] == did, "the conversation carries the desk it belongs to")
-    check(conv["settings"]["planMode"] == "always", "and a desk always plans its first run (§4.1)")
+    check(made["desk"]["autonomy"] == "plan", "and a desk plans its first run by default (§4.1)")
     check(made["desk"]["status"] == "draft" and "run_id" not in made, "start=false creates nothing to watch")
     check(made["desk"]["workspace"] == f"cowork/{did}", f"the row stores a relative root, got {made['desk']['workspace']}")
 
@@ -234,8 +233,7 @@ def test_ask_as_it_goes_reviews_each_change_instead_of_planning_first() -> None:
            {"text": "Done."})
     made = make_desk("Write the note", autonomy="ask")
     did, cid = made["desk"]["id"], made["conversation_id"]
-    check(j("GET", f"/conversations/{cid}")["settings"]["planMode"] == "off",
-          "an 'ask' desk does not start its reply in planning")
+    check("planMode" not in j("GET", f"/conversations/{cid}")["settings"], "the chat stores no plan mode of its own")
     row = card(did, "desk_write_file")
     check(row["tool"] == "desk_write_file", f"the change itself is the card, got {row['tool']}")
     check(not row["forced"], "not forced: it follows the permission mode, so a grant or allow rule can lift it")
@@ -1004,36 +1002,13 @@ def test_desk_changes_reach_the_app_topic() -> None:
                "a desk_status event for the rename on /events")
 
 
-def _chat(plan_mode: str) -> str:
-    cid = j("POST", "/conversations", {"title": f"plan {plan_mode}"})["id"]
-    j("PATCH", f"/conversations/{cid}", {"settings": {"planMode": plan_mode}})
-    return cid
+def _chat() -> str:
+    return j("POST", "/conversations", {"title": "chat"})["id"]
 
 
 def _chat_turn(cid: str, text: str) -> None:
     j("POST", f"/conversations/{cid}/chat", {"content": text})
     wait_until(lambda: not bus.live(cid), "the chat reply to end")
-
-
-def test_chat_plan_mode_always_offers_only_reading_and_the_plan() -> None:
-    script({"text": "ok"})
-    _chat_turn(_chat("always"), "add a todo")
-    offered = SCRIPT["tools"][0]
-    check(PLAN_TOOL in offered, "the plan tool is offered")
-    check(all(toolbox.specs[n].danger in PLAN_SAFE_DANGER for n in offered if n in toolbox.specs),
-          f"and nothing consequential, got {[n for n in offered if toolbox.specs.get(n) and toolbox.specs[n].danger not in PLAN_SAFE_DANGER]}")
-    check("## Plan mode is on" in _system_text(SCRIPT["messages"][0]), "and the model is told why")
-    script({"text": "ok"})
-    _chat_turn(_chat("off"), "add a todo")
-    check("todo_add" in SCRIPT["tools"][0], "with plan mode off the same chat is offered writes")
-
-
-def test_chat_plan_mode_auto_turns_on_at_the_first_change() -> None:
-    script({"calls": [call("todo_add", text="Buy milk")]}, {"text": "I will propose a plan."})
-    _chat_turn(_chat("auto"), "add a todo")
-    check("todo_add" in SCRIPT["tools"][0], "auto offers everything until something consequential is reached for")
-    check("planning" in _tool_text(SCRIPT["messages"][1]), f"the first write is refused with the planning message, got {_tool_text(SCRIPT['messages'][1])[:300]!r} / {len(SCRIPT['messages'])}")
-    check("todo_add" not in SCRIPT["tools"][1], "and from the next round only reading and the plan are offered")
 
 
 def test_a_planning_desk_is_not_offered_desk_done_or_desk_start() -> None:
@@ -1055,14 +1030,14 @@ def test_a_chat_is_offered_desk_start_whatever_views_are_hidden() -> None:
     settings_patch(hiddenViews=["cowork"])
     try:
         script({"text": "ok"})
-        _chat_turn(_chat("off"), "start a desk")
+        _chat_turn(_chat(), "start a desk")
         check("desk_start" in SCRIPT["tools"][0], "a started desk lists among chats, so no hidden view withholds desk_start")
     finally:
         settings_patch(hiddenViews=list(llm.DEFAULT_SETTINGS["hiddenViews"]))
 
 
 def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
-    cid = _chat("auto")
+    cid = _chat()
     script({"text": "Sure, the vendors are A and B."})
     _chat_turn(cid, "Compare vendor A and vendor B")
     before = {c["id"] for c in j("GET", "/conversations?include_desks=true")}
@@ -1073,7 +1048,6 @@ def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
     check({c["id"] for c in j("GET", "/conversations?include_desks=true")} == before, "and no new conversation is made")
     conv = j("GET", f"/conversations/{cid}")
     check(conv["settings"]["deskId"] == did, "settings.deskId binds the chat to its desk")
-    check(conv["settings"]["planMode"] == "auto", "the chat's own plan mode is left alone")
     check(made["desk"]["brief"] == "Compare vendor A and vendor B", "the brief is what the user last asked")
     quiet(did)
     firsts = [m for m in SCRIPT["messages"] if m]
@@ -1220,8 +1194,7 @@ TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_pending_plan_shows_in_the_desk,
          test_pause_and_stop_refuse_a_finished_desk,
          test_desk_changes_reach_the_app_topic,
-         test_chat_plan_mode_always_offers_only_reading_and_the_plan,
-         test_chat_plan_mode_auto_turns_on_at_the_first_change]
+]
 
 
 def _loose_ends() -> Iterator[str]:
@@ -1245,7 +1218,7 @@ if __name__ == "__main__":
     # except in the test that is about it, and the chat approval timeout is off everywhere: every
     # card here is decided by the test that opened it, and a timer firing first would be a race.
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "planMode": "off",
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "",
                                       "parkAfterSeconds": 0, "approvalWaitSeconds": 0, "deskMaxLive": 4})
         for t in TESTS:
             try:

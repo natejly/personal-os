@@ -107,17 +107,12 @@ def card(rid: str) -> dict[str, Any]:
     return wait_until(lambda: store.approvals("pending", run_id=rid), "the question card")[0]
 
 
-def test_offered_in_chat_and_while_planning_and_desk_tools_are_not() -> None:
+def test_offered_in_chat_and_desk_tools_are_not() -> None:
     ROUNDS.append(["hi"])
     _, rid = start()
     finished(rid)
     assert "ask_user" in OFFERED[0]
     assert not {"desk_ask", "desk_done", "desk_write_file"} & OFFERED[0], "desk workspace tools stay inside desks"
-    ROUNDS.append(["hi"])
-    _, rid = start({"planMode": "always"})
-    finished(rid)
-    assert {"ask_user", "propose_plan"} <= OFFERED[1], "plan mode can clarify before it proposes"
-    assert "gmail_send" not in OFFERED[1]
 
 
 def test_an_answer_on_the_card_comes_back_as_the_result() -> None:
@@ -184,7 +179,7 @@ def test_a_plan_card_that_receives_a_steer_is_still_a_deny() -> None:
     args = {"title": f"steered plan {time.time()}"}
     plan = {"title": "Do it", "steps": [{"tool": "todo_add", "arguments": args}]}
     ROUNDS.extend([{"tool_calls": [{"id": "p0", "name": "propose_plan", "arguments": json.dumps(plan)}]}, ["ok"]])
-    cid, rid = start({"planMode": "always"})
+    cid, rid = start()
     row = card(rid)
     assert row["tool"] == "propose_plan"
     j("POST", f"/conversations/{cid}/steer", {"content": "Option B please"})

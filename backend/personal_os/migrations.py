@@ -454,6 +454,46 @@ def _chat_links(c: sqlite3.Connection) -> None:
         c.execute(stmt)
 
 
+def _plan_mode_into_plan_first(c: sqlite3.Connection) -> None:
+    """The composer's Plan toggle is gone; Mode → Plan first (a desk with autonomy 'plan') covers it. A chat that planned
+    (its own planMode 'auto'/'always', or none of its own under such a global default) gets a draft Plan-first desk bound
+    to it, so its next message plans first. Every stored planMode, per chat and global, is then dropped."""
+    from . import cowork, permissions
+    from .db import new_id, now
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'").fetchone():
+        return
+    row = c.execute("SELECT value FROM settings WHERE key = ?", (permissions.KEY,)).fetchone()
+    perms = permissions._json(row[0]) if row else None
+    default = perms.get("planMode") if isinstance(perms, dict) else None
+    planning = [r[0] for r in c.execute(
+        "SELECT id FROM conversations WHERE COALESCE(json_extract(settings, '$.planMode'), ?) IN ('auto', 'always') "
+        "AND json_extract(settings, '$.deskId') IS NULL AND json_extract(settings, '$.job_id') IS NULL", (default,))]
+    if planning:
+        stmt = ""
+        for line in cowork.SCHEMA.splitlines(keepends=True):  # Desks() creates it at startup, after migrations
+            stmt += line
+            if sqlite3.complete_statement(stmt):
+                c.execute(stmt)
+                stmt = ""
+    t = now()
+    for cid in planning:
+        if c.execute("SELECT 1 FROM desks WHERE conversation_id = ?", (cid,)).fetchone():
+            continue  # a chat that worked autonomously before keeps its desk row; it is rebound below
+        did = new_id()
+        c.execute("INSERT INTO desks(id, conversation_id, project_id, title, brief, autonomy, workspace, created_at, updated_at) "
+                  "SELECT ?, id, project_id, title, ?, 'plan', ?, ?, ? FROM conversations WHERE id = ?",
+                  (did, "Carry on with this chat", f"{cowork.WORKSPACE_ROOT}/{did}", t, t, cid))
+    for cid in planning:
+        c.execute("UPDATE desks SET autonomy = 'plan', archived = 0 WHERE conversation_id = ?", (cid,))
+        c.execute("UPDATE conversations SET settings = json_set(settings, '$.deskId', (SELECT id FROM desks WHERE conversation_id = ?)) "
+                  "WHERE id = ?", (cid, cid))
+    c.execute("UPDATE conversations SET settings = json_remove(settings, '$.planMode') WHERE json_extract(settings, '$.planMode') IS NOT NULL")
+    if isinstance(perms, dict) and "planMode" in perms:
+        perms.pop("planMode")
+        c.execute("UPDATE settings SET value = ? WHERE key = ?", (json.dumps(perms), permissions.KEY))
+    c.execute("DELETE FROM settings WHERE key = 'planMode'")  # a legacy top-level row
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -487,6 +527,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (29, "drop_tts_settings", _drop_tts_settings),
     (30, "drop_private_chats", _drop_private_chats),
     (31, "chat_links", _chat_links),
+    (32, "plan_mode_into_plan_first", _plan_mode_into_plan_first),
 ]
 
 

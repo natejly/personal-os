@@ -4,7 +4,7 @@ import { detectSlash, filterCommands } from '../features/notes/slash'
 /**
  * The chat composer's slash commands: built-ins beside the user's saved commands (commands.py).
  *
- * A `client` built-in acts in the UI and is never sent (`/compact`, `/skills`, `/commands`, `/plan`). The
+ * A `client` built-in acts in the UI and is never sent (`/compact`, `/skills`, `/commands`). The
  * others are sent as typed and the backend fills them under the turn (`/skill`, `/schedule`, `/loop`), so
  * the stored message keeps what the user wrote and nothing runs until they send.
  */
@@ -15,8 +15,7 @@ export const BUILTIN: { name: string; args?: string; hint: string; client?: bool
   { name: 'research', args: '<question>', hint: 'Plan, search in parallel, and answer with sources' },
   { name: 'compact', args: '[focus]', hint: 'Summarize the earlier messages of this chat', client: true },
   { name: 'skills', hint: 'Open Library → Skills', client: true },
-  { name: 'commands', hint: 'Open Library → Automations', client: true },
-  { name: 'plan', hint: 'Cycle plan mode: off → auto → always', client: true }
+  { name: 'commands', hint: 'Open Library → Automations', client: true }
 ]
 
 /** The menu shows at most this many rows: the built-ins plus a few saved commands. */

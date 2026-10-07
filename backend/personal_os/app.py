@@ -2392,7 +2392,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
                 if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
                     break
-                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, conv=conv_id,
+                proots, pcwd = shell_tool.perm_where(toolbox, sim) if name == "shell_run" else ([], None)
+                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,
                                          doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
                 if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
                     break
@@ -2883,9 +2884,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 perm = permrules.Resolution(mode, forced)
                 pre_mode = mode  # what the call would have done before rules and session grants (approval_log below)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
+                    # A shell command is judged from where it will start, and the desk's own folder is not Grain's data.
+                    proots, pcwd = shell_tool.perm_where(toolbox, tool_ctx) if c["name"] == "shell_run" else ([], None)
                     perm = permrules.resolve(
                         c["name"], args, mode, forced,
-                        rules=perm_rules, conv=conv_id,
+                        rules=perm_rules, conv=conv_id, roots=proots, cwd=pcwd,
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode
                     if perm.kind == "doom_loop":

@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any
 
-from . import llm, redact
+from . import llm, providers, redact
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +31,7 @@ def clean(raw: str) -> str:
 
 
 def low_model(cfg: dict[str, Any], model: str) -> str:
-    # One line to swap for the low-tier lookup.
-    return str(cfg.get("modelLow") or cfg.get("extractionModel") or model)
+    return providers.tier_model(cfg, "low") or model
 
 
 async def summarise(cfg: dict[str, Any], model: str, chunk: str) -> str:

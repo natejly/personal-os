@@ -1,4 +1,4 @@
-"""Reasoning effort: new chats start at low, and Kimi K3 only hears a value it accepts.
+"""Reasoning effort: new chats start at medium, and Kimi K3 only hears a value it accepts.
 
 K3 rejects medium and xhigh, and a missing field is its own max. The dropdown can still say
 Medium; the wire value for that model is high.
@@ -27,11 +27,11 @@ from personal_os.llm import effort_param  # noqa: E402
 from personal_os.repos import Conversations, DEFAULT_EFFORT  # noqa: E402
 
 
-def test_new_chat_starts_at_low() -> None:
+def test_new_chat_starts_at_medium() -> None:
     with tempfile.TemporaryDirectory() as d:
         conv = Conversations(Database(d)).create(None, "hi", "kimi-k3")
-    assert conv["settings"]["effort"] == "low"
-    assert DEFAULT_EFFORT == "low"
+    assert conv["settings"]["effort"] == "medium"
+    assert DEFAULT_EFFORT == "medium"
 
 
 def test_kimi_k3_medium_is_sent_as_high() -> None:

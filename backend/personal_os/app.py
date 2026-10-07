@@ -546,7 +546,7 @@ workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_stor
 )
 command_store = Commands(db)
 toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
-mcp_store = McpServers(db)
+mcp_store = McpServers(db, lambda: bool(permissions.get(settings(), "allowAllConnections")))
 # Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
 # to hold a reply, so everything it offers goes through McpClient's bounded calls.
 # Remote servers sign in with OAuth; tokens live in their own table, never in a server's secrets.
@@ -586,7 +586,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     names = {s["id"]: s["name"] for s in mcp_store.servers()}
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
-    for tool in mcp_drift.offerable(mcp_store.tools()):  # a quarantined (drifted) tool is not offered
+    for tool in mcp_drift.offerable(mcp_store.tools(), mcp_store.allow_all()):  # a quarantined (drifted) tool is not offered
         slug = tool["slug"]
         if slug not in ready:
             continue
@@ -2202,7 +2202,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         def _desk_manual_text() -> str:
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
-            net = ("open" if permissions.get(cfg, "shellNetwork") else
+            net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
                    "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
             try:
                 inputs = workspace.inputs(desk_id) if desk_id else []
@@ -8017,7 +8017,7 @@ def delete_skill(skill_id: str) -> dict[str, bool]:
 def _known_tools() -> set[str]:
     """Every tool name the assistant could actually call, so the lint can catch an invented one.
     Connector tools count too, except a quarantined one, which is not offered."""
-    return set(toolbox.specs) | {t["slug"] for t in mcp_drift.offerable(mcp_store.tools())}
+    return set(toolbox.specs) | {t["slug"] for t in mcp_drift.offerable(mcp_store.tools(), mcp_store.allow_all())}
 
 
 toolbox.known_tools = _known_tools  # skill_draft / skill_revise lint against the same set

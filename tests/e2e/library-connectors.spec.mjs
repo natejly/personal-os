@@ -132,7 +132,7 @@ test('remote HTTP connector form validation, paste of config JSON', async ({ gra
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
   await page.getByRole('button', { name: 'Add custom' }).click()
-  await page.getByRole('button', { name: 'Remote' }).click()
+  await page.getByRole('button', { name: 'HTTP', exact: true }).click()
   await page.getByRole('button', { name: 'Add connector' }).click()
   await expect(page.getByText(/Enter the server's https:\/\/ URL/).first()).toBeVisible()
   for (const bad of ['ftp://x.example/mcp', 'not a url', 'https://']) {

@@ -2,6 +2,19 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-07
+
+### Added
+
+- **Files → Artifacts.** A third Files section lists every file the assistant made in any chat (plain chats' outboxes and autonomous sessions' workspaces: documents, data, images, code, browser downloads), grouped by chat with the newest first and a link back to the chat. It is an index of paths, not copies: saves are recorded as they happen, files a shell or script wrote are picked up by a rescan when the list is requested, and a migration indexes what was already on disk. Files open in the same viewer as uploads, with Open, Reveal in Finder and Save a copy. A chat in the trash keeps its artifacts listed (labelled, no link) until it is erased, which removes the files and their entries; an entry whose file is gone is left out.
+
+### Changed
+
+- **Projects: Artifacts tab renamed Context.** The project tab that lists a project's chats' files, notes and uploads is now called Context, so "Artifacts" means one thing: the Files section above.
+- **Memory is in Settings.** The Memory sidebar row and page are gone; Settings has a Memory tab (between Texting and Appearance) with the scope filter, a collapsed Learning section (learn from chats, learn how I write) and the panel itself. Split is the default layout again, graph on the left and memories on the right; List, Graph and Voice are one click away. ⌘6, the Go menu, "View all" on Today and every link to Memory open that tab.
+- **Sidebar rows are toggles in Appearance.** Settings → Appearance → Sidebar has one switch per row (Lists, Calendar, Mail, Health, Library), saved at once with no restart; Today cards and the default file font moved there too. The Advanced Layout group is gone. A migration removes `memory` from `hiddenViews`; all rows stay on by default.
+- **Settings is shorter.** Advanced keeps eight groups (Assistant, Approvals, Files and web, Search, Desks and workers, Voice and shortcuts, Data, Developer). The undo-send switch moved to Integrations. An open Settings window follows `openSettings` calls from toasts and links.
+
 ## Unreleased — 2026-10-06
 
 ### Removed

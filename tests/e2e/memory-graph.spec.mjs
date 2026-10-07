@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures.mjs'
 import { shrink } from './helpers/kb.mjs'
+import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
 
 async function openGraph(page) {
-  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
-  await page.getByRole('button', { name: 'Graph', exact: true }).click()
+  await openMemoryTab(page, 'Graph')
   await expect(page.locator('.graph-canvas')).toBeVisible()
 }
 
@@ -123,8 +123,7 @@ test('graph entities and counts persist across relaunch; wheel zoom and pan do n
   for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -120)
   await page.mouse.down(); await page.mouse.move(box.x + 100, box.y + 100); await page.mouse.up()
   const p = await grain.relaunch()
-  await p.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
-  await p.getByRole('button', { name: 'Graph', exact: true }).click()
+  await openMemoryTab(p, 'Graph')
   await expect(p.locator('g.node')).toHaveCount(2)
   await expect(p.getByText(/2 entities, 1 relation$/)).toBeVisible()
   clean(grain)
@@ -139,7 +138,7 @@ test('tidy-up merges two aliases of one entity (proposal seeded), keeping edges'
   const { sqlite } = await import('./helpers/kb.mjs')
   sqlite(grain.dataDir, "INSERT INTO memory_proposals(id,project_id,kind,payload,rationale,status,created_at) VALUES('pm',NULL,'merge_entities',?,'same db','pending',strftime('%s','now'))",
     [JSON.stringify({ ids: [a.id, b.id], keep_id: a.id, lose_id: b.id, label: 'PostgreSQL', snapshot: { [a.id]: 'Postgres', [b.id]: 'PostgreSQL' } })])
-  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
+  await openMemoryTab(page, 'List')
   await expect(page.locator('.mem-row.proposal')).toHaveCount(1)
   await page.getByRole('button', { name: 'Apply: Merge entities' }).click()
   await expect(page.locator('.mem-row.proposal')).toHaveCount(0)

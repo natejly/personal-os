@@ -959,9 +959,15 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .knowledge-head { display: flex; align-items: center; gap: 10px; }
 .knowledge-head h3 { margin: 0 auto 0 0; }
 .knowledge-controls { display: flex; align-items: center; gap: 8px; }
+.knowledge-section > details { margin: 8px 0 10px; font-size: 13px; }
+.knowledge-section > details > summary { cursor: pointer; color: var(--text-muted); }
+.knowledge-section > details .toggle-row { padding: 6px 0; }
+.knowledge-section > details .toggle-text { display: flex; flex-direction: column; gap: 2px; }
+.knowledge-section > details .toggle-text small { color: var(--text-muted); }
 .knowledge-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
 .knowledge-body .memory-panel.embedded .memory-body { min-height: 0; }
-.knowledge-body .memory-toolbar { padding: 8px 12px; }
+.knowledge-body .memory-toolbar { padding: 8px 12px; flex-wrap: wrap; row-gap: 4px; }
+.knowledge-body .memory-body.mode-split .mem-pane { width: 340px; }
 .knowledge-body > .page-body { padding: 12px 14px 24px; max-width: none; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
@@ -1231,6 +1237,7 @@ button.tag:disabled { cursor: default; }
 /* Secondary tools under the add row: history on the left, tidy-up on the right. */
 .mem-tools { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
 .mem-tools .muted { margin: 0; }
+.mem-tools .chip-check { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 /* A tidy-up suggestion is waiting on the user, so it wears the waiting border and keeps its two
    answers under the text, where a narrow split pane still has room for them. */
 .mem-row.proposal { flex-direction: column; border: 1px dashed var(--await-border); background: var(--await-fill); }
@@ -1402,16 +1409,28 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body .graph-body { flex: 1; min-width: 0; }
 .mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
 .memory-body.mode-list .mem-pane { flex: 1; }
+.memory-body.mode-split .mem-pane { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); }
+.memory-body.mode-split .mem-body { max-width: none; padding: 14px 16px 32px; }
+.memory-body.mode-split .mem-body .add-row { flex-wrap: wrap; }
+.memory-body.mode-split .mem-body .add-row > input { flex: 1 1 100%; }
+.memory-body.mode-split .mem-body .add-row select { margin-left: auto; }
+.memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
+.memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
+.memory-body.mode-split .mem-tools { flex-wrap: wrap; }
+.memory-body.mode-split .empty-hint.big { padding: 32px 0; }
 /* Voice takes the whole panel: a profile has nothing to sit beside. */
 .memory-body.mode-style { overflow: hidden; }
 .memory-body.mode-style .style-body { max-width: 760px; }
 
+/* Three columns (graph + inspector + memories) need a narrower list on small windows. */
+@media (max-width: 1400px) { .memory-body.mode-split .mem-pane { width: 340px; } }
+/* Too narrow for two columns: Split shows the list alone, the Graph button still opens the graph. */
+@media (max-width: 900px) { .memory-body.mode-split .graph-body { display: none; } .knowledge-body .memory-body.mode-split .mem-pane { flex: 1; width: auto; border-left: 0; } }
 .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }
 .memory-toolbar > .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .memory-panel.embedded { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.memory-page-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .memory-panel.embedded .memory-body { min-height: 520px; }
 
 /* Segmented split / list / graph switch */
@@ -1582,8 +1601,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-add .primary-btn { min-height: 28px; padding: 4px 12px; }
 .todo-add-more { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px 0 36px; }
 .todo-add-more input, .todo-add-more select { min-height: 26px; font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: inherit; outline: 0; }
-/* Settings → Modules: one row per view with where it lives. */
-.place-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; }
 
 /* ---------- Todos ---------- */
 .todo { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; background: var(--bg-elev); margin: 0; }

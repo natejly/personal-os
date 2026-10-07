@@ -387,6 +387,20 @@ def _drop_nav_placement(c: sqlite3.Connection) -> None:
     c.execute("DELETE FROM settings WHERE key = 'navPlacement'")
 
 
+def _drop_memory_hidden_view(c: sqlite3.Connection) -> None:
+    """Memory moved into Settings and is no longer a sidebar row, so a stored hiddenViews entry for it is dead
+    (and would tell the model Memory is hidden)."""
+    row = c.execute("SELECT value FROM settings WHERE key = 'hiddenViews'").fetchone()
+    if not row:
+        return
+    try:
+        views = json.loads(row[0])
+    except ValueError:
+        return
+    if isinstance(views, list) and "memory" in views:
+        c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "memory"]),))
+
+
 def _allow_all_connections_for_existing(c: sqlite3.Connection) -> None:
     """An install that already has chats keeps the connections it had: allowAllConnections on. A fresh database (every
     migration runs at once, nothing yet written) stays off. The permissions row exists either way, so it is no signal."""
@@ -409,6 +423,16 @@ def _internal_message_kinds(c: sqlite3.Connection) -> None:
         return
     for kind, prefix in _INTERNAL_PREFIXES_BEFORE_KIND:
         c.execute("UPDATE messages SET kind=? WHERE role='user' AND kind IS NULL AND substr(content, 1, ?) = ?", (kind, len(prefix), prefix))
+
+
+def _chat_artifacts_backfill(c: sqlite3.Connection) -> None:
+    """Files → Artifacts lists every chat's outputs from chat_files, so the outboxes and desk workspaces already on
+    disk are indexed once here (chat_files.backfill_outputs). The data dir is the database file's folder."""
+    from pathlib import Path
+    from . import chat_files
+    row = next((r for r in c.execute("PRAGMA database_list") if r[1] == "main"), None)
+    if row and row[2]:
+        chat_files.backfill_outputs(c, Path(row[2]).parent)
 
 
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
@@ -439,6 +463,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (24, "drop_nav_placement", _drop_nav_placement),
     (25, "allow_all_connections_for_existing", _allow_all_connections_for_existing),
     (26, "internal_message_kinds", _internal_message_kinds),
+    (27, "chat_artifacts_backfill", _chat_artifacts_backfill),
+    (28, "drop_memory_hidden_view", _drop_memory_hidden_view),
 ]
 
 

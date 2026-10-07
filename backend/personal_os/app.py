@@ -501,6 +501,7 @@ app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
 if toolbox.chat_outputs is not None:
     toolbox.chat_outputs.on_save = chat_files.record_output
+workspace.on_save = chat_files.record_desk_output  # a desk's files are its chat's artifacts too
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -1958,6 +1959,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             "run_id": run.run_id if run else None,
+            # A turn in the Telegram chat: what the agent makes rides on the reply without a send_files step (sendfiles.attach_made).
+            "auto_attach": telegram_bridge.is_texts_conversation(conv_id),
         }
         if is_wake and body.wake.get("tainted"):  # the worker read untrusted text; its report carries that into this turn
             tool_ctx["tainted"] = True
@@ -3499,7 +3502,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if is_wake:
         workers_mgr.mark_delivered(body.wake.get("ids") or [])  # reached its end (even with an error): the sweep at startup does not repeat it
         if text and not error and not silent and not stop.is_set():
-            _push_wake_reply(text, tool_ctx.get("reply_attachments"))
+            _push_wake_reply(text, tool_ctx.get("reply_attachments"), conv_id)
     if tool_ctx.get("learned"):
         yield "learned", {**tool_ctx["learned"], "conversation_id": conv_id, "message_id": am["id"], "user_message_id": user_msg_id}
 
@@ -3950,7 +3953,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
     if body.content is not None and (too_long := _message_too_long(body.content, settings(), str(row.get("model") or ""))):
         raise HTTPException(413, too_long)
-    _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
+    atts = _resolve_attachments(row, body.attachments)  # a missing or foreign file is refused before a run exists
     # A chat with a live run is never hidden: writing in an archived one brings it back.
     if row.get("archived_at"):
         convos.update(id, {"archived": False})
@@ -3973,6 +3976,9 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     if body.wake is not None:
         raise HTTPException(400, "A wake turn is started by the backend only")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
+    # Typed in Grain into the Texts chat: it runs as a Telegram turn and shows on the phone. Internal turns (wake, ...) never get here.
+    if body.origin != "telegram" and body.wake is None and body.kind is None and not body.replace_from and telegram_bridge.is_texts_conversation(id):
+        telegram_bridge.from_app(id, run.run_id, body.content or "", atts)
     return {"run_id": run.run_id, "seq": run.seq}
 
 
@@ -4032,10 +4038,16 @@ async def _wake_conversation(conv_id: str) -> None:
     run.task.add_done_callback(lambda _t: _wake_inflight.difference_update(wake["ids"]))
 
 
-def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None) -> None:
-    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on."""
-    if settings().get("telegramPushWorkerResults"):
-        telegram_bridge.push(text, attachments or None)
+def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
+    """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
+    and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
+    if not settings().get("telegramPushWorkerResults"):
+        return
+    telegram_bridge.push(text, attachments or None)
+    texts = telegram_bridge.texts_conversation_id()
+    src = convos.get(conv_id, with_messages=False) if conv_id else None
+    if texts and texts != conv_id and not (src or {}).get("settings", {}).get("private"):  # a private chat's work stays out of other chats
+        _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
 
 
 def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
@@ -4099,6 +4111,7 @@ async def resume_worker_route(worker_id: str, body: WorkerResumeIn | None = None
 class SteerIn(BaseModel):
     content: str
     attachments: list[str] | None = None
+    origin: Literal["telegram"] | None = None  # a steer sent from the phone is not echoed back to it
 
 
 @app.post("/conversations/{id}/steer")
@@ -4132,6 +4145,8 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     run.publish("user_message", um)
     run.steers.append(um)
     run.poke()
+    if body.origin != "telegram" and telegram_bridge.is_texts_conversation(id):
+        telegram_bridge.from_app(id, run.run_id, text, attachments)
     return {"ok": True, "run_id": run.run_id, "message": um}
 
 
@@ -5988,7 +6003,7 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
-        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
+        return await memory_index.search_reranked(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -6669,6 +6684,27 @@ def document_open(id: str) -> dict[str, bool]:
     d, p = _original(id)
     if any(Path(n).suffix.lower() in _RUNS_CODE for n in (d["name"], p.name)) or p.stat().st_mode & 0o111:
         raise HTTPException(400, f"{d['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
+    return _run_open(str(p))
+
+
+def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
+    hit = chat_files.file(id)
+    if hit is None:
+        raise HTTPException(404, "No such file")
+    return hit
+
+
+@app.post("/chat-files/{id}/reveal")
+def artifact_reveal(id: str) -> dict[str, bool]:
+    """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
+    return _run_open("-R", str(_artifact_or_404(id)[1]))
+
+
+@app.post("/chat-files/{id}/open")
+def artifact_open(id: str) -> dict[str, bool]:
+    f, p = _artifact_or_404(id)
+    if p.suffix.lower() in _RUNS_CODE or p.stat().st_mode & 0o111:
+        raise HTTPException(400, f"{f['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
     return _run_open(str(p))
 
 
@@ -8702,9 +8738,14 @@ def _desk_report(desk: dict[str, Any]) -> None:
     _tell_chat(origin, origin_report(desk, desks.outputs(desk["id"])))
 
 
-def _tell_chat(cid: str, text: str) -> None:
+def _tell_chat(cid: str, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
     """Add one assistant message to a chat and tell any open window to re-read it (callable from any thread)."""
-    convos.add_message(cid, "assistant", text)
+    convos.add_message(cid, "assistant", text, attachments=attachments or None)
+    _announce_conversation(cid)
+
+
+def _announce_conversation(cid: str) -> None:
+    """Tell any open window to re-read a chat (callable from any thread)."""
     try:
         running = asyncio.get_running_loop()
     except RuntimeError:
@@ -9333,7 +9374,7 @@ def _telegram_message_text(message_id: str) -> str | None:
 
 
 def _telegram_create_conversation() -> str:
-    return create_conversation(ConvIn(title="Texts"))["id"]
+    return create_conversation(ConvIn(title="Telegram"))["id"]
 
 
 def _telegram_message_attachments(message_id: str) -> list[dict[str, Any]]:
@@ -9361,7 +9402,7 @@ async def _telegram_turn(conv_id: str, text: str, attachment_ids: list[str] | No
     for _ in range(2):
         try:
             if bus.answering(conv_id):
-                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None))
+                return await steer_run(conv_id, SteerIn(content=text, attachments=attachment_ids or None, origin="telegram"))
             return await chat(conv_id, ChatIn(content=text, origin="telegram", attachments=attachment_ids or None))
         except HTTPException as e:
             if e.status_code != 409:
@@ -9376,6 +9417,11 @@ async def _telegram_decide(call_id: str, decision: str) -> dict[str, Any]:
 def _telegram_conversation_title(conv_id: str) -> str | None:
     row = convos.get(conv_id, with_messages=False)
     return row["title"] if row else None
+
+
+def _telegram_mark_conversation(cid: str, flag: bool) -> None:
+    convos.update(cid, {"settings": {"telegram": flag}})
+    _announce_conversation(cid)  # the sidebar only re-reads a chat on this event
 
 
 telegram_bridge = telegram.TelegramBridge(telegram.Deps(
@@ -9397,6 +9443,7 @@ telegram_bridge = telegram.TelegramBridge(telegram.Deps(
     message_attachments=_telegram_message_attachments,
     attachment_path=_telegram_attachment_path,
     store_upload=_telegram_store_upload,
+    mark_texts_conversation=_telegram_mark_conversation,
 ))
 
 

@@ -72,7 +72,7 @@ const PROJECT_ROWS = 4
  */
 type NavEntry = { view?: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind }
 
-// The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Modules can hide it.
+// The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Appearance can hide it.
 const TOP: NavEntry[] = [
   { view: 'home', description: 'Your day at a glance: plan, mail, events and what the agent did', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
@@ -222,7 +222,6 @@ export default function Sidebar(): JSX.Element {
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     if (v === 'library') return skillCandidates || null
-    if (v === 'memory') return memoryProposals || null
     return null
   }
 
@@ -263,9 +262,9 @@ export default function Sidebar(): JSX.Element {
           .filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
         {navEntries().some((e) => viewHidden(settings, e.view)) && (
-          <button className="nav-item nav-more" title="Turn on hidden views in Settings → Modules"
-            onClick={() => useStore.getState().openSettings('modules')}>
-            <Plus size={15} /><span>More modules…</span>
+          <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Appearance"
+            onClick={() => useStore.getState().openSettings('appearance')}>
+            <Plus size={15} /><span>More rows…</span>
           </button>
         )}
       </nav>

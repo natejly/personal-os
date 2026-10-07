@@ -47,7 +47,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'memory' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'docs' | 'library' | 'project' | 'canvas'
 /** Which tab a project page shows. */
 export type ProjectTab = 'chats' | 'context' | 'instructions' | 'memory'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
@@ -65,7 +65,7 @@ export const readDocMode = (): DocMode => {
   } catch { return 'split' }
 }
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
-export type MemoryMode = 'list' | 'graph' | 'style'
+export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections, one per rail entry in SettingsModal. Older ids still work in openSettings (lib/settingsTabs). */
 import { resolveTab, type AdvancedGroup, type LegacySettingsTab, type SettingsTab } from './lib/settingsTabs'
@@ -452,7 +452,7 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
-  /** Open the Memory page narrowed to these rows. */
+  /** Open Settings → Memory narrowed to these rows. */
   showMemories: (ids: string[]) => void
   /** Trash one memory a reply learned, and drop it from that reply's chip. */
   undoLearned: (messageId: string, memoryId: string) => Promise<void>
@@ -965,8 +965,8 @@ export const useStore = create<State>((set, get) => {
       else if (action.startsWith('desk:')) void s.goToDesk(action.slice(5))
       else if (action.startsWith('view:')) {
         const v = action.slice(5) as View
-        // A view turned off in Settings → Modules stays off: its shortcut says how to turn it back on.
-        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('modules') })
+        // A view turned off in Settings → Appearance stays off: its shortcut says how to turn it back on.
+        if (viewHidden(s.settings, v)) s.toast(`${v[0].toUpperCase()}${v.slice(1)} is turned off`, 'info', { label: 'Turn on', run: () => get().openSettings('appearance') })
         else s.setView(v)
       } else if (action === 'upload') {
         s.openFiles('uploads')
@@ -1716,7 +1716,7 @@ export const useStore = create<State>((set, get) => {
     projects: [],
     view: 'home',
     lastClassicView: 'home',
-    memoryMode: 'list',
+    memoryMode: 'split',
     projectViewId: null,
     projectTab: 'chats',
     draftProjectId: null,
@@ -1916,8 +1916,8 @@ export const useStore = create<State>((set, get) => {
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => {
-      set(memoryMode ? { memoryMode, memoryFocus: null, settingsOpen: false } : { memoryFocus: null, settingsOpen: false })
-      get().setView('memory')
+      set({ memoryFocus: null, memoryMode: memoryMode ?? 'split' })
+      get().openSettings('memory')
     },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
@@ -3252,8 +3252,8 @@ export const useStore = create<State>((set, get) => {
     },
 
     showMemories: (ids) => {
-      set({ memoryFocus: ids, memoryMode: 'list', settingsOpen: false })
-      get().setView('memory')
+      set({ memoryFocus: ids, memoryMode: 'list' })
+      get().openSettings('memory')
     },
     undoLearned: async (messageId, memoryId) => {
       await get().deleteMemory(memoryId)

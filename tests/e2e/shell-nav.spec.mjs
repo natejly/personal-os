@@ -27,7 +27,7 @@ test('every sidebar nav item opens its view and is marked current; Today brings 
 test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its view and is marked current', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
     const labels = await page.locator('.sidebar .nav-item:not(.nav-more) > span:first-of-type').allInnerTexts()
-    const order = ['Today', 'Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Memory', 'Library']
+    const order = ['Today', 'Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Library']
     expect(labels.filter((l) => order.includes(l))).toEqual(order)
     for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/], ['Health', /Health/]]) {
       await sidebarItem(page, name).click()
@@ -64,7 +64,7 @@ test('the title-bar Quick chat button opens and closes the page agent panel', as
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('hidden views are not in the sidebar; More modules opens Settings → Advanced → Layout', async ({ grain }) => {
+test('hidden views are not in the sidebar; More rows opens Settings → Appearance', async ({ grain }) => {
   const { page, api } = grain
   // Library ships on; hiding it takes it out of the sidebar
   await expect(sidebarItem(page, 'Library')).toHaveCount(1)
@@ -72,10 +72,11 @@ test('hidden views are not in the sidebar; More modules opens Settings → Advan
   await page.reload()
   await page.waitForSelector('.sidebar')
   await expect(sidebarItem(page, 'Library')).toHaveCount(0)
-  await page.getByRole('button', { name: /More modules/ }).click()
+  await page.getByRole('button', { name: /More rows/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Advanced' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.locator('.adv-group[open] > summary', { hasText: 'Layout' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('dialog').locator('h4', { hasText: 'Sidebar' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('checkbox', { name: 'Library', exact: true })).not.toBeChecked()
 })
 
 test('⌘B hides and shows the sidebar from the menu, the button and the title-bar toggle', async ({ grain }) => {
@@ -259,9 +260,11 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await expect(page.getByText('Library is turned off')).toBeVisible()
   await menu(grain, 'Today'); await heading(page, /Today/)
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
-  // Memory… opens the Memory page
+  // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
-  await expect(page.locator('.memory-page')).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('tab', { name: 'Memory' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.knowledge-body .graph-body')).toBeVisible()
+  await expect(page.locator('.knowledge-body .mem-pane')).toBeVisible()
   await menu(grain, 'Settings…')
   await expect(page.getByRole('dialog').getByRole('tab').first()).toBeVisible()
   await page.keyboard.press('Escape')

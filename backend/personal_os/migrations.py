@@ -387,6 +387,20 @@ def _drop_nav_placement(c: sqlite3.Connection) -> None:
     c.execute("DELETE FROM settings WHERE key = 'navPlacement'")
 
 
+def _drop_memory_hidden_view(c: sqlite3.Connection) -> None:
+    """Memory moved into Settings and is no longer a sidebar row, so a stored hiddenViews entry for it is dead
+    (and would tell the model Memory is hidden)."""
+    row = c.execute("SELECT value FROM settings WHERE key = 'hiddenViews'").fetchone()
+    if not row:
+        return
+    try:
+        views = json.loads(row[0])
+    except ValueError:
+        return
+    if isinstance(views, list) and "memory" in views:
+        c.execute("UPDATE settings SET value = ? WHERE key = 'hiddenViews'", (json.dumps([v for v in views if v != "memory"]),))
+
+
 def _allow_all_connections_for_existing(c: sqlite3.Connection) -> None:
     """An install that already has chats keeps the connections it had: allowAllConnections on. A fresh database (every
     migration runs at once, nothing yet written) stays off. The permissions row exists either way, so it is no signal."""
@@ -450,6 +464,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (25, "allow_all_connections_for_existing", _allow_all_connections_for_existing),
     (26, "internal_message_kinds", _internal_message_kinds),
     (27, "chat_artifacts_backfill", _chat_artifacts_backfill),
+    (28, "drop_memory_hidden_view", _drop_memory_hidden_view),
 ]
 
 

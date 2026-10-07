@@ -430,11 +430,17 @@ export const api = {
     /** Free slots as draft text; creates no draft or event. */
     suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
       req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }, NO_TIMEOUT),
-    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
-    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
+    /** Stores one attachment of a message in Uploads (for the viewer, or to attach it to a forward). */
+    gmailAttachmentImport: (messageId: string, attachmentId: string) =>
+      req<Document>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/import`, { method: 'POST' }, NO_TIMEOUT),
+    /** Writes one attachment to the Downloads folder. */
+    gmailAttachmentSave: (messageId: string, attachmentId: string) =>
+      req<{ path: string; name: string }>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/save`, { method: 'POST' }, NO_TIMEOUT)
   },
   /** Backups, restore and export (backend backups.py). */
   data: {

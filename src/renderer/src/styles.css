@@ -2376,6 +2376,21 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .widget-bar .smart-ta-hint { right: 6px; bottom: 4px; }
 
 /* ---------- Mail compose ---------- */
+/* Attachments: chips in the compose window, rows under a message body. */
+.mail-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.mail-compose .mail-attachments { margin-top: 0; }
+.mail-attach-chip, .mail-attach-row { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12.5px; }
+.mail-attach-chip { padding: 3px 4px 3px 8px; }
+.mail-attach-chip.pending { opacity: 0.7; padding-right: 8px; }
+.mail-attach-icon { flex: none; color: var(--text-muted); }
+.mail-attach-name { min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-attach-x { display: inline-flex; padding: 3px; border-radius: 50%; color: var(--text-muted); cursor: pointer; }
+.mail-attach-x:hover { background: var(--hover); color: var(--text); }
+.mail-attach-row { padding: 0 2px 0 0; }
+.mail-attach-row[aria-busy="true"] { opacity: 0.6; }
+.mail-attach-open { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 4px 6px 10px; border-radius: 8px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.mail-attach-open:hover:not(:disabled) { background: var(--hover); }
+.mail-compose.dragging { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .mail-compose section { display: flex; flex-direction: column; gap: 10px; }
 .mail-compose .smart-ta { flex: 0 1 auto; }
 .mail-review { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-elev); font-size: 13px; }

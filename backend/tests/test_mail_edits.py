@@ -42,7 +42,7 @@ class ValidatorTests(unittest.TestCase):
         bad = [{**GOOD, "to": ""}, {**GOOD, "to": "not-an-address"}, {**GOOD, "to": "a@b.co, nope"},
                {**GOOD, "subject": "x\nBcc: evil@example.com"}, {**GOOD, "subject": "s" * 999},
                {**GOOD, "body": "b" * 200_001}, {**GOOD, "to": ",".join(f"u{i}@example.com" for i in range(51))},
-               {**GOOD, "reply_to_message_id": "../x"}, {**GOOD, "as_draft": "yes"}, {**GOOD, "cc": "x@y.co"},
+               {**GOOD, "reply_to_message_id": "../x"}, {**GOOD, "as_draft": "yes"}, {**GOOD, "cc": "nope"}, {**GOOD, "bcc": "a@b.co, nope"}, {**GOOD, "unknown": "x"},
                {"to": "a@b.co", "subject": "s"}]
         for args in bad:
             with self.assertRaises(EditError, msg=str(args)[:60]):

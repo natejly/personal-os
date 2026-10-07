@@ -126,3 +126,5 @@ p.mc-problem { margin: 8px 12px; }
   .mc-kbd { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .mc * { transition: none !important; animation: none !important; } }
+.mc-attach.edit { align-items: center; }
+.mc-attach.edit .mc-chip { padding-right: 4px; }

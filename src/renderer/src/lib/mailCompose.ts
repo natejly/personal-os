@@ -4,6 +4,8 @@
  * preview a persisted tool event keeps. No React in here so node:test can run it.
  */
 
+import type { GmailFullMessage, GmailMessage } from '@shared/types'
+
 export interface Recipient {
   /** The display name, '' when the address stands alone. */
   name: string
@@ -56,34 +58,52 @@ const norm = (s: unknown): string => String(s ?? '').replace(/\r\n/g, '\n').repl
 
 export interface ComposeDraft {
   to: Recipient[]
+  cc: Recipient[]
+  bcc: Recipient[]
   subject: string
   body: string
+  /** Uploads document ids or absolute file paths, as the tool arguments carry them. */
+  attachments: string[]
 }
 
-export type DraftField = 'to' | 'subject' | 'body'
+export type DraftField = 'to' | 'cc' | 'bcc' | 'subject' | 'body' | 'attachments'
 
 /** Which of the model's fields the person changed. Whitespace-at-line-end and case in the domain part
  *  of an address do not count; everything else does. */
 export function editedFields(original: Record<string, unknown>, draft: ComposeDraft): DraftField[] {
   const out: DraftField[] = []
-  const was = recipientsFromArg(original.to).ok.map((r) => `${r.name}|${r.email.toLowerCase()}`)
-  const now = draft.to.map((r) => `${r.name}|${r.email.toLowerCase()}`)
-  if (was.length !== now.length || was.some((x, i) => x !== now[i])) out.push('to')
+  const key = (r: Recipient): string => `${r.name}|${r.email.toLowerCase()}`
+  const differs = (a: string[], b: string[]): boolean => a.length !== b.length || a.some((x, i) => x !== b[i])
+  for (const f of ['to', 'cc', 'bcc'] as const) {
+    if (differs(recipientsFromArg(original[f]).ok.map(key), draft[f].map(key))) out.push(f)
+  }
   if (norm(original.subject) !== norm(draft.subject)) out.push('subject')
   if (norm(original.body) !== norm(draft.body)) out.push('body')
+  if (differs(attachmentRefs(original.attachments), draft.attachments)) out.push('attachments')
   return out
+}
+
+/** The attachment entries of a tool call: strings as sent, or {name} objects reduced to their name. */
+export function attachmentRefs(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((a) => (typeof a === 'string' ? a : String((a as { name?: unknown })?.name ?? 'attachment'))) : []
 }
 
 /** The arguments a decision posts. Keeps everything the model sent (reply_to_message_id included) and
  *  overlays what the card edits; `asDraft` switches a send to Save-as-draft (gmail_send only). */
 export function composeArgs(original: Record<string, unknown>, draft: ComposeDraft, asDraft = false): Record<string, unknown> {
   const out: Record<string, unknown> = { ...original, to: recipientsToArg(draft.to), subject: draft.subject.trim(), body: draft.body }
+  for (const f of ['cc', 'bcc'] as const) {
+    if (draft[f].length) out[f] = recipientsToArg(draft[f])
+    else delete out[f]
+  }
+  if (draft.attachments.length) out.attachments = draft.attachments
+  else delete out.attachments
   delete out.as_draft
   if (asDraft) out.as_draft = true
   return out
 }
 
-/** Why the draft cannot go yet, or null. */
+/** Why the draft cannot go yet, or null. `invalid` holds the unparsable entries of To, Cc and Bcc together. */
 export function composeProblem(draft: ComposeDraft, invalid: string[]): string | null {
   if (invalid.length) return `"${invalid[0]}" is not a valid email address.`
   if (!draft.to.length) return 'Add at least one recipient.'
@@ -214,4 +234,42 @@ export function clock(seconds: number): string {
 
 export function gmailLink(kind: 'message' | 'drafts', id?: string | null): string {
   return kind === 'drafts' || !id ? 'https://mail.google.com/mail/u/0/#drafts' : `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(id)}`
+}
+
+// ---------- attachments ----------
+
+/** Gmail refuses a message over 25 MB, so the compose window says so before uploading. */
+export const MAIL_ATTACH_LIMIT_BYTES = 25 * 1024 * 1024
+
+/** The message to show when `adding` would push the total past the limit, else null. */
+export function attachmentsOverLimit(existing: number[], adding: number[]): string | null {
+  const total = [...existing, ...adding].reduce((a, b) => a + b, 0)
+  if (total <= MAIL_ATTACH_LIMIT_BYTES) return null
+  return `Attachments total ${Math.ceil(total / (1024 * 1024))} MB; Gmail allows ${MAIL_ATTACH_LIMIT_BYTES / (1024 * 1024)} MB.`
+}
+
+export type AttachmentKind = 'image' | 'pdf' | 'sheet' | 'text' | 'archive' | 'file'
+
+/** Which icon an attachment gets; the extension decides when the type is a generic octet-stream. */
+export function attachmentKind(mime: string, name: string): AttachmentKind {
+  const m = mime.toLowerCase()
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? ''
+  if (m.startsWith('image/')) return 'image'
+  if (m === 'application/pdf' || ext === 'pdf') return 'pdf'
+  if (/spreadsheet|ms-excel|csv/.test(m) || ['xls', 'xlsx', 'csv', 'tsv', 'ods', 'numbers'].includes(ext)) return 'sheet'
+  if (/zip|tar|gzip|x-7z|rar/.test(m) || ['zip', 'tar', 'gz', 'tgz', '7z', 'rar'].includes(ext)) return 'archive'
+  if (m.startsWith('text/') || ['txt', 'md', 'doc', 'docx', 'rtf', 'json'].includes(ext)) return 'text'
+  return 'file'
+}
+
+/** An approval card's attachment entry before its document is looked up: a path shows its file name. */
+export function attachmentLabel(ref: string): string {
+  return ref.startsWith('/') ? ref.split('/').filter(Boolean).pop() ?? ref : ref
+}
+
+/** Subject and body for a forward: the original's headers and text under the cursor's blank lines. */
+export function forwardCompose(m: GmailMessage, full: GmailFullMessage | null): { subject: string; body: string } {
+  const subject = /^fwd?:/i.test(m.subject ?? '') ? m.subject ?? '' : `Fwd: ${m.subject ?? ''}`
+  const head = [`From: ${m.from ?? ''}`, `Date: ${m.date ?? ''}`, `Subject: ${m.subject ?? ''}`, full?.to ? `To: ${full.to}` : ''].filter(Boolean)
+  return { subject, body: `\n\n---------- Forwarded message ----------\n${head.join('\n')}\n\n${full?.body ?? m.snippet}` }
 }

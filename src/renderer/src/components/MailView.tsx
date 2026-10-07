@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type Dispatch, type SetStateAction } from 'react'
+import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X, Forward, Download, File as FileIcon, FileText, FileSpreadsheet, FileArchive, Image as ImageIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { PIM_SETTINGS_TAB, pimLabel, pimProvider, pimStatus } from '../lib/pim'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
-import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
+import type { Document, GmailAttachment, GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 import { oneLine } from '../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { readView, writeView } from '../lib/viewCache'
@@ -14,6 +14,14 @@ import { rowButton } from '../lib/rowButton'
 import { useModal } from '../lib/useModal'
 import { shortDate, shortDateTime } from '../lib/dates'
 import SidebarToggle from './SidebarToggle'
+import { fmtBytes } from '../lib/showPanel'
+import { attachmentKind, attachmentsOverLimit, forwardCompose, type AttachmentKind } from '../lib/mailCompose'
+
+const KIND_ICON: Record<AttachmentKind, typeof FileIcon> = { image: ImageIcon, pdf: FileText, text: FileText, sheet: FileSpreadsheet, archive: FileArchive, file: FileIcon }
+const AttachIcon = ({ a }: { a: { mime: string; name: string } }): JSX.Element => {
+  const Icon = KIND_ICON[attachmentKind(a.mime, a.name)]
+  return <Icon size={14} className="mail-attach-icon" />
+}
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -32,11 +40,19 @@ type ReadFilter = 'all' | 'unread'
 
 interface Compose {
   to: string
+  cc: string
+  bcc: string
   subject: string
   body: string
   replyTo: GmailMessage | null
+  /** Gmail id the send threads under: the replied-to row's, or the one an assistant's card handed over. */
+  replyToId: string | null
   /** Body of the message being replied to; context for the AI review and ghost text. */
   replyBody: string
+  /** Uploads documents that go out with the message. */
+  attachments: GmailAttachment[]
+  /** Files still uploading (or a forward's originals still being fetched); Send waits for them. */
+  pending: { name: string; label: string }[]
 }
 interface Review {
   feedback: string[]
@@ -52,11 +68,12 @@ const RANGES = [
 const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
 
 /** The open message. Its own component so the dialog behaviour mounts and unmounts with it. */
-function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onSnooze, onUnread, onAsk }: {
+function MailReader({ message: m, full, onClose, onReply, onForward, onStar, onArchive, onSnooze, onUnread, onAsk }: {
   message: GmailMessage
   full: GmailFullMessage | null
   onClose: () => void
   onReply: () => void
+  onForward: () => void
   onStar: () => void
   onArchive: () => void
   onSnooze: () => void
@@ -66,6 +83,16 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
   const { titleId, backdrop, modal } = useModal(onClose)
   const starred = isStarred(m)
   const gmail = useStore(pimProvider) === 'google'
+  const toast = useStore((s) => s.toast)
+  const [fetching, setFetching] = useState<string | null>(null)
+  // Row click: store the attachment in Uploads and show it in the upload viewer. Download: write it to Downloads.
+  const fetchAttachment = async (a: GmailAttachment, save: boolean): Promise<void> => {
+    setFetching(a.id)
+    try {
+      if (save) toast(`Saved to ${(await api.google.gmailAttachmentSave(m.id, a.id)).path}`)
+      else useStore.getState().openUploadPreview((await api.google.gmailAttachmentImport(m.id, a.id)).id)
+    } catch (e) { toast((e as Error).message, 'error') } finally { setFetching(null) }
+  }
   return (
     <div className="modal-backdrop" {...backdrop}>
       <div className="modal wide mail-reader" {...modal}>
@@ -80,6 +107,20 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
             <span className="muted">{m.date && !isNaN(new Date(m.date).getTime()) ? shortDateTime(new Date(m.date)) : m.date ?? ''}</span>
           </p>
           {full ? <pre className="doc-text mail-body">{full.body || '(no text content)'}</pre> : <p className="muted">Loading…</p>}
+          {!!full?.attachments?.length && (
+            <div className="mail-attachments" aria-label="Attachments">
+              {full.attachments.map((a) => (
+                <div key={a.id} className="mail-attach-row" aria-busy={fetching === a.id}>
+                  <button className="mail-attach-open" title={a.name} disabled={fetching !== null} onClick={() => void fetchAttachment(a, false)}>
+                    <AttachIcon a={a} /><span className="mail-attach-name">{a.name}</span><span className="muted">{fmtBytes(a.size)}</span>
+                  </button>
+                  <button className="icon-btn" title={`Download ${a.name}`} aria-label={`Download ${a.name}`} disabled={fetching !== null} onClick={() => void fetchAttachment(a, true)}>
+                    <Download size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
         {/* Reply is what an open message is for, so it is the one filled button, last. The two state
             toggles are icons on the left; everything else is a quiet button. */}
@@ -93,6 +134,7 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
           <button className="ghost-btn" onClick={onArchive}><Archive size={14} /> Archive</button>
           <button className="ghost-btn" onClick={onSnooze}>Snooze</button>
           <button className="ghost-btn" onClick={onAsk}><MessageSquare size={14} /> Ask assistant</button>
+          <button className="ghost-btn" disabled={!full} onClick={onForward}><Forward size={14} /> Forward</button>
           <button className="primary-btn" onClick={onReply}><Reply size={14} /> Reply</button>
         </footer>
       </div>
@@ -100,7 +142,7 @@ function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onS
   )
 }
 
-function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDiscard, onSuggestTimes, onReview, onDraft, onSend }: {
+function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDiscard, onSuggestTimes, onReview, onDraft, onSend, onAttach }: {
   compose: Compose
   setCompose: Dispatch<SetStateAction<Compose | null>>
   review: Review | null
@@ -112,18 +154,27 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
   onReview: () => void
   onDraft: () => void
   onSend: () => void
+  onAttach: (files: File[]) => void
 }): JSX.Element {
   // Escape and a backdrop click only leave a message nobody has typed in: a half-written email
   // leaves via Discard, draft or send, never by a stray key or a click that missed the dialog.
   const opened = useRef(compose)
-  const untouched = compose.to === opened.current.to && compose.subject === opened.current.subject && compose.body === opened.current.body
+  const untouched = compose.to === opened.current.to && compose.subject === opened.current.subject && compose.body === opened.current.body && compose.cc === opened.current.cc && compose.bcc === opened.current.bcc
+    && compose.attachments.length + compose.pending.length === opened.current.attachments.length + opened.current.pending.length
   const { titleId, backdrop, modal } = useModal(() => { if (untouched) onDiscard() })
   // A reply opens as the reader closes, and the reader hands focus back to its row after autoFocus
   // has already run: claim the field again, or the first keystroke goes nowhere.
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [drag, setDrag] = useState(false)
+  const [ccOpen, setCcOpen] = useState(!!(compose.cc || compose.bcc))
+  const files = (e: DragEvent): boolean => Array.from(e.dataTransfer.types).includes('Files')
   useEffect(() => { modal.ref.current?.querySelector<HTMLElement>(opened.current.replyTo ? 'textarea' : 'input')?.focus() }, [])
   return (
     <div className="modal-backdrop" {...backdrop}>
-      <div className="modal wide mail-compose" {...modal}>
+      <div className={`modal wide mail-compose${drag ? ' dragging' : ''}`} {...modal}
+        onDragOver={(e) => { if (files(e)) { e.preventDefault(); setDrag(true) } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDrag(false) }}
+        onDrop={(e) => { if (!files(e)) return; e.preventDefault(); setDrag(false); onAttach(Array.from(e.dataTransfer.files)) }}>
         <header>
           <h2 id={titleId}>{compose.replyTo ? `Reply: ${compose.replyTo.subject || '(no subject)'}` : 'New message'}</h2>
           <button className="icon-btn" title="Discard" aria-label="Discard message"
@@ -131,6 +182,10 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
         </header>
         <section>
           <input placeholder="To" aria-label="To" value={compose.to} onChange={(e) => setCompose((c) => c && { ...c, to: e.target.value })} autoFocus={!compose.replyTo} />
+          {ccOpen ? <>
+            <input placeholder="Cc" aria-label="Cc" value={compose.cc} onChange={(e) => setCompose((c) => c && { ...c, cc: e.target.value })} />
+            <input placeholder="Bcc" aria-label="Bcc" value={compose.bcc} onChange={(e) => setCompose((c) => c && { ...c, bcc: e.target.value })} />
+          </> : <button type="button" className="link small" style={{ alignSelf: 'flex-start' }} onClick={() => setCcOpen(true)}>Cc/Bcc</button>}
           <input placeholder="Subject" aria-label="Subject" value={compose.subject} onChange={(e) => setCompose((c) => c && { ...c, subject: e.target.value })} />
           <SmartTextarea
             kind="mail"
@@ -141,6 +196,23 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
             sharedStyle={{ minHeight: 220 }}
             autoFocus={!!compose.replyTo}
           />
+          {(compose.attachments.length > 0 || compose.pending.length > 0) && (
+            <div className="mail-attachments" aria-label="Attachments">
+              {compose.attachments.map((a, i) => (
+                <span key={`${a.id}-${i}`} className="mail-attach-chip" title={a.name}>
+                  <AttachIcon a={a} /><span className="mail-attach-name">{a.name}</span><span className="muted">{fmtBytes(a.size)}</span>
+                  {/* Only drops the chip: the upload stays in the Uploads library. */}
+                  <button className="mail-attach-x" title="Remove" aria-label={`Remove ${a.name}`}
+                    onClick={() => setCompose((c) => c && { ...c, attachments: c.attachments.filter((x) => x !== a) })}><X size={12} /></button>
+                </span>
+              ))}
+              {compose.pending.map((p, i) => (
+                <span key={`p-${i}`} className="mail-attach-chip pending" title={p.name}>
+                  <Paperclip size={14} className="mail-attach-icon" /><span className="mail-attach-name">{p.name}</span><span className="muted">{p.label}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {review && (
             <div className="mail-review">
               <h4><Sparkles size={13} /> AI review</h4>
@@ -158,15 +230,17 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
         </section>
         <footer>
           <button className="ghost-btn" onClick={onDiscard}>Discard</button>
+          <input ref={fileRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => { onAttach(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+          <button className="ghost-btn" onClick={() => fileRef.current?.click()}><Paperclip size={14} /> Attach</button>
           <span className="spacer" />
           <button className="ghost-btn" disabled={busy !== null} onClick={onSuggestTimes}>Suggest times</button>
           <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={onReview}>
             <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
           </button>
-          <button className="ghost-btn" disabled={busy !== null || !valid} onClick={onDraft}>
+          <button className="ghost-btn" disabled={busy !== null || !valid || compose.pending.length > 0} onClick={onDraft}>
             {busy === 'draft' ? 'Saving…' : 'Save draft'}
           </button>
-          <button className="primary-btn" disabled={busy !== null || !valid} onClick={onSend}>
+          <button className="primary-btn" disabled={busy !== null || !valid || compose.pending.length > 0} onClick={onSend}>
             <Send size={14} /> {busy === 'send' ? 'Sending…' : 'Send'}
           </button>
         </footer>
@@ -313,7 +387,45 @@ export default function MailView(): JSX.Element {
 
   const startCompose = (): void => {
     setReview(null)
-    setCompose({ to: '', subject: '', body: '', replyTo: null, replyBody: '' })
+    setCompose({ to: '', cc: '', bcc: '', subject: '', body: '', replyTo: null, replyToId: null, replyBody: '', attachments: [], pending: [] })
+  }
+  // A pending slot resolves to a chip (doc) or just goes away (null). A slot the compose no longer holds
+  // belongs to a message that was discarded meanwhile, so it is ignored.
+  const settle = (slot: Compose['pending'][number], doc: Document | null): void =>
+    setCompose((c) => c && c.pending.includes(slot) ? {
+      ...c, pending: c.pending.filter((p) => p !== slot),
+      attachments: doc ? [...c.attachments, { id: doc.id, name: doc.name, mime: doc.mime, size: doc.size }] : c.attachments
+    } : c)
+  const attach = (files: File[]): void => {
+    const sizes = (compose?.attachments ?? []).map((a) => a.size)
+    for (const f of files) {
+      const over = attachmentsOverLimit(sizes, [f.size])
+      if (over) { toast(over, 'error'); continue }
+      sizes.push(f.size)
+      const slot = { name: f.name, label: 'Uploading…' }
+      setCompose((c) => c && { ...c, pending: [...c.pending, slot] })
+      api.documents.upload(null, f).then((d) => settle(slot, d)).catch((e: Error) => { toast(e.message, 'error'); settle(slot, null) })
+    }
+  }
+  // An assistant's email card moved here to be finished: open it prefilled, once.
+  const prefill = useStore((s) => s.mailComposePrefill)
+  useEffect(() => {
+    if (!prefill) return
+    useStore.setState({ mailComposePrefill: null })
+    setReview(null)
+    setCompose({
+      to: prefill.to, cc: prefill.cc, bcc: prefill.bcc, subject: prefill.subject, body: prefill.body, replyTo: null,
+      replyToId: prefill.replyToMessageId, replyBody: '', attachments: prefill.attachments, pending: []
+    })
+  }, [prefill])
+  const startForward = (m: GmailMessage): void => {
+    const f = full?.id === m.id ? full : null
+    const pending = (f?.attachments ?? []).map((a) => ({ name: a.name, label: 'Fetching…' }))
+    setReview(null)
+    setOpen(null)
+    setCompose({ to: '', cc: '', bcc: '', ...forwardCompose(m, f), replyTo: null, replyToId: null, replyBody: '', attachments: [], pending })
+    f?.attachments?.forEach((a, i) => api.google.gmailAttachmentImport(m.id, a.id).then((d) => settle(pending[i], d))
+      .catch((e: Error) => { toast(e.message, 'error'); settle(pending[i], null) }))
   }
   const startReply = (m: GmailMessage): void => {
     const addr = m.from?.match(/<(.*)>/)?.[1] ?? m.from ?? ''
@@ -324,7 +436,7 @@ export default function MailView(): JSX.Element {
       : ''
     setReview(null)
     setOpen(null)
-    setCompose({ to: addr, subject, body: quote, replyTo: m, replyBody: orig || m.snippet })
+    setCompose({ to: addr, cc: '', bcc: '', subject, body: quote, replyTo: m, replyToId: m.id, replyBody: orig || m.snippet, attachments: [], pending: [] })
   }
   const composeValid = compose !== null && /\S+@\S+/.test(compose.to) && (compose.subject.trim() !== '' || compose.body.trim() !== '')
   const doSend = async (): Promise<void> => {
@@ -332,7 +444,7 @@ export default function MailView(): JSX.Element {
     setBusy('send')
     try {
       // Queued behind its undo hold, not sent: say so, and let PendingSends count it down.
-      const queued = await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      const queued = await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyToId, cc: compose.cc.trim() || undefined, bcc: compose.bcc.trim() || undefined, attachments: compose.attachments.map((a) => a.id) })
       if (queued.status === 'sent' && queued.verified === false) toast(queued.error ?? 'Sent, but Gmail did not confirm it. Check your Sent folder.', 'error')
       else toast(queued.status === 'sent' ? 'Email sent.' : `Sending in ${queued.seconds_left}s — you can still undo it.`)
       window.dispatchEvent(new Event('grain-outbox-changed'))
@@ -348,7 +460,7 @@ export default function MailView(): JSX.Element {
     if (!compose) return
     setBusy('draft')
     try {
-      await api.google.gmailDraft({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      await api.google.gmailDraft({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyToId, cc: compose.cc.trim() || undefined, bcc: compose.bcc.trim() || undefined, attachments: compose.attachments.map((a) => a.id) })
       toast('Draft saved in Gmail.')
       setCompose(null)
       setReview(null)
@@ -488,6 +600,7 @@ export default function MailView(): JSX.Element {
         <MailReader
           message={opened} full={full} onClose={() => setOpen(null)}
           onReply={() => startReply(opened)}
+          onForward={() => startForward(opened)}
           onStar={() => void modify(opened, { star: !isStarred(opened) })}
           onArchive={() => void modify(opened, { archive: true })}
           onSnooze={() => void snooze(opened)}
@@ -501,7 +614,7 @@ export default function MailView(): JSX.Element {
           compose={compose} setCompose={setCompose} review={review} setReview={setReview}
           busy={busy} valid={composeValid}
           onDiscard={() => { setCompose(null); setReview(null) }}
-          onSuggestTimes={() => void suggestTimes()} onReview={() => void doReview()} onDraft={() => void doDraft()} onSend={() => void doSend()}
+          onSuggestTimes={() => void suggestTimes()} onReview={() => void doReview()} onDraft={() => void doDraft()} onSend={() => void doSend()} onAttach={attach}
         />
       )}
     </main>

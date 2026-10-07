@@ -1304,6 +1304,13 @@ export interface DriveFile {
   owner: string | null
 }
 
+export interface GmailAttachment {
+  id: string
+  name: string
+  mime: string
+  size: number
+}
+
 export interface GmailFullMessage {
   id: string
   thread_id: string
@@ -1312,6 +1319,7 @@ export interface GmailFullMessage {
   subject: string | null
   date: string | null
   body: string
+  attachments?: GmailAttachment[]
 }
 
 export interface GmailLabel {

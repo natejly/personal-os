@@ -15,6 +15,7 @@ import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
+import { quietEvents } from '../lib/orchestration'
 import { latestBrowserCall } from '../lib/browserApproval'
 import { planOfCall } from '../lib/planDigest'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
@@ -296,7 +297,8 @@ function Row({ render }: { render: () => JSX.Element }): JSX.Element {
 const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(QUESTION_TOOLS.has(t.name) && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
 
 /** `browserSession`: set on the transcript's latest reply that used the browser; its last browser card offers the viewer. */
-function ToolEvents({ events, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
+function ToolEvents({ events: all, conversationId, streaming = false, browserSession }: { events: ToolEvent[]; conversationId: string; streaming?: boolean; browserSession?: string }): JSX.Element {
+  const events = useMemo(() => quietEvents(all), [all]) // hand-offs to workers are not cards: the app shows the workers
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -357,8 +359,6 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
         ))}
         {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
         {t.pending && t.needs_approval && t.name === 'propose_plan' && !deskPlanShown && <ProposedPlanCard event={t} conversationId={conversationId} />}
-        {/* A question is answered, not permitted: its options and a text box instead of Allow/Deny. */}
-        {t.pending && t.needs_approval && QUESTION_TOOLS.has(t.name) && <AskQuestion event={t} conversationId={conversationId} />}
         {t.pending && t.needs_approval && t.name !== 'propose_plan' && !QUESTION_TOOLS.has(t.name) && (
           <GenericApproval event={t} conversationId={conversationId} decide={async (ok) => decideFor(t)(ok)}
             onWhy={inMainChat ? () => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() } : undefined} />
@@ -372,6 +372,8 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
     // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
     // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
     // A pending question keeps the answer box below; once it is answered (or running) its card shows the question and choices.
+    // A question is its own card, alone (no tool header): options and a text box while pending, one muted line after.
+    if (QUESTION_TOOLS.has(t.name)) return <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}><AskQuestion event={t} conversationId={conversationId} /></RenderBoundary>
     const Card = hasCard(t) ? TOOL_CARDS[t.name] : undefined
     const asking = !!t.pending && !!t.needs_approval
     return (

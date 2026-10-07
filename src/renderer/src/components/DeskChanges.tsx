@@ -1,28 +1,41 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Redo2, Undo2 } from 'lucide-react'
-import type { FullDesk, RunChanges } from '@shared/types'
+import type { FullDesk, RunChanges, RunInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { STATUS_WORD, fmtAgo, groupChangesByTurn, recentRunIds, undoNote } from '../lib/deskFiles'
-import { useStore } from '../store'
+import { useConversation, useIsStreaming, useStore } from '../store'
 
 /**
  * What each of the desk's recent turns did to its workspace, with the same Undo / Redo a chat reply
  * has (the backend snapshots a desk's folder around every run). Both are the user's clicks. An
  * undo leaves alone any file edited after the turn, and says which, rather than clobbering it.
+ * A chat with no desk passes `conversationId` instead: the same list for its replies' runs.
  */
-export default function DeskChanges({ desk }: { desk: FullDesk }): JSX.Element | null {
+export default function DeskChanges({ desk, conversationId }: { desk?: FullDesk; conversationId?: string }): JSX.Element | null {
   const toast = useStore((s) => s.toast)
   const loadDeskFiles = useStore((s) => s.loadDeskFiles)
   const [changes, setChanges] = useState<Record<string, RunChanges | undefined>>({})
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [open, setOpen] = useState(true)
+  const [chatRuns, setChatRuns] = useState<Pick<RunInfo, 'run_id' | 'started_at'>[]>([])
+  const msgCount = useConversation(conversationId)?.messages?.length
+  const streaming = useIsStreaming(conversationId)
 
   // Re-read when a turn starts or ends: the run list changes, and `status` flips as a turn closes.
-  const ids = useMemo(() => recentRunIds(desk.runs), [desk.runs])
-  const stamp = `${ids.join(',')}:${desk.status}:${desk.runs.length}`
+  const runs = desk ? desk.runs : chatRuns
+  const ids = useMemo(() => recentRunIds(runs), [runs])
+  const stamp = desk ? `${ids.join(',')}:${desk.status}:${desk.runs.length}` : `${conversationId}:${msgCount}:${streaming}`
   useEffect(() => {
     let gone = false
+    if (!desk) {
+      if (conversationId) void api.conversationChanges(conversationId).then((r) => {
+        if (gone) return
+        setChatRuns(r.runs)
+        setChanges(Object.fromEntries(r.runs.map((x) => [x.run_id, x])))
+      }).catch(() => undefined)
+      return () => { gone = true }
+    }
     void Promise.all(ids.map((id) => api.runChanges(id).then((c) => [id, c] as const).catch(() => [id, undefined] as const)))
       .then((rows) => { if (!gone) setChanges(Object.fromEntries(rows)) })
     return () => { gone = true }
@@ -30,7 +43,7 @@ export default function DeskChanges({ desk }: { desk: FullDesk }): JSX.Element |
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stamp])
 
-  const turns = useMemo(() => groupChangesByTurn(desk.runs, changes), [desk.runs, changes])
+  const turns = useMemo(() => groupChangesByTurn(runs, changes, desk ? 8 : 20), [runs, changes, desk])
   const unavailable = ids.length > 0 && ids.every((id) => changes[id] && !changes[id]?.available)
 
   const go = useCallback(async (runId: string, undone: boolean): Promise<void> => {
@@ -39,7 +52,7 @@ export default function DeskChanges({ desk }: { desk: FullDesk }): JSX.Element |
       const r = await (undone ? api.redoRun(runId) : api.undoRun(runId))
       setNotes((n) => ({ ...n, [runId]: undoNote(r.edited_since) }))
       setChanges((c) => (c[runId] ? { ...c, [runId]: { ...(c[runId] as RunChanges), state: undone ? 'applied' : 'undone' } } : c))
-      void loadDeskFiles(desk.id, '', true)
+      if (desk) void loadDeskFiles(desk.id, '', true)
     } catch (e) {
       // 409 is a refusal with a reason ("edited since", nothing to undo); show it on the turn, not as a toast.
       setNotes((n) => ({ ...n, [runId]: (e as Error).message }))
@@ -47,9 +60,9 @@ export default function DeskChanges({ desk }: { desk: FullDesk }): JSX.Element |
     } finally {
       setBusy(null)
     }
-  }, [desk.id, loadDeskFiles, toast])
+  }, [desk, loadDeskFiles, toast])
 
-  if (turns.length === 0 && !unavailable) return null
+  if (turns.length === 0 && !unavailable) return desk ? null : <p className="empty-hint">No files changed in this chat yet.</p>
   return (
     <section className="desk-changes">
       <button className="desk-folder" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

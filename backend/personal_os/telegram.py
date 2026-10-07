@@ -943,8 +943,8 @@ class TelegramBridge:
                 self._spawn(self._long_run_note(run, took, owner))
 
     async def _reply_final(self, run: Any, chat_id: int) -> None:
-        if run.run_id in self._muted.seen or run.status == "interrupted":  # a backend going down sends nothing
-            return
+        if run.run_id in self._muted.seen or run.status == "interrupted" or getattr(run, "silent", False):
+            return  # a backend going down sends nothing, and a reply that only handed work on was removed (its work shows in the app)
         text = ((self.deps.message_text(run.message_id) if run.message_id else "") or "").strip()
         if not to_plain(text):
             text = RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone

@@ -10,6 +10,8 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Changed
 
+- **Composer "Mode" button.** The composer control that hands a chat to a desk is now called Mode (accessible name "Mode: how the assistant works in this chat"), and each style has a one-line description: Plan first, Ask as it goes, and Autonomous (renamed from "Work and propose"; same behaviour, same API values).
+- **Read aloud and voice chat removed.** The speaker button on a reply, the hands-free voice chat loop (`/voice`, the waveform button) and their settings (voice, speed, turn cap) are gone; migration 29 deletes the stored keys. Dictation (the mic button and its chord) is the one voice input and still never sends for you.
 - **Projects: Artifacts tab renamed Context.** The project tab that lists a project's chats' files, notes and uploads is now called Context, so "Artifacts" means one thing: the Files section above.
 - **Memory is in Settings.** The Memory sidebar row and page are gone; Settings has a Memory tab (between Texting and Appearance) with the scope filter, a collapsed Learning section (learn from chats, learn how I write) and the panel itself. Split is the default layout again, graph on the left and memories on the right; List, Graph and Voice are one click away. ⌘6, the Go menu, "View all" on Today and every link to Memory open that tab.
 - **Sidebar rows are toggles in Appearance.** Settings → Appearance → Sidebar has one switch per row (Lists, Calendar, Mail, Health, Library), saved at once with no restart; Today cards and the default file font moved there too. The Advanced Layout group is gone. A migration removes `memory` from `hiddenViews`; all rows stay on by default.

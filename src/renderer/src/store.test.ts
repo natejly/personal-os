@@ -1254,3 +1254,56 @@ test('Memory lives in Settings: split by default, and every way in lands on its 
   st().openSettings('modules')
   assert.equal(st().settingsTab, 'appearance')
 })
+
+test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {
+  const made: Array<{ title: string; body?: string; tag?: string }> = []
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const real = { N: g.Notification, d: g.document, f: globalThis.fetch }
+  let focused = false
+  g.Notification = class { static permission = 'granted'; onclick: (() => void) | null = null; constructor(title: string, o: { body?: string; tag?: string }) { made.push({ title, ...o }) } }
+  g.document = { hasFocus: () => focused }
+  const conv = (id: string): object => ({ id, project_id: null, title: `Chat ${id}`, model: 'm', settings: {}, created_at: 0, updated_at: 0, messages: [] })
+  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    return new Response(JSON.stringify(/\/conversations\/n\d$/.test(url) ? conv(url.slice(-2)) : []), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const frame = (cid: string, rid: string, o: Record<string, unknown> = {}): void =>
+    useStore.getState().onRunState({ run_id: rid, conversation_id: cid, message_id: null, seq: 1, started_at: 0, live: true, answering: true, status: 'running', kind: 'chat', replied: false, ...o } as never)
+  const finish = (cid: string, rid: string, o: Record<string, unknown> = {}): void => { frame(cid, rid); frame(cid, rid, { answering: false, replied: true, ...o }) }
+  const unread = (id: string): number | undefined => useStore.getState().unreadById[id]
+  try {
+    useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [], sessions: {}, unreadById: {}, conversations: [conv('n1'), conv('n2')], view: 'chat', focusedConversationId: 'n2' } as never)
+
+    finish('n1', 'ra')
+    assert.equal(unread('n1'), 1, 'off screen: a dot')
+    assert.deepEqual(made.map((n) => [n.title, n.body, n.tag]), [['Chat n1', 'Reply ready', 'ra:reply']], 'one banner, fixed body')
+    frame('n1', 'ra', { answering: false, replied: true, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'the run ending after its reply does not count twice')
+
+    made.length = 0
+    focused = true
+    finish('n2', 'rb')
+    assert.equal(unread('n2'), undefined, 'on screen and focused: nothing to flag')
+    assert.equal(made.length, 0, 'and no banner')
+
+    focused = false
+    finish('n2', 'rc')
+    assert.equal(unread('n2'), undefined, 'on screen in an unfocused window: no dot')
+    assert.equal(made.length, 1, 'but a banner')
+
+    made.length = 0
+    frame('n1', 'rd')
+    frame('n1', 'rd', { answering: false, replied: false, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'a silent wake leaves nothing to read')
+    assert.equal(made.length, 0)
+
+    await useStore.getState().selectChat('n1')
+    assert.equal(unread('n1'), undefined, 'opening the chat reads it')
+  } finally {
+    reset()
+    useStore.setState({ unreadById: {}, focusedConversationId: null } as never)
+    g.Notification = real.N
+    g.document = real.d
+    globalThis.fetch = real.f
+  }
+})

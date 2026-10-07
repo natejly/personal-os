@@ -38,15 +38,15 @@ export const chatRow = (page, title) => page.locator('.sidebar .convo-item', { h
 export const openChat = async (page, title) => { await chatRow(page, title).click() }
 export const strip = (page) => page.locator('.desk-strip')
 export const panel = (page) => page.locator('.desk-panel')
-/** The workspace panel, on `tab` (Files, Changes or Review). */
+/** The chat's side panel (the header button opens it, desk or not), on `tab` (Files, Changes or Review). */
 export async function openPanel(page, tab) {
-  if (!(await panel(page).count())) await strip(page).getByRole('button', { name: 'Files, changes and review' }).click()
+  if (!(await panel(page).count())) await page.getByRole('button', { name: 'Documents in this chat' }).click()
   if (tab) await panel(page).locator('.desk-tabs').getByRole('button', { name: new RegExp('^' + tab) }).click()
 }
 /** Turn autonomy on from the composer, as a user does: pick the level, Start working. */
-export async function turnOn(page, level = 'Work and propose') {
-  await page.getByRole('button', { name: /Work autonomously/ }).click()
-  const menu = page.getByRole('dialog', { name: 'Work autonomously' })
+export async function turnOn(page, level = 'Autonomous') {
+  await page.getByRole('button', { name: /^Mode/ }).click()
+  const menu = page.getByRole('dialog', { name: 'Mode' })
   await menu.getByLabel(new RegExp(level)).check()
   await menu.getByRole('button', { name: 'Start working' }).click()
 }

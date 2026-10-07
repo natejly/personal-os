@@ -1,6 +1,6 @@
 # Cowork + Planning Mode — original design
 
-> **Folded into chats, 2026-10-05.** The standalone Cowork view, its desk rail and detail pane, the `cowork` nav entry and ⌘⇧K are gone. The same desks now run behind any chat: "Work autonomously" (`AutonomyToggle.tsx`), the status strip (`DeskStrip.tsx`) and side panel with Files / Changes / Review (`DeskPanel.tsx`), and Settings → Autonomy (`CoworkSettings.tsx`). The backend (`backend/personal_os/cowork.py`) is as described here.
+> **Folded into chats, 2026-10-05.** The standalone Cowork view, its desk rail and detail pane, the `cowork` nav entry and ⌘⇧K are gone. The same desks now run behind any chat: the composer "Mode" menu (`AutonomyToggle.tsx`), the status strip (`DeskStrip.tsx`) and side panel with Files / Changes / Review (`DeskPanel.tsx`), and Settings → Autonomy (`CoworkSettings.tsx`). The backend (`backend/personal_os/cowork.py`) is as described here.
 
 > **Budgets removed, 2026-10-06.** Desks no longer have a turn limit and replies no longer have round, token or time budgets; mentions of `maxToolRounds`, `deskMaxTurns`, `{maxTurns}` and budget-window chaining below are historical. A turn ends when the model is done, asks, or stuck detection stops it (`docs/research/settings-magic-numbers.md`, "Removed budgets").
 

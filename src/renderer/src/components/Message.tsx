@@ -16,13 +16,13 @@ import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
+import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import MemoryChips from './MemoryChips'
 import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
-import ReadAloudButton from './ReadAloudButton'
 import ResearchTrail from './ResearchTrail'
 import { trailFromEvents } from '../lib/researchTrail'
 
@@ -271,7 +271,7 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
 export type ChatFace = { name: string; hue?: number; tone?: number }
 
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -286,10 +286,13 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
-  const events = message.tool_events
+  // Hand-offs to workers are not cards: the app shows the workers themselves.
+  const events = useMemo(() => quietEvents(message.tool_events), [message.tool_events])
   const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
   const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
+  // A reply that only handed work on has nothing to draw (the backend removes it once the turn ends).
+  if (!isUser && !streaming && !message.content && !message.reasoning && !message.error && !message.attachments?.length && !events.length && message.tool_events?.length) return null
   return (
     <div className={`msg ${message.role}`} data-message-id={message.id}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
@@ -352,7 +355,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               </button>
             )}
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && (message.tool_events?.length ?? 0) > 0 && (
+            {!isUser && events.length > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
             {!isUser && !streaming && message.content.trim() && (
@@ -363,7 +366,6 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
-            {!bare && !isUser && message.content.trim() && <ReadAloudButton id={message.id} text={message.content} />}
             {resendable && isUser && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />

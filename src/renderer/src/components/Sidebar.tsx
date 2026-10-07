@@ -303,7 +303,7 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-rows">
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {rows.slice(0, PROJECT_ROWS).map((c) => <ChatRow key={c.id} conv={c} sub active={c.id === focusedId && view === 'chat'} />)}
-                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id, 'chats')}>View all</button>}
+                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
                   </div>
                 )}
               </div>

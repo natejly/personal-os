@@ -140,31 +140,25 @@ test('sidebar group lists only the newest 4 chats (no switch), View all opens Ch
   await expect(group.locator('.cf-row')).toHaveCount(0)
   await group.getByRole('button', { name: 'View all' }).click()
   await expect(page.getByRole('heading', { name: 'Mixed' })).toBeVisible()
-  await expect(page.locator('.tabs button.active')).toContainText('Chats')
   await expect(page.locator('.chat-row')).toHaveCount(5)
-  await page.locator('.tabs').getByRole('button', { name: /^Context/ }).click()
-  await expect(page.locator('.tabs button.active')).toContainText('Context')
   await expect(page.locator('.pf .cf-name', { hasText: 'note 2' })).toBeVisible()
   // collapse via the folder twist and the choice survives a relaunch
   await group.getByRole('button', { name: /Collapse Mixed|Expand Mixed/ }).first().click().catch(() => {})
   clean(grain)
 })
 
-test('project view: tabs, counts, new chat button, empty state, memory add inside the project', async ({ grain }) => {
+test('project view: sections, counts, new chat button, empty state, memory add inside the project', async ({ grain }) => {
   const { page, api } = grain
   const p = await api('/projects', { method: 'POST', body: { name: 'Tabs' } })
   await page.reload()
   await sidebar(page).getByText('Tabs', { exact: true }).click()
   await expect(page.getByText('No chats yet')).toBeVisible()
-  await page.locator('.project-page .tabs').getByRole('button', { name: /Memory/ }).click()
   await page.getByPlaceholder(/Remember something in this project/).fill('tabs memory one')
   await page.getByPlaceholder(/Remember something in this project/).press('Enter')
   await expect(page.getByText('tabs memory one')).toBeVisible()
   const mems = await api('/memories?project_id=' + p.id + '&include_global=false')
   expect(mems.map((m) => m.content)).toContain('tabs memory one')
-  await page.locator('.tabs').getByRole('button', { name: /^Context/ }).click()
-  await expect(page.getByText('No context yet')).toBeVisible()
-  await page.locator('.tabs').getByRole('button', { name: /^Chats/ }).click()
+  await expect(page.getByText('No files yet')).toBeVisible()
   await page.locator('.page-header').getByRole('button', { name: /New chat/ }).click()
   await expect(page.getByText('New chat in Tabs')).toBeVisible()
   clean(grain)
@@ -185,7 +179,7 @@ test('50 projects and 200 chats in one project: sidebar and project view stay us
   expect(await group.locator('.project-rows .convo-item').count()).toBeLessThanOrEqual(4)
   await sidebar(page).getByText('Proj 00', { exact: true }).click()
   await expect(page.locator('.chat-row')).toHaveCount(200)
-  await expect(page.locator('.tabs').getByRole('button', { name: /^Chats/ })).toContainText('200')
+  await expect(page.getByRole('region', { name: 'Chats' }).locator('.project-sec-head')).toContainText('200')
   // the sidebar scrolls as one column: the last project can be reached
   await sidebar(page).getByText('Proj 49', { exact: true }).scrollIntoViewIfNeeded()
   await sidebar(page).getByText('Proj 49', { exact: true }).click()

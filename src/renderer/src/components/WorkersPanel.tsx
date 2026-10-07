@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bot, ChevronDown, ChevronRight, RotateCcw, Square } from 'lucide-react'
 import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
-import { useStore, useConversation } from '../store'
-import { sortWorkers, upsertWorker, workerActions, workerIsLive, workerLine } from '../lib/workers'
+import { useStore, useConversation, useWorkers } from '../store'
+import { liveWorkerCount, sortWorkers, workerActions, workerIsLive, workerLine } from '../lib/workers'
 
 const TONE: Record<WorkerInfo['status'], string> = { queued: '', running: 'working', awaiting_approval: 'needs-you', done: 'done', error: 'failed', interrupted: 'failed', stopped: '' }
 /** Ended workers stay listed so their transcript can be opened; only the newest few, to keep the panel short. */
@@ -11,44 +11,32 @@ const ENDED_SHOWN = 4
 
 /**
  * The chat's background workers (the assistant's `delegate` tool), under its checklist: status, the current action,
- * Stop / Resume, and approval cards the worker is waiting on. Refetches on the app topic's `workers` event with a
+ * Stop / Resume, and approval cards the worker is waiting on. Fed by the app topic's `workers` event (see the store), with a
  * 3 s poll as a fallback while any worker is live. Hidden when the chat has none.
  */
 export default function WorkersPanel({ conversationId: focusId }: { conversationId?: string }): JSX.Element | null {
   const conversationId = useConversation(focusId)?.id // the main view passes no id: resolve the focused chat
-  const [workers, setWorkers] = useState<WorkerInfo[]>([])
+  const workers = useWorkers(conversationId)
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
-  const { openSubagent, toast } = useStore()
+  const { openSubagent, toast, loadWorkers } = useStore()
 
-  const load = useCallback((): void => {
-    if (conversationId) void api.workers.list(conversationId).then((r) => setWorkers(r.workers)).catch(() => undefined)
-  }, [conversationId])
-  useEffect(() => {
-    setWorkers([])
-    load()
-    const onEvent = (e: Event): void => {
-      const d = (e as CustomEvent<{ conversation_id: string; worker: WorkerInfo }>).detail
-      if (d.conversation_id === conversationId) setWorkers((ws) => upsertWorker(ws, d.worker))
-    }
-    window.addEventListener('grain-workers', onEvent)
-    return () => window.removeEventListener('grain-workers', onEvent)
-  }, [conversationId, load])
+  useEffect(() => { if (conversationId) void loadWorkers(conversationId) }, [conversationId, loadWorkers])
   const anyLive = workers.some(workerIsLive)
   useEffect(() => {
-    if (!anyLive) return
-    const t = setInterval(load, 3000)
+    if (!anyLive || !conversationId) return
+    const t = setInterval(() => void loadWorkers(conversationId), 3000)
     return () => clearInterval(t)
-  }, [anyLive, load])
+  }, [anyLive, conversationId, loadWorkers])
 
   if (!workers.length) return null
-  const sorted = sortWorkers(workers)
+  const sorted = sortWorkers([...workers])
   const shown = [...sorted.filter(workerIsLive), ...sorted.filter((w) => !workerIsLive(w)).slice(0, ENDED_SHOWN)]
-  const live = workers.filter(workerIsLive).length
+  const live = liveWorkerCount(workers)
 
   const act = async (id: string, fn: () => Promise<unknown>): Promise<void> => {
     setBusy(id)
-    try { await fn() } catch (e) { toast((e as Error).message, 'error') } finally { setBusy(null); load() }
+    try { await fn() } catch (e) { toast((e as Error).message, 'error') } finally { setBusy(null); if (conversationId) void loadWorkers(conversationId) }
   }
 
   return (

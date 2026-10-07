@@ -4,6 +4,7 @@ import type { WorkerInfo } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore, useConversation, useWorkerFace, useWorkers } from '../store'
 import Face from './Face'
+import WorkerChat from './WorkerChat'
 import { workersCardShown } from '../lib/statusChrome'
 import { liveWorkerCount, sortWorkers, workerActions, workerIsLive, workerWord } from '../lib/workers'
 
@@ -17,7 +18,7 @@ function WorkerFace({ w }: { w: WorkerInfo }): JSX.Element {
 
 /**
  * The chat's background workers (the assistant's `delegate` tool), under its checklist: a face, the title, a status word and
- * Stop / Resume per row; a row unfolds to the current action or, once ended, the final report and a link to the transcript.
+ * Stop / Resume per row; a row unfolds to the worker's chat (WorkerChat): its history, and a box to steer or stop it.
  * Approval cards the worker is waiting on stay inline. Fed by the app topic's `workers` event (see the store), with a
  * 3 s poll as a fallback while any worker is live. Hidden when the chat has none.
  */
@@ -28,7 +29,7 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [unfolded, setUnfolded] = useState<string | null>(null)
-  const { openSubagent, toast, loadWorkers } = useStore()
+  const { toast, loadWorkers } = useStore()
 
   useEffect(() => { if (conversationId) void loadWorkers(conversationId) }, [conversationId, loadWorkers])
   const anyLive = workers.some(workerIsLive)
@@ -65,22 +66,16 @@ export default function WorkersPanel({ conversationId: focusId, all = false }: {
             return (
               <li key={w.id} className={`worker-row ${on ? 'on' : ''}`}>
                 <div className="worker-line">
-                  <button className="worker-open" aria-expanded={on} title={on ? 'Hide details' : 'Show details'} onClick={() => setUnfolded(on ? null : w.id)}>
+                  <button className="worker-open" aria-expanded={on} title={on ? 'Hide chat' : 'Open chat'} onClick={() => setUnfolded(on ? null : w.id)}>
                     {on ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                     <WorkerFace w={w} />
                     <span className="worker-title">{w.title || w.goal}</span>
                     <small>{workerWord(w)}</small>
                   </button>
-                  {a.stop && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.stop(w.id))}><Square size={11} /> Stop</button>}
+                  {a.stop && !on && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.stop(w.id))}><Square size={11} /> Stop</button>}
                   {a.resume && <button className="ghost-btn xs" disabled={busy === w.id} onClick={() => void act(w.id, () => api.workers.resume(w.id))}><RotateCcw size={11} /> Resume</button>}
                 </div>
-                {on && (
-                  <div className="worker-detail">
-                    {workerIsLive(w) && w.now && <p className="muted small">{w.now}</p>}
-                    {!workerIsLive(w) && w.report && <pre className="worker-report">{w.report}</pre>}
-                    <button className="ghost-btn xs" onClick={() => openSubagent(w.id)}>Open transcript</button>
-                  </div>
-                )}
+                {on && <WorkerChat id={w.id} onStop={() => act(w.id, () => api.workers.stop(w.id))} />}
                 {w.pending_approvals.map((p) => (
                   <div key={p.call_id} className="worker-approval">
                     <span>Wants to use <code>{p.tool}</code></span>

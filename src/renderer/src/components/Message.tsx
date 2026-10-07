@@ -259,7 +259,7 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
 export type ChatFace = { name: string; hue?: number; tone?: number }
 
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element | null {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face, plain = false, from }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace; /** A row not stored as a chat message (a worker's history): no actions under it. */ plain?: boolean; /** A user-role row someone else wrote, labelled with their face and name (the main agent's task to a worker). */ from?: { label: string; face: ChatFace } }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
@@ -291,7 +291,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
+            <div className="user-bubble">{from && <div className="user-from"><Face name={from.face.name} hue={from.face.hue} tone={from.face.tone} size={14} /> {from.label}</div>}<AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
           )
         ) : (
           <div className="msg-body">
@@ -326,10 +326,10 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {bare ? <div className="msg-partial">Stopped before any output</div> : note && <div className="msg-partial">{note}</div>}
         {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
         {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
-        {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
+        {!plain && !streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
         {/* Always mounted and only hidden while the reply streams: the row's height is reserved, so
             nothing lands below the fold when the stream ends. */}
-        {!editing && (
+        {!editing && !plain && (
           <div className={streaming ? 'msg-actions streaming' : 'msg-actions'} aria-hidden={streaming || undefined}>
             {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
             {message.model && (

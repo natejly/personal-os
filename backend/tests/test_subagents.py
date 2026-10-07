@@ -40,6 +40,9 @@ passed = 0
 mgr = appmod.subagent_mgr
 
 
+from personal_os.subagents import USER_NOTE
+
+
 def check(cond: Any, label: str) -> None:
     global passed
     assert cond, label
@@ -837,6 +840,28 @@ def test_steer_reaches_a_running_child() -> None:
     mgr.children.clear()
     tr2 = mgr.transcript(ch.id)
     check(tr2 is not None and tr2[-1]["content"] == "answered the steer", "and from the tape once it is not")
+
+
+def test_transcript_labels_who_spoke() -> None:
+    """User rows say whether the human or the main agent wrote them; the note prefix never reaches the transcript."""
+    reset()
+    SCRIPTS["slow2"] = [{"text": "first thoughts", "delay": 0.3}]
+    SCRIPTS["from the human"] = [{"text": "ok"}]
+
+    async def go() -> Any:
+        ctx = mkctx(new_conv())
+        out = await appmod.toolbox.call("agent_spawn", {"task": "slow2", "background": True}, ctx)
+        ch = mgr.children[out["agent_id"]]
+        await asyncio.sleep(0.1)
+        check(mgr.steer(ch, "from the human", by_user=True), "steer accepted")
+        await appmod.toolbox.call("agent_wait", {"ids": [ch.id]}, ctx)
+        return ch
+
+    ch = run(go())
+    check(any(m.get("content", "").startswith(USER_NOTE) for m in ch.messages if m["role"] == "user"), "stored row keeps the prefix")
+    users = [m for m in mgr.transcript(ch.id) if m["role"] == "user"]
+    check(users[0]["from"] == "agent" and users[0]["content"] == "slow2", "the initial task is from the agent")
+    check(users[-1]["from"] == "user" and users[-1]["content"] == "from the human", "the human's note is labelled and stripped")
 
 
 def test_agent_routes_and_prompt_blocks() -> None:

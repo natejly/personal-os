@@ -225,9 +225,10 @@ def test_a_desk_is_a_conversation_the_chat_list_hides() -> None:
     check(j("GET", "/cowork/desks/nope", expect=404)["detail"] == "No such desk", "an unknown desk 404s")
 
 
-def test_ask_as_it_goes_cards_each_change_instead_of_planning_first() -> None:
+def test_ask_as_it_goes_reviews_each_change_instead_of_planning_first() -> None:
     """'Ask as it goes' is a mode the UI offers, so it has to be a different thing from 'Plan
-    first': nothing withheld up front, no plan card, and one card per change on its way out."""
+    first': nothing withheld up front, no plan card, and each change follows the permission mode
+    (here the reviewer is unavailable, so the change is carded, but not forced)."""
     script({"calls": [WRITE]},
            {"calls": [call("desk_done", summary="Written.")]},
            {"text": "Done."})
@@ -237,8 +238,7 @@ def test_ask_as_it_goes_cards_each_change_instead_of_planning_first() -> None:
           "an 'ask' desk does not start its reply in planning")
     row = card(did, "desk_write_file")
     check(row["tool"] == "desk_write_file", f"the change itself is the card, got {row['tool']}")
-    check(bool(row["forced"]),
-          "forced, so 'Always allow' cannot quietly turn the mode the user chose back off")
+    check(not row["forced"], "not forced: it follows the permission mode, so a grant or allow rule can lift it")
     j("POST", f"/approvals/{row['call_id']}", {"decision": "allow"})
     quiet(did)
 
@@ -278,9 +278,7 @@ def test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first() -> None:
 def test_seen_clears_the_desks_needs_you_badge() -> None:
     script({"calls": [call("desk_ask", question="Which vendor did you mean?")]}, {"text": "Waiting."})
     did = make_desk("Compare the vendors", autonomy="ask")["desk"]["id"]
-    q = card(did, "desk_ask")
-    j("POST", f"/approvals/{q['call_id']}", {"decision": "allow", "note": "the second one"})
-    quiet(did)
+    card(did, "desk_ask")  # parked on the question: it sits in Needs you until the user looks
 
     before = desk(did)
     check(before["unseen"] > 0, f"the desk is in Needs you, got unseen={before['unseen']}")
@@ -856,7 +854,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_chained_turn_hands_off_before_it_ends,
          test_nothing_caps_a_desk_chain_but_the_single_nudge,
          test_desk_ask_moves_the_desk_to_needs_you,
-         test_ask_as_it_goes_cards_each_change_instead_of_planning_first,
+         test_ask_as_it_goes_reviews_each_change_instead_of_planning_first,
          test_seen_clears_the_desks_needs_you_badge,
          test_leaving_needs_you_clears_the_old_ask,
          test_a_steer_does_not_double_charge_the_turn,
@@ -1097,8 +1095,9 @@ def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
     j("POST", "/cowork/desks", {"conversation_id": "nope"}, expect=404)
 
 
-def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
-    # A turn that used a tool and then just ended is unfinished work: one nudge, then it settles for the user to look at.
+def test_a_tool_using_reply_that_just_ends_is_the_answer_in_an_ask_desk() -> None:
+    # The front-agent stance answers first and hands longer work to workers, so an ask desk's reply that ended is the answer
+    # whatever tools it used: no nudge turn, the desk settles done.
     script({"calls": [call("current_time")]}, {"text": "I think that is everything."}, {"text": "Still nothing."})
     did = make_desk("Do it", autonomy="ask")["desk"]["id"]
     quiet(did)
@@ -1106,9 +1105,10 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
     quiet(did)
     firsts = [m for m in SCRIPT["messages"] if m]
     nudges = [m for m in firsts if "ended your reply without calling" in str(m[-1].get("content") or "")]
-    check(len(nudges) == 1, f"one nudge turn was started, got {len(nudges)} of {len(firsts)} rounds")
-    check(len(run_store.list(desk_id=did, statuses=None)) == 2, "and no third turn")
-    check(desk(did)["status"] in ("review", "blocked"), "a nudged turn that also just ends settles")
+    check(len(nudges) == 0, f"no nudge turn was started, got {len(nudges)} of {len(firsts)} rounds")
+    check(len(run_store.list(desk_id=did, statuses=None)) == 1, "and no second turn")
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", f"it settles done (answered), got {d['status']}/{d['status_reason']}")
 
 
 def test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge() -> None:
@@ -1130,7 +1130,7 @@ def test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge() -> None:
           "and lands in the same transcript")
 
 
-def test_an_answer_that_used_a_tool_or_a_plan_is_not_a_plain_answer() -> None:
+def test_an_answer_that_consumed_a_plan_step_or_has_a_plan_is_not_a_plain_answer() -> None:
     from personal_os.app import _answered, _chain_kind
     import types
 
@@ -1139,9 +1139,9 @@ def test_an_answer_that_used_a_tool_or_a_plan_is_not_a_plain_answer() -> None:
         return types.SimpleNamespace(**{**base, **kw})
     row = {"autonomy": "ask", "plan_id": None, "status": "working", "turn": 1, "budget": {}}
     check(_answered(row, fake()) and _chain_kind(row, fake()) is None, "a turn with no tool call at all is a plain answer, and nothing follows it")
-    check(not _answered(row, fake(tool_calls=1)) and _chain_kind(row, fake(tool_calls=1)) == "nudge",
-          "a call that was refused still counts as a tool call: the nudge path is unchanged")
-    check(not _answered(row, fake(tool_ok=1, tool_calls=1)) and _chain_kind(row, fake(tool_ok=1, tool_calls=1)) == "nudge", "so does one that ran")
+    check(_answered(row, fake(tool_calls=1)) and _chain_kind(row, fake(tool_calls=1)) is None,
+          "a reply that used tools and ended is still the answer: nothing follows it")
+    check(_answered(row, fake(tool_ok=1, tool_calls=1)) and _chain_kind(row, fake(tool_ok=1, tool_calls=1)) is None, "so is one whose calls ran")
     check(not _answered(row, fake(steps_consumed=1)), "a consumed plan step is not a plain answer")
     check(not _answered({**row, "plan_id": "p1"}, fake()), "a desk with a plan is not")
     check(_chain_kind({**row, "plan_id": "p1"}, fake()) == "nudge", "and still gets its nudge")
@@ -1194,9 +1194,9 @@ def test_a_message_over_the_live_cap_queues_instead_of_starting() -> None:
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_chat_is_offered_desk_start_whatever_views_are_hidden,
          test_a_chat_works_autonomously_in_its_own_conversation,
-         test_a_reply_that_just_ends_gets_exactly_one_nudge,
+         test_a_tool_using_reply_that_just_ends_is_the_answer_in_an_ask_desk,
          test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge,
-         test_an_answer_that_used_a_tool_or_a_plan_is_not_a_plain_answer,
+         test_an_answer_that_consumed_a_plan_step_or_has_a_plan_is_not_a_plain_answer,
          test_a_chats_first_message_can_start_a_desk_through_the_message_route,
          test_a_message_over_the_live_cap_queues_instead_of_starting,
          test_a_desk_is_told_it_is_a_desk,

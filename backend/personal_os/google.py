@@ -21,7 +21,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime as dt
-import email.mime.text
+import email.message
 from email.utils import formataddr, getaddresses, parsedate_to_datetime
 import json
 import logging
@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import verify
+from . import mail_attachments, verify
 from .cache import TTLCache, bypassing, cached, dont_cache, invalidates
 from .google_store import ReadStore
 
@@ -867,7 +867,7 @@ class Google:
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
         # A message body does not change once it is stored. Serve the saved copy so opening
         # a message again is not another full get. A bypass (explicit refresh) still fetches.
-        key = f"{message_id}:{max_chars}"
+        key = f"{message_id}:{max_chars}:a"  # ":a" = carries the attachment list
         if not bypassing():
             hit = self._reads.get("gmail-body", key)
             if isinstance(hit, dict) and hit.get("id") == message_id:
@@ -876,9 +876,16 @@ class Google:
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
-        out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars]}
+        out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars],
+               "attachments": _attachments(msg.get("payload", {}))}
         self._reads.put("gmail-body", key, out, cap=_GMAIL_BODY_CAP)
         return out
+
+    def gmail_attachment(self, message_id: str, attachment_id: str) -> bytes:
+        """The bytes of one attachment. Never logged."""
+        svc = self._svc("gmail", "v1")
+        res = svc.users().messages().attachments().get(userId="me", messageId=message_id, id=attachment_id).execute()
+        return base64.urlsafe_b64decode(res["data"] + "===")
 
     def _reply_headers(self, reply_to_message_id: str) -> tuple[str | None, dict[str, str]]:
         """Thread id plus In-Reply-To/References headers so mail clients thread the reply."""
@@ -890,7 +897,9 @@ class Google:
         return orig.get("threadId"), headers
 
     @invalidates("gmail")
-    def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+    def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                    attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
+                    bcc: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         message: dict[str, Any] = {}
         headers: dict[str, str] = {}
@@ -898,13 +907,16 @@ class Google:
             tid, headers = self._reply_headers(reply_to_message_id)
             if tid:
                 message["threadId"] = tid
-        message["raw"] = _raw_message(to, subject, body, **headers)
+        message["raw"] = _raw_message(to, subject, body, **headers, attachments=attachments, cc=cc, bcc=bcc)
         d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
-        out = {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
+        out = {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent.",
+               "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_draft(d.get("id") or "", subject))
 
     @invalidates("gmail")
-    def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+    def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                   attachments: list[dict[str, Any]] | None = None, cc: str | None = None,
+                   bcc: str | None = None) -> dict[str, Any]:
         """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
 
         Anything that fails before messages().send() is raised as NotSent (or GoogleNotConnected,
@@ -918,13 +930,14 @@ class Google:
                 tid, headers = self._reply_headers(reply_to_message_id)
                 if tid:
                     message["threadId"] = tid
-            message["raw"] = _raw_message(to, subject, body, **headers)
+            message["raw"] = _raw_message(to, subject, body, **headers, attachments=attachments, cc=cc, bcc=bcc)
         except GoogleNotConnected:
             raise
         except Exception as e:  # noqa: BLE001
             raise NotSent(f"{type(e).__name__}: {e}") from e
         m = svc.users().messages().send(userId="me", body=message).execute()
-        out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
+        out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId"),
+               "attachments": [a["name"] for a in attachments or []]}
         return verify.attach(out, self._verify_sent(m.get("id") or "", to, subject, m.get("threadId")))
 
     def _verify_sent(self, message_id: str, to: str, subject: str, thread_id: str | None) -> dict[str, Any]:
@@ -1676,14 +1689,45 @@ def _address_header(value: str) -> str:
     return ", ".join(formataddr((name, addr)) for name, addr in getaddresses([value]) if addr)
 
 
-def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None) -> str:
-    msg = email.mime.text.MIMEText(body)
-    msg["to"], msg["subject"] = _address_header(to), subject
+def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None,
+                 attachments: list[dict[str, Any]] | None = None, cc: str | None = None, bcc: str | None = None) -> str:
+    """The RFC 822 message, base64url. With attachments it is multipart/mixed; without, plain text.
+    Bcc is only a header here: Gmail removes it from the copies it delivers."""
+    msg = email.message.EmailMessage()
+    msg["To"], msg["Subject"] = _address_header(to), subject
+    if cc:
+        msg["Cc"] = _address_header(cc)
+    if bcc:
+        msg["Bcc"] = _address_header(bcc)
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
     if references:
         msg["References"] = references
+    msg.set_content(body)
+    if attachments:
+        mail_attachments.check_total(attachments)
+        for a in attachments:
+            maintype, _, subtype = (a.get("mime") or "").partition("/")
+            if not maintype or not subtype:
+                maintype, subtype = "application", "octet-stream"
+            msg.add_attachment(Path(a["path"]).read_bytes(), maintype=maintype, subtype=subtype, filename=a["name"])
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+def _attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every part that is a file with its own attachment id, at any depth."""
+    out: list[dict[str, Any]] = []
+
+    def walk(p: dict[str, Any]) -> None:
+        body = p.get("body") or {}
+        if p.get("filename") and body.get("attachmentId"):
+            out.append({"id": body["attachmentId"], "name": p["filename"], "mime": p.get("mimeType") or "application/octet-stream",
+                        "size": body.get("size") or 0})
+        for part in p.get("parts") or []:
+            walk(part)
+
+    walk(payload)
+    return out
 
 
 def _doc_text(doc: dict[str, Any]) -> str:

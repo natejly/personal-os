@@ -60,7 +60,7 @@ from .jobs_policy import JobPolicy
 from .jobs import (DESK_JOB_AUTONOMY, KINDS, MAIL_MAX_THREADS, TARGETS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals,
                    Scheduler, local_tz_name, next_fire, spent, valid_cron, valid_tz)
 from . import guide, skillbuild, skillmd
-from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
+from . import mail_attachments, mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
@@ -76,7 +76,7 @@ from .chat_files import ChatFiles, router as chat_files_router
 from .filesnap import FileSnapshots, router as filesnap_router
 from .extundo import ExternalUndo, router as extundo_router
 from .snapshots import Snapshots, available as snapshots_available, router as snapshots_router
-from .outbox import Outbox, router as outbox_router
+from .outbox import Outbox, extras as mail_extras, router as outbox_router
 from .setup import router as setup_router
 from .reliability import router as reliability_router, secret_values
 from .retention import RetentionWorker
@@ -444,7 +444,7 @@ sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
 # A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
 sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
-outbox = Outbox(db, pim, settings)
+outbox = Outbox(db, pim, settings, documents=documents)
 app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
@@ -3276,7 +3276,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A note typed with the denial goes back as the result and the reply carries on.
                     result = (tools.tool_error(f"{c['name']} was declined by the user, who said: {deny_note}",
                                                alternative="follow what the user said, or ask them what they would like instead")
-                              if deny_note else tools.denied(c["name"], "just declined by the user"))
+                              if deny_note else tools.denied(c["name"], tools.DISCARDED if c["name"] == "gmail_send" else "just declined by the user"))
                 elif asks and c["name"] in QUESTION_TOOLS and (answer := ((run_store.approval(uid) or {}).get("note")
                                                                        or deny_note or "").strip()):
                     # The card was answered while this reply was still holding it, so the answer goes
@@ -6954,11 +6954,17 @@ class GmailComposeIn(BaseModel):
     subject: str = ""
     body: str = ""
     reply_to_message_id: str | None = None
+    attachments: list[str] = []  # Uploads document ids
+    cc: str | None = None
+    bcc: str | None = None
 
 
 @app.post("/integrations/google/gmail/draft")
 def google_gmail_draft(body: GmailComposeIn) -> Any:
-    return _gcall(pim.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
+    def draft() -> Any:
+        items = mail_attachments.resolve(documents, db.data_dir, body.attachments)  # ValueError -> 400 in _gcall
+        return pim.gmail_draft(body.to, body.subject, body.body, body.reply_to_message_id, **mail_extras(items, body.cc, body.bcc))
+    return _gcall(draft)
 
 
 class SuggestTimesIn(BaseModel):
@@ -6980,7 +6986,41 @@ async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
 @app.post("/integrations/google/gmail/send")
 def google_gmail_send(body: GmailComposeIn) -> Any:
     # Queued, not sent: the hold is what makes Undo possible (see outbox.py). The response says so.
-    return _gcall(outbox.queue, body.to, body.subject, body.body, body.reply_to_message_id, "app")
+    return _gcall(outbox.queue, body.to, body.subject, body.body, body.reply_to_message_id, "app", None, body.attachments, body.cc, body.bcc)
+
+
+def _gmail_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+    """The attachment's name and mime as Gmail lists them for the message (never the client's), and its bytes."""
+    att = next((a for a in pim.gmail_get(message_id).get("attachments") or [] if a["id"] == attachment_id), None)
+    if att is None:
+        raise HTTPException(404, "That message has no such attachment.")
+    return att, pim.gmail_attachment(message_id, attachment_id)
+
+
+async def _fetch_attachment(message_id: str, attachment_id: str) -> tuple[dict[str, Any], bytes]:
+    try:
+        return await asyncio.to_thread(_gmail_attachment, message_id, attachment_id)
+    except HTTPException:
+        raise
+    except GoogleNotConnected as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"{pim.provider.capitalize()} API error: {e}") from e
+
+
+@app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/import")
+async def google_gmail_attachment_import(message_id: str, attachment_id: str) -> dict[str, Any]:
+    """Copy a received attachment into Uploads so the app can preview it."""
+    att, data = await _fetch_attachment(message_id, attachment_id)
+    return await asyncio.to_thread(_store_upload, None, att["name"], att["mime"], data)
+
+
+@app.post("/integrations/google/gmail/{message_id}/attachments/{attachment_id}/save")
+async def google_gmail_attachment_save(message_id: str, attachment_id: str) -> dict[str, str]:
+    """Save a received attachment into the Downloads folder."""
+    att, data = await _fetch_attachment(message_id, attachment_id)
+    dest = await asyncio.to_thread(mail_attachments.save_to_folder, data, att["name"], mail_attachments.downloads_dir())
+    return {"path": str(dest), "name": dest.name}
 
 
 # ---------------- assist (inline completion + draft review) ----------------

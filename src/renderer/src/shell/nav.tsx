@@ -1,4 +1,4 @@
-import { Brain, Calendar, Mail, Library } from 'lucide-react'
+import { Calendar, Mail, Library } from 'lucide-react'
 import type { WidgetKind } from '@shared/types'
 import type { View } from '../store'
 import { MODULES } from './registry'
@@ -16,10 +16,9 @@ export interface NavEntry {
 
 /**
  * The shell's own sidebar views. Today and Files are fixed and come before; Calendar and Mail take 14 and 16,
- * Memory and Library 30 and 40, and a module slots by its `nav.order` (Lists 12, Health 18).
+ * Library 40, and a module slots by its `nav.order` (Lists 12, Health 18).
  */
 const SHELL: NavEntry[] = [
-  { view: 'memory', label: 'Memory', description: 'What Grain remembers about you: standing preferences, a dated log, notes, your voice and the knowledge graph', icon: <Brain size={15} />, kind: 'memory', order: 30 },
   { view: 'library', description: 'Skills, agents, automations and connectors', label: 'Library', icon: <Library size={15} />, order: 40 },
   { view: 'calendar', description: 'Your week and the day\'s events, from Google Calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar', order: 14 },
   { view: 'mail', description: 'Your Gmail inbox: read, reply and draft', label: 'Mail', icon: <Mail size={15} />, order: 16 }

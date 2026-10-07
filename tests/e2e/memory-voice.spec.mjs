@@ -1,13 +1,13 @@
 import { test, expect } from './fixtures.mjs'
 import { callWith, msgText, send, shrink, sleep, systemOf } from './helpers/kb.mjs'
+import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver|502 \(Bad Gateway\)/.test(e))).toEqual([])
 
 const PROFILE = { summary: 'Writes short warm notes, VOICESUM style.', guidelines: ['Open with a first name', 'GUIDELINEMARK keep it brief'], phrases: ['cheers then'], avoid: ['exclamation marks'] }
 
 async function openVoice(page) {
-  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
-  await page.getByRole('button', { name: 'Voice', exact: true }).click()
+  await openMemoryTab(page, 'Voice')
   await expect(page.getByRole('heading', { name: /Writing samples/ })).toBeVisible()
 }
 
@@ -64,8 +64,7 @@ test('voice panel: edit guidelines, phrases, never, summary; edits persist and m
   expect(s.profile.edited).toBeTruthy()
   await expect(page.getByText(/Hand-edited/)).toBeVisible()
   const p2 = await grain.relaunch()
-  await p2.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
-  await p2.getByRole('button', { name: 'Voice', exact: true }).click()
+  await openMemoryTab(p2, 'Voice')
   await expect(p2.getByLabel('Style summary')).toHaveValue('Edited summary SUMEDIT')
   clean(grain)
 })
@@ -151,7 +150,7 @@ test('a project voice replaces the personal one inside that project; without it 
   expect(casual).not.toContain('LEGALGUIDE')
   // the project's Voice tab says drafts use the personal voice
   await page.locator('.sidebar').getByText('Casual', { exact: true }).first().click()
-  await page.getByRole('button', { name: /^Memory \d+$/ }).click() // the project's own Memory tab, not the sidebar view
+  await page.getByRole('button', { name: /^Memory \d+$/ }).click() // the project's own Memory tab
   await page.getByRole('button', { name: 'Voice', exact: true }).click()
   await expect(page.getByText(/currently use your personal voice/)).toBeVisible()
   clean(grain)
@@ -164,7 +163,7 @@ test('voice panel at 820x520 with a long profile and 50 samples stays scrollable
   await shrink(grain)
   await openVoice(page)
   await expect(page.locator('.style-sample')).toHaveCount(50)
-  const over = await page.evaluate(() => { const e = document.querySelector('.memory-page'); return e.scrollWidth - e.clientWidth })
+  const over = await page.evaluate(() => { const e = document.querySelector('.knowledge-body'); return e.scrollWidth - e.clientWidth })
   expect(over).toBeLessThanOrEqual(1)
   clean(grain)
 })

@@ -66,14 +66,20 @@ test('one page-agent action toggles the page agent once', () => {
   assert.equal(useStore.getState().pageAgentOpen, before)
 })
 
-test('a view action routes, and view:graph opens memory on the graph', () => {
+test('a view action routes, and view:graph opens Settings → Memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
-  // Memory is its own page now.
+  // Memory is a Settings tab, not a page.
   fire('view:graph')
-  assert.equal(useStore.getState().view, 'memory')
-  assert.equal(useStore.getState().settingsOpen, false)
+  assert.equal(useStore.getState().settingsOpen, true)
+  assert.equal(useStore.getState().settingsTab, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
+  useStore.setState({ settingsOpen: false, settingsTab: 'model' })
+  fire('view:memory')
+  assert.equal(useStore.getState().settingsOpen, true)
+  assert.equal(useStore.getState().settingsTab, 'memory')
+  assert.equal(useStore.getState().memoryMode, 'split')
+  useStore.setState({ settingsOpen: false })
 })
 
 /** A stand-in DOM for the duration of `fn`: node has neither `document` nor `KeyboardEvent`. */
@@ -131,8 +137,7 @@ test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => 
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'advanced')
-  assert.equal(useStore.getState().settingsGroup, 'layout')
+  assert.equal(useStore.getState().settingsTab, 'appearance')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')

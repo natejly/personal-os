@@ -870,8 +870,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       return mapMsg(ev.data.id, (m) => ({ ...m, status: ev.data.kind ? { kind: ev.data.kind, attempt: ev.data.attempt, max: ev.data.max, until: ev.data.until, reason: ev.data.reason, model: ev.data.model, why: ev.data.why } : null }))
     case 'delta':
       return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text, status: null }))
-    case 'reasoning':
-      return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text, status: null }))
+    case 'thinking_summary':
+      return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':
       return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, review: ev.data.review ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent, ...(ev.data.mcp ? { mcp: ev.data.mcp } : {}) }] }))
     case 'tool_result':
@@ -1454,7 +1454,7 @@ export const useStore = create<State>((set, get) => {
           if (seq === null || (replay && seq >= replay.end)) flush()
           continue
         }
-        if (ev.event === 'delta' || ev.event === 'reasoning') {
+        if (ev.event === 'delta') {
           buf.push(ev)
           continue
         }

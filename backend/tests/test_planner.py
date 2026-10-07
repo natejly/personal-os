@@ -210,7 +210,7 @@ class ModuleTests(unittest.TestCase):
 
     def test_accepted_focus_block_is_locked_next_time(self) -> None:
         self.google.events.append({"start": "2026-10-05T11:10:00", "end": "2026-10-05T12:40:00", "all_day": False, "calendar_id": "grain-cal",
-                                   "summary": f"Focus: Write spec", "description": f"Planned by Grain from todo {self.t1['id']}"})
+                                   "summary": "Focus: Write spec", "description": f"Planned by Grain from todo {self.t1['id']}"})
         self.stored["planner"] = {"calendarId": "grain-cal"}
         body = self.client.post("/planner/suggest", json={}).json()
         self.assertEqual(body["already_planned"], [self.t1["id"]])

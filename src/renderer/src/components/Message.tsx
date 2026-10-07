@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -71,7 +71,7 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
  */
 function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
   const [open, setOpen] = useState(false)
-  const body = useRef<HTMLDivElement>(null)
+  const body = useRef<HTMLUListElement>(null)
   useEffect(() => {
     if (open && streaming && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [reasoning, open, streaming])
@@ -88,11 +88,9 @@ function ReplyActivity({ reasoning, events, conversationId, streaming, answering
     <div className={`reasoning ${streaming && !answering ? 'live' : ''}`}>
       <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
-        <Lightbulb size={13} />
-        <span className="reasoning-label">{label}</span>
-        {streaming && !answering && <span className="thinking mini"><span /><span /><span /></span>}
+        <span className={`reasoning-label ${streaming && !answering ? 'shimmer' : ''}`}>{label}</span>
       </button>
-      {open && reasoning && <div className="reasoning-body" ref={body}>{reasoning}</div>}
+      {open && reasoning && <ul className="reasoning-body" ref={body}>{reasoning.split('\n').map((l, i) => <li key={i}>{l}</li>)}</ul>}
       {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
     </div>
   )
@@ -229,7 +227,7 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 }
 
 /** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
-/** The three dots for a reply with nothing to show yet; past 5s they gain the elapsed time, so a slow model does not look hung. */
+/** A shimmering "Thinking…" for a reply with nothing to show yet; past 5s it gains the elapsed time, so a slow model does not look hung. */
 export function Thinking(): JSX.Element {
   const [start] = useState(() => Date.now())
   const [now, setNow] = useState(start)
@@ -238,7 +236,7 @@ export function Thinking(): JSX.Element {
     return () => clearInterval(t)
   }, [])
   const text = waitText(now - start)
-  return <><span className="thinking"><span /><span /><span /></span>{text && <div className="run-status" role="status">{text}</div>}</>
+  return <div className="thinking run-status shimmer" role="status">{text ?? 'Thinking…'}</div>
 }
 
 /** The "N steps · ms · tok" chip, shown only with Settings → Behavior → Developer tools on. Its own component so the

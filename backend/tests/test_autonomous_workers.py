@@ -71,6 +71,8 @@ async def _fake(settings: dict[str, Any], model: str, messages: list[dict[str, A
         gate = GATES.get(mk)
         while gate is not None and not gate.is_set():
             await asyncio.sleep(0.01)
+    if step.get("delay"):
+        await asyncio.sleep(step["delay"])
     calls = [] if tool_choice == "none" else step.get("calls", [])
     if step.get("text"):
         yield {"type": "delta", "text": step["text"]}
@@ -158,7 +160,7 @@ def settle(cid: str) -> list[dict[str, Any]]:
 
 
 def desk_runs(did: str) -> list[dict[str, Any]]:
-    return store.list(desk_id=did, statuses=None)
+    return [r for r in store.list(desk_id=did, statuses=None) if r["kind"] == "desk"]  # a worker of the desk shares its desk_id
 
 
 def seat(name: str) -> list[dict[str, Any]]:
@@ -272,8 +274,8 @@ def test_delegate_with_an_unknown_agent_is_a_tool_error_and_starts_nothing() -> 
         appmod.agent_defs.delete(row["id"])
 
 
-# ---------------- e. a worker has no desk tools ----------------
-def test_a_worker_is_not_offered_desk_tools() -> None:
+# ---------------- e. a worker holds the desk's file tools, not its control tools ----------------
+def test_a_worker_is_offered_the_desk_file_tools_but_not_the_control_tools() -> None:
     desk_tools = {n for n, s in appmod.toolbox.specs.items() if s.group == "desk"}
     assert desk_tools, "the desk tools exist"
     FRONT[:] = [delegate("Plain job"), {"text": "Started."}]
@@ -281,8 +283,20 @@ def test_a_worker_is_not_offered_desk_tools() -> None:
     settle(cid)
     assert desk_tools & set(seat("front")[0]["tools"]), "the front agent of a desk has them"
     wtools = set(seat("worker")[0]["tools"])
-    assert wtools and not desk_tools & wtools
-    assert not desk_tools & set(store.get(mgr.list(cid)[0]["id"])["input"]["tools"])
+    files = {"desk_write_file", "desk_read_file", "desk_list_files", "desk_trash_file"}
+    control = {"desk_done", "desk_deliver", "desk_ask", "desk_start"}
+    assert files <= wtools and not control & wtools
+    assert not control & set(store.get(mgr.list(cid)[0]["id"])["input"]["tools"])
+
+
+# ---------------- e2. a desk turn that only hands work on is quiet ----------------
+def test_an_ask_desk_turn_that_only_delegated_leaves_no_reply_row() -> None:
+    WORKER["Quiet desk job"] = [{"text": "FOUND: 7"}]
+    FRONT[:] = [{**delegate("Quiet desk job"), "text": ""}, {"text": "NO_REPLY"}]
+    WAKE[:] = [{"text": "The answer is 7."}]
+    cid, did = make_desk("ask")
+    msgs = settle(cid)
+    assert [m["content"] for m in msgs if m["role"] == "assistant"] == ["The answer is 7."], "only the worker's result is said"
 
 
 # ---------------- f. hints ----------------

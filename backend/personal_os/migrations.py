@@ -435,6 +435,11 @@ def _chat_artifacts_backfill(c: sqlite3.Connection) -> None:
         chat_files.backfill_outputs(c, Path(row[2]).parent)
 
 
+def _drop_tts_settings(c: sqlite3.Connection) -> None:
+    """Read aloud and the hands-free voice chat loop are gone; their stored settings are dead rows."""
+    c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in ("ttsVoice", "ttsRate", "voiceLoopMaxTurns")])
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -465,6 +470,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (26, "internal_message_kinds", _internal_message_kinds),
     (27, "chat_artifacts_backfill", _chat_artifacts_backfill),
     (28, "drop_memory_hidden_view", _drop_memory_hidden_view),
+    (29, "drop_tts_settings", _drop_tts_settings),
 ]
 
 

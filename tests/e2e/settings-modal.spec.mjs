@@ -45,7 +45,7 @@ test('toggles and fields persist through PUT /settings and survive relaunch', as
   await dialog(page).getByLabel('Standing instructions').fill('Always answer in haiku.')
   await field(page, 'Name new chats').setChecked(false, { force: true })
   await openAdvanced(page, 'Desks and workers')
-  await field(page, 'Notify me about chats').setChecked(false, { force: true })
+  await field(page, 'Notify me when a chat finishes').setChecked(false, { force: true })
   await field(page, 'Notify me about scheduled jobs').setChecked(false, { force: true })
   await openAdvanced(page, 'Voice and shortcuts')
   await field(page, 'Dictation key').fill('Control+Alt+K')

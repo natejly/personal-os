@@ -76,3 +76,36 @@ test('a message with markdown-looking and html text is shown literally in the us
   await expect(users(page).first().locator('img')).toHaveCount(0)
   await expect(users(page).first().locator('strong')).toHaveCount(0)
 })
+
+test('every chat has a side panel: Files and Changes, and no Review without a desk', async ({ grain }) => {
+  const { page } = grain
+  await newChat(page)
+  await sayAndWait(page, '!!tool current_time {}', '')
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  const panel = page.locator('.desk-panel')
+  await expect(panel).toBeVisible()
+  const tabs = panel.locator('.desk-tabs')
+  await expect(tabs.getByRole('button', { name: 'Files' })).toBeVisible()
+  await expect(tabs.getByRole('button', { name: 'Changes' })).toBeVisible()
+  await expect(tabs.getByRole('button', { name: /^Review/ })).toHaveCount(0)
+  await expect(panel.getByText('No files in this chat yet.')).toBeVisible()
+  await tabs.getByRole('button', { name: 'Changes' }).click()
+  await expect(panel.getByText('No files changed in this chat yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await expect(panel).toHaveCount(0)
+})
+
+test('the checklist is one collapsed pill above the composer; click opens the steps, click again folds it', async ({ grain }) => {
+  const { page } = grain
+  await newChat(page)
+  const plan = { steps: [{ text: 'first step', status: 'in_progress' }, { text: 'second step', status: 'pending' }] }
+  await say(page, '!!tool todo_write ' + JSON.stringify(plan))
+  const pill = page.getByRole('region', { name: 'Checklist' })
+  await expect(pill).toContainText('0/2', { timeout: 60_000 })
+  await expect(pill).toContainText('first step')
+  await expect(pill.locator('.plan-steps')).toHaveCount(0)
+  await pill.locator('.plan-head').click()
+  await expect(pill.locator('.plan-steps .plan-step')).toHaveCount(2)
+  await pill.locator('.plan-head').click()
+  await expect(pill.locator('.plan-steps')).toHaveCount(0)
+})

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { isInternal, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerLine } from './workers'
+import { isInternal, liveWorkerCount, sortWorkers, upsertWorker, withoutInternal, workerActions, workerWord } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -16,11 +16,11 @@ test('buttons follow the status', () => {
   assert.deepEqual(workerActions(w('w1', 'stopped', { resumable: true })), { stop: false, resume: true })
 })
 
-test('status line', () => {
-  assert.equal(workerLine(w('w1', 'queued', { queue_position: 2 })), 'Queued, number 2')
-  assert.equal(workerLine(w('w1', 'running', { now: 'Reading the report' })), 'Reading the report')
-  assert.equal(workerLine(w('w1', 'running')), 'Working')
-  assert.equal(workerLine(w('w1', 'awaiting_approval')), 'Needs approval')
+test('status word', () => {
+  assert.equal(workerWord(w('w1', 'queued', { queue_position: 2 })), 'Queued #2')
+  assert.equal(workerWord(w('w1', 'queued')), 'Queued')
+  assert.equal(workerWord(w('w1', 'running', { now: 'Reading the report' })), 'Working')
+  assert.equal(workerWord(w('w1', 'awaiting_approval')), 'Needs approval')
 })
 
 test('live workers sort first and upsert replaces by id', () => {

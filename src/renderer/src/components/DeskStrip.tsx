@@ -1,7 +1,7 @@
 import { CircleHelp, PanelRight, Pause, Play, ShieldQuestion, Square, TriangleAlert } from 'lucide-react'
 import type { Desk, DeskStatus, FullDesk, ToolEvent } from '@shared/types'
-import { useStore, useWorkers } from '../store'
-import { STATUS_LABEL, deskElapsed, fmtDur, stripHidden, useTick } from '../lib/deskStatus'
+import { useChatFaceById, useStore, useWorkers } from '../store'
+import { STATUS_LABEL, stripHidden } from '../lib/deskStatus'
 import { liveWorkerCount } from '../lib/workers'
 import { queuePositions } from '../lib/deskFiles'
 import DeskPlan from './DeskPlan'
@@ -25,15 +25,15 @@ export default function DeskStrip({ deskId, panelOpen, onPanel }: { deskId: stri
   const position = useStore((s) => (desk?.status === 'queued' ? queuePositions(s.desks).get(deskId) : undefined))
   const { startDesk, pauseDesk, resumeDesk, stopDesk } = useStore()
   const liveWorkers = liveWorkerCount(useWorkers(desk?.conversation_id))
-  useTick(Boolean(desk?.live))
+  const face = useChatFaceById(desk?.conversation_id)
   if (!desk || stripHidden(desk.status, liveWorkers)) return null
-  const detail = position ? `#${position} in line` : desk.headline || desk.status_reason
+  // Live, the status word says it all; the reason only matters once the run has stopped.
+  const detail = position ? `#${position} in line` : ['stopped', 'failed', 'interrupted'].includes(desk.status) ? desk.status_reason : ''
   return (
     <div className={`desk-strip desk-ring-${desk.status}`} role="status" aria-label="Working autonomously">
-      <Face name={desk.id} status={desk.status} size={18} title={STATUS_LABEL[desk.status]} />
+      <Face {...face} status={desk.status} size={18} title={STATUS_LABEL[desk.status]} />
       <b className="desk-strip-status">{STATUS_LABEL[desk.status]}</b>
       {detail && <span className="desk-strip-detail">{detail}</span>}
-      <span className="desk-strip-meta">turn {desk.turn} · {fmtDur(deskElapsed(desk))}</span>
       {approvals > 0 && <span className="desk-badge ask" title={`${approvals} waiting on your approval`}>{approvals}</span>}
       {desk.unseen > 0 && <span className="desk-badge" title={`${desk.unseen} need${desk.unseen === 1 ? 's' : ''} you`}>{desk.unseen}</span>}
       <span className="spacer" />

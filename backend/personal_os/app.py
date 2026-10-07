@@ -32,6 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, titles
+from . import fsx
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -1603,6 +1604,8 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
+    if (keys := fsx.claim_keys(toolbox, ctx, name, args)) and (held := fsx.CLAIMS.held_by_other(keys)):
+        return fsx.claimed_refusal(held)  # a worker is writing that file right now
     if run is not None and snaps.wants(name, args, run.desk_id, ctx.get("settings")):
         await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id, ctx.get("settings")))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
@@ -2338,7 +2341,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         plan_msg: dict[str, Any] | None = None
         nudged = False
         work_rounds = 0  # rounds in which this reply called something beyond delegating and the task list (workers.counts_as_work)
-        ack_nudged = False
 
         def _front_active() -> bool:
             return _front() and any(sc["function"]["name"] == "delegate" for sc in tool_schemas)
@@ -2590,7 +2592,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if partial == "loop":
                     partial = None
                 repeats, last_sig, stuck_hits, stop_text = 0, None, 0, None
-                work_rounds, ack_nudged = 0, False
+                work_rounds = 0
                 if delegation_forced:
                     delegation_forced = False
                     tool_schemas = _schemas()
@@ -2732,11 +2734,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
-            if _front_active() and workers_mod.ack_inject_due(work_rounds, bool("".join(buf).strip()), True, is_wake):
-                # The user has been told nothing and this is not the first round of calls: the backend says it for the model.
-                buf.append(workers_mod.ACK_LINE + "\n")
-                turn["content"] = workers_mod.ACK_LINE
-                yield "delta", {"id": am["id"], "text": workers_mod.ACK_LINE + "\n"}
             # Read-only agent_spawn calls of this round start together; never in plan mode.
             subagent_mgr.prestart(calls, tool_ctx, start=not planning and not stop.is_set())
             if buf and buf[-1] and not buf[-1].endswith("\n"):
@@ -3428,9 +3425,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     delegation_forced = True
                     tool_schemas = _schemas()
                     messages.append({"role": "system", "content": workers_mod.FORCE_DELEGATE_NUDGE.format(n=work_rounds)})
-                if workers_mod.ack_nudge_due(work_rounds, bool("".join(buf).strip()), ack_nudged, True, is_wake):
-                    ack_nudged = True
-                    messages.append({"role": "system", "content": workers_mod.ACK_NUDGE})
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -3479,7 +3473,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     outcome = None if error else ("stopped" if stop.is_set() else partial)
     # A wake turn the assistant answers with NO_REPLY (or nothing) is silent: its reply row goes, and nothing is pushed anywhere.
     silent = is_wake and not error and not stop.is_set() and workers_mod.is_silent(text.rsplit("\n", 1)[-1])  # its last word, even after a check: nothing new to say
+    # A front turn that only handed work on (hand-off tools, the task list) and has nothing to say is silent too: the app shows the work.
+    silent = silent or (not is_wake and not error and not stop.is_set() and _front() and workers_mod.dispatch_only(e.get("name") for e in tool_events)
+                        and workers_mod.is_silent(text))
     if silent:
+        if run is not None:
+            run.silent = True  # the Telegram bridge reads this: a removed reply is not "Stopped."
         with db.tx() as c:
             c.execute("DELETE FROM messages WHERE id=?", (am["id"],))
         convos.touch(conv_id)
@@ -4068,7 +4067,7 @@ def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:
             "explicit_modes": toolbox.explicit(*maps), "tool_overrides": {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})},
             "model": router.concrete(str(conv["model"] or cfg["defaultModel"]), cfg), "effort": str(conv["settings"].get("effort") or "default"),
             "allowed_urls": set(), "modes": modes, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": srcs,
-            "taint_unsourced": bool(conv["settings"].get("tainted")) and not srcs}
+            "desk_id": conv["settings"].get("deskId") or None, "taint_unsourced": bool(conv["settings"].get("tainted")) and not srcs}
 
 
 @app.get("/conversations/{id}/workers")

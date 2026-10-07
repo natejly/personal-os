@@ -144,13 +144,29 @@ export type ChatNoticeKind = 'reply' | 'approval' | 'failed'
 
 /**
  * What an event just did to a chat that is worth a system notification, from the status before and after it.
- * One kind per transition, so a status that did not move rings never. A reply the user stopped is not news to them.
+ * One kind per transition, so a status that did not move rings never. A reply the user stopped, or a silent turn that left no reply, is not news to them.
  */
 export const chatNotice = (prev: SessionStatus, next: SessionStatus, ev: ChatEvent): ChatNoticeKind | null => {
   if (next === 'needs-approval' && prev !== 'needs-approval') return 'approval'
   if (next === 'error' && prev !== 'error') return 'failed'
-  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped) return 'reply'
+  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped && ev.data.id) return 'reply'  // no id: a silent wake, its reply row is gone
   return null
+}
+
+/** A `run_state` frame as the finish rule reads it: `replied` is true once the run published a visible reply (not a silent wake), `stopped` once the user hit Stop. */
+export type FinishInfo = RunInfo
+
+/**
+ * The one finish rule for a run this window did not stream, from the frame before it and the frame now.
+ * Fires on the transition only: the reply becoming whole (`replied`, which a silent wake never sets), or the run
+ * ending with an error. Never for a job or worker run, a stopped run, or a frame that repeats what was already seen;
+ * the caller's per-run key stops the same run ringing twice across the stream and this feed.
+ */
+export const finishNotice = (prev: FinishInfo | undefined, info: FinishInfo): 'reply' | 'failed' | null => {
+  if ((info.kind !== 'chat' && info.kind !== 'desk') || info.stopped) return null
+  if (prev && (prev.replied || !prev.live)) return null
+  if (info.error || info.status === 'error') return info.replied || !info.live ? 'failed' : null
+  return info.replied ? 'reply' : null
 }
 
 /** The sidebar pulse: a session's own status wins, and a conversation with no session falls back to its live run. */

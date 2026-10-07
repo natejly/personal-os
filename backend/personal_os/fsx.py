@@ -246,6 +246,68 @@ def guard_local(box: Any, ctx: dict[str, Any], name: str, args: dict[str, Any]) 
             raise mac.LocalPathError(f"{p.name}: {why}; it needs the user's approval, so tell them what you would change")
 
 
+# ---------------------------------------------------------------- write claims
+CLAIMED_TOOLS = frozenset({"write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir", "desk_write_file", "desk_trash_file"})
+CLAIM_ARGS = ("path", "dest", "destination", "src", "source", "to")
+
+
+class WriteClaims:
+    """Which child is writing which path. A child claims every path a file-writing call names and keeps it until it ends
+    (`release`); another child, or the reply itself, writing a claimed path meanwhile is told to wait. In memory only.
+
+    ponytail: only the file tools are tracked. A shell command (shell_run, run_python) can touch any path and is not claimed;
+    the read ledger still refuses a write to a file that changed since it was read."""
+
+    def __init__(self) -> None:
+        self._owners: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def claim(self, owner: str, keys: list[str]) -> str | None:
+        """Take every key for `owner`, or take none and return the first one somebody else holds."""
+        with self._lock:
+            for k in keys:
+                if self._owners.get(k, owner) != owner:
+                    return k
+            for k in keys:
+                self._owners[k] = owner
+        return None
+
+    def held_by_other(self, keys: list[str], owner: str = "") -> str | None:
+        with self._lock:
+            return next((k for k in keys if self._owners.get(k, owner) != owner), None)
+
+    def release(self, owner: str) -> None:
+        with self._lock:
+            for k in [k for k, o in self._owners.items() if o == owner]:
+                del self._owners[k]
+
+
+CLAIMS = WriteClaims()
+
+
+def claim_keys(box: Any, ctx: dict[str, Any], name: str, args: dict[str, Any]) -> list[str]:
+    """The resolved paths a file-writing call names, for `WriteClaims`; [] for any other tool."""
+    if name not in CLAIMED_TOOLS:
+        return []
+    base = mac.home() if name in ("write_local_file", "move_local_file") else grants_for(box, ctx).default_root()  # the mac tools start at home
+    keys: list[str] = []
+    for k in CLAIM_ARGS:
+        v = args.get(k)
+        if isinstance(v, str) and v.strip():
+            try:
+                p = Path(os.path.expanduser(v.strip()))
+                keys.append(str((p if p.is_absolute() else base / p).resolve()))
+            except (OSError, RuntimeError):
+                continue
+    return keys
+
+
+def claimed_refusal(path: str) -> dict[str, Any]:
+    from .tools import tool_error  # tools imports this module
+    return tool_error(f"{path} is being edited by another worker; wait for it or message it.",
+                      alternative="work on a different file, or wait until that worker is done")
+
+
 # ---------------------------------------------------------------- read ledger
 class ReadLedger:
     """What this conversation has actually seen of each file, as character ranges against one mtime.

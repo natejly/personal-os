@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, compaction, limits, llm, mac, permissions, permrules, redact
+from . import approval_log, autoreview, compaction, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
@@ -1060,9 +1060,14 @@ class Subagents:
                                              forced=forced, desk_id=ch.desk_id, danger=spec.danger)
                     self.store.decide(uid, "deny", by="unattended", note=unattended)
             elif mode == "ask":
-                decision = await self._ask(ch, uid, name, args, forced, spec.danger)
-                if decision != "allow":
+                decision, edited = await self._ask(ch, uid, name, args, forced, spec.danger)
+                if decision == "deny":
                     result = denied(name, DISCARDED if name == "gmail_send" else "declined by the user")
+                elif edited:  # the user rewrote the call on its card: those arguments are the call
+                    args = edited
+                    result = denied(name, bad) if (bad := self._confine(ch, name, args)) else None
+            if result is None and (key := self._claim(ch, name, args)):
+                result = fsx.claimed_refusal(key)
             if result is None:
                 ch.touch(in_tool=True)
                 ch.ctx["fs_outside_ok"] = fs_ask  # approved above: the user said yes to this credential store or write
@@ -1133,11 +1138,13 @@ class Subagents:
 
     async def _snapshot_before(self, ch: Child, name: str, args: dict[str, Any]) -> None:
         """A child's writes belong to the parent's reply, so they land in the parent run's folder snapshot and
-        the reply's Undo takes them back with everything else. A detached worker has no reply to undo."""
+        the reply's Undo takes them back with everything else. A detached worker has no reply: its own run id keys the
+        snapshot (closed in `_finish`), so its writes show in Changes and can be undone."""
         run = ch.ctx.get("run")
-        if self.snaps is None or run is None or getattr(run, "kind", None) == "worker" or not self.snaps.wants(name, args, ch.desk_id):
+        if self.snaps is None or run is None or not self.snaps.wants(name, args, ch.desk_id):
             return
-        await asyncio.to_thread(self.snaps.before, run.run_id, self.snaps.roots_for_call(name, args, ch.desk_id))
+        rid = ch.id if ch.detached else run.run_id
+        await asyncio.to_thread(self.snaps.before, rid, self.snaps.roots_for_call(name, args, ch.desk_id))
 
     def _confine(self, ch: Child, name: str, args: dict[str, Any]) -> str | None:
         """A writer narrowed to one folder (agent_spawn `root`) keeps its file tools inside it; one that was not may write
@@ -1150,9 +1157,17 @@ class Subagents:
                 return redact.scrub_command_output(f"{k} {v!r} is outside this subagent's writable folders")
         return None
 
-    async def _ask(self, ch: Child, uid: str, name: str, args: dict[str, Any], forced: bool, danger: str) -> str:
+    def _claim(self, ch: Child, name: str, args: dict[str, Any]) -> str | None:
+        """Claim the paths a file-writing call names for this child. -> the path another child holds, else None."""
+        keys = fsx.claim_keys(self.toolbox, ch.ctx, name, args)
+        if not keys:
+            return None
+        return fsx.CLAIMS.claim(ch.id, keys)
+
+    async def _ask(self, ch: Child, uid: str, name: str, args: dict[str, Any], forced: bool, danger: str) -> tuple[str, dict[str, Any] | None]:
         """Raise an approval card for a child's call and wait for the user. The card rides the parent's stream,
-        labelled with the child. 'Always' answers are honoured once only: a child never buys a standing grant."""
+        labelled with the child. -> (the decision, the user's edited arguments or None). Any answer but deny runs the call
+        once; the standing grants of 'always' (rules, session, chat) are saved by the approval route, never bought by the child."""
         loop = asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         self.approvals[uid] = fut
@@ -1199,7 +1214,8 @@ class Subagents:
                                         "result_preview": "", "duration_ms": int(waited * 1000),
                                         "error": None if decision != "deny" else "declined", "approval": decision,
                                         "forced": forced, "agent": ch.label})
-        return "allow" if decision in ("allow", "always_chat", "always_global") else "deny"
+        row = self.store.approval(uid) if self.store is not None and decision != "deny" else None
+        return decision, (row or {}).get("edited_args") or None
 
     # ---- ending ----------------------------------------------------------------------------------
     async def _finish(self, ch: Child) -> None:
@@ -1211,6 +1227,7 @@ class Subagents:
             await self.locks.release(ch.id)
         except Exception:  # noqa: BLE001
             log.debug("lock release failed", exc_info=True)
+        fsx.CLAIMS.release(ch.id)
         try:
             blob = json.dumps(ch.messages, default=str, ensure_ascii=False)
             if self.results is not None and ch.conversation_id:
@@ -1228,6 +1245,8 @@ class Subagents:
             log.warning("could not record subagent %s", ch.id, exc_info=True)
         ch.finished.set()
         self._publish(ch)
+        if ch.detached and self.snaps is not None:  # a worker has no reply to close its folder snapshots after it
+            asyncio.get_running_loop().run_in_executor(None, self.snaps.finish, ch.id)  # not awaited: a Stop cancelling this task must not skip `finished`
 
     def report(self, ch: Child) -> dict[str, Any]:
         text = redact.scrub_command_output(ch.text)

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { File, FileDown, FileText, FolderOpen, Files, GitBranch, Paperclip, Pin } from 'lucide-react'
 import { Popover } from '../canvas/PresetsMenu'
+import { useIsStreaming } from '../store'
 import { fmtAgo } from '../lib/deskFiles'
 import { actionLabel, groupByKind, rowAction, type ChatFile, type ChatFileKind } from '../lib/chatFiles'
 import { chatFilesApi, openChatFile, revealChatFile } from '../lib/useChatFiles'
@@ -50,37 +51,48 @@ export function ChatFileRow({ file, jump, showChat, onDone, onOpen, onPin }: { f
   )
 }
 
-/** The chat header's Documents button and its popover: this chat's files, grouped by kind. */
-export default function ChatFilesButton({ conversationId }: { conversationId?: string }): JSX.Element {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
+const ORDER: ChatFileKind[] = ['output', 'local', 'upload', 'note', 'coding']
+const LABEL: Partial<Record<ChatFileKind, string>> = { output: 'Artifacts', local: 'Changed files' }
+
+/**
+ * This chat's files, Artifacts first. Refreshes when a reply starts or ends. `pane` is the Files tab of the side panel,
+ * `above` the same list over a desk's workspace tree (nothing at all when empty), `pop` the bare list inside the popover.
+ */
+export function ChatFilesList({ conversationId, layout = 'pane', onDone }: { conversationId: string; layout?: 'pane' | 'above' | 'pop'; onDone?: () => void }): JSX.Element | null {
   const [files, setFiles] = useState<ChatFile[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
+  const streaming = useIsStreaming(conversationId)
+  useEffect(() => { setFiles(null) }, [conversationId])
   useEffect(() => {
-    if (!at || !conversationId) return
     let live = true  // ChatView is not keyed by chat, so a late answer for the last chat must not land here
-    setFiles(null)
     setProblem(null)
     chatFilesApi.forChat(conversationId).then((r) => { if (live) setFiles(r.files) }).catch((e: Error) => { if (live) setProblem(e.message) })
     return () => { live = false }
-  }, [at, conversationId])
-  const close = (): void => setAt(null)
+  }, [conversationId, streaming])
+  if (layout === 'above' && !problem && !files?.length) return null
+  return (
+    <div className={`${layout === 'pop' ? '' : 'desk-pane scroll '}cf-list${layout === 'above' ? ' cf-above' : ''}`}>
+      {problem && <p className="empty-hint" role="alert">{problem}</p>}
+      {!problem && files === null && <p className="empty-hint">Loading…</p>}
+      {files?.length === 0 && <p className="empty-hint">No files in this chat yet.</p>}
+      {files && groupByKind(files).sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind)).map((g) => (
+        <section key={g.kind}>
+          <h4>{LABEL[g.kind] ?? g.label}</h4>
+          {g.files.map((f) => <ChatFileRow key={f.id} file={f} jump={null} onDone={onDone} />)}
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** A canvas chat window has no side panel, so its Documents button opens the list in a popover. */
+export default function ChatFilesButton({ conversationId }: { conversationId?: string }): JSX.Element {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null)
   return (
     <>
       <button className={`icon-btn no-drag${at ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-haspopup="dialog" aria-expanded={!!at} disabled={!conversationId}
         onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAt({ x: r.right - 320, y: r.bottom + 4 }) }}><Files size={15} /></button>
-      {at && (
-        <Popover at={at} onClose={close} className="cf-pop">
-          {problem && <p className="empty-hint" role="alert">{problem}</p>}
-          {!problem && files === null && <p className="empty-hint">Loading…</p>}
-          {files?.length === 0 && <p className="empty-hint">No documents in this chat yet.</p>}
-          {files && groupByKind(files).map((g) => (
-            <section key={g.kind}>
-              <h4>{g.label}</h4>
-              {g.files.map((f) => <ChatFileRow key={f.id} file={f} jump={null} onDone={close} />)}
-            </section>
-          ))}
-        </Popover>
-      )}
+      {at && conversationId && <Popover at={at} onClose={() => setAt(null)} className="cf-pop"><ChatFilesList conversationId={conversationId} layout="pop" onDone={() => setAt(null)} /></Popover>}
     </>
   )
 }

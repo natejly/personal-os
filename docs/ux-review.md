@@ -70,7 +70,7 @@ Priority: **High** = seen on every visit or misleading; **Med** = clutter on a f
 | C6 | Tool calls nest three deep (group → row → Details). Two clicks before content. | Med | Kept: the fold is PR #59's design; opening by default would undo it |
 | C7 | The approval card shows Approve, Deny, "⌘↵", a pattern box, two "Don't ask again" links, "Deny with a note…" and Details. | Med | Kept: approvals are out of scope by the brief |
 | C8 | The mail review card says "waiting for you to send" in the header and "Approval is required each time." in the footer. | Low | Kept: the card's copy is part of the safety contract |
-| C9 | The autonomy control is "Autonomous" on screen, "Work autonomously" as its accessible name. | Low | Kept (the e2e suite addresses it by the accessible name) |
+| C9 | The autonomy control is "Autonomous" on screen, "Work autonomously" as its accessible name. | Low | Fixed: the button reads "Mode" and its accessible name is "Mode: how the assistant works in this chat" |
 | C10 | The paperclip opens the native file dialog directly; its title says "Add files to this chat". | — | Good |
 | C11 | Under Allow everything with All domains on, the footer carries seven chips and wraps to two lines at 1280px. | Low | Kept: both red pills are the only cue for that state, so they stay full-width |
 

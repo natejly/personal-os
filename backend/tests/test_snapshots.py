@@ -181,6 +181,24 @@ check(c.post("/runs/run-3/undo").json()["reverted"] == ["r.txt"] and (ROOT / "r.
 check(c.post("/runs/run-3/undo").status_code == 409, "second undo is a 409")
 check(c.post("/runs/run-3/redo").json()["reverted"] == ["r.txt"] and (ROOT / "r.txt").read_text() == "2", "POST redo")
 
+# a chat's changes: every run of the conversation, newest first, with the ids Undo / Redo need
+from personal_os.repos import Conversations  # noqa: E402
+
+CID = Conversations(DB).create(None, "t", "m")["id"]
+check(c.get(f"/conversations/{CID}/changes").json() == {"available": True, "runs": []}, "a chat with no snapshots has no runs")
+for i, rid in enumerate(("cr-1", "cr-2")):
+    (ROOT / f"c{i}.txt").write_text("1")
+    store.create(rid, CID)
+    store.update(rid, message_id=f"cm-{i}")
+    S.before(rid, [ROOT])
+    (ROOT / f"c{i}.txt").write_text("2")
+    S.finish(rid)
+cc = c.get(f"/conversations/{CID}/changes").json()
+check([x["run_id"] for x in cc["runs"]] == ["cr-2", "cr-1"] and cc["runs"][0]["message_id"] == "cm-1", "newest run first, with its message id")
+check(all(x["count"] == 1 and x["state"] == "applied" and x["started_at"] for x in cc["runs"]), "each item is a run summary")
+check(c.post("/runs/cr-2/undo").status_code == 200 and c.get(f"/conversations/{CID}/changes").json()["runs"][0]["state"] == "undone", "undo from the list shows undone")
+check(c.get("/conversations/other/changes").json()["runs"] == [], "unknown chat: empty")
+
 # after `done` the changes are readable at once, even while the run is still closing (auto-learn tail)
 (ROOT / "d.txt").write_text("1")
 store.create("run-4", None)

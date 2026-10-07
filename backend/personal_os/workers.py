@@ -54,10 +54,12 @@ WORKER_PROMPT = (
 
 FRONT_AGENT_HINT = (
     "## How to work\n"
-    "You are the user's assistant and you own each request end to end. Reply to the user first, in one or two plain "
-    "lines, then work. Do quick lookups yourself. Anything that needs more than a couple of steps goes to a background "
-    "worker with delegate: write a self-contained brief (goal, context, constraints, done criteria, report format), "
-    "because the worker cannot see this conversation, and tell the user in one line what you started. Keep todo_write "
+    "You are the user's assistant and you own each request end to end. Answer what you can yourself, and do quick "
+    "lookups yourself. Anything that needs more than a couple of steps goes to a background worker with delegate: write "
+    "a self-contained brief (goal, context, constraints, done criteria, report format), because the worker cannot see "
+    "this conversation. The app shows the user what is running, so never announce, narrate or summarise delegation, "
+    "planning, rounds, tools or workers. If a turn has nothing for the user beyond handing work on, answer with exactly "
+    "NO_REPLY and nothing else. Keep todo_write "
     "current for multi-step work (it is re-sent to you every round). "
     "In an autonomous chat, desk_done is optional: a reply that answers and hands the rest to workers is complete. Follow-ups on work a worker already did go to resume_worker or message_worker, not a "
     "new worker. Do not poll workers: when one finishes its report arrives by itself as a hidden message from the "
@@ -70,13 +72,10 @@ FRONT_AGENT_HINT = (
     "End with at most one specific next step you can do right now, or none."
 )
 
-ACK_NUDGE = ("You have not told the user anything yet. Start your next message with one short plain line saying what "
-             "you are doing, before any further tool call.")
-ACK_LINE = "On it, working on that now."
 FORCE_DELEGATE_NUDGE = (
     "This reply has already used {n} rounds of tool calls itself. From here only delegate, message_worker, check_worker, "
     "stop_worker, resume_worker and todo_write are offered. Hand the remaining work to a worker with a self-contained "
-    "brief, then tell the user in a sentence or two what you started. Do not explain this rule to them.")
+    "brief. Do not announce it and do not explain this rule; if there is nothing else for the user, answer with exactly NO_REPLY.")
 
 WAKE_HEADER = (
     "[A background worker has finished. This message comes from the system, not from the user. Tell the user the result in "
@@ -123,7 +122,7 @@ def restrict_schemas(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def forced_refusal(name: str) -> dict[str, Any]:
     """The answer to a call to some other tool after delegation is forced. Nothing stops: the reply still ends with text."""
     return tool_error(f"{name} is not available in this reply any more: the work has passed the point where it goes to a worker.",
-                      alternative="delegate it, with a self-contained brief, then tell the user briefly what you started")
+                      alternative="delegate it, with a self-contained brief")
 
 
 def lane_refusal(name: str, front: bool, forced: bool) -> dict[str, Any] | None:
@@ -138,14 +137,10 @@ def lane_refusal(name: str, front: bool, forced: bool) -> dict[str, Any] | None:
     return None
 
 
-def ack_inject_due(work_rounds: int, has_text: bool, front: bool, wake: bool) -> bool:
-    """A round with tool calls, after a round of them, and the user has still been told nothing: the backend writes the ack line."""
-    return front and not wake and work_rounds >= 1 and not has_text
-
-
-def ack_nudge_due(work_rounds: int, has_text: bool, nudged: bool, front: bool, wake: bool) -> bool:
-    """After a text-less round of tool calls: ask the model, once, to open its next message with a short line for the user."""
-    return front and not wake and work_rounds >= 1 and not has_text and not nudged
+def dispatch_only(names: Iterable[str | None]) -> bool:
+    """True when a reply's tool calls were all hand-offs or the task list (and there was at least one): the app shows that work."""
+    ns = list(names)
+    return bool(ns) and all(n in FRONT_TOOLS or n == "todo_write" for n in ns)
 
 
 def is_silent(text: str) -> bool:
@@ -285,14 +280,16 @@ class Workers:
         (the approval and bridge callbacks), taint copied as it stands."""
         ctx = {k: parent[k] for k in self.KEEP if k in parent}
         modes = arrange_tools(parent.get("modes") or {}, False)
-        # A worker has no desk workspace, so the desk's own file tools are not offered.
-        modes = {n: v for n, v in modes.items() if (sp := self.sub.toolbox.specs.get(n)) is None or sp.group != "desk"}
+        # A worker keeps the chat's desk (an autonomous chat's workspace sits in Grain's data folder, which only a ctx with
+        # that desk_id may write) and so its file tools; the desk's control tools (done, deliver, ask, start) are CHILD_BLOCK.
+        if not parent.get("desk_id"):  # a chat with no desk has no workspace for them
+            modes = {n: v for n, v in modes.items() if (sp := self.sub.toolbox.specs.get(n)) is None or sp.group != "desk"}
         if not allow_subworkers:
             for n in SPAWN_TOOLS:
                 modes.pop(n, None)
         ctx.update(modes=modes, run=WorkerRun(self, parent.get("conversation_id")), stop=asyncio.Event(), depth=0,
                    agent_run_id=str(parent.get("agent_run_id") or ""), meter=None, meter_root=None, message_id=None,
-                   user_message_id=None, run_id=None, desk_id=None, citations=[], review_cache={}, deferred=set(),
+                   user_message_id=None, run_id=None, desk_id=parent.get("desk_id"), citations=[], review_cache={}, deferred=set(),
                    tainted=bool(parent.get("tainted")), taint_sources=list(parent.get("taint_sources") or []),
                    taint_unsourced=bool(parent.get("taint_unsourced")), proposal_only=False)
         return ctx
@@ -405,7 +402,11 @@ class Workers:
                 "resume_of": inp.get("resume_of") or None,
                 "resumable": ended and bool(self.store.event_counts(row["run_id"]).get("transcript")),
                 "pending_approvals": [] if ended else self._approvals(row["run_id"]),
-                "depth": int(inp.get("depth") or 1), "cost": round(float(cost), 6) if cost is not None else None}
+                "depth": int(inp.get("depth") or 1), "cost": round(float(cost), 6) if cost is not None else None,
+                # the face: a Library agent keeps its name; a resumed worker keeps the id it started as
+                "agent": str(inp.get("role") or ""), "origin": str(inp.get("origin") or row["run_id"]),
+                # ponytail: capped here, and the list recomputes it per poll; a per-worker report route is the upgrade
+                "report": self.report_text(row)[:4000] if ended else ""}
 
     def info_of(self, ch: Child) -> dict[str, Any]:
         return self.info(self.row(ch.id) or {"run_id": ch.id, "input": {"conversation_id": ch.conversation_id}, "status": "running"})
@@ -500,7 +501,7 @@ class Workers:
         inp = row.get("input") or {}
         out = self.start(parent, {"task": str(text or "").strip() or "Continue where you left off and finish the brief.",
                                   "title": inp.get("title"), "goal": inp.get("goal"), "allow_subworkers": inp.get("allow_subworkers")},
-                         resume=row["run_id"], meta={"resume_of": row["run_id"]})
+                         resume=row["run_id"], meta={"resume_of": row["run_id"], "origin": inp.get("origin") or row["run_id"]})
         if "worker_id" in out:
             self.store.mark_input(row["run_id"], wake_delivered=1)  # the new run reports for it
         return out
@@ -574,7 +575,7 @@ def register(tb: Any) -> None:
                             "report_format": report_format, "title": title, "allow_subworkers": allow_subworkers, "agent": agent})
         if "worker_id" in out:
             out["note"] = ("Started in the background" if out["state"] == "running" else "Queued; it starts when a slot is free") + \
-                ". Its report arrives by itself as a hidden message when it finishes; do not poll for it. Tell the user in one line what you started."
+                ". Its report arrives by itself as a hidden message when it finishes; do not poll for it. Say nothing about it to the user; the app shows it."
         return out
 
     R("delegate", ToolSpec(

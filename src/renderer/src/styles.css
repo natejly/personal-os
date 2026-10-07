@@ -2514,19 +2514,22 @@ select:focus-visible {
 /* Scoped to .plan-panel throughout: the plan approval card uses the same .plan-head / .plan-steps /
    .plan-step names for a different layout, and unscoped rules here used to restyle it. */
 .plan-panel {
-  max-width: var(--chat-col); width: 100%; margin: 0 auto; padding: 8px 24px 0;
-  font-size: 12.5px;
+  max-width: var(--chat-col); width: 100%; margin: 0 auto 4px; padding: 0 24px;
+  font-size: 12.5px; box-sizing: border-box;
 }
-.plan-panel > header { display: flex; align-items: center; gap: 10px; }
+.plan-panel > header { display: flex; align-items: center; gap: 8px; }
+/* One slim row like the autonomy strip, but quieter: no border, muted text. Click anywhere on it to open the list. */
 .plan-panel .plan-head {
-  display: flex; align-items: center; gap: 6px; min-height: 24px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 24px;
   border: 0; background: none; padding: 2px 0; cursor: pointer;
-  color: var(--text-muted); font: inherit;
+  color: var(--text-muted); font: inherit; text-align: left;
 }
 .plan-panel .plan-head:hover { color: var(--text); }
-.plan-panel .plan-head b { font-weight: 600; }
-.plan-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
+.plan-panel .plan-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-panel .plan-current { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.plan-panel.all-done .plan-head { color: var(--text-faint); }
+.plan-panel .plan-bar { flex: 0 0 56px; margin-left: auto; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.plan-panel .plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
 .plan-panel .plan-steps {
   list-style: none; margin: 6px 0 0; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
@@ -2544,13 +2547,17 @@ select:focus-visible {
 .plan-step.done .plan-text { color: var(--text-faint); text-decoration: line-through; }
 .plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
 
-/* Workers sit under the checklist, so they drop its top gap. */
+/* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
-.worker-panel .worker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
-.worker-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
-.worker-open small { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-panel .worker-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 0; }
+.worker-line { display: flex; align-items: center; gap: 8px; }
+.worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
+.worker-open small { color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.worker-approval { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding-left: 16px; color: var(--text-muted); }
+.worker-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 36px; }
+.worker-detail p { margin: 0; }
+.worker-report { margin: 0; max-width: 100%; max-height: 160px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 12px; color: var(--text-muted); }
+.worker-approval { display: flex; align-items: center; gap: 8px; padding-left: 36px; color: var(--text-muted); }
 .worker-approval span { flex: 1; min-width: 0; }
 
 /* ---------- Skills review (procedural memory) ---------- */

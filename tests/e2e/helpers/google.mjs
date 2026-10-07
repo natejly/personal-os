@@ -44,9 +44,9 @@ export const testDisconnected = base.extend({
   grain: async ({}, use, testInfo) => run(use, testInfo, {})
 })
 
-/** Open an app-switcher view by its button name (Calendar, Mail, Lists...). */
+/** Open a view from its sidebar row (Calendar, Mail, Lists...). */
 export async function openApp(page, name) {
-  await page.getByRole('button', { name: new RegExp(`^${name}$`, 'i') }).first().click()
+  await page.locator('.sidebar .nav-item', { hasText: new RegExp(`^\\s*${name}`) }).first().click()
 }
 export function resize(g, w, h) {
   return g.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [w, h])

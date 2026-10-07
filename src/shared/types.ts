@@ -1489,8 +1489,6 @@ export interface Settings {
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means every view is shown. */
   hiddenViews?: string[]
-  /** Where a view's entry lives, by view id: a sidebar row or a title-bar icon. Missing means the module's own default. */
-  navPlacement?: Record<string, 'sidebar' | 'apps'>
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'

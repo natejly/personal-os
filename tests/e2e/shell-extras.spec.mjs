@@ -55,14 +55,13 @@ test('300 chats: the sidebar stays responsive, scrolls, searches, and nav still 
 
 test('hammering the nav: 40 rapid clicks end on the last view without errors', async ({ grain }) => {
   const { page } = grain
-  const sw = page.getByRole('toolbar', { name: 'Apps' })
   const seq = ['Lists', 'Calendar', 'Mail']
   for (let i = 0; i < 40; i++) {
-    await (i % 4 === 0 ? sidebarItem(page, 'Files') : sw.getByRole('button', { name: seq[i % 3] })).click()
+    await (i % 4 === 0 ? sidebarItem(page, 'Files') : sidebarItem(page, seq[i % 3])).click()
   }
-  await sw.getByRole('button', { name: 'Mail' }).click()
+  await sidebarItem(page, 'Mail').click()
   await heading(page, /Mail/)
-  await sw.getByRole('button', { name: 'Lists' }).dblclick()
+  await sidebarItem(page, 'Lists').dblclick()
   await heading(page, /Lists/)
   expect(grain.consoleErrors).toEqual([])
 })

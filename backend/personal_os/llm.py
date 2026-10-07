@@ -124,7 +124,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "homeWidgets": {},
     "hiddenViews": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
-    "navPlacement": {},
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 5,
     "snapshotsEnabled": True,

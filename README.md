@@ -688,14 +688,14 @@ and every change is published as a `coding_session` event, which the "Coding ses
 | Driver | Where it runs | How it is followed |
 | --- | --- | --- |
 | Claude Code | `claude --bg` in the repo or worktree, **outside** Grain's sandbox, with your own account and tools | the CLI's own files under `~/.claude/jobs/<id>/` (`state.json`, `timeline.jsonl`), read as untrusted text |
-| OpenCode | `opencode run` under the OS sandbox as a background job in the shell registry; writes stay in the workspace folder that holds the repo | the job's event stream; a follow-up continues the same OpenCode session |
+| OpenCode | the `opencode` you installed, run under the OS sandbox as a background job in the shell registry, with its own model and sign-in; writes stay in the workspace folder that holds the repo | the job's event stream; a follow-up continues the same OpenCode session |
 
 **Permissions.** Claude Code keeps its normal prompting: Grain passes no permission flag. A permission prompt shows as
 `needs_you` (attention: needs you) and you answer it in a terminal with `claude attach <id>`; the card says so.
 `permission_mode` (`acceptEdits` or `bypassPermissions`, Claude Code only) relaxes the prompting for that one session
 only; a call that sets it is always a card, whatever the tool's mode or any standing grant, and the card spells out
-what the mode allows. OpenCode has nobody at its prompt, so it runs with every permission allowed inside the sandbox
-and takes no `permission_mode`. Starting and following up are `external` tools: they ask first in a chat and are only
+what the mode allows. OpenCode has nobody at its prompt, so it runs under whatever its own config permits inside the
+sandbox and takes no `permission_mode`. Starting and following up are `external` tools: they ask first in a chat and are only
 proposals in an unattended run, and they ask again once the reply has read untrusted content. Subagents are gated
 the same way as `opencode_run`.
 

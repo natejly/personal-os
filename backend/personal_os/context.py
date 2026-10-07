@@ -267,7 +267,7 @@ def build_context(
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
         parts.append(f"Hidden in this app right now: {', '.join(hidden)}. Before pointing the user at one of them, "
-                     "say they can turn it on in Settings → Modules.")
+                     "say they can turn it on in Settings → Appearance.")
     volatile: list[str] = []
     used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None,
                             "skills": [], "profile": [], "page": None, "style": None, "pinned": [], "trimmed": {}}

@@ -26,7 +26,7 @@ instructions, files, memories and graph.
 ```
 
 Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
-Settings → Modules hides any of them. A **Quick chat** button at the top right of
+Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
 every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
@@ -162,7 +162,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   memories and a project graph, layered on top of your personal ones.
 - **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
   scope filter and search box — the first two halves side by side, either alone,
-  or the voice profile on its own:
+  or the voice profile on its own (Split is the default):
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget, see a memory's past versions, and export or import
@@ -523,11 +523,11 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Data |
+| ⌘, | Settings: Model, Usage, Permissions, Integrations, Texting, Memory, Appearance, System access, Advanced |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
-A view turned off in Settings → Modules keeps its shortcut, which then offers
+A view turned off in Settings → Appearance keeps its shortcut, which then offers
 to turn the view back on instead of opening it.
 
 ## How a reply is built

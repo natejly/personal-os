@@ -2,6 +2,14 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-07
+
+### Changed
+
+- **Memory is in Settings.** The Memory sidebar row and page are gone; Settings has a Memory tab (between Texting and Appearance) with the scope filter, a collapsed Learning section (learn from chats, learn how I write) and the panel itself. Split is the default layout again, graph on the left and memories on the right; List, Graph and Voice are one click away. ⌘6, the Go menu, "View all" on Today and every link to Memory open that tab.
+- **Sidebar rows are toggles in Appearance.** Settings → Appearance → Sidebar has one switch per row (Lists, Calendar, Mail, Health, Library), saved at once with no restart; Today cards and the default file font moved there too. The Advanced Layout group is gone. A migration removes `memory` from `hiddenViews`; all rows stay on by default.
+- **Settings is shorter.** Advanced keeps eight groups (Assistant, Approvals, Files and web, Search, Desks and workers, Voice and shortcuts, Data, Developer). The undo-send switch moved to Integrations. An open Settings window follows `openSettings` calls from toasts and links.
+
 ## Unreleased — 2026-10-06
 
 ### Removed

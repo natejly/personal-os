@@ -38,7 +38,7 @@ export default function CommandPalette(): JSX.Element {
     ...recent(docs).map((d) => ({ key: `doc:${d.id}`, label: d.title || 'Untitled', hint: 'File', run: () => void s.openDoc(d.id) })),
     ...SETTINGS_TABS.map((t) => ({ key: `settings:${t.id}`, label: t.label, hint: 'Settings', run: () => s.openSettings(t.id) })),
     // Advanced groups people look for by name.
-    ...([['memory', 'Memory and search'], ['modules', 'Layout'], ['cowork', 'Desks and background'], ['data', 'Data and support'], ['behavior', 'Assistant behaviour']] as const)
+    ...([['cowork', 'Desks and workers'], ['data', 'Data'], ['behavior', 'Assistant']] as const)
       .map(([id, label]) => ({ key: `settings:advanced:${id}`, label, hint: 'Settings · Advanced', run: () => s.openSettings(id) }))
   ]
   const needle = q.trim().toLowerCase()

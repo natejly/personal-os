@@ -1,11 +1,12 @@
 import { test, expect } from './fixtures.mjs'
 import { send, shrink } from './helpers/kb.mjs'
+import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
-const pane = (page) => page.locator('.memory-page')
+const pane = (page) => page.locator('.knowledge-body')
 const ignorable = /favicon|ResizeObserver|Failed to load resource|ERR_CONNECTION|fetch|NetworkError/i
 
 async function openMemory(page) {
-  await page.locator('.sidebar').getByRole('button', { name: /^Memory\s*\d*$/ }).click()
+  await openMemoryTab(page, 'List')
   await expect(page.getByPlaceholder(/Remember something/)).toBeVisible()
 }
 
@@ -40,7 +41,7 @@ test('backend dies while the Memory panel is open: the app stays up and recovers
   // the panel is still rendered and the old row is still shown
   await expect(pane(page).getByText('survivor memory')).toBeVisible()
   // the page itself did not wedge or unmount
-  await expect(page.locator('.memory-page')).toBeVisible()
+  await expect(page.locator('.knowledge-body')).toBeVisible()
 })
 
 test('Settings memory scope filter lists a project memory only under that project', async ({ grain }) => {

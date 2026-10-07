@@ -79,6 +79,31 @@ def _solid(png: bytes) -> bool:
         return True
 
 
+async def save_capture(tb: Any, ctx: dict[str, Any], name: str, png: bytes) -> dict[str, Any] | None:
+    """Save a captured PNG in Uploads and shape it for the chat: `images` (the thumbnail the UI shows), `saved`
+    (doc id, path, size) and `attachment` (what send_files puts on the reply). None when the bytes are not a picture.
+    The browser's page captures take the same road, so one card markup and one send path serve both."""
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(png))
+        im.load()
+    except Exception:  # noqa: BLE001
+        return None
+    name = safe_upload_name(name)
+    pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
+    dest, digest = await asyncio.to_thread(blob_store.store, tb.documents.db.data_dir, name, png)
+    row = tb.documents.create(pid, name, "image/png", len(png), str(dest), "", content_hash=digest)
+    if len(png) > THUMB_PNG_MAX:
+        jpeg, _, _ = await asyncio.to_thread(vision.prepare, png)
+        thumb, thumb_mime = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii"), "image/jpeg"
+    else:
+        thumb, thumb_mime = "data:image/png;base64," + base64.b64encode(png).decode("ascii"), "image/png"
+    return {"images": [{"name": name, "mime": thumb_mime, "bytes": len(png), "data": thumb}],
+            "saved": [{"doc_id": row["id"], "path": str(dest), "width": im.width, "height": im.height}],
+            "attachment": {"id": row["id"], "name": name, "mime": "image/png", "size": len(png)},
+            "note": "Saved in Uploads. Pass attachment.id to send_files to send it to the user; view_image(document_id=...) reads it."}
+
+
 def register(tb: Any) -> None:
     """Register screenshot on a Toolbox (group `mac`)."""
     from .tools import ToolSpec, _obj, tool_error
@@ -121,27 +146,9 @@ def register(tb: Any) -> None:
             code, png = 1, b""
         if code != 0 or not png or (status != macos.GRANTED and _solid(png)):
             return no_permission() if status != macos.GRANTED else tool_error("screenshot: the capture failed", alternative="try again, or capture another target")
-        from PIL import Image
-        try:
-            im = Image.open(io.BytesIO(png))
-            im.load()
-        except Exception:  # noqa: BLE001
-            return tool_error("screenshot: the capture could not be read", alternative="try again")
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        name = safe_upload_name(f"screenshot-{stamp}{'-' + _slug(label) if _slug(label) else ''}.png")
-        pid = ctx.get("project_id") if isinstance(ctx.get("project_id"), str) else None
-        dest, digest = await asyncio.to_thread(blob_store.store, tb.documents.db.data_dir, name, png)
-        row = tb.documents.create(pid, name, "image/png", len(png), str(dest), "", content_hash=digest)
-        if len(png) > THUMB_PNG_MAX:
-            jpeg, _, _ = await asyncio.to_thread(vision.prepare, png)
-            thumb = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-            thumb_mime = "image/jpeg"
-        else:
-            thumb, thumb_mime = "data:image/png;base64," + base64.b64encode(png).decode("ascii"), "image/png"
-        return {"images": [{"name": name, "mime": thumb_mime, "bytes": len(png), "data": thumb}],
-                "saved": [{"doc_id": row["id"], "path": str(dest), "width": im.width, "height": im.height}],
-                "attachment": {"id": row["id"], "name": name, "mime": "image/png", "size": len(png)},
-                "note": "Saved in Uploads. Pass attachment.id to send_files to send it to the user; view_image(document_id=...) reads it."}
+        out = await save_capture(tb, ctx, f"screenshot-{stamp}{'-' + _slug(label) if _slug(label) else ''}.png", png)
+        return out if out is not None else tool_error("screenshot: the capture could not be read", alternative="try again")
 
     spec = ToolSpec(
         "screenshot",

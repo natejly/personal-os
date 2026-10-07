@@ -22,18 +22,17 @@ test('desks working at once: the extra desk queues ("#1 in line") and starts whe
   expect(realErrors(grain)).toEqual([])
 })
 
-test('a desk that hits its turn cap stops and asks instead of running on', async ({ grain }) => {
+test('a desk whose turns only talk settles after one nudge and does not run on', async ({ grain }) => {
   await grain.api('/settings', { method: 'PUT', body: settingsFor })
   const llm = await scriptLLM(grain)
-  // every turn only talks: the desk would chain forever, so the cap is what ends it
+  // every turn only talks: nothing but the desk's own nudge could chain another one
   for (let i = 0; i < 6; i++) llm.push({ text: `still thinking ${i}` })
-  const { desk } = await deskChat(grain, { brief: 'never finishes', title: 'Capped', budget: { maxTurns: 2 } })
+  const { desk } = await deskChat(grain, { brief: 'never finishes', title: 'Talker' })
   await expect.poll(async () => (await grain.api(`/cowork/desks/${desk.id}`)).status, { timeout: 120_000 }).toMatch(/blocked|paused|review|done|needs_approval/)
-  const d = await grain.api(`/cowork/desks/${desk.id}`)
-  expect(d.turn).toBeLessThanOrEqual(2)
   const before = llm.requests.length
   await grain.page.waitForTimeout(4000)
-  expect(llm.requests.length).toBe(before) // nothing keeps running behind the cap
+  expect(llm.requests.length).toBe(before) // nothing keeps running once it has settled
+  expect(before).toBe(2) // the first turn plus the one nudge
 })
 
 test('a desk lets go of a card nobody answers (parkAfterSeconds) and the answer still wakes it', async ({ grain }) => {

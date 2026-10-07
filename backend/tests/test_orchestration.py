@@ -959,7 +959,7 @@ def test_ember_1_is_the_default_model_per_provider_and_a_saved_one_wins() -> Non
     assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/ember-1"
     assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "ember-1"
     assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "ember-1", "an inferred proxy too"
-    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5-mini", "no Ember there: its own default"
+    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5", "no Ember there: the preset's high tier"
     assert providers.default_model({}) == "", "no provider yet: nothing"
     saved = {k: v for k, v in appmod.db.get_settings().items() if k in ("provider", "baseUrl", "defaultModel")}
     try:
@@ -1104,3 +1104,13 @@ def test_the_subagent_routes_open_a_workers_transcript() -> None:
     assert "panel report" in json.dumps(r.json()["messages"])
     r = client.post(f"/subagents/{wid}/message", json={"content": "hello"})
     assert r.status_code == 409 and r.json()["detail"]["finished"] is True, "a finished worker takes no note; the UI resumes it instead"
+
+
+def test_tier_model_saved_wins_then_preset_then_default_model() -> None:
+    fw = {"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
+    assert providers.tier_model(fw, "high") == "accounts/fireworks/models/ember-1"
+    assert providers.tier_model(fw, "medium") == "accounts/fireworks/models/glm-5p3"
+    assert providers.tier_model(fw, "low") == "accounts/fireworks/models/deepseek-v4p1-flash"
+    assert providers.tier_model({**fw, "modelLow": "x"}, "low") == "x"
+    assert providers.tier_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}, "medium") == "glm-5.3"
+    assert providers.tier_model({"provider": "custom", "baseUrl": "http://h/v1", "defaultModel": "mine"}, "low") == "mine"

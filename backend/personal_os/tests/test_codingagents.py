@@ -146,8 +146,10 @@ class ClaudeDriver(CodingTestCase):
 
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
-        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--model", "fable", "--agents", ca.CLAUDE_AGENTS, "do it"])
+        # No --model either: without one the CLI uses the user's own default, the model they have quota for.
+        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "do it"])
         self.assertNotIn("--permission-mode", plain)
+        self.assertNotIn("--model", plain)
         agents = json.loads(plain[plain.index("--agents") + 1])
         self.assertEqual(len(agents), 2)
         self.assertTrue(all(set(a) == {"description", "prompt", "model"} and a["model"] == "sonnet" for a in agents.values()))

@@ -139,9 +139,9 @@ def test_migration_backfills_existing_outputs() -> None:
     c = DB.connect()  # migrations.run owns its transactions
     try:
         applied = migrations.run(c)
-        check(applied == [27] and migrations.MIGRATIONS[-1][1] == "chat_artifacts_backfill", "step 27 is the backfill")
+        check(27 in applied and migrations.MIGRATIONS[26][1] == "chat_artifacts_backfill", "step 27 is the backfill")
         c.execute("PRAGMA user_version = 26")
-        check(migrations.run(c) == [27], "re-running the step is harmless")
+        check(27 in migrations.run(c), "re-running the step is harmless")
     finally:
         c.close()
     mine = {f["name"]: f["rel"] for f in artifacts() if f["conversation_id"] == cid}

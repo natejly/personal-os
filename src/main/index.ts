@@ -258,8 +258,6 @@ function buildMenu(): void {
         // modifier over.
         item('page-agent'),
         item('toggle-context'),
-        // Shown for discovery only: the composer binds ⇧⌘P itself, so the menu must not swallow it.
-        item('plan-mode'),
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },

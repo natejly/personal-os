@@ -209,8 +209,6 @@
 .aplan-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .aplan-decided { margin: 8px 0 0; }
 
-.plan-mode.auto, .plan-mode.always { color: var(--accent); }
-
 /* ---- files tab: rich preview, delivered marks, changes ---- */
 .desk-preview-meta { white-space: nowrap; }
 .desk-preview-note { margin: 0 0 6px; }

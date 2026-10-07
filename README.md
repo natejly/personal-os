@@ -44,7 +44,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    menu: short plain messages go to the fast model, long, analytical or
    tool-heavy ones (and High or Max reasoning) to the default, with the reason
    shown while the reply starts. Type `/` for slash commands: `/skill`, `/schedule`, `/loop`,
-   `/compact`, `/skills`, `/commands` and `/plan` (⌘⇧P also cycles plan mode).
+   `/compact`, `/skills` and `/commands`.
    From any app, press ⌥Space (or the menubar item) for a small ask bar: type a
    line, optionally attach your clipboard text, and the reply streams in place.
    Open in chat continues it in the main window.
@@ -116,7 +116,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
   Type `/` in the composer for `/skill`, `/schedule`, `/loop`, `/research`, `/compact`,
-  `/skills`, `/commands` and `/plan`. Attachments ride on the message as chips,
+  `/skills` and `/commands`. Attachments ride on the message as chips,
   and their text is given to the model under a size cap. Chat rows show a face
   that blinks while the chat works.
 - **Image generation.** `generate_image` makes pictures with the model chosen under
@@ -210,7 +210,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Mode** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
+- **Mode** (a control in any chat's composer). A chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
   once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
   or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
@@ -516,7 +516,6 @@ and its verdict is kept on the row.
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
-| ⌘⇧P | Cycle plan mode in the composer |
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
 | ⌘I | Page agent panel |
 | ⌃⌘I | Toggle context panel |

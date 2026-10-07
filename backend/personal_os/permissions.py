@@ -62,8 +62,6 @@ DEFAULTS: dict[str, Any] = {
     # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
     # reads it for scope; it is still stored and returned so an older client keeps working.
     "workspaceRoots": [],
-    # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
-    "planMode": "off",
     # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
     # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
     "sandboxNetwork": "off",
@@ -103,7 +101,6 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "sandboxRuntime": SANDBOX_RUNTIMES,
     "sandboxNetwork": ("off", "proxy", "open"),
     "docEditMode": ("review", "apply"),
-    "planMode": ("off", "auto", "always"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
@@ -112,7 +109,6 @@ CHOICE_ERRORS = {
     "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
     "sandboxNetwork": "sandboxNetwork must be 'off', 'proxy' or 'open'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
-    "planMode": "planMode must be 'off', 'auto' or 'always'",
 }
 
 

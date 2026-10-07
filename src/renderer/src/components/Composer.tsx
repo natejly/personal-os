@@ -7,7 +7,6 @@ import { slashMenuKey } from '../features/notes/slash'
 import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
 import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
-import PlanModeToggle from './PlanModeToggle'
 import AutonomyToggle from './AutonomyToggle'
 import { PermissionModePill } from './PermissionMode'
 import { uploadNote } from '../lib/uploadNote'
@@ -70,12 +69,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const newChat = !onSend && !compact && !activeId
   const newChatAutonomy = (st: ReturnType<typeof useStore.getState>): DeskAutonomy | null =>
     startAutonomy({ autonomousByDefault: st.settings.autonomousByDefault, draft: st.draftAutonomy, mainComposer: newChat, agent: st.draftChatSettings.agent })
-  // A draft that starts autonomous becomes a desk, which plans by its own autonomy and ignores this chat's plan mode.
-  const startsAsDesk = useStore((s) => newChatAutonomy(s) !== null)
   /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
   const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
   useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
-  const setChatSettings = useStore((s) => s.setChatSettings)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
@@ -123,7 +119,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
   }
 
-  /** A built-in the UI handles itself (/compact, /skills, /commands, /plan). The draft is dropped once it has run. */
+  /** A built-in the UI handles itself (/compact, /skills, /commands). The draft is dropped once it has run. */
   const runClient = async ({ name, args }: { name: string; args: string }, k0: string): Promise<void> => {
     const s = useStore.getState()
     if (name === 'compact') {
@@ -142,13 +138,6 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (name === 'skills' || name === 'commands') {
       s.setLibraryTab(name === 'skills' ? 'skills' : 'automations')
       s.setView('library')
-    } else if (name === 'plan') {
-      const modes = ['off', 'auto', 'always'] as const
-      type Mode = (typeof modes)[number]
-      const cur: Mode = (activeId ? s.sessions[activeId]?.conversation.settings.planMode : s.draftChatSettings.planMode) ?? s.settings.planMode ?? 'off'
-      const want: Mode = (modes as readonly string[]).includes(args) ? (args as Mode) : modes[(modes.indexOf(cur) + 1) % modes.length]
-      await setChatSettings({ planMode: want }, conversationId).catch((e: unknown) => s.toast((e as Error).message, 'error'))
-      s.toast(`Plan mode: ${want}`, 'info')
     }
   }
 
@@ -438,16 +427,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!canSend} onClick={() => submit()}><ArrowUp size={16} /></button>
         </div>
       </div>
-      {/* The plan-mode toggle binds ⌘⇧P itself, only for the focused conversation, so several mounted
-          chat widgets do not all cycle at once. It comes last because its label grows with the mode, and
-          nothing sits after it to be pushed. An empty page-agent panel has no chat for either toggle to set. */}
       <div className="composer-footer">
         {footer}
         {conversationId !== '\u0000page-agent' && (
           <>
             <PermissionModePill />
-            {/* A chat working autonomously plans by its desk's autonomy, so its own plan mode steps aside. */}
-            {!deskBound && !startsAsDesk && <PlanModeToggle conversationId={conversationId} />}
             <AutonomyToggle conversationId={conversationId} draft={newChat} />
           </>
         )}

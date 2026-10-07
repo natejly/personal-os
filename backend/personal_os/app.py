@@ -1469,15 +1469,6 @@ PLAN_HINT = ("When a request needs more than a couple of tool calls, open with t
 # Only added when save_memory or search_memory is available in this chat. Static text: it sits in the cached prefix.
 MEMORY_HINT = ("Save corrections, standing instructions and durable facts the user states with save_memory (kind instruction for always/never rules, until for facts that stop holding on a date).\n"
                "Call search_memory before answering a question about the user's past or preferences that is not already in context.")
-# Plan mode in an ordinary chat (conv.settings.planMode, else settings.planMode). 'always' starts every
-# reply drafting; 'auto' starts it the first time the reply reaches for a consequential tool.
-CHAT_PLAN_HINT = ("## Plan mode is on\nBefore anything that changes something (writes, sends, creates, deletes, runs code), "
-                  "call propose_plan with the exact calls you intend to make and wait for the user's answer. Reading and "
-                  "searching are fine without a plan. Once a plan is approved, make each approved call exactly once with "
-                  "exactly its arguments. If a decision is genuinely the user's, call ask_user once instead of guessing.")
-# Groups whose `writes` tools are the assistant's own bookkeeping rather than a change the user would
-# want to approve, so they never trip 'auto' plan mode.
-PLAN_AUTO_EXEMPT_GROUPS = ("plan", "memory", "graph", "style")
 
 
 def _today_hint() -> str:
@@ -1756,7 +1747,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             attachments=bool(body.attachments) if body.content is not None else bool((last_user or {}).get("attachments")),
             prior_tools=bool(last_asst and last_asst.get("tool_events")),
             effort=str(conv["settings"].get("effort") or "default"),
-            plan_mode=str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off") in ("auto", "always"),
+            plan_mode=((desks.get(str(conv["settings"].get("deskId") or ""), with_outputs=False) or {}).get("autonomy") == "plan"),
             fast_model=str(cfg.get("fastModel") or ""), default_model=str(cfg.get("defaultModel") or ""))
         model = routed[0]
     user_msg_id: str | None = None  # the user message this turn answers: what a learned memory cites
@@ -2147,12 +2138,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
         # desk here; an approved plan ends it, which is why `active_plan` turns it off.
         planning = bool(desk) and autonomy == "plan" and active_plan is None
-        # Plan mode in an ordinary chat: the toggle's setting, the chat's own over the global default.
-        # 'always' drafts from the first round; 'auto' flips `planning` on at the first consequential call
-        # (see the gate). Either way a plan approved in this reply ends it, as it does for a desk.
-        chat_plan_mode = "" if desk else str(conv["settings"].get("planMode") or permissions.get(cfg, "planMode") or "off")
-        if chat_plan_mode == "always":
-            planning = True
         # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
         parked_note = ""
         if desk_id:
@@ -2273,7 +2258,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
-                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "",
                  TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
@@ -2849,13 +2833,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
                 if c["name"] != PLAN_TOOL and raw_mode != "off":
-                    if (chat_plan_mode == "auto" and not planning and active_plan is None and danger in MUTATING
-                            and (spec.group if spec else "") not in PLAN_AUTO_EXEMPT_GROUPS):
-                        # 'auto' plan mode: the first consequential call of a reply turns drafting
-                        # on. This call is refused with the planning message below and the model is
-                        # offered the reduced set from the next round, exactly as in 'always'.
-                        planning = True
-                        tool_schemas = _schemas()
                     if planning and danger not in PLAN_SAFE_DANGER:
                         # Nothing consequential runs while a plan is being drafted. `forced` rides out
                         # on the tool_call event so the UI can say "blocked while planning" rather than
@@ -3268,7 +3245,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # The decision was recorded on the plan by whoever answered it (the route, or the stop
                         # above), including any step the user edited: re-read it rather than trust `args`.
                         plan = plans.by_call(uid) or plan
-                        if (desk_id or chat_plan_mode in ("auto", "always")) and plan.get("status") == "approved":
+                        if desk_id and plan.get("status") == "approved":
                             # A plan approved in this very reply is the desk's active plan from here
                             # on: `active_plan` was read before it existed, and the calls that follow
                             # are exactly the ones it authorises. Drafting is over, so the block on
@@ -8634,13 +8611,8 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
         desks.delete(desk["id"])
         convos.delete(conv["id"])
         raise HTTPException(400, f"Could not copy the inputs: {e}") from e
-    # Marked here rather than in Desks: `deskId` is what keeps the conversation out of Recent
-    # chats. planMode follows the autonomy the user picked — 'ask as it goes' works from the first
-    # turn and its calls follow the permission mode, so planMode is "off" for it; writing 'always'
-    # would make it a plan desk and the chat view's own plan toggle a lie. _chat_stream reads the desk's autonomy, not this, so a
-    # later change of autonomy still takes effect; this keeps the stored setting honest.
-    convos.update(conv["id"], {"settings": {"deskId": desk["id"],
-                                            "planMode": "off" if desk["autonomy"] == "ask" else "always"}})
+    # Marked here rather than in Desks: `deskId` is what keeps the conversation out of Recent chats.
+    convos.update(conv["id"], {"settings": {"deskId": desk["id"]}})
     out: dict[str, Any] = {"desk": desk, "conversation_id": conv["id"]}
     if body.start:
         run = _launch_desk(desk["id"], brief, START_FROM)
@@ -8655,7 +8627,7 @@ async def _create_desk(body: DeskIn, *, origin: str | None = None,
 def _desk_on_chat(body: DeskIn) -> dict[str, Any]:
     """A chat told to work autonomously: the desk binds to THAT conversation and reads its history as the brief. One
     desk per conversation, so a chat that worked autonomously before gets its old desk back, workspace and outputs
-    included. Plan mode is left alone: a desk reads its autonomy, and the chat's own setting is back when it detaches."""
+    included. A desk reads its autonomy off the desk row."""
     if body.autonomy not in AUTONOMY:
         raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
     cid = body.conversation_id or ""

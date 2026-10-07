@@ -24,7 +24,6 @@ test('the app menu takes every accelerator from the registry', () => {
   // No literal accelerator survives in main: a key typed there would bypass the overlay.
   assert.ok(!/accelerator: ['"`]/.test(menu), 'a literal accelerator in src/main/index.ts')
   for (const s of inMenu.filter((x) => !x.id.startsWith('space-'))) assert.ok(menu.includes(`item('${s.id}')`), `${s.id} is not in the menu`)
-  assert.ok(menu.includes("item('plan-mode')"), 'plan mode stays discoverable in the menu')
 })
 
 test('formatAccelerator renders macOS glyphs in ⌃⌥⇧⌘ order', () => {

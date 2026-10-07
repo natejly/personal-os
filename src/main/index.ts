@@ -21,7 +21,9 @@ import { startUpdater } from './updater'
 import { registerSystemAccess } from './systemAccess'
 import { background, goBackground, reveal } from './background'
 import { attachContextMenu } from './attachContextMenu'
+import { registerPreviewScheme, servePreviews } from './htmlPreview'
 
+registerPreviewScheme() // before ready
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
 
@@ -357,6 +359,7 @@ else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
   goBackground()
+  servePreviews()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('ui:zoom', (e, percent: number) => {

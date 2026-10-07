@@ -16,6 +16,15 @@ test('a subframe may load the renderer and nothing on the sidecar', () => {
   assert.equal(frameNavigationAllowed('file:///tmp/x.pdf', undefined), false)
 })
 
+test('a subframe may load grain-preview: documents, which are not http and do not widen it', () => {
+  assert.equal(frameNavigationAllowed('grain-preview://doc/abc', RENDERER), true)
+  assert.equal(frameNavigationAllowed('grain-preview://doc/abc', undefined), true)
+  assert.equal(frameNavigationAllowed('grain-preview.evil.test://doc/abc', RENDERER), false)
+  assert.equal(frameNavigationAllowed('https://grain-preview/doc/abc', RENDERER), false)
+  assert.equal(frameNavigationAllowed('http://grain-preview:80/doc/abc', RENDERER), false)
+  assert.equal(targetsLoopbackService('grain-preview://doc/abc', BACKEND), false)
+})
+
 test("a subframe may load the renderer's own blob: URLs (a PDF for the side panel), never an opaque origin's", () => {
   // Dev: the renderer is an http document; packaged: a file:// one, whose blobs are blob:file:///…
   assert.equal(frameNavigationAllowed(`blob:${RENDERER}/9fd38d09-50a0-4f50-9410-172efe003f48`, RENDERER), true)

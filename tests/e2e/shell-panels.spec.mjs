@@ -185,10 +185,10 @@ test('sidebar chat pulse shows a reply streaming in another chat, then settles',
   await expect(rowA.locator('.face .mo-always')).toBeVisible()
   await expect(rowA.locator('.face .mo-always')).toHaveCount(0, { timeout: 20_000 })
   // finished while out of sight: unread dot until opened
-  await expect(rowA.locator('.pulse')).toHaveCount(1)
+  await expect(rowA.locator('.pulse.unread')).toHaveCount(1)
   await rowA.click()
   await expect(page.locator('.msg.assistant').last()).toContainText('finally done')
-  await expect(rowA.locator('.pulse')).toHaveCount(0, { timeout: 10_000 })
+  await expect(rowA.locator('.pulse.unread')).toHaveCount(0, { timeout: 10_000 })
   void a
   expect(grain.consoleErrors).toEqual([])
 })

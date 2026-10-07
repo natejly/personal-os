@@ -39,7 +39,6 @@ import TypographyControls from '../features/notes/TypographyMenu'
 import PlannerMailSettings from './PlannerMailSettings'
 import MemoryPanel from './MemoryPanel'
 import ScopeSelect from './ScopeSelect'
-import { VoiceSettings } from './ReadAloudButton'
 
 type Tab = SettingsTab
 
@@ -377,7 +376,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
-              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Per-tool rules and the always-ask list are under Advanced.</p>
+              <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Allow everything still asks before permanent deletes outside the Trash, disk wipes, force-pushes and sending email. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
                   <summary>Reviewer model: {draft.autoReviewModel ? draft.autoReviewModel : 'automatic'}</summary>
@@ -533,7 +532,7 @@ export default function SettingsModal(): JSX.Element {
                 <p className="muted small"><b>On</b> runs, <b>Ask</b> pauses for you, <b>Off</b> hides the tool.</p>
                 <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
                 <h4>Always ask first</h4>
-                <p className="muted small">Cards that appear every time, in every mode except Allow everything. Keep what you cannot take back here.</p>
+                <p className="muted small">Cards that appear every time, in every mode except Allow everything. Sending email asks in every mode. Keep what you cannot take back here.</p>
                 <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
                 <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
                 <GrantsPanel draft={draft} patch={patch} />
@@ -599,12 +598,11 @@ export default function SettingsModal(): JSX.Element {
                 <h4>Checks and commands</h4>
                 <DeskGates draft={draft} patch={patch} />
                 <h4>Notifications</h4>
-                <Switch title="Notify me about chats" help="A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at." checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />
+                <Switch title="Notify me when a chat finishes" help="An unread dot on the chat, and a system notification when a reply or autonomous run finishes, fails or needs your approval while you are not looking at that chat." checked={draft.chatNotify !== false} onChange={(chatNotify) => patch({ chatNotify })} />
                 <Switch title="Notify me about scheduled jobs" help="When a job fails, is paused or leaves something for you while the app is in the background." checked={draft.notifyJobs !== false} onChange={(notifyJobs) => patch({ notifyJobs })} />
               </AdvGroup>
 
               <AdvGroup id="voice" title="Voice and shortcuts" {...gp}>
-                <VoiceSettings draft={draft} patch={patch} />
                 <h4>Shortcuts <button type="button" className="link-btn" onClick={() => useStore.getState().openHelp('shortcuts')}>Show all shortcuts</button></h4>
                 {shortcut && !shortcut.ok && <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`}</p>}
                 {capShortcut && !capShortcut.ok && <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>}

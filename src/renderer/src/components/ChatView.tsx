@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, Files } from 'lucide-react'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -8,7 +8,6 @@ import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
-import PlanPanel from './PlanPanel'
 import WorkersPanel from './WorkersPanel'
 import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
@@ -143,7 +142,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
         </div>
         <div className="no-drag header-right">
-          <ChatFilesButton conversationId={convo?.id} />
+          {conversationId
+            ? <ChatFilesButton conversationId={convo?.id} />
+            : <button className={`icon-btn no-drag${deskPanel ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-pressed={deskPanel} disabled={!convo?.id}
+              onClick={() => setDeskPanel((o) => !o)}><Files size={15} /></button>}
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
@@ -192,13 +194,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
             </button>
           )}
-          <PlanPanel conversationId={conversationId} />
           <WorkersPanel conversationId={conversationId} />
           {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
-        {desk && deskPanel && <DeskPanel desk={desk} onClose={() => setDeskPanel(false)} />}
+        {convo?.id && !conversationId && deskPanel && <DeskPanel key={convo.id} desk={desk} conversationId={convo.id} onClose={() => setDeskPanel(false)} />}
         {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
         {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

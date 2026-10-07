@@ -1,5 +1,6 @@
 import { routineDraftFrom, type RoutineDraft } from './lib/routine'
 import { hexToHue, PROJECT_TONE } from './lib/projectHue'
+import { agentHue, faceSeed, libraryAgent, type FaceLook } from './lib/faces'
 import { create } from 'zustand'
 import { useMemo } from 'react'
 import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
@@ -17,7 +18,7 @@ import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Sco
 import { currentSelection } from './lib/pageContext'
 import { panelConversationFor, type PagePin } from './lib/pagePanel'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
@@ -231,8 +232,6 @@ export interface State {
   draftFast: boolean
   /** Every other per-chat setting picked on a draft (plan mode, skip permissions, context toggles). `send` applies it. */
   draftChatSettings: Partial<ConversationSettings>
-  /** The next new chat is private: it is created with `private`, which only creation can set. */
-  draftPrivate: boolean
   /** Autonomy picked on a draft. Null follows `settings.autonomousByDefault`; `send` starts the new chat's desk with it. */
   draftAutonomy: DraftAutonomy
   /** The first message of a chat that has no row yet, shown until the row exists. */
@@ -297,6 +296,8 @@ export interface State {
   conversations: Conversation[]
   /** Loaded conversations, keyed by id. Each one streams independently. */
   sessions: Record<string, ChatSession>
+  /** Replies that finished off screen in a run this window did not stream (Telegram, a worker's wake turn, a desk): no session holds them, so the count lives here. */
+  unreadById: Record<string, number>
   /** Conversations with a reply running right now, from `/runs` and the app topic's `run_state`: the sidebar pulse for a chat with no session. */
   liveRuns: LiveRuns
   focusedConversationId: string | null
@@ -624,6 +625,8 @@ export interface State {
   refreshMemoryProposals: () => Promise<void>
   /** Toast one learn pass with an Undo, and refresh what it touched. */
   onLearned: (l: Learned) => void
+  /** One `run_state` frame from `/events`: the live-run map, the finish and approval notices, and following a reply this window did not start. */
+  onRunState: (info: RunInfo) => void
 }
 
 let toastSeq = 0
@@ -895,7 +898,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
         ...(ev.data.tainted ? withTaint(done, ev.data.taint_sources ?? []) : done),
         streaming: done.streaming && { ...done.streaming, answering: false, stopping: final ? false : done.streaming.stopping },
         finishedAt: Date.now(),
-        unread: final && !focused ? done.unread + 1 : done.unread
+        unread: final && !focused && ev.data.id ? done.unread + 1 : done.unread
       }
     }
     case 'error': {
@@ -1179,13 +1182,15 @@ export const useStore = create<State>((set, get) => {
     set((st) => ({ conversations: st.conversations.map((c) => (c.id === id && c.title !== title ? { ...c, title } : c)) }))
   }
   /**
-   * A chat with no stream in this window flipping into needs-you or blocked (a run started elsewhere, a reply
-   * left running off screen) rings like one it streams. Desk and job runs have their own notifiers.
+   * A chat with no stream in this window flipping into needs-you or blocked, or finishing (a run started elsewhere,
+   * a reply left running off screen) rings like one it streams. Job runs have their own notifier; a desk's own
+   * statuses are the desk notifier's, so a desk run rings here only for finishing (announce skips its OS banner).
    * ponytail: the first connection replays the topic's ring, so frames in its first seconds are treated as
    * history; a real flip in that window shows on the sidebar dot without a banner.
    */
   const runNoticed = new Set<string>()
   let quietUntil = 0
+  const lastRuns = new Map<string, FinishInfo>()
   let jobsTimer: ReturnType<typeof setTimeout> | null = null
   const ringRunState = (prevStatus: string | undefined, info: RunInfo): void => {
     if (info.kind === 'job') {
@@ -1193,11 +1198,22 @@ export const useStore = create<State>((set, get) => {
       if (jobsTimer === null) jobsTimer = setTimeout(() => { jobsTimer = null; void get().refreshJobs() }, 500)
       return
     }
-    if (Date.now() < quietUntil || info.kind === 'desk') return
-    const next: Attention = info.attention ?? attention('run', info.status)
-    if (!wantsYou(next) || attention('run', prevStatus) === next) return
+    const before = lastRuns.get(info.run_id)
+    if (info.live) lastRuns.set(info.run_id, info); else lastRuns.delete(info.run_id)
+    if (Date.now() < quietUntil) return
     if (get().sessions[info.conversation_id]?.streaming?.runId === info.run_id) return  // its own stream announces it
     const visible = onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained })
+    const fin = finishNotice(before, info)
+    if (fin) {
+      // The dot only for a chat out of sight; one on screen in an unfocused window gets the banner and is read on return.
+      if (announce(info.conversation_id, info.run_id, fin, visible, runNoticed) && !visible && get().settings.chatNotify !== false) {
+        set((st) => ({ unreadById: { ...st.unreadById, [info.conversation_id]: (st.unreadById[info.conversation_id] ?? 0) + 1 } }))
+      }
+      return
+    }
+    if (info.kind === 'desk') return
+    const next: Attention = info.attention ?? attention('run', info.status)
+    if (!wantsYou(next) || attention('run', prevStatus) === next) return
     announce(info.conversation_id, info.run_id, next === 'needs_you' ? 'approval' : 'failed', visible, runNoticed)
   }
   const watchBackgroundEvents = async (): Promise<void> => {
@@ -1244,15 +1260,7 @@ export const useStore = create<State>((set, get) => {
             // Crew windows and the Library's run list re-read the run; the event itself carries no payloads.
             window.dispatchEvent(new Event('grain-crew'))
           } else if (ev.event === 'run_state') {
-            const info = ev.data
-            const prevStatus = get().liveRuns[info.conversation_id]?.status
-            set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
-            ringRunState(prevStatus, info)
-            const sess = get().sessions[info.conversation_id]
-            // A reply this window did not start: follow it if it is on screen, or, once it ends, read what it persisted.
-            const next = sess && followRun(sess.streaming, info, onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained }))
-            if (next === 'attach') void get().attachSession(info.conversation_id).catch(() => undefined)
-            else if (next === 'open') void get().openSession(info.conversation_id).catch(() => undefined)
+            get().onRunState(ev.data)
           } else if (ev.event === 'conversation_changed') {
             if (ev.data.title) applyTitle(ev.data.id, ev.data.title)
             if (ev.data.reload) {
@@ -1319,16 +1327,23 @@ export const useStore = create<State>((set, get) => {
    * Tell the user a chat they are not looking at needs them, at most once per run and kind. Not for a desk's
    * conversation (the desk notifier owns those), and not while the window is in front with the chat on screen.
    */
-  const announce = (convId: string, runId: string, kind: 'reply' | 'approval' | 'failed', visible: boolean, seen: Set<string>): void => {
+  const announce = (convId: string, runId: string, kind: 'reply' | 'approval' | 'failed', visible: boolean, seen: Set<string>): boolean => {
     const key = `${runId}:${kind}`
-    if (seen.has(key)) return
+    if (seen.has(key)) return false
     seen.add(key)
+    runNoticed.add(key)  // the `/events` feed sees the same run end too: one notice per run, whichever path got there first
     if (kind === 'approval') void get().refreshAgentInbox()  // the Today badge counts every open card, this one too
-    if (get().settings.chatNotify === false) return
-    if (visible && typeof document !== 'undefined' && document.hasFocus()) return
-    if (get().desks.some((d) => d.conversation_id === convId)) return
+    if (get().settings.chatNotify === false) return true
+    if (visible && typeof document !== 'undefined' && document.hasFocus()) return true
+    // A desk's chat: its status notifier already says finished / failed / needs you, so one run is not two banners.
+    if (get().desks.some((d) => d.conversation_id === convId) && (kind === 'approval' || get().settings.deskNotify !== false)) return true
     const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
-    notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick: () => void get().selectChat(convId) })
+    const onClick = (): void => {
+      try { window.os.showMain() } catch { /* no bridge: window.focus() in notify() is the fallback */ }
+      void get().selectChat(convId)
+    }
+    notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick })
+    return true
   }
 
   /**
@@ -1663,13 +1678,11 @@ export const useStore = create<State>((set, get) => {
     const parked = parkable(patch)
     if (!id) {
       // No conversation to PATCH yet: park the patch and let `send` apply it to the conversation it is
-      // about to create. Never the global settings: a draft's toggle is about that one chat. Private is
-      // set at creation, which is the only time it can be.
-      const { effort, fast, private: priv, ...rest } = patch
+      // about to create. Never the global settings: a draft's toggle is about that one chat.
+      const { effort, fast, ...rest } = patch
       set((s) => ({
         draftEffort: effort ?? s.draftEffort,
         draftFast: fast ?? s.draftFast,
-        draftPrivate: priv ?? s.draftPrivate,
         draftChatSettings: { ...s.draftChatSettings, ...rest }
       }))
       return
@@ -1738,7 +1751,6 @@ export const useStore = create<State>((set, get) => {
     draftModel: null,
     draftFast: false,
     draftChatSettings: {},
-    draftPrivate: false,
     draftAutonomy: null,
     draftPendingSend: null,
     uploadTaintTarget: null,
@@ -1791,6 +1803,7 @@ export const useStore = create<State>((set, get) => {
     helpSection: 'shortcuts',
     conversations: [],
     sessions: {},
+    unreadById: {},
     liveRuns: {},
     focusedConversationId: null,
     memories: [],
@@ -1913,7 +1926,7 @@ export const useStore = create<State>((set, get) => {
       // Coming back to the chat view shows the focused conversation, so what it finished while away is read.
       if (view === 'chat') {
         const fid = get().focusedConversationId
-        if (fid && (get().sessions[fid]?.unread ?? 0) > 0) get().clearSessionStatus(fid)
+        if (fid && unreadOf(get(), fid) > 0) get().clearSessionStatus(fid)
       }
       if (view === 'docs') {
         void get().refreshDocs()
@@ -2070,7 +2083,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2154,6 +2167,7 @@ export const useStore = create<State>((set, get) => {
     },
     clearSessionStatus: (conversationId) => {
       clearHold(conversationId)
+      if (get().unreadById[conversationId]) set((st) => { const { [conversationId]: _read, ...rest } = st.unreadById; return { unreadById: rest } })
       patchSession(conversationId, (s) => {
         const settled = s.status === 'done' || s.status === 'error'
         return { ...s, unread: 0, touchedAt: Date.now(), status: settled ? 'idle' : s.status, finishedAt: settled ? null : s.finishedAt }
@@ -2362,7 +2376,7 @@ export const useStore = create<State>((set, get) => {
       let created: (id: string | null) => void = () => undefined
       draftCreate = new Promise((r) => { created = r })
       try {
-        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel, get().draftPrivate)
+        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel)
       } catch (e) {
         draftCreate = null
         created(null)
@@ -2405,7 +2419,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftAutonomy: null, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftAutonomy: null, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
@@ -3221,6 +3235,16 @@ export const useStore = create<State>((set, get) => {
         set({ memoryProposals: (await api.memories.proposals('all')).length })
       } catch { /* a badge is not worth a toast */ }
     },
+    onRunState: (info) => {
+      const prevStatus = get().liveRuns[info.conversation_id]?.status
+      set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
+      ringRunState(prevStatus, info)
+      const sess = get().sessions[info.conversation_id]
+      // A reply this window did not start: follow it if it is on screen, or, once it ends, read what it persisted.
+      const next = sess && followRun(sess.streaming, info, onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained }))
+      if (next === 'attach') void get().attachSession(info.conversation_id).catch(() => undefined)
+      else if (next === 'open') void get().openSession(info.conversation_id).catch(() => undefined)
+    },
     onLearned: (l) => {
       // Updates and forgets count as changes: they edit open lists too.
       const text = learnedText(l)
@@ -3713,7 +3737,7 @@ export const retainSession = (conversationId: string): (() => void) => {
   const first = !retained.has(conversationId)
   retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)
   // A surface mounting this conversation is where the user reads it, so what finished while it was away is read.
-  if (first && (useStore.getState().sessions[conversationId]?.unread ?? 0) > 0) useStore.getState().clearSessionStatus(conversationId)
+  if (first && unreadOf(useStore.getState(), conversationId) > 0) useStore.getState().clearSessionStatus(conversationId)
   return () => {
     const n = (retained.get(conversationId) ?? 0) - 1
     if (n > 0) return void retained.set(conversationId, n)
@@ -3725,6 +3749,9 @@ export const retainSession = (conversationId: string): (() => void) => {
 
 export const useProject = (id: string | null | undefined): Project | undefined =>
   useStore((s) => (id ? s.projects.find((p) => p.id === id) : undefined))
+
+/** A chat's unread replies: the session's own count (streamed here) plus those from runs this window did not stream. */
+const unreadOf = (s: State, id: string): number => (s.sessions[id]?.unread ?? 0) + (s.unreadById[id] ?? 0)
 
 const pick = (s: State, convId?: string): ChatSession | undefined => s.sessions[convId ?? s.focusedConversationId ?? '']
 
@@ -3752,7 +3779,7 @@ export const useStreamingMessageId = (convId?: string): string | null =>
     return st?.answering ? st.messageId : null
   })
 export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.stopping)
-export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)
+export const useUnread = (convId?: string): number => useStore((s) => unreadOf(s, convId ?? s.focusedConversationId ?? ''))
 const EMPTY_WORKERS: readonly WorkerInfo[] = []
 /** A chat's background workers; a stable empty list while it has none so selectors do not re-render. */
 export const useWorkers = (convId?: string): readonly WorkerInfo[] => useStore((s) => (convId && s.workers[convId]) || EMPTY_WORKERS)
@@ -3771,21 +3798,31 @@ export const useNowText = (convId?: string): string | null =>
     const id = sess?.streaming?.answering ? sess.streaming.messageId : null
     return id ? nowText(sess!.conversation.messages?.find((m) => m.id === id), sess!.subagents) : null
   })
+/** A Library agent's face colour; the primitive under every face that wears an agent. */
+export const useAgentHue = (agent?: string): number | undefined => useStore((s) => agentHue(s.agentDefs, agent))
 /**
- * The face a chat wears. A chat in a project wears the project's colour (hue and tone, shape still from its own id)
- * so the project's chats read as one family and match its dot; that wins over an agent's hue. Otherwise the agent's
- * (name and colour) when it was opened on one, else its own id.
+ * The face a chat wears (see `faceSeed`): the agent it was opened on (name and Library colour, even inside a project),
+ * else its own id tinted by its project's colour so the project's chats read as one family and match its dot.
  */
-export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings' | 'project_id'> | null | undefined): { name: string; hue?: number; tone?: number } => {
+export const useChatFace = (conv: Pick<Conversation, 'id' | 'settings' | 'project_id'> | null | undefined): FaceLook => {
   const agent = conv?.settings?.agent
-  const agentHue = useStore((s) => agent ? (s.agentDefs.custom.find((d) => d.name === agent) ?? s.agentDefs.builtin.find((d) => d.name === agent))?.hue : null)
+  const hue = useAgentHue(agent)
   const color = useStore((s) => (conv?.project_id ? s.projects.find((p) => p.id === conv.project_id)?.color : undefined))
   const projectHue = color ? hexToHue(color) : null
-  const name = agent || (conv?.id ?? '')
   const id = conv?.id ?? ''
   // One object per input: MessageView is memo'd on shallow props, so a fresh object each render would undo that.
-  return useMemo(() => {
-    if (projectHue != null) return { name: id, hue: projectHue, tone: PROJECT_TONE }
-    return agentHue != null ? { name, hue: agentHue } : { name }
-  }, [name, id, agentHue, projectHue])
+  return useMemo(() => faceSeed({ id, agent, hue, project: projectHue != null ? { hue: projectHue, tone: PROJECT_TONE } : null }), [id, agent, hue, projectHue])
+}
+/** `useChatFace` for a chat known only by id (a desk, a job run): the listed conversation, else the id itself. */
+export const useChatFaceById = (convId?: string | null): FaceLook => {
+  const conv = useStore((s) => (convId ? s.conversations.find((c) => c.id === convId) ?? s.sessions[convId]?.conversation ?? null : null))
+  const face = useChatFace(conv)
+  return conv || !convId ? face : { name: convId }
+}
+/** The face of a worker or subagent: its Library agent when it runs as one, else the first worker of its resume chain, so a resume keeps it. */
+export const useWorkerFace = (w: { id: string; agent?: string; origin?: string }): FaceLook => {
+  const agent = libraryAgent(w.agent)
+  const hue = useAgentHue(agent)
+  const id = w.origin ?? w.id
+  return useMemo(() => faceSeed({ id, agent, hue }), [id, agent, hue])
 }

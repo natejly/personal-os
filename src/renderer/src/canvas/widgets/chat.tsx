@@ -10,6 +10,7 @@ import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
 import { composerKey, setDraftFiles } from '../../lib/drafts'
 import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
+import { agentHue, faceSeed, libraryAgent } from '../../lib/faces'
 import { retainSession, useChatFace, useConversation, useIsStreaming, useNowText, useStore, useStreamingMessageId, useSubagents } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -47,8 +48,9 @@ function ChatRing({ convId, status, title }: { convId: string; status: string; t
   const kids = Object.values(useSubagents(convId)).filter((k) => k.message_id === latest)
   const face = useChatFace(conv)
   const openSubagent = useStore((s) => s.openSubagent)
+  const defs = useStore((s) => s.agentDefs)
   return <CrewRing center={{ ...face, status, title }}
-    kids={kids.map((k) => ({ id: k.id, status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
+    kids={kids.map((k) => ({ id: k.id, ...faceSeed({ id: k.id, agent: libraryAgent(k.role), hue: agentHue(defs, libraryAgent(k.role)) }), status: k.state, title: `${k.role}: ${k.now || k.state}` }))} onPick={openSubagent} />
 }
 
 /**

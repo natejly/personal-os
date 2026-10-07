@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Conversation } from '@shared/types'
-import { agentState, detectMention, latestAgentChat, mentionItems, routeMention } from './mentions'
+import { agentState, detectMention, latestAgentChat, mentionChats, mentionItems, routeMention } from './mentions'
 
 const agents = [{ name: 'inbox-triage', description: 'Sorts mail' }, { name: 'travel', description: 'Plans trips' }]
 
@@ -43,4 +43,20 @@ test('agentState: needs-you wins over working, otherwise idle', () => {
   assert.deepEqual(agentState({ working: 1, needs_you: 2 }), { state: 'needs-you', label: 'Needs you (2)' })
   assert.equal(agentState({ working: 1, needs_you: 0 }).state, 'working')
   assert.equal(agentState(undefined).state, 'idle')
+})
+
+test('mentionItems lists chats after agents, by title slug', () => {
+  const chats = [{ id: 'c1', title: 'Trip plan' }, { id: 'c2', title: 'Taxes' }]
+  const rows = mentionItems('see @t', 6, [{ name: 'travel', description: 'Trips' }], 8, chats)
+  assert.deepEqual(rows?.map((r) => r.key), ['agent:travel', 'chat:c1', 'chat:c2'])
+  assert.equal(rows?.[1].label, '@trip-plan')
+  assert.equal(rows?.[1].hint, 'Chat · Trip plan')
+  assert.equal(rows?.[1].insert, 'see @trip-plan ')
+  assert.equal(mentionItems('@', 1, [{ name: 'travel', description: 'Trips' }], 2, chats)?.length, 2)
+})
+
+test('mentionChats skips archived, current and job chats', () => {
+  const c = (id: string, extra: object): Conversation => ({ ...conv(id, undefined, 1), ...extra }) as Conversation
+  const list = [c('a', {}), c('b', { archived_at: 5 }), c('cur', {}), c('j', { settings: { job_id: 'x' } })]
+  assert.deepEqual(mentionChats(list, 'cur').map((x) => x.id), ['a'])
 })

@@ -12,13 +12,13 @@ import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationS
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 
-/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. `locked`: a private chat cannot turn it on. */
-function Toggle({ label, hint, value, onChange, icon, disabled, fix, locked = false }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void }; locked?: boolean }): JSX.Element {
+/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. */
+function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
   return (
     <label className="toggle-row">
       <span className="toggle-icon">{icon}</span>
       <span className="toggle-text"><b>{label}</b><small>{hint}</small>{fix && <button className="link small" onClick={(e) => { e.preventDefault(); fix.open() }}>{fix.label}</button>}</span>
-      <input type="checkbox" aria-label={label} checked={value} disabled={disabled || locked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={label} checked={value} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
   )
@@ -244,16 +244,15 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
-        {cs.private && <p className="private-banner"><EyeOff size={13} /> Private: nothing here is remembered</p>}
-        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} locked={!!cs.private} />
-        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} locked={!!cs.private} />
+        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
+        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
         <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts from your notes and uploads" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
-        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} locked={!!cs.private} />
-        {convo && !cs.private && <>
+        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} />
+        {convo && <>
           <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Stays in history and search; nothing from it becomes a memory, graph relation or draft skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
           {cs.learn === false && <button className="link small" onClick={() => void useStore.getState().forgetLearned(convo.id)}>Forget what was learned here</button>}
         </>}
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} locked={!!cs.private} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (

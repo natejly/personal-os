@@ -20,7 +20,7 @@ test('a lone working agent shows no strip; the composer\'s Stop stops it', async
   await page.screenshot({ path: `${SHOTS}/single-agent-working.png` })
   await stop.click()
   await waitStatus(grain, desk.id, 'stopped', 60_000)
-  await expect(strip(page)).toContainText('Stopped')
+  await expect(strip(page)).toHaveCount(0) // stopped or not, the main agent never gets a strip
   expect(realErrors(grain)).toEqual([])
 })
 

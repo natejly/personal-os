@@ -382,6 +382,7 @@ def router(cf: ChatFiles) -> Any:
         with cf.db.tx() as c:
             if not c.execute("SELECT 1 FROM conversations WHERE id=? AND deleted_at IS NULL", (id,)).fetchone():
                 raise HTTPException(404, "No such conversation")
+        cf.reconcile()  # outputs a shell wrote straight to disk (throttled)
         return page(conversation_id=id, limit=limit)
 
     @r.get("/chat-files")

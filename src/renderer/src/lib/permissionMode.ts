@@ -4,7 +4,7 @@ export type PermissionMode = 'auto' | 'manual' | 'allow_all'
 export const MODES: { id: PermissionMode; label: string; pill: string; description: string }[] = [
   { id: 'auto', label: 'Auto', pill: 'Auto', description: 'Auto — a second AI checks each risky action and you are asked only when it is unsure (recommended)' },
   { id: 'manual', label: 'Manual', pill: 'Manual', description: 'Manual — you are asked before every risky action' },
-  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — no checks and no questions, except denied calls and the always-ask list (dangerous)' }
+  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — runs without checks or questions. Still asks only for Grain\'s own data and app, passwords and keys, permanent deletes, disk wipes, force-pushes, and sending email (dangerous)' }
 ]
 
 /** The mode in effect; a missing or unknown value is Auto. */
@@ -21,7 +21,7 @@ export const pillLabel = (m: PermissionMode): string => MODES.find((x) => x.id =
 /** Hover text and accessible name for the composer pill. Under Allow everything the red pill is the only cue, so it says so. */
 export const pillTitle = (m: PermissionMode): string =>
   m === 'allow_all'
-    ? 'Dangerously allow all is on: Grain acts without asking. Click to change it in Settings.'
+    ? 'Dangerously allow all is on: Grain acts without asking. It still asks before permanent deletes, disk wipes, force-pushes and sending email. Click to change it in Settings.'
     : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`
 
 /** Second composer pill, independent of the mode: shown only while "Allow all domains and MCP servers" is on. */

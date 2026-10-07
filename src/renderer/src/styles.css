@@ -566,6 +566,7 @@ kbd {
   max-width: 100%;
 }
 .msg.user { flex-direction: row-reverse; }
+.user-from { font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
 .user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 /* A quoted selection in the user's bubble: set off from the task text, rendered as markdown. */
 .user-quote { margin: 6px 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--border-strong); color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
@@ -759,9 +760,6 @@ kbd {
   font-weight: 600;
 }
 .ghost-btn.skip-perms.on:hover { background: color-mix(in srgb, var(--danger) 24%, transparent); }
-.private-chat.on { color: var(--accent); }
-.convo-private { flex: none; color: var(--text-faint); }
-.private-banner { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }
 /* The composer holds focus almost all the time, so its focused state is a firmer edge and not the
@@ -2513,25 +2511,11 @@ select:focus-visible {
 /* ---------- Plan panel (the chat's plan artifact) ---------- */
 /* Scoped to .plan-panel throughout: the plan approval card uses the same .plan-head / .plan-steps /
    .plan-step names for a different layout, and unscoped rules here used to restyle it. */
-.plan-panel {
-  max-width: var(--chat-col); width: 100%; margin: 0 auto; padding: 8px 24px 0;
-  font-size: 12.5px;
-}
-.plan-panel > header { display: flex; align-items: center; gap: 10px; }
-.plan-panel .plan-head {
-  display: flex; align-items: center; gap: 6px; min-height: 24px;
-  border: 0; background: none; padding: 2px 0; cursor: pointer;
-  color: var(--text-muted); font: inherit;
-}
-.plan-panel .plan-head:hover { color: var(--text); }
-.plan-panel .plan-head b { font-weight: 600; }
-.plan-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
-.plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
-.plan-panel .plan-steps {
-  list-style: none; margin: 6px 0 0; padding: 8px 10px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
-  max-height: 180px; overflow-y: auto;
-}
+.plan-panel { font-size: 12.5px; }
+/* In the chat's side panel (Checklist tab): a count and Clear, then the steps. Nothing above the composer. */
+.plan-panel > header { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.plan-panel .plan-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plan-panel .plan-steps { list-style: none; margin: 6px 0 0; padding: 0; }
 .plan-panel .plan-step { display: flex; align-items: flex-start; gap: 7px; padding: 3px 0; }
 /* 13px to look at, 24px to hit: the expander keeps the step rows as dense as they were. */
 .plan-check { position: relative; border: 0; background: none; padding: 1px 0 0; cursor: pointer; color: var(--text-faint); line-height: 1; }
@@ -2544,13 +2528,17 @@ select:focus-visible {
 .plan-step.done .plan-text { color: var(--text-faint); text-decoration: line-through; }
 .plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
 
-/* Workers sit under the checklist, so they drop its top gap. */
+/* Workers sit above the checklist pill, in the status block over the composer. */
 .worker-panel { padding-top: 4px; }
-.worker-panel .worker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0; }
-.worker-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
-.worker-open small { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.worker-panel .worker-row { display: flex; flex-direction: column; gap: 2px; padding: 3px 0; }
+.worker-line { display: flex; align-items: center; gap: 8px; }
+.worker-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: var(--text); font: inherit; }
+.worker-open small { color: var(--text-faint); white-space: nowrap; margin-left: auto; }
 .worker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.worker-approval { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding-left: 16px; color: var(--text-muted); }
+.worker-detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 36px; }
+.worker-detail p { margin: 0; }
+.worker-report { margin: 0; max-width: 100%; max-height: 160px; overflow: auto; white-space: pre-wrap; font: inherit; font-size: 12px; color: var(--text-muted); }
+.worker-approval { display: flex; align-items: center; gap: 8px; padding-left: 36px; color: var(--text-muted); }
 .worker-approval span { flex: 1; min-width: 0; }
 
 /* ---------- Skills review (procedural memory) ---------- */

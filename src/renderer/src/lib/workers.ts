@@ -15,12 +15,9 @@ const LABEL: Record<WorkerStatus, string> = {
   queued: 'Queued', running: 'Working', awaiting_approval: 'Needs approval', done: 'Done', error: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped'
 }
 
-/** One line under a worker's title: its position while queued, the current action while running. */
-export function workerLine(w: Pick<WorkerInfo, 'status' | 'now' | 'queue_position'>): string {
-  if (w.status === 'queued') return w.queue_position ? `Queued, number ${w.queue_position}` : 'Queued'
-  if (w.status === 'running' && w.now) return w.now
-  return LABEL[w.status]
-}
+/** The short word beside a worker's title: its place in line while queued, else its status. */
+export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queue_position'>): string =>
+  w.status === 'queued' && w.queue_position ? `Queued #${w.queue_position}` : LABEL[w.status]
 
 /** Live workers first (oldest first within them, so the order does not jump), then ended ones newest first. */
 export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
@@ -30,8 +27,8 @@ export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {
 /** Replace or add one worker (an event's payload) in the list. */
 export const upsertWorker = (ws: WorkerInfo[], w: WorkerInfo): WorkerInfo[] => (ws.some((x) => x.id === w.id) ? ws.map((x) => (x.id === w.id ? w : x)) : [w, ...ws])
 
-/** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. */
-export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null
+/** Any non-null kind marks a control message for the model (wake, nudge, continue, ...); it is not the user's words and never shows. Messages from another chat ('chat_in', 'chat_reply') are the exception: they render. */
+export const isInternal = (m: Pick<Message, 'kind'>): boolean => m.kind != null && m.kind !== 'chat_in' && m.kind !== 'chat_reply'
 
 /** The same array when nothing is hidden, so memoised callers keep their identity. */
 export const withoutInternal = <T extends Pick<Message, 'kind'>>(messages: T[] | undefined): T[] | undefined =>

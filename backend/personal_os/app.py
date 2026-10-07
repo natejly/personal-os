@@ -501,6 +501,7 @@ app.include_router(chat_files_router(chat_files))
 toolbox.chat_files = chat_files
 if toolbox.chat_outputs is not None:
     toolbox.chat_outputs.on_save = chat_files.record_output
+workspace.on_save = chat_files.record_desk_output  # a desk's files are its chat's artifacts too
 # Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
 # every search is the old BM25 one.
 embedder = Embedder()
@@ -6002,7 +6003,7 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
-        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
+        return await memory_index.search_reranked(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -6683,6 +6684,27 @@ def document_open(id: str) -> dict[str, bool]:
     d, p = _original(id)
     if any(Path(n).suffix.lower() in _RUNS_CODE for n in (d["name"], p.name)) or p.stat().st_mode & 0o111:
         raise HTTPException(400, f"{d['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
+    return _run_open(str(p))
+
+
+def _artifact_or_404(id: str) -> tuple[dict[str, Any], Path]:
+    hit = chat_files.file(id)
+    if hit is None:
+        raise HTTPException(404, "No such file")
+    return hit
+
+
+@app.post("/chat-files/{id}/reveal")
+def artifact_reveal(id: str) -> dict[str, bool]:
+    """Files → Artifacts: show a chat's output in Finder (the raw route is in chat_files.py)."""
+    return _run_open("-R", str(_artifact_or_404(id)[1]))
+
+
+@app.post("/chat-files/{id}/open")
+def artifact_open(id: str) -> dict[str, bool]:
+    f, p = _artifact_or_404(id)
+    if p.suffix.lower() in _RUNS_CODE or p.stat().st_mode & 0o111:
+        raise HTTPException(400, f"{f['name']} can run code, so Grain won't open it. Reveal it in Finder instead.")
     return _run_open(str(p))
 
 

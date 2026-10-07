@@ -277,6 +277,7 @@ def test_a_text_from_the_phone_is_not_echoed_back() -> None:
     pair()
     fake.push(fake.update("ping"))
     wait_until(lambda: "Hello <b>there</b>" in fake.sent(), "the reply")
+    time.sleep(0.3)  # a late echo would land after the reply
     assert fake.sent() == ["Hello <b>there</b>"]
     owner_only()
 

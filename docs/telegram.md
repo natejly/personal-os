@@ -103,9 +103,10 @@ so and the details stay in Grain.
 Anything the assistant produces during a Telegram turn rides on the final reply without a separate
 step: documents it writes, PDFs, spreadsheets and CSV files, code files, rendered pages, charts,
 generated images and screenshots, including browser screenshots it takes while using the agent
-browser. Pictures go as photos or albums, everything else as files with the reply as caption, with
-the size limits and fallbacks below; a file already sent as a progress update is not sent twice.
-Only files the assistant made in that run attach this way, never the ones you sent it.
+browser (those also go to the phone the moment they are taken). The reply's text goes first, then
+pictures as photos or albums and everything else as files, with the size limits and fallbacks
+below; a file already sent as a progress update is not sent twice. Only files the assistant made
+in that run attach this way, never the ones you sent it, and never more than twenty per reply.
 
 ### Screenshots, images and files
 

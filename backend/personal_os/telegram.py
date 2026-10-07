@@ -468,6 +468,7 @@ class TelegramBridge:
         st = self._state()
         if st.get("botId") != me.get("id"):
             st = {"textsConversationId": st.get("textsConversationId")}
+            self._mark(st.get("textsConversationId"), False)  # unpaired again: pairing re-labels it
         st.update(botId=me.get("id"), botUsername=me.get("username"))
         self.deps.save_state(st)
         if st.get("ownerChatId") is None:

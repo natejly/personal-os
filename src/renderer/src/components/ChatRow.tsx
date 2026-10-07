@@ -43,9 +43,11 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   const settled = useRef(false)
 
   const entries = (): MenuEntry[] => [
-    { label: 'Rename', run: () => { settled.current = false; setRenaming(true) } },
-    // The Telegram chat is always first in the list, so pinning means nothing there.
-    ...(telegram ? [] : [{ label: conv.pinned_at ? 'Unpin' : 'Pin', run: () => void pinChat(conv.id, !conv.pinned_at) }] as MenuEntry[]),
+    // The Telegram chat is always first in the list and always called "Telegram", so renaming and pinning mean nothing there.
+    ...(telegram ? [] : [
+      { label: 'Rename', run: () => { settled.current = false; setRenaming(true) } },
+      { label: conv.pinned_at ? 'Unpin' : 'Pin', run: () => void pinChat(conv.id, !conv.pinned_at) }
+    ] as MenuEntry[]),
     {
       kind: 'submenu',
       label: 'Move to project',

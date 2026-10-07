@@ -219,3 +219,13 @@ def test_a_table_left_out_does_not_count_toward_the_length() -> None:
     rows = "\n".join(f"| {i} | {'x' * 200} |" for i in range(41))
     p = tf.plan(f"| n | t |\n|---|---|\n{rows}")
     assert p.summary is None and p.parts == [tf.TABLE_PLACEHOLDER] and len(p.files) == 1
+
+
+def test_emphasis_markers_on_a_long_line_render_in_bounded_time() -> None:
+    import time
+    line = "*a " * 20000  # unclosed emphasis repeated: an unbounded lazy match goes quadratic here
+    t = time.monotonic()
+    out = tf.render(line)
+    plain = tf.to_plain("_b " * 20000 + "**c " * 20000)
+    assert time.monotonic() - t < 2.0 and out.html and plain
+    assert tf.render("# ").html.strip() == "" and "<b></b>" not in tf.render("#   \ntext").html

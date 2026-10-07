@@ -1004,14 +1004,15 @@ class Toolbox:
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
             ctx.setdefault("taint_sources", []).append(name)  # every taint is sourced (Toolbox.tainted_for relies on it)
-        if ctx.get("auto_attach"):  # a Telegram chat turn: whatever the agent just made rides on the reply
-            try:
-                await sendfiles.attach_made(self, ctx, name, out)
-            except Exception:  # noqa: BLE001 - the file is still where the tool put it; only the attaching failed
-                log.warning("auto-attach after %s failed", name, exc_info=True)
         # One gate for every external write: a result whose read-back did not prove the write is
         # reported as a failure, here, so no individual tool can forget to do it.
-        return checked(name, out)
+        res = checked(name, out)
+        if ctx.get("auto_attach"):  # a Telegram chat turn: whatever the agent just made (and the check accepted) rides on the reply
+            try:
+                await sendfiles.attach_made(self, ctx, name, res)
+            except Exception:  # noqa: BLE001 - the file is still where the tool put it; only the attaching failed
+                log.warning("auto-attach after %s failed", name, exc_info=True)
+        return res
 
     # ---- tool implementations ----
     def _register(self) -> None:

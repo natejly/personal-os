@@ -32,10 +32,10 @@ def _plain_inline(line: str) -> str:
     line = re.sub(r"!\[[^\]]*\]\(([^)\s]+)[^)]*\)", r"\1", line)
     line = re.sub(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)",
                   lambda m: m.group(2) if m.group(1).strip() == m.group(2) else f"{m.group(1)} ({m.group(2)})", line)
-    line = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), line)
-    line = re.sub(r"~~(.+?)~~", r"\1", line)
-    line = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"\1", line)
-    line = re.sub(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])", r"\1", line)
+    line = re.sub(r"\*\*(.{1,300}?)\*\*|__(.{1,300}?)__", lambda m: m.group(1) or m.group(2), line)
+    line = re.sub(r"~~(.{1,300}?)~~", r"\1", line)
+    line = re.sub(r"(?<![\w*])\*(?!\s)(.{1,300}?)(?<!\s)\*(?![\w*])", r"\1", line)
+    line = re.sub(r"(?<![\w])_(?!\s)(.{1,300}?)(?<!\s)_(?![\w])", r"\1", line)
     return re.sub(r"`([^`]+)`", r"\1", line)
 
 
@@ -77,10 +77,10 @@ _CODE = re.compile(r"`([^`]+)`")
 _IMG = re.compile(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _BARE = re.compile(r"https?://[^\s]+")
-_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
-_STRIKE = re.compile(r"~~(.+?)~~")
-_ITAL_STAR = re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])")
-_ITAL_US = re.compile(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])")
+_BOLD = re.compile(r"\*\*(.{1,300}?)\*\*|__(.{1,300}?)__")
+_STRIKE = re.compile(r"~~(.{1,300}?)~~")
+_ITAL_STAR = re.compile(r"(?<![\w*])\*(?!\s)(.{1,300}?)(?<!\s)\*(?![\w*])")
+_ITAL_US = re.compile(r"(?<![\w])_(?!\s)(.{1,300}?)(?<!\s)_(?![\w])")
 _HOLE = re.compile(r"\x00(\d+)\x00")
 _TAG = re.compile(r"<(/?)([a-z]+)(?: [^>]*)?>")
 _LINK_SCHEMES = ("http://", "https://", "mailto:", "tg://")
@@ -223,7 +223,8 @@ def render(md: str) -> Rendered:
         elif _HR.match(line):
             out.append("──────────")
         elif h := _HEADING.match(line):
-            out.append(f"<b>{_inline(h.group(1), bold=False)}</b>")
+            if h.group(1).strip():  # a bare "#" is nothing, not an empty tag pair
+                out.append(f"<b>{_inline(h.group(1), bold=False)}</b>")
         elif b := _BULLET.match(line):
             out.append(f"{b.group(1)}• {_inline(b.group(2))}")
         else:

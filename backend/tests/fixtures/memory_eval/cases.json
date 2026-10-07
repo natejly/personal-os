@@ -1,0 +1,707 @@
+{
+ "now": "2026-10-07T12:00:00-04:00",
+ "categories": [
+  "lexical",
+  "paraphrase",
+  "graph",
+  "temporal",
+  "negative",
+  "supersession",
+  "anaphoric"
+ ],
+ "cases": [
+  {
+   "id": "lex-01",
+   "category": "lexical",
+   "query": "When is my next appointment with Dr. Okafor?",
+   "expected": [
+    "m-okafor"
+   ],
+   "must_not": [
+    "m-exp-dentist"
+   ]
+  },
+  {
+   "id": "lex-02",
+   "category": "lexical",
+   "query": "Which Fly.io region do I use?",
+   "expected": [
+    "m-fly"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-03",
+   "category": "lexical",
+   "query": "Do I have a penicillin allergy?",
+   "expected": [
+    "m-allergy"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-04",
+   "category": "lexical",
+   "query": "Do I have a Citi Bike membership?",
+   "expected": [
+    "m-car"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-05",
+   "category": "lexical",
+   "query": "What does Miso need at the vet?",
+   "expected": [
+    "m-vet"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-06",
+   "category": "lexical",
+   "query": "Which day does the Synology run its offsite backups?",
+   "expected": [
+    "m-nas"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-08",
+   "category": "lexical",
+   "query": "What is my Gowanus Climbing schedule?",
+   "expected": [
+    "m-climb",
+    "m-instr-calendar"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-09",
+   "category": "lexical",
+   "query": "Where is my Obsidian vault synced?",
+   "expected": [
+    "m-obsidian"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-10",
+   "category": "lexical",
+   "query": "When is the Chicago Marathon?",
+   "expected": [
+    "m-run-signup"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "lex-11",
+   "category": "lexical",
+   "query": "When did the Atlas cutover finish?",
+   "expected": [
+    "m-atlas-4"
+   ],
+   "must_not": [],
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "lex-12",
+   "category": "lexical",
+   "query": "Who do I report to for this Atlas work?",
+   "expected": [
+    "m-priya"
+   ],
+   "must_not": [
+    "m-job-old"
+   ],
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "par-01",
+   "category": "paraphrase",
+   "query": "Who do I answer to at the office?",
+   "expected": [
+    "m-priya"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-02",
+   "category": "paraphrase",
+   "query": "Which meals are off the table for me?",
+   "expected": [
+    "m-diet",
+    "m-cilantro"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-03",
+   "category": "paraphrase",
+   "query": "How do I travel across town day to day?",
+   "expected": [
+    "m-car"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-04",
+   "category": "paraphrase",
+   "query": "What's my pet like?",
+   "expected": [
+    "m-cat",
+    "m-vet"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-05",
+   "category": "paraphrase",
+   "query": "Which dairy alternative do I enjoy?",
+   "expected": [
+    "m-oat"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-06",
+   "category": "paraphrase",
+   "query": "Am I a night owl?",
+   "expected": [
+    "m-sleep-new"
+   ],
+   "must_not": [
+    "m-sleep-old"
+   ]
+  },
+  {
+   "id": "par-07",
+   "category": "paraphrase",
+   "query": "What's my financial safety net plan?",
+   "expected": [
+    "m-savings"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-08",
+   "category": "paraphrase",
+   "query": "What soundtrack helps me concentrate while programming?",
+   "expected": [
+    "m-pref-music"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-09",
+   "category": "paraphrase",
+   "query": "Do I want long answers or short ones?",
+   "expected": [
+    "m-pref-concise"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-10",
+   "category": "paraphrase",
+   "query": "Which foreign tongue am I studying?",
+   "expected": [
+    "m-lang",
+    "m-goal-pt"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "par-11",
+   "category": "paraphrase",
+   "query": "What should we do differently next time we move data over?",
+   "expected": [
+    "m-atlas-5"
+   ],
+   "must_not": [],
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "gra-01",
+   "category": "graph",
+   "query": "What does Mei's team work on?",
+   "expected": [
+    "m-beacon-1",
+    "m-beacon-2",
+    "m-beacon-3"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-02",
+   "category": "graph",
+   "query": "Where is Priya's company based?",
+   "expected": [
+    "m-lumen-hq"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-03",
+   "category": "graph",
+   "query": "What does Diego do for work?",
+   "expected": [
+    "m-cobalt",
+    "m-tom"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-04",
+   "category": "graph",
+   "query": "Which tools does Kiln depend on?",
+   "expected": [
+    "m-rust",
+    "m-fly"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-05",
+   "category": "graph",
+   "query": "What is there to do near where Sofia lives?",
+   "expected": [
+    "m-portland"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-06",
+   "category": "graph",
+   "query": "Tell me about the gym Diego goes to",
+   "expected": [
+    "m-climb"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-07",
+   "category": "graph",
+   "query": "What database does Mei's project use?",
+   "expected": [
+    "m-beacon-2",
+    "m-pg-upgrade"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "gra-08",
+   "category": "graph",
+   "query": "Which of my projects share a database with Atlas?",
+   "expected": [
+    "m-beacon-1",
+    "m-beacon-2",
+    "m-pg-upgrade"
+   ],
+   "must_not": [
+    "m-atlas-2"
+   ]
+  },
+  {
+   "id": "gra-09",
+   "category": "graph",
+   "query": "What did we do for the holidays in Hannah's hometown?",
+   "expected": [
+    "m-denver"
+   ],
+   "must_not": []
+  },
+  {
+   "id": "tmp-01",
+   "category": "temporal",
+   "query": "What did I decide about hiring last month?",
+   "expected": [
+    "m-hire-sep-a",
+    "m-hire-sep-b"
+   ],
+   "must_not": [
+    "m-hire-2025-06",
+    "m-hire-2026-01",
+    "m-hire-2026-04",
+    "m-hire-2026-08"
+   ]
+  },
+  {
+   "id": "tmp-02",
+   "category": "temporal",
+   "query": "What did I decide about the team budget last month?",
+   "expected": [
+    "m-budget-sep"
+   ],
+   "must_not": [
+    "m-budget-2025",
+    "m-budget-2026-02",
+    "m-budget-aug"
+   ]
+  },
+  {
+   "id": "tmp-03",
+   "category": "temporal",
+   "query": "What running milestones did I hit in March?",
+   "expected": [
+    "m-run-half",
+    "m-run-signup"
+   ],
+   "must_not": [
+    "m-run-start",
+    "m-run-10k",
+    "m-run-feb",
+    "m-run-apr",
+    "m-run-taper"
+   ]
+  },
+  {
+   "id": "tmp-04",
+   "category": "temporal",
+   "query": "What home projects was I planning last spring?",
+   "expected": [
+    "m-reno-hallway",
+    "m-reno-bath"
+   ],
+   "must_not": [
+    "m-reno-quote",
+    "m-reno-demo",
+    "m-reno-hinges",
+    "m-reno-done"
+   ]
+  },
+  {
+   "id": "tmp-05",
+   "category": "temporal",
+   "query": "What did I change in Home Assistant two weeks ago?",
+   "expected": [
+    "m-ha-0923"
+   ],
+   "must_not": [
+    "m-ha-2025",
+    "m-ha-0909",
+    "m-ha-1002",
+    "m-ha-backup"
+   ]
+  },
+  {
+   "id": "tmp-06",
+   "category": "temporal",
+   "query": "What did I tell Priya yesterday?",
+   "expected": [
+    "m-priya-1006"
+   ],
+   "must_not": [
+    "m-priya",
+    "m-1on1-new",
+    "m-reorg",
+    "m-demo-1002",
+    "m-pref-tz"
+   ]
+  },
+  {
+   "id": "tmp-07",
+   "category": "temporal",
+   "query": "What did I buy yesterday?",
+   "expected": [
+    "m-shoes"
+   ],
+   "must_not": [
+    "m-buy-desk",
+    "m-guitar-buy"
+   ]
+  },
+  {
+   "id": "tmp-08",
+   "category": "temporal",
+   "query": "Which hobbies did I take up in 2025?",
+   "expected": [
+    "m-climb",
+    "m-pottery",
+    "m-run-start"
+   ],
+   "must_not": [
+    "m-lang",
+    "m-sourdough",
+    "m-guitar-buy"
+   ]
+  },
+  {
+   "id": "tmp-09",
+   "category": "temporal",
+   "query": "Which books am I reading since 2026-09-01?",
+   "expected": [
+    "m-book-sep05",
+    "m-book-sep28"
+   ],
+   "must_not": [
+    "m-book-2025a",
+    "m-book-2025b",
+    "m-book-jul",
+    "m-book-aug"
+   ]
+  },
+  {
+   "id": "tmp-10",
+   "category": "temporal",
+   "query": "What did I get done on Kiln last week?",
+   "expected": [
+    "m-kiln-0930",
+    "m-kiln-1001"
+   ],
+   "must_not": [
+    "m-kiln-start",
+    "m-kiln-inc",
+    "m-kiln-sitemap",
+    "m-kiln-0926"
+   ]
+  },
+  {
+   "id": "tmp-11",
+   "category": "temporal",
+   "query": "What changed at work back in January?",
+   "expected": [
+    "m-reorg",
+    "m-hire-2026-01"
+   ],
+   "must_not": [
+    "m-hire-2026-04",
+    "m-beacon-3",
+    "m-job-v2",
+    "m-1on1-new",
+    "m-hire-2026-08"
+   ]
+  },
+  {
+   "id": "tmp-12",
+   "category": "temporal",
+   "query": "What did we plan for the Lisbon trip in February?",
+   "expected": [
+    "m-lisbon-flights"
+   ],
+   "must_not": [
+    "m-lisbon-plan",
+    "m-lisbon-sardines"
+   ]
+  },
+  {
+   "id": "tmp-13",
+   "category": "temporal",
+   "query": "What did I note about Beacon last month?",
+   "expected": [
+    "m-demo-0930"
+   ],
+   "must_not": [
+    "m-beacon-1",
+    "m-beacon-2",
+    "m-beacon-3"
+   ]
+  },
+  {
+   "id": "neg-01",
+   "category": "negative",
+   "query": "What is the capital of Australia?",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-02",
+   "category": "negative",
+   "query": "What is the boiling point of liquid nitrogen?",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-03",
+   "category": "negative",
+   "query": "Summarize the plot of Hamlet in two sentences.",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-04",
+   "category": "negative",
+   "query": "Who won the 1998 World Cup final?",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-05",
+   "category": "negative",
+   "query": "Write a regex that matches IPv4 addresses.",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-06",
+   "category": "negative",
+   "query": "Recommend a good tequila for margaritas.",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "neg-07",
+   "category": "negative",
+   "query": "Translate 'good morning' into Japanese.",
+   "expected": [],
+   "must_not": []
+  },
+  {
+   "id": "sup-01",
+   "category": "supersession",
+   "query": "Where do I live?",
+   "expected": [
+    "m-home-new"
+   ],
+   "must_not": [
+    "m-home-old"
+   ]
+  },
+  {
+   "id": "sup-02",
+   "category": "supersession",
+   "query": "What editor do I use?",
+   "expected": [
+    "m-editor-new"
+   ],
+   "must_not": [
+    "m-editor-old"
+   ]
+  },
+  {
+   "id": "sup-03",
+   "category": "supersession",
+   "query": "How much coffee do I drink?",
+   "expected": [
+    "m-coffee-new"
+   ],
+   "must_not": [
+    "m-coffee-old"
+   ]
+  },
+  {
+   "id": "sup-04",
+   "category": "supersession",
+   "query": "When is my 1:1 with Priya?",
+   "expected": [
+    "m-1on1-new"
+   ],
+   "must_not": [
+    "m-1on1-old"
+   ]
+  },
+  {
+   "id": "sup-05",
+   "category": "supersession",
+   "query": "What's my job title?",
+   "expected": [
+    "m-job-v2"
+   ],
+   "must_not": [
+    "m-job-old"
+   ]
+  },
+  {
+   "id": "sup-06",
+   "category": "supersession",
+   "query": "What is my marathon goal time?",
+   "expected": [
+    "m-run-signup"
+   ],
+   "must_not": [
+    "m-goal-marathon-old"
+   ]
+  },
+  {
+   "id": "sup-07",
+   "category": "supersession",
+   "query": "Do I have any dentist appointments coming up?",
+   "expected": [
+    "m-okafor"
+   ],
+   "must_not": [
+    "m-exp-dentist"
+   ]
+  },
+  {
+   "id": "sup-08",
+   "category": "supersession",
+   "query": "Am I travelling to Denver soon?",
+   "expected": [
+    "m-denver"
+   ],
+   "must_not": [
+    "m-exp-denver"
+   ]
+  },
+  {
+   "id": "ana-01",
+   "category": "anaphoric",
+   "query": "And when is our 1:1?",
+   "expected": [
+    "m-1on1-new"
+   ],
+   "must_not": [
+    "m-1on1-old"
+   ],
+   "prev_user": "Who do I report to at work?",
+   "prev_reply": "You report to Priya Raman, the VP of Engineering at Lumen Freight."
+  },
+  {
+   "id": "ana-02",
+   "category": "anaphoric",
+   "query": "What is it written in?",
+   "expected": [
+    "m-beacon-1"
+   ],
+   "must_not": [],
+   "prev_user": "What project does Mei run?",
+   "prev_reply": "Mei Tanaka leads Beacon, the route-planning engine."
+  },
+  {
+   "id": "ana-03",
+   "category": "anaphoric",
+   "query": "When is her birthday?",
+   "expected": [
+    "m-sofia-bday"
+   ],
+   "must_not": [],
+   "prev_user": "Tell me about my sister.",
+   "prev_reply": "Your sister Sofia lives in Portland and has a toddler named Ines."
+  },
+  {
+   "id": "ana-04",
+   "category": "anaphoric",
+   "query": "How is that going?",
+   "expected": [
+    "m-run-taper",
+    "m-run-signup"
+   ],
+   "must_not": [],
+   "prev_user": "What am I training for?",
+   "prev_reply": "You are running the Chicago Marathon on October 11."
+  },
+  {
+   "id": "ana-05",
+   "category": "anaphoric",
+   "query": "And what about herbs?",
+   "expected": [
+    "m-cilantro"
+   ],
+   "must_not": [],
+   "prev_user": "Do I have any food restrictions?",
+   "prev_reply": "You are vegetarian except for fish, and allergic to penicillin."
+  },
+  {
+   "id": "ana-06",
+   "category": "anaphoric",
+   "query": "What was my favourite meal there?",
+   "expected": [
+    "m-lisbon-sardines"
+   ],
+   "must_not": [],
+   "prev_user": "Where did Hannah and I go on holiday?",
+   "prev_reply": "You and Hannah went to Lisbon in May 2026."
+  }
+ ]
+}

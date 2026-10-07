@@ -1,10 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Desk, RunChanges, RunInfo } from '@shared/types'
-import { defaultDest, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, queuePositions, recentRunIds, splitUrl, undoNote } from './deskFiles'
+import { defaultDest, deliveryLabel, fileKind, fmtAgo, fmtBytes, groupChangesByTurn, inputChip, queuePositions, recentRunIds, splitUrl, undoNote } from './deskFiles'
 
 const run = (id: string, at: number): RunInfo => ({ run_id: id, conversation_id: 'c', message_id: null, seq: 0, started_at: at, live: false, answering: false })
 const ch = (count: number): RunChanges => ({ available: true, count, state: 'applied', files: Array.from({ length: count }, (_, i) => ({ root: 'r', status: 'A' as const, path: `f${i}` })), skipped: [] })
+
+test('inputChip: names one or two files, counts more, empty for none', () => {
+  assert.equal(inputChip([]), '')
+  assert.equal(inputChip(['inputs/report.pdf']), '[report.pdf]')
+  assert.equal(inputChip(['inputs/notes.md', 'inputs/data.csv']), '[notes.md, data.csv]')
+  assert.equal(inputChip(['inputs/a', 'inputs/b', 'inputs/c']), '[3 files]')
+})
 
 test('fileKind: pictures, documents, markdown, svg stays text', () => {
   assert.equal(fileKind('outputs/a.PNG', false), 'image')

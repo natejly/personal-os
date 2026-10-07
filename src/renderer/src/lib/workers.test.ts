@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Message, WorkerInfo } from '@shared/types'
-import { isWake, sortWorkers, upsertWorker, withoutWake, workerActions, workerLine } from './workers'
+import { isWake, liveWorkerCount, sortWorkers, upsertWorker, withoutWake, workerActions, workerLine } from './workers'
 
 const w = (id: string, status: WorkerInfo['status'], extra: Partial<WorkerInfo> = {}): WorkerInfo => ({
   id, conversation_id: 'c', title: id, goal: '', status, now: '', queue_position: null, started_at: Number(id.replace(/\D/g, '')) || 0,
@@ -39,4 +39,10 @@ test('wake rows are hidden, other rows keep their identity', () => {
   assert.equal(isWake(m('x', 'wake')), true)
   assert.deepEqual(withoutWake([m('a'), m('x', 'wake'), m('b')])?.map((x) => x.id), ['a', 'b'])
   assert.equal(withoutWake(undefined), undefined)
+})
+
+test('live worker count', () => {
+  const ws = (['queued', 'running', 'awaiting_approval', 'done', 'error', 'stopped', 'interrupted'] as const).map((s, i) => w(`w${i}`, s))
+  assert.equal(liveWorkerCount(ws), 3)
+  assert.equal(liveWorkerCount([]), 0)
 })

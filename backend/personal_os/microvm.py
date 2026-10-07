@@ -301,7 +301,8 @@ class Sandboxes:
         sfx = self._sfx(name)
         net, px = NET_PREFIX + sfx, PX_PREFIX + sfx
         token = secrets.token_urlsafe(18)
-        allow = egress.allowed_set(True, permissions.get(self.settings(), "shellAllowedDomains"))
+        allow = egress.allowed_set(True, permissions.get(self.settings(), "shellAllowedDomains"),
+                                   permissions.get(self.settings(), "allowAllConnections"))
         self._run([binary, "rm", "-f", px], timeout=30)  # a leftover from a crash holds an old token
         n = self._run([binary, "network", "create", "--internal", "--label", f"{PROXY_LABEL}=1", net], timeout=30)
         if n.returncode != 0 and b"already exists" not in n.stderr:

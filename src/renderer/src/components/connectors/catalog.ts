@@ -44,10 +44,21 @@ export const fieldsValid = (entry: McpCatalogEntry, values: Record<string, strin
   entry.fields.filter((f) => f.required && !(values[f.id] ?? '').trim()).map((f) => f.id)
 
 /** One line to put under a card when the program that launches the connector is not installed; '' when fine. */
-export function runtimeWarning(entry: Pick<McpCatalogEntry, 'runtime'>, runtimes: Record<string, { command: string; found: boolean; hint: string }>): string {
+export function runtimeWarning(entry: Pick<McpCatalogEntry, 'runtime' | 'detected'>, runtimes: Record<string, { command: string; found: boolean; hint: string }>): string {
+  if (entry.detected) return '' // the card's own detection line says it better
   const rt = runtimes[entry.runtime]
   return rt && !rt.found ? `${rt.command} not found. ${rt.hint}` : ''
 }
+
+/** What a card says about a locally detected program: found at a path, missing with a hint, or nothing to detect. */
+export function detectionLabel(entry: Pick<McpCatalogEntry, 'detected'>): { found: boolean; text: string } | null {
+  const d = entry.detected
+  if (!d) return null
+  return d.found ? { found: true, text: `Detected at ${d.path}` } : { found: false, text: d.hint }
+}
+
+/** Installs with one click: found on this Mac and nothing to fill in. */
+export const oneClick = (entry: Pick<McpCatalogEntry, 'detected' | 'fields'>): boolean => !!entry.detected?.found && entry.fields.length === 0
 
 /** The connector a tool belongs to: the server's own name when the event carries it, else read from `mcp__server__tool`. */
 export function connectorName(toolName: string, mcp?: { server: string } | null): string {

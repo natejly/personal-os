@@ -11,11 +11,13 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
-from . import redact
+from . import mcp_path, redact
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +32,8 @@ MAX_DESCRIPTION = 200  # a card's blurb, not documentation
 ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 FIELD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 ICON_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # a lucide-react icon name in kebab-case
+# Filled in at install time, not by the user: the detected binary's path, and the interpreter Grain itself runs on.
+RESERVED = ("bin", "grain_python")
 PLACEHOLDER = re.compile(r"\{([A-Za-z0-9_]+)\}")
 # A literal credential in a template would ship to every user. Only the rules that identify credentials by shape.
 CREDENTIAL_RULES = ("private_key", "url_userinfo", "aws_key", "github_pat", "google_api", "google_oauth", "slack_webhook", "jwt")
@@ -113,6 +117,12 @@ def validate_entry(e: Any) -> list[str]:
         if f.get("secret") and f.get("multiple"):
             bad(f"field {fid} is secret and cannot be multiple")
 
+    detect = e.get("detect")
+    if detect is not None and not (isinstance(detect, dict) and isinstance(detect.get("binary"), str) and detect["binary"]
+                                   and isinstance(detect.get("dirs", []), list) and isinstance(detect.get("hint", ""), str)):
+        bad("detect needs a binary name, an optional dirs list and an optional hint")
+        detect = None
+
     install = e.get("install")
     if not isinstance(install, dict):
         bad("install is required")
@@ -141,7 +151,12 @@ def validate_entry(e: Any) -> list[str]:
         for text in items:
             for name in _refs(text):
                 used.add(name)
-                if name not in declared:
+                if name in RESERVED:
+                    if where != "command":
+                        bad(f"{{{name}}} may only be used in install.command")
+                    elif name == "bin" and not detect:
+                        bad("{bin} needs a detect block")
+                elif name not in declared:
                     bad(f"{{{name}}} in install.{where} is not a declared field")
                 elif declared[name].get("secret") and where not in ("env", "headers"):
                     bad(f"secret field {name} appears in install.{where}; secrets may only go in env or headers")
@@ -206,12 +221,25 @@ def get(entry_id: str, path: Path | str | None = None) -> dict[str, Any] | None:
     return next((e for e in load(path)["entries"] if e["id"] == entry_id), None)
 
 
+def detect(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """{found, path, hint} for an entry that names a binary to look for (`detect`), else None. The dirs listed come first,
+    then the user's login-shell PATH: the packaged app is launched with the bare system PATH, which hides Homebrew and ~/.local/bin.
+    Blocking (the PATH probe spawns a shell once per process): call it off the event loop."""
+    d = entry.get("detect")
+    if not isinstance(d, dict):
+        return None
+    name = d["binary"]
+    path = next((p for x in d.get("dirs") or [] if os.access(p := os.path.join(os.path.expanduser(x), name), os.X_OK)), None)
+    path = path or mcp_path.resolve(name)
+    return {"found": path is not None, "path": path or "", "hint": d.get("hint") or ""}
+
+
 def _fill(template: str, values: dict[str, str]) -> str:
     return PLACEHOLDER.sub(lambda m: values.get(m.group(1), ""), template)
 
 
-def render_install(entry: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
-    """The create_server arguments for `entry` with the user's `values`.
+def render_install(entry: dict[str, Any], values: dict[str, Any], binary: str = "") -> dict[str, Any]:
+    """The create_server arguments for `entry` with the user's `values`; `binary` is the detected path for {bin}.
 
     Raises ValueError naming the first required field that is empty. Values never appear in an error. An env/header
     template that mentions a secret field goes to `secrets` / `headers` (the secret store); the rest to plain `env`.
@@ -224,6 +252,7 @@ def render_install(entry: dict[str, Any], values: dict[str, Any]) -> dict[str, A
             raise ValueError(f"Missing required field: {fid}")
         vals[fid] = v
     install = entry.get("install") or {}
+    vals.update(bin=binary, grain_python=sys.executable)
     args: list[str] = []
     for a in (str(x) for x in install.get("args") or []):
         ref = PLACEHOLDER.fullmatch(a)
@@ -242,6 +271,6 @@ def render_install(entry: dict[str, Any], values: dict[str, Any]) -> dict[str, A
             continue
         (secrets if any(fields.get(r, {}).get("secret") for r in _refs(tpl)) else env)[k] = v
     headers = {k: v for k, tpl in (install.get("headers") or {}).items() if (v := _fill(str(tpl), vals)).strip()}
-    return {"name": entry["name"], "transport": entry["transport"], "command": install.get("command") or "", "args": args,
+    return {"name": entry["name"], "transport": entry["transport"], "command": _fill(install.get("command") or "", vals), "args": args,
             "env": env, "secrets": secrets, "url": _fill(install.get("url") or "", vals), "headers": headers,
             "description": entry.get("description") or "", "catalog_id": entry["id"]}

@@ -37,6 +37,11 @@ class ImportIn(BaseModel):
     refs: list[str] = Field(default_factory=list)
 
 
+class ImportJsonIn(BaseModel):
+    text: str
+    enabled: bool | None = None  # None keeps each server's own enabled flag
+
+
 def _install_of(pkg: dict[str, Any]) -> tuple[str, list[str]] | None:
     """(command, args) that runs a registry package over stdio, or None for a package kind Grain cannot launch."""
     kind, ident, version = pkg.get("registryType"), str(pkg.get("identifier") or ""), str(pkg.get("version") or "")
@@ -120,7 +125,8 @@ def router(store: McpServers, client: McpClient, server_view: Callable[[dict[str
     @r.get("/mcp/catalog")
     async def catalog() -> dict[str, Any]:
         servers = store.servers()
-        entries = [{**e, "installed": [s["id"] for s in servers if s.get("catalog_id") == e["id"]]} for e in mcp_catalog.load()["entries"]]
+        entries = [{**e, "installed": [s["id"] for s in servers if s.get("catalog_id") == e["id"]],
+                    "detected": await asyncio.to_thread(mcp_catalog.detect, e)} for e in mcp_catalog.load()["entries"]]
         return {"entries": entries, "categories": mcp_catalog.CATEGORIES, "runtimes": await asyncio.to_thread(mcp_path.runtimes)}
 
     @r.post("/mcp/catalog/{entry_id}/install")
@@ -128,8 +134,11 @@ def router(store: McpServers, client: McpClient, server_view: Callable[[dict[str
         entry = mcp_catalog.get(entry_id)
         if entry is None:
             raise HTTPException(404, "No such catalog entry")
+        found = await asyncio.to_thread(mcp_catalog.detect, entry)
+        if found is not None and not found["found"]:
+            raise HTTPException(409, found["hint"] or f"{entry['name']} is not installed on this Mac")
         try:
-            kwargs = mcp_catalog.render_install(entry, body.values)
+            kwargs = mcp_catalog.render_install(entry, body.values, found["path"] if found else "")
         except ValueError as e:  # names the field, never a value
             raise HTTPException(400, str(e)) from e
         if body.name and body.name.strip():
@@ -163,6 +172,29 @@ def router(store: McpServers, client: McpClient, server_view: Callable[[dict[str
                 skipped.append({"ref": ref, "reason": "already added"})
             else:
                 created.append(store.create_server(**mcp_import.create_kwargs(configs[ref])))
+        if created:
+            await client.sync()
+        return {"created": [server_view(store.server(c["id"]) or c) for c in created], "skipped": skipped}
+
+    @r.post("/mcp/import/json")
+    async def import_json(body: ImportJsonIn) -> dict[str, Any]:
+        try:
+            cfgs = mcp_import.parse_pasted(body.text)
+        except ValueError as e:  # a fixed message: pasted values are never echoed
+            raise HTTPException(400, str(e)) from e
+        have = list(store.servers())
+        created: list[dict[str, Any]] = []
+        skipped: list[dict[str, str]] = []
+        for cfg in cfgs:
+            if any(mcp_import.same(cfg, s) for s in have):
+                skipped.append({"name": cfg["key"], "reason": "already added"})
+                continue
+            kw = mcp_import.create_kwargs(cfg)
+            if body.enabled is not None:
+                kw["enabled"] = body.enabled
+            row = store.create_server(**kw)
+            have.append(row)
+            created.append(row)
         if created:
             await client.sync()
         return {"created": [server_view(store.server(c["id"]) or c) for c in created], "skipped": skipped}

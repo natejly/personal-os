@@ -68,8 +68,11 @@ def normalize_entry(e: Any) -> str | None:
     return h
 
 
-def allowed_set(registry: bool, extra: Any) -> tuple[str, ...]:
-    """The host entries a run may reach: the registry preset (when on) plus the user's valid extra entries."""
+def allowed_set(registry: bool, extra: Any, everything: bool = False) -> tuple[str, ...]:
+    """The host entries a run may reach: the registry preset (when on) plus the user's valid extra entries.
+    `everything` (allowAllConnections) is the one entry "*": any hostname, still never an IP literal."""
+    if everything:
+        return ("*",)
     out: list[str] = list(REGISTRY_HOSTS) if registry else []
     for e in extra if isinstance(extra, (list, tuple)) else []:
         n = normalize_entry(e)
@@ -83,7 +86,7 @@ def host_allowed(host: str, entries: tuple[str, ...] | list[str]) -> bool:
     h = normalize_host(host)
     if not h or _is_ip(h):
         return False
-    return any(h == e or h.endswith("." + e) for e in entries)
+    return any(e == "*" or h == e or h.endswith("." + e) for e in entries)
 
 
 def addr_ok(ip: str) -> bool:

@@ -1,6 +1,6 @@
 import { AlertTriangle, BadgeCheck, Check, ExternalLink } from 'lucide-react'
 import type { McpCatalogEntry } from '@shared/types'
-import { iconFor } from './catalog'
+import { detectionLabel, iconFor } from './catalog'
 
 const TRANSPORT_WORD = { stdio: 'Runs here', http: 'Remote', sse: 'Remote (SSE)' } as const
 const AUTH_WORD = { none: 'No sign-in', api_key: 'API key', oauth: 'Browser sign-in', env: 'Needs settings' } as const
@@ -11,6 +11,8 @@ export default function ConnectorCard({ entry, warning, onInstall }: {
 }): JSX.Element {
   const Icon = iconFor(entry.icon)
   const installed = entry.installed.length > 0
+  const detect = detectionLabel(entry)
+  const missing = !!detect && !detect.found
   return (
     <div className="connector-card">
       <div className="connector-head">
@@ -24,9 +26,12 @@ export default function ConnectorCard({ entry, warning, onInstall }: {
         </span>
         {installed
           ? <span className="tag verified"><Check size={11} /> Installed</span>
-          : <button className="primary-btn small" aria-label={`Install ${entry.name}`} onClick={onInstall}>Install</button>}
+          : missing
+            ? <span className="tag" title="Not found on this Mac">Not installed</span>
+            : <button className="primary-btn small" aria-label={`Install ${entry.name}`} onClick={onInstall}>Install</button>}
       </div>
       <p className="connector-desc">{entry.description}</p>
+      {detect && !installed && <p className="connector-detect">{detect.text}</p>}
       <div className="connector-tags">
         <span className="tag">{TRANSPORT_WORD[entry.transport]}</span>
         <span className="tag">{AUTH_WORD[entry.auth]}</span>

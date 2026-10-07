@@ -115,7 +115,8 @@ def resolve_cwd(cwd: str | None, default: Path, desk: Path | None = None) -> Pat
 def reaches_out(settings: dict[str, Any]) -> bool:
     """True when a sandboxed command could send something off this Mac: open network, or a proxy with any allowed host."""
     return bool(permissions.get(settings, "shellNetwork")) or bool(
-        egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains")))
+        egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains"),
+                           permissions.get(settings, "allowAllConnections")))
 
 
 def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any], roots: list[Any]) -> bool:
@@ -670,7 +671,8 @@ def register(tb: Any) -> None:
         wrapped = f"trap {shlex.quote('pwd -P >' + shlex.quote(os.path.join(tmp, CWD_FILE)) + ' 2>/dev/null')} EXIT\n{command}"
         argv = [shell_bin, "-c", wrapped]
         env = scrubbed_env(tmp)
-        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"))
+        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"),
+                                     permissions.get(s, "allowAllConnections"))
         proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
         token: str | None = None
         port: int | None = None

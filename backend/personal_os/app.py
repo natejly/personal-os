@@ -5989,7 +5989,7 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
         if qvec is _UNSET:
             qvec = await _query_vec(query, cfg, conv_settings)
-        return memory_index.search(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
+        return await memory_index.search_reranked(project_id, query, qvec, limit=memory_limits.CONTEXT_HITS, settings=cfg)
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None

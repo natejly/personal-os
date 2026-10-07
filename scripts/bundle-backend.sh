@@ -72,5 +72,8 @@ SMOKE="$(mktemp -d)"
 (cd / && PYTHONDONTWRITEBYTECODE=1 PERSONAL_OS_DATA_DIR="$SMOKE" "$PY" -c "import personal_os.app, personal_os.__main__; print('bundle ok:', personal_os.__file__)")
 rm -rf "$SMOKE"
 # Precompile now: the app runs with PYTHONDONTWRITEBYTECODE so nothing writes into the signed bundle.
-"$PY" -m compileall -q -j 0 "$OUT/python/lib/python3.12" >/dev/null || true
+# unchecked-hash: packaging resets every source file's mtime, which makes timestamp-checked .pyc files stale in the
+# installed app. Then every launch recompiles in memory, and any child Python started without the flag rewrites
+# them, which breaks the signature. Unchecked-hash .pyc files stay valid whatever the mtimes.
+"$PY" -m compileall -q -f -j 0 --invalidation-mode unchecked-hash "$OUT/python/lib/python3.12" >/dev/null || true
 du -sh "$OUT"

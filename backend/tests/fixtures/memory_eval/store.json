@@ -1,0 +1,1261 @@
+{
+ "projects": [
+  {
+   "id": "proj-atlas",
+   "name": "Atlas"
+  }
+ ],
+ "memories": [
+  {
+   "id": "m-name",
+   "kind": "fact",
+   "created_at": "2025-04-07T09:10:00-04:00",
+   "content": "User's name is Jordan Reyes and they are 34 years old"
+  },
+  {
+   "id": "m-job-old",
+   "kind": "fact",
+   "created_at": "2025-04-10T10:02:00-04:00",
+   "content": "User is an engineering manager at Lumen Freight and manages a team of six engineers",
+   "superseded_by": "m-job-v2"
+  },
+  {
+   "id": "m-job-v2",
+   "kind": "fact",
+   "created_at": "2026-07-14T17:45:00-04:00",
+   "content": "User was promoted to senior engineering manager at Lumen Freight in July 2026 and now manages eleven engineers"
+  },
+  {
+   "id": "m-lumen-hq",
+   "kind": "fact",
+   "created_at": "2025-04-11T09:30:00-04:00",
+   "content": "Lumen Freight's headquarters is in Boston, and User flies up for the quarterly offsite while working remotely the rest of the year"
+  },
+  {
+   "id": "m-priya",
+   "kind": "fact",
+   "created_at": "2025-04-12T11:20:00-04:00",
+   "content": "User reports to Priya Raman, the VP of Engineering at Lumen Freight"
+  },
+  {
+   "id": "m-mei",
+   "kind": "fact",
+   "created_at": "2025-05-02T13:05:00-04:00",
+   "content": "Mei Tanaka runs the routing group and is User's closest peer manager"
+  },
+  {
+   "id": "m-1on1-old",
+   "kind": "fact",
+   "created_at": "2025-07-08T15:00:00-04:00",
+   "content": "User has a weekly 1:1 with Priya on Tuesdays at 10am",
+   "superseded_by": "m-1on1-new"
+  },
+  {
+   "id": "m-1on1-new",
+   "kind": "fact",
+   "created_at": "2026-02-26T16:10:00-05:00",
+   "content": "User moved the weekly 1:1 with Priya to Thursdays at 2pm"
+  },
+  {
+   "id": "m-promo",
+   "kind": "goal",
+   "created_at": "2025-09-02T08:40:00-04:00",
+   "content": "User wants to be promoted to senior engineering manager by the end of 2026"
+  },
+  {
+   "id": "m-reorg",
+   "kind": "fact",
+   "created_at": "2026-01-14T12:15:00-05:00",
+   "content": "Lumen Freight announced a reorg: the platform and routing groups merge under Priya in February"
+  },
+  {
+   "id": "m-beacon-1",
+   "kind": "fact",
+   "created_at": "2025-06-18T14:25:00-04:00",
+   "content": "Beacon is the route-planning engine that cuts delivery miles; its core was rewritten in Rust last quarter"
+  },
+  {
+   "id": "m-beacon-2",
+   "kind": "fact",
+   "created_at": "2025-11-03T10:50:00-05:00",
+   "content": "Beacon's nightly batch job reads shipment windows from Postgres and finishes in under twenty minutes"
+  },
+  {
+   "id": "m-beacon-3",
+   "kind": "fact",
+   "created_at": "2026-03-12T16:30:00-04:00",
+   "content": "Beacon pilot launched with two regional carriers in the Northeast"
+  },
+  {
+   "id": "m-pg-upgrade",
+   "kind": "note",
+   "created_at": "2026-04-30T11:00:00-04:00",
+   "content": "The Postgres 16 upgrade needs a maintenance window; vacuum tuning is the main risk"
+  },
+  {
+   "id": "m-demo-0930",
+   "kind": "note",
+   "created_at": "2026-09-30T15:20:00-04:00",
+   "content": "User prepared an outline for the Beacon carrier demo"
+  },
+  {
+   "id": "m-demo-1002",
+   "kind": "note",
+   "created_at": "2026-10-02T10:35:00-04:00",
+   "content": "User asked Priya for a decision on the Beacon pilot budget by Friday"
+  },
+  {
+   "id": "m-priya-1006",
+   "kind": "note",
+   "created_at": "2026-10-06T16:20:00-04:00",
+   "content": "User told Priya that the Beacon pilot needs two more weeks before the carrier demo"
+  },
+  {
+   "id": "m-standup",
+   "kind": "instruction",
+   "created_at": "2025-05-20T09:00:00-04:00",
+   "content": "User wants meeting notes as bullet points with owners and due dates, never prose paragraphs"
+  },
+  {
+   "id": "m-linear",
+   "kind": "fact",
+   "created_at": "2025-06-03T10:15:00-04:00",
+   "content": "User tracks the team's work in Linear with weekly cycles that start on Monday"
+  },
+  {
+   "id": "m-slack",
+   "kind": "instruction",
+   "created_at": "2025-08-19T11:45:00-04:00",
+   "content": "Summarize long chat threads in three bullets rather than pasting them"
+  },
+  {
+   "id": "m-hire-2025-06",
+   "kind": "fact",
+   "created_at": "2025-06-23T10:00:00-04:00",
+   "content": "User decided to hire a backend engineer before a designer"
+  },
+  {
+   "id": "m-hire-2026-01",
+   "kind": "fact",
+   "created_at": "2026-01-27T09:20:00-05:00",
+   "content": "User decided to freeze hiring for the first quarter because headcount was uncertain"
+  },
+  {
+   "id": "m-hire-2026-04",
+   "kind": "fact",
+   "created_at": "2026-04-14T13:40:00-04:00",
+   "content": "User decided to pause hiring until the reorg lands"
+  },
+  {
+   "id": "m-hire-2026-08",
+   "kind": "fact",
+   "created_at": "2026-08-05T15:10:00-04:00",
+   "content": "User decided to ask recruiting for a senior hire profile rather than a mid-level one"
+  },
+  {
+   "id": "m-hire-sep-a",
+   "kind": "fact",
+   "created_at": "2026-09-11T12:30:00-04:00",
+   "content": "User decided to reopen the backend engineer requisition and interview three candidates"
+  },
+  {
+   "id": "m-hire-sep-b",
+   "kind": "fact",
+   "created_at": "2026-09-24T17:05:00-04:00",
+   "content": "User decided to offer the role to the second candidate, Noor, at the top of the band"
+  },
+  {
+   "id": "m-budget-2025",
+   "kind": "fact",
+   "created_at": "2025-10-06T14:00:00-04:00",
+   "content": "User decided to put the team's 2026 training budget into conference tickets rather than courses"
+  },
+  {
+   "id": "m-budget-2026-02",
+   "kind": "fact",
+   "created_at": "2026-02-11T10:25:00-05:00",
+   "content": "User decided to move the team offsite budget to a single day trip in the spring"
+  },
+  {
+   "id": "m-budget-aug",
+   "kind": "fact",
+   "created_at": "2026-08-19T16:45:00-04:00",
+   "content": "User decided to hold back half of the team's equipment budget until the reorg settles"
+  },
+  {
+   "id": "m-budget-sep",
+   "kind": "fact",
+   "created_at": "2026-09-17T11:50:00-04:00",
+   "content": "User decided to spend the remaining team budget on two standing desks and a monitor arm"
+  },
+  {
+   "id": "m-buy-desk",
+   "kind": "note",
+   "created_at": "2026-09-18T14:15:00-04:00",
+   "content": "User ordered two standing desks and a monitor arm for the team"
+  },
+  {
+   "id": "m-atlas-1",
+   "kind": "fact",
+   "created_at": "2025-08-14T10:00:00-04:00",
+   "content": "Atlas is the warehouse data migration; the cutover target is the end of Q1 2026",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-2",
+   "kind": "fact",
+   "created_at": "2025-12-09T15:30:00-05:00",
+   "content": "Atlas will use Postgres logical replication instead of dump-and-restore for the cutover",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-3",
+   "kind": "fact",
+   "created_at": "2026-02-20T11:10:00-05:00",
+   "content": "Atlas cutover slipped to May because of the legacy invoice tables",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-4",
+   "kind": "fact",
+   "created_at": "2026-05-28T09:45:00-04:00",
+   "content": "Atlas cutover completed on 2026-05-24 with four minutes of read-only downtime",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-5",
+   "kind": "instruction",
+   "created_at": "2026-09-15T16:00:00-04:00",
+   "content": "For Atlas follow-ups, write a runbook for every migration step before the cutover, not after",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-6",
+   "kind": "note",
+   "created_at": "2026-06-10T13:20:00-04:00",
+   "content": "Atlas stakeholders are the finance team and the warehouse operations leads",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-atlas-7",
+   "kind": "fact",
+   "created_at": "2025-10-21T10:40:00-04:00",
+   "content": "Atlas load tests ran at three times the expected peak write rate without lag",
+   "project_id": "proj-atlas"
+  },
+  {
+   "id": "m-home-old",
+   "kind": "fact",
+   "created_at": "2025-04-09T19:00:00-04:00",
+   "content": "User rents an apartment in Park Slope",
+   "superseded_by": "m-home-new"
+  },
+  {
+   "id": "m-home-new",
+   "kind": "fact",
+   "created_at": "2026-01-31T18:30:00-05:00",
+   "content": "User moved to a rented apartment in Gowanus in January 2026; the landlord is Omar Haddad"
+  },
+  {
+   "id": "m-rent",
+   "kind": "fact",
+   "created_at": "2026-02-02T08:15:00-05:00",
+   "content": "Rent is $2,950 a month, due on the 1st through the joint account with Hannah"
+  },
+  {
+   "id": "m-hannah",
+   "kind": "fact",
+   "created_at": "2025-04-15T20:10:00-04:00",
+   "content": "User's partner is Hannah Cho, a product designer who grew up in Denver"
+  },
+  {
+   "id": "m-anniv",
+   "kind": "fact",
+   "created_at": "2025-06-22T09:05:00-04:00",
+   "content": "User and Hannah's anniversary is June 21; they usually book a dinner two weeks ahead"
+  },
+  {
+   "id": "m-sofia",
+   "kind": "fact",
+   "created_at": "2025-04-20T18:00:00-04:00",
+   "content": "User's sister Sofia lives in Portland and has a toddler named Ines"
+  },
+  {
+   "id": "m-sofia-bday",
+   "kind": "fact",
+   "created_at": "2025-05-08T12:00:00-04:00",
+   "content": "Sofia's birthday is March 3; User ships a gift a week early"
+  },
+  {
+   "id": "m-portland",
+   "kind": "note",
+   "created_at": "2025-08-24T21:00:00-04:00",
+   "content": "User visits Portland every August and they usually go hiking around Mount Hood"
+  },
+  {
+   "id": "m-denver",
+   "kind": "note",
+   "created_at": "2025-11-30T22:10:00-05:00",
+   "content": "User spent Thanksgiving 2025 in Denver with Hannah's family"
+  },
+  {
+   "id": "m-diego",
+   "kind": "fact",
+   "created_at": "2025-05-14T18:40:00-04:00",
+   "content": "Diego Alvarez is User's closest friend; they climb together every week"
+  },
+  {
+   "id": "m-tom",
+   "kind": "fact",
+   "created_at": "2025-04-25T12:30:00-04:00",
+   "content": "Tom Bright founded Cobalt Labs and mentors User; they have lunch on the first Friday of each month"
+  },
+  {
+   "id": "m-cobalt",
+   "kind": "fact",
+   "created_at": "2025-04-08T10:30:00-04:00",
+   "content": "User worked at Cobalt Labs from 2019 to 2024 as a senior engineer and left on good terms"
+  },
+  {
+   "id": "m-cat",
+   "kind": "fact",
+   "created_at": "2025-04-18T20:20:00-04:00",
+   "content": "User has a cat named Miso, a grey tabby adopted in 2024"
+  },
+  {
+   "id": "m-vet",
+   "kind": "fact",
+   "created_at": "2025-10-14T09:25:00-04:00",
+   "content": "Miso's vet is Park Slope Animal Clinic; annual shots are due every November"
+  },
+  {
+   "id": "m-bday",
+   "kind": "fact",
+   "created_at": "2025-04-30T08:30:00-04:00",
+   "content": "User's birthday is September 12 and they prefer a low-key dinner over a party"
+  },
+  {
+   "id": "m-plant",
+   "kind": "note",
+   "created_at": "2025-05-26T10:05:00-04:00",
+   "content": "User keeps a fiddle-leaf fig by the window and waters it on Sundays"
+  },
+  {
+   "id": "m-reno-quote",
+   "kind": "fact",
+   "created_at": "2025-04-28T11:30:00-04:00",
+   "content": "Lena Fischer is the contractor redoing the kitchen and quoted $18,400"
+  },
+  {
+   "id": "m-reno-demo",
+   "kind": "note",
+   "created_at": "2025-05-19T17:10:00-04:00",
+   "content": "Kitchen demolition begins in mid-May and the cabinets are on a six-week lead time"
+  },
+  {
+   "id": "m-reno-hinges",
+   "kind": "note",
+   "created_at": "2025-08-30T13:45:00-04:00",
+   "content": "The kitchen renovation was delayed because the cabinets arrived with the wrong hinges"
+  },
+  {
+   "id": "m-reno-done",
+   "kind": "fact",
+   "created_at": "2025-10-12T19:20:00-04:00",
+   "content": "Kitchen renovation finished; User chose white oak shelves and a soapstone counter"
+  },
+  {
+   "id": "m-reno-hallway",
+   "kind": "goal",
+   "created_at": "2026-04-09T20:15:00-04:00",
+   "content": "User wants to repaint the hallway sage green and plans to ask Lena for a quote"
+  },
+  {
+   "id": "m-reno-bath",
+   "kind": "goal",
+   "created_at": "2026-05-12T21:30:00-04:00",
+   "content": "User is planning to retile the bathroom floor in the summer with matte hex tiles"
+  },
+  {
+   "id": "m-okafor",
+   "kind": "fact",
+   "created_at": "2025-05-06T08:50:00-04:00",
+   "content": "User sees Dr. Okafor in Park Slope for dental cleanings every six months"
+  },
+  {
+   "id": "m-exp-dentist",
+   "kind": "note",
+   "created_at": "2026-08-01T09:00:00-04:00",
+   "content": "User has a dental appointment with Dr. Okafor on 2026-08-12 at 9am",
+   "expires_at": "2026-08-13T00:00:00-04:00"
+  },
+  {
+   "id": "m-exp-denver",
+   "kind": "note",
+   "created_at": "2026-08-10T12:00:00-04:00",
+   "content": "User travels to Denver from 2026-08-20 to 2026-08-24, so do not schedule calls then",
+   "expires_at": "2026-08-25T00:00:00-04:00"
+  },
+  {
+   "id": "m-allergy",
+   "kind": "fact",
+   "created_at": "2025-04-14T09:40:00-04:00",
+   "content": "User is allergic to penicillin",
+   "pinned": true
+  },
+  {
+   "id": "m-diet",
+   "kind": "preference",
+   "created_at": "2025-04-16T12:10:00-04:00",
+   "content": "User is vegetarian except for fish"
+  },
+  {
+   "id": "m-cilantro",
+   "kind": "preference",
+   "created_at": "2025-06-05T19:35:00-04:00",
+   "content": "User dislikes cilantro and asks restaurants to leave it off"
+  },
+  {
+   "id": "m-oat",
+   "kind": "preference",
+   "created_at": "2025-05-03T08:05:00-04:00",
+   "content": "User takes oat milk in coffee"
+  },
+  {
+   "id": "m-coffee-old",
+   "kind": "fact",
+   "created_at": "2025-04-17T08:20:00-04:00",
+   "content": "User drinks two coffees a day",
+   "superseded_by": "m-coffee-new"
+  },
+  {
+   "id": "m-coffee-new",
+   "kind": "fact",
+   "created_at": "2026-06-12T08:00:00-04:00",
+   "content": "User cut back to one coffee a day and switches to decaf after noon"
+  },
+  {
+   "id": "m-sleep-old",
+   "kind": "fact",
+   "created_at": "2025-04-19T07:30:00-04:00",
+   "content": "User wakes at 7am on weekdays",
+   "superseded_by": "m-sleep-new"
+  },
+  {
+   "id": "m-sleep-new",
+   "kind": "fact",
+   "created_at": "2026-04-02T05:55:00-04:00",
+   "content": "User now wakes at 5:45am on weekdays for training and is in bed by 9:30pm"
+  },
+  {
+   "id": "m-physio",
+   "kind": "note",
+   "created_at": "2026-04-26T18:30:00-04:00",
+   "content": "User has recurring left knee soreness after long runs and does physio exercises twice a week"
+  },
+  {
+   "id": "m-run-start",
+   "kind": "goal",
+   "created_at": "2025-05-11T07:15:00-04:00",
+   "content": "User started a couch-to-10k plan with a goal of running three mornings a week"
+  },
+  {
+   "id": "m-run-10k",
+   "kind": "fact",
+   "created_at": "2025-11-16T11:40:00-05:00",
+   "content": "User ran a 10k race in 52 minutes"
+  },
+  {
+   "id": "m-goal-marathon-old",
+   "kind": "goal",
+   "created_at": "2025-12-14T20:00:00-05:00",
+   "content": "User wants to run a marathon in 2026 and finish in under 4:30",
+   "superseded_by": "m-run-signup"
+  },
+  {
+   "id": "m-run-feb",
+   "kind": "note",
+   "created_at": "2026-02-10T06:50:00-05:00",
+   "content": "User raised the long run to 14 kilometres and added a weekly tempo session"
+  },
+  {
+   "id": "m-run-half",
+   "kind": "fact",
+   "created_at": "2026-03-08T12:05:00-04:00",
+   "content": "User ran a half marathon in Prospect Park in 1:51 on a cold morning"
+  },
+  {
+   "id": "m-run-signup",
+   "kind": "goal",
+   "created_at": "2026-03-22T20:45:00-04:00",
+   "content": "User signed up for the Chicago Marathon on October 11, 2026, with a goal of finishing under 4:15"
+  },
+  {
+   "id": "m-run-apr",
+   "kind": "note",
+   "created_at": "2026-04-19T12:10:00-04:00",
+   "content": "User's long run reached 28 kilometres and the pace held steady"
+  },
+  {
+   "id": "m-run-taper",
+   "kind": "note",
+   "created_at": "2026-09-14T07:40:00-04:00",
+   "content": "User's taper began; the longest run left is 16 kilometres this Sunday"
+  },
+  {
+   "id": "m-shoes",
+   "kind": "preference",
+   "created_at": "2026-10-06T08:10:00-04:00",
+   "content": "User bought a pair of trail shoes on 2026-10-06 and prefers neutral cushioned shoes, size 10.5"
+  },
+  {
+   "id": "m-pref-metric",
+   "kind": "preference",
+   "created_at": "2025-04-22T09:15:00-04:00",
+   "content": "User prefers metric units for distances and temperatures"
+  },
+  {
+   "id": "m-climb",
+   "kind": "fact",
+   "created_at": "2025-06-14T20:30:00-04:00",
+   "content": "User joined Gowanus Climbing and climbs on Tuesday and Thursday evenings"
+  },
+  {
+   "id": "m-instr-calendar",
+   "kind": "instruction",
+   "created_at": "2025-06-16T09:10:00-04:00",
+   "content": "Never schedule anything over User's Thursday 6pm climbing session"
+  },
+  {
+   "id": "m-pottery",
+   "kind": "fact",
+   "created_at": "2025-09-08T14:20:00-04:00",
+   "content": "User started a Saturday pottery class at a studio in Red Hook"
+  },
+  {
+   "id": "m-lang",
+   "kind": "fact",
+   "created_at": "2026-01-19T19:30:00-05:00",
+   "content": "User started learning Portuguese with a weekly tutor ahead of the Lisbon trip"
+  },
+  {
+   "id": "m-goal-pt",
+   "kind": "goal",
+   "created_at": "2026-01-21T07:50:00-05:00",
+   "content": "User wants enough Portuguese to order food and chat by the Lisbon trip"
+  },
+  {
+   "id": "m-sourdough",
+   "kind": "fact",
+   "created_at": "2026-06-02T10:00:00-04:00",
+   "content": "User took up sourdough baking and feeds the starter every evening"
+  },
+  {
+   "id": "m-guitar-buy",
+   "kind": "note",
+   "created_at": "2026-08-11T15:30:00-04:00",
+   "content": "User bought a used guitar and practises fingerstyle for twenty minutes a day"
+  },
+  {
+   "id": "m-lisbon-plan",
+   "kind": "goal",
+   "created_at": "2025-12-05T21:10:00-05:00",
+   "content": "User and Hannah plan a trip to Lisbon in May 2026"
+  },
+  {
+   "id": "m-lisbon-flights",
+   "kind": "fact",
+   "created_at": "2026-02-14T10:20:00-05:00",
+   "content": "User booked flights to Lisbon for May 9 through May 17 on TAP and chose aisle seats"
+  },
+  {
+   "id": "m-lisbon-sardines",
+   "kind": "note",
+   "created_at": "2026-05-20T22:00:00-04:00",
+   "content": "On the Lisbon trip User's favourite meal was the grilled sardines at a small place in Alfama"
+  },
+  {
+   "id": "m-pref-seat",
+   "kind": "preference",
+   "created_at": "2025-07-02T11:00:00-04:00",
+   "content": "User prefers aisle seats on flights and books direct flights when possible"
+  },
+  {
+   "id": "m-book-2025a",
+   "kind": "note",
+   "created_at": "2025-06-30T21:40:00-04:00",
+   "content": "User finished reading Thinking in Systems and recommends it to the team"
+  },
+  {
+   "id": "m-book-2025b",
+   "kind": "note",
+   "created_at": "2025-12-28T20:30:00-05:00",
+   "content": "User read The Overstory over the holidays"
+  },
+  {
+   "id": "m-book-jul",
+   "kind": "note",
+   "created_at": "2026-07-30T22:15:00-04:00",
+   "content": "User is reading Project Hail Mary on the subway"
+  },
+  {
+   "id": "m-book-aug",
+   "kind": "note",
+   "created_at": "2026-08-22T21:10:00-04:00",
+   "content": "User picked up Staff Engineer to share with the senior engineers"
+  },
+  {
+   "id": "m-book-sep05",
+   "kind": "note",
+   "created_at": "2026-09-05T20:45:00-04:00",
+   "content": "User started reading The Design of Everyday Things"
+  },
+  {
+   "id": "m-book-sep28",
+   "kind": "note",
+   "created_at": "2026-09-28T21:30:00-04:00",
+   "content": "User is reading An Elegant Puzzle about engineering management"
+  },
+  {
+   "id": "m-goal-read",
+   "kind": "goal",
+   "created_at": "2026-01-03T09:00:00-05:00",
+   "content": "User wants to read 24 books in 2026"
+  },
+  {
+   "id": "m-kiln-start",
+   "kind": "fact",
+   "created_at": "2025-09-27T15:00:00-04:00",
+   "content": "Kiln is User's side project, a static site generator written in Rust"
+  },
+  {
+   "id": "m-kiln-inc",
+   "kind": "note",
+   "created_at": "2026-01-08T21:20:00-05:00",
+   "content": "User added incremental builds to Kiln, which cut rebuilds to under a second"
+  },
+  {
+   "id": "m-kiln-sitemap",
+   "kind": "note",
+   "created_at": "2026-09-18T22:00:00-04:00",
+   "content": "User fixed the Kiln sitemap bug that listed draft pages"
+  },
+  {
+   "id": "m-kiln-0926",
+   "kind": "note",
+   "created_at": "2026-09-26T11:25:00-04:00",
+   "content": "User wrote the Kiln changelog for the next release"
+  },
+  {
+   "id": "m-kiln-0930",
+   "kind": "note",
+   "created_at": "2026-09-30T19:10:00-04:00",
+   "content": "User shipped Kiln 0.4 with an image optimization step"
+  },
+  {
+   "id": "m-kiln-1001",
+   "kind": "note",
+   "created_at": "2026-10-01T20:30:00-04:00",
+   "content": "User deployed the Kiln docs site after switching its config format"
+  },
+  {
+   "id": "m-fly",
+   "kind": "fact",
+   "created_at": "2025-10-01T20:00:00-04:00",
+   "content": "The docs site runs on Fly.io in the ewr region on a single shared machine"
+  },
+  {
+   "id": "m-rust",
+   "kind": "preference",
+   "created_at": "2025-09-29T19:45:00-04:00",
+   "content": "User is learning Rust and likes ownership explained by analogy"
+  },
+  {
+   "id": "m-pref-code",
+   "kind": "preference",
+   "created_at": "2025-10-05T10:30:00-04:00",
+   "content": "User prefers Rust examples over Python when code is shown"
+  },
+  {
+   "id": "m-editor-old",
+   "kind": "fact",
+   "created_at": "2025-04-21T09:00:00-04:00",
+   "content": "User's main editor is VS Code",
+   "superseded_by": "m-editor-new"
+  },
+  {
+   "id": "m-editor-new",
+   "kind": "fact",
+   "created_at": "2025-11-20T21:00:00-05:00",
+   "content": "User switched to Neovim as the main editor and keeps the config in a dotfiles repo"
+  },
+  {
+   "id": "m-obsidian",
+   "kind": "fact",
+   "created_at": "2025-05-30T08:40:00-04:00",
+   "content": "User keeps notes in an Obsidian vault synced through iCloud, with one daily note per day"
+  },
+  {
+   "id": "m-nas",
+   "kind": "fact",
+   "created_at": "2025-10-27T18:00:00-04:00",
+   "content": "User's Synology NAS takes weekly offsite backups every Sunday night"
+  },
+  {
+   "id": "m-ha-2025",
+   "kind": "note",
+   "created_at": "2025-10-30T20:10:00-04:00",
+   "content": "User set up Home Assistant on a Raspberry Pi 5 to control the lights"
+  },
+  {
+   "id": "m-ha-0909",
+   "kind": "note",
+   "created_at": "2026-09-09T21:15:00-04:00",
+   "content": "User replaced the Zigbee hub in Home Assistant with a USB coordinator"
+  },
+  {
+   "id": "m-ha-0923",
+   "kind": "note",
+   "created_at": "2026-09-23T19:40:00-04:00",
+   "content": "User automated the hallway lights in Home Assistant to dim after 10pm"
+  },
+  {
+   "id": "m-ha-1002",
+   "kind": "note",
+   "created_at": "2026-10-02T18:05:00-04:00",
+   "content": "User added a motion sensor on the balcony to Home Assistant"
+  },
+  {
+   "id": "m-ha-backup",
+   "kind": "note",
+   "created_at": "2026-06-16T13:00:00-04:00",
+   "content": "Home Assistant backups run nightly to the NAS"
+  },
+  {
+   "id": "m-bank",
+   "kind": "fact",
+   "created_at": "2025-04-24T12:00:00-04:00",
+   "content": "User banks with Northwind Bank; the joint account with Hannah pays rent and groceries"
+  },
+  {
+   "id": "m-savings",
+   "kind": "goal",
+   "created_at": "2025-09-15T08:30:00-04:00",
+   "content": "User wants a six-month emergency fund by December 2026"
+  },
+  {
+   "id": "m-pref-concise",
+   "kind": "preference",
+   "created_at": "2025-04-23T09:20:00-04:00",
+   "content": "User likes replies kept to five sentences or fewer unless asked for depth",
+   "pinned": true
+  },
+  {
+   "id": "m-pref-morning",
+   "kind": "preference",
+   "created_at": "2025-05-05T08:00:00-04:00",
+   "content": "User does not want calls or meetings before 10am; mornings are for running and focus work"
+  },
+  {
+   "id": "m-pref-email",
+   "kind": "preference",
+   "created_at": "2025-05-22T14:00:00-04:00",
+   "content": "User wants emails drafted in a friendly but brief tone and signed Jordan"
+  },
+  {
+   "id": "m-pref-dates",
+   "kind": "preference",
+   "created_at": "2025-06-09T10:00:00-04:00",
+   "content": "User wants dates written as YYYY-MM-DD"
+  },
+  {
+   "id": "m-pref-dark",
+   "kind": "preference",
+   "created_at": "2025-07-11T22:00:00-04:00",
+   "content": "User prefers dark mode in every app"
+  },
+  {
+   "id": "m-pref-music",
+   "kind": "preference",
+   "created_at": "2025-08-05T13:35:00-04:00",
+   "content": "User listens to instrumental jazz while coding"
+  },
+  {
+   "id": "m-car",
+   "kind": "fact",
+   "created_at": "2025-06-12T08:45:00-04:00",
+   "content": "User does not own a car and gets around by subway with an annual Citi Bike membership"
+  },
+  {
+   "id": "m-pref-tz",
+   "kind": "fact",
+   "created_at": "2025-09-22T09:00:00-04:00",
+   "content": "User works on US Eastern time and Priya's group is mostly on Pacific time"
+  }
+ ],
+ "entities": [
+  {
+   "id": "n-user",
+   "label": "User",
+   "type": "person",
+   "aliases": [],
+   "self": true
+  },
+  {
+   "id": "n-mei",
+   "label": "Mei Tanaka",
+   "type": "person",
+   "aliases": [
+    "Mei"
+   ]
+  },
+  {
+   "id": "n-priya",
+   "label": "Priya Raman",
+   "type": "person",
+   "aliases": [
+    "Priya"
+   ]
+  },
+  {
+   "id": "n-diego",
+   "label": "Diego Alvarez",
+   "type": "person",
+   "aliases": [
+    "Diego"
+   ]
+  },
+  {
+   "id": "n-hannah",
+   "label": "Hannah Cho",
+   "type": "person",
+   "aliases": [
+    "Hannah"
+   ]
+  },
+  {
+   "id": "n-sofia",
+   "label": "Sofia Reyes",
+   "type": "person",
+   "aliases": [
+    "Sofia"
+   ]
+  },
+  {
+   "id": "n-tom",
+   "label": "Tom Bright",
+   "type": "person",
+   "aliases": [
+    "Tom"
+   ]
+  },
+  {
+   "id": "n-okafor",
+   "label": "Dr. Okafor",
+   "type": "person",
+   "aliases": [
+    "Okafor"
+   ]
+  },
+  {
+   "id": "n-lena",
+   "label": "Lena Fischer",
+   "type": "person",
+   "aliases": [
+    "Lena"
+   ]
+  },
+  {
+   "id": "n-omar",
+   "label": "Omar Haddad",
+   "type": "person",
+   "aliases": [
+    "Omar"
+   ]
+  },
+  {
+   "id": "n-lumen",
+   "label": "Lumen Freight",
+   "type": "organization",
+   "aliases": [
+    "Lumen"
+   ]
+  },
+  {
+   "id": "n-cobalt",
+   "label": "Cobalt Labs",
+   "type": "organization",
+   "aliases": [
+    "Cobalt"
+   ]
+  },
+  {
+   "id": "n-northwind",
+   "label": "Northwind Bank",
+   "type": "organization",
+   "aliases": [
+    "Northwind"
+   ]
+  },
+  {
+   "id": "n-gowanus",
+   "label": "Gowanus Climbing",
+   "type": "organization",
+   "aliases": []
+  },
+  {
+   "id": "n-atlas",
+   "label": "Atlas",
+   "type": "project",
+   "aliases": []
+  },
+  {
+   "id": "n-beacon",
+   "label": "Beacon",
+   "type": "project",
+   "aliases": []
+  },
+  {
+   "id": "n-kiln",
+   "label": "Kiln",
+   "type": "project",
+   "aliases": []
+  },
+  {
+   "id": "n-reno",
+   "label": "Kitchen Renovation",
+   "type": "project",
+   "aliases": []
+  },
+  {
+   "id": "n-marathon",
+   "label": "Chicago Marathon",
+   "type": "event",
+   "aliases": []
+  },
+  {
+   "id": "n-postgres",
+   "label": "Postgres",
+   "type": "tool",
+   "aliases": [
+    "PostgreSQL"
+   ]
+  },
+  {
+   "id": "n-neovim",
+   "label": "Neovim",
+   "type": "tool",
+   "aliases": [
+    "nvim"
+   ]
+  },
+  {
+   "id": "n-linear",
+   "label": "Linear",
+   "type": "tool",
+   "aliases": []
+  },
+  {
+   "id": "n-obsidian",
+   "label": "Obsidian",
+   "type": "tool",
+   "aliases": []
+  },
+  {
+   "id": "n-fly",
+   "label": "Fly.io",
+   "type": "tool",
+   "aliases": []
+  },
+  {
+   "id": "n-ha",
+   "label": "Home Assistant",
+   "type": "tool",
+   "aliases": []
+  },
+  {
+   "id": "n-rust",
+   "label": "Rust",
+   "type": "tool",
+   "aliases": []
+  },
+  {
+   "id": "n-brooklyn",
+   "label": "Brooklyn",
+   "type": "place",
+   "aliases": []
+  },
+  {
+   "id": "n-lisbon",
+   "label": "Lisbon",
+   "type": "place",
+   "aliases": []
+  },
+  {
+   "id": "n-portland",
+   "label": "Portland",
+   "type": "place",
+   "aliases": []
+  },
+  {
+   "id": "n-denver",
+   "label": "Denver",
+   "type": "place",
+   "aliases": []
+  },
+  {
+   "id": "n-boston",
+   "label": "Boston",
+   "type": "place",
+   "aliases": []
+  }
+ ],
+ "edges": [
+  {
+   "source": "n-user",
+   "relation": "works_at",
+   "target": "n-lumen",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "lives_in",
+   "target": "n-brooklyn",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "works_on",
+   "target": "n-atlas",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "works_on",
+   "target": "n-kiln",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "knows",
+   "target": "n-diego",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "partner_of",
+   "target": "n-hannah",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "sibling_of",
+   "target": "n-sofia",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "reports_to",
+   "target": "n-priya",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "mentored_by",
+   "target": "n-tom",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "uses",
+   "target": "n-neovim",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "uses",
+   "target": "n-obsidian",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "uses",
+   "target": "n-linear",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "uses",
+   "target": "n-ha",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "member_of",
+   "target": "n-gowanus",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "banks_with",
+   "target": "n-northwind",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "trains_for",
+   "target": "n-marathon",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "rents_from",
+   "target": "n-omar",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "patient_of",
+   "target": "n-okafor",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "works_on",
+   "target": "n-reno",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-user",
+   "relation": "visited",
+   "target": "n-lisbon",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-mei",
+   "relation": "works_at",
+   "target": "n-lumen",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-mei",
+   "relation": "leads",
+   "target": "n-beacon",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-priya",
+   "relation": "works_at",
+   "target": "n-lumen",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-priya",
+   "relation": "manages",
+   "target": "n-mei",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-beacon",
+   "relation": "uses",
+   "target": "n-postgres",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-beacon",
+   "relation": "uses",
+   "target": "n-rust",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-atlas",
+   "relation": "uses",
+   "target": "n-postgres",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-atlas",
+   "relation": "part_of",
+   "target": "n-lumen",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-beacon",
+   "relation": "part_of",
+   "target": "n-lumen",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-kiln",
+   "relation": "uses",
+   "target": "n-rust",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-kiln",
+   "relation": "hosted_on",
+   "target": "n-fly",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-diego",
+   "relation": "member_of",
+   "target": "n-gowanus",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-diego",
+   "relation": "works_at",
+   "target": "n-cobalt",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-sofia",
+   "relation": "lives_in",
+   "target": "n-portland",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-hannah",
+   "relation": "grew_up_in",
+   "target": "n-denver",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-tom",
+   "relation": "founded",
+   "target": "n-cobalt",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-lena",
+   "relation": "works_on",
+   "target": "n-reno",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-gowanus",
+   "relation": "located_in",
+   "target": "n-brooklyn",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-lumen",
+   "relation": "located_in",
+   "target": "n-boston",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-hannah",
+   "relation": "lives_in",
+   "target": "n-brooklyn",
+   "since": "2025-04-07T12:00:00-04:00"
+  },
+  {
+   "source": "n-okafor",
+   "relation": "located_in",
+   "target": "n-brooklyn",
+   "since": "2025-04-07T12:00:00-04:00"
+  }
+ ]
+}

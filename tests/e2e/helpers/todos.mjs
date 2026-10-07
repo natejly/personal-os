@@ -1,5 +1,6 @@
 export async function openTodos(page) {
-  await page.getByRole('button', { name: 'Lists', exact: true }).first().click()
+  // the sidebar row's name carries the open-todo count ("Lists 3"), so match on its label
+  await page.locator('.sidebar .nav-item', { hasText: /^\s*Lists/ }).first().click()
   await page.getByPlaceholder('Add to Todos…').waitFor()
 }
 export const addBox = (page) => page.getByPlaceholder('Add to Todos…')

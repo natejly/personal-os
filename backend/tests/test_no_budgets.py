@@ -362,3 +362,16 @@ def test_put_settings_accepts_old_budget_keys_and_stores_nothing() -> None:
     stored = appmod.db.get_settings()
     assert not set(OLD_KEYS) & set(stored)
     client.put("/settings", json={"uiZoom": 100})
+
+
+def test_migration_drops_nav_placement() -> None:
+    d = Path(tempfile.mkdtemp(prefix="navplace-mig-"))
+    db = Database(d)
+    db.set_settings({"navPlacement": {"mail": "apps"}, "uiZoom": 110})
+    con = sqlite3.connect(next(d.glob("*.db")))
+    con.execute("PRAGMA user_version = 23")
+    con.commit()
+    assert migrations.run(con) == [24]
+    left = {r[0] for r in con.execute("SELECT key FROM settings")}
+    con.close()
+    assert "navPlacement" not in left and "uiZoom" in left

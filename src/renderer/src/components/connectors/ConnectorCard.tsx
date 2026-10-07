@@ -2,8 +2,9 @@ import { AlertTriangle, BadgeCheck, Check, ExternalLink } from 'lucide-react'
 import type { McpCatalogEntry } from '@shared/types'
 import { detectionLabel, iconFor } from './catalog'
 
-const TRANSPORT_WORD = { stdio: 'Runs here', http: 'Remote', sse: 'Remote (SSE)' } as const
-const AUTH_WORD = { none: 'No sign-in', api_key: 'API key', oauth: 'Browser sign-in', env: 'Needs settings' } as const
+// Only what differs from the default (runs on this Mac, no sign-in) earns a chip; the category is the filter above the grid.
+const TRANSPORT_WORD = { stdio: '', http: 'Remote', sse: 'Remote (SSE)' } as const
+const AUTH_WORD = { none: '', api_key: 'API key', oauth: 'Browser sign-in', env: 'Needs settings' } as const
 
 /** One catalog entry: who makes it, how it runs, what it needs, and whether its launcher is missing. */
 export default function ConnectorCard({ entry, warning, onInstall }: {
@@ -33,9 +34,8 @@ export default function ConnectorCard({ entry, warning, onInstall }: {
       <p className="connector-desc">{entry.description}</p>
       {detect && !installed && <p className="connector-detect">{detect.text}</p>}
       <div className="connector-tags">
-        <span className="tag">{TRANSPORT_WORD[entry.transport]}</span>
-        <span className="tag">{AUTH_WORD[entry.auth]}</span>
-        <span className="tag">{entry.category}</span>
+        {TRANSPORT_WORD[entry.transport] && <span className="tag">{TRANSPORT_WORD[entry.transport]}</span>}
+        {AUTH_WORD[entry.auth] && <span className="tag">{AUTH_WORD[entry.auth]}</span>}
         {entry.docs && <a className="tag" href={entry.docs} target="_blank" rel="noreferrer" aria-label={`${entry.name} documentation`}><ExternalLink size={11} /> Docs</a>}
       </div>
       {warning && !installed && <p className="test-msg fail connector-warn"><AlertTriangle size={12} /> {warning}</p>}

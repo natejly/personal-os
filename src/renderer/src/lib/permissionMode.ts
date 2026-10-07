@@ -2,9 +2,9 @@
 export type PermissionMode = 'auto' | 'manual' | 'allow_all'
 
 export const MODES: { id: PermissionMode; label: string; pill: string; description: string }[] = [
-  { id: 'auto', label: 'Auto', pill: 'Auto', description: 'Auto — Grain checks each risky action with a second AI first and only asks you when unsure (recommended)' },
-  { id: 'manual', label: 'Manual', pill: 'Manual', description: 'Manual — Grain asks before any risky action, including writes to system areas like /etc and /Library' },
-  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — runs everything except denied calls, with no checks or questions. Grain\'s own data and app stay off limits; credential stores and writes right after untrusted content still ask (dangerous)' }
+  { id: 'auto', label: 'Auto', pill: 'Auto', description: 'Auto — a second AI checks each risky action and you are asked only when it is unsure (recommended)' },
+  { id: 'manual', label: 'Manual', pill: 'Manual', description: 'Manual — you are asked before every risky action' },
+  { id: 'allow_all', label: 'Allow everything', pill: 'Allow everything', description: 'Allow everything — no checks and no questions, except denied calls and the always-ask list (dangerous)' }
 ]
 
 /** The mode in effect; a missing or unknown value is Auto. */

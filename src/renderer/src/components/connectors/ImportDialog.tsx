@@ -58,8 +58,8 @@ export default function ImportDialog({ onImported }: { onImported: () => void })
   return (
     <div className="import-panel">
       <p className="muted small">
-        Bring over connectors you already set up in another app. Secret-looking values go to the backend&apos;s secret
-        store; nothing is turned on, and every tool still asks before it runs.
+        Bring over connectors you already set up in another app. Secret-looking values go to the secret store, and
+        nothing is turned on until you enable it here.
       </p>
       {error && <p className="test-msg fail">{error}</p>}
       {sources?.map((src) => (

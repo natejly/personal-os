@@ -201,7 +201,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # A floating Explain / Summarize / Verify / Ask bubble over selected text.
     "selectionToolbar": True,
     # Interface zoom, percent (80-160 in steps of 5); every window applies it as its page zoom factor.
-    "uiZoom": 100,
+    "uiZoom": 110,
     # Default type for Files ({font: serif|sans|mono|book, size: px, measure: ch}); a doc can override it (docs.typography).
     "docTypography": {},
     "responseStyle": "default",  # what a new chat starts on; see style_presets

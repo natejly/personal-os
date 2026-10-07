@@ -115,8 +115,8 @@ test('a subagent opens from its card, takes a message while it runs, and shows i
   await expect(win.locator('.crew-sat')).toHaveCount(1) // the blob did not unfold
   await panel.getByRole('textbox').fill('and also check the weather')
   await panel.getByRole('button', { name: 'Send' }).click()
-  await expect(panel.locator('.sa-msg.user').last()).toContainText('and also check the weather', { timeout: 30_000 })
-  await expect(panel.locator('.sa-msg.assistant').last()).toContainText('MOCK: and also check the weather', { timeout: 40_000 })
+  await expect(panel.locator('.msg.user').last()).toContainText('and also check the weather', { timeout: 30_000 })
+  await expect(panel.locator('.msg.assistant').last()).toContainText('MOCK: and also check the weather', { timeout: 40_000 })
   await shot(page, 'subagent-panel')
   const parent = (await api(`/runs?status=all&conversation_id=${c.id}`)).find((r) => r.kind === 'chat')
   const child = (await api(`/runs/${parent.run_id}/children`))[0]

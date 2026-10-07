@@ -10,6 +10,8 @@ import type { Conversation } from '@shared/types'
 import { STATUS_LABEL } from '../lib/deskStatus'
 import { useChatFileCount } from '../lib/useChatFiles'
 import { formatCount } from '../lib/chatFiles'
+import { chatLabel, isTelegramChat } from '../lib/chatRows'
+import TelegramIcon from './TelegramIcon'
 import './chatFiles.css'
 
 /**
@@ -32,6 +34,8 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
   const setChatSettings = useStore((s) => s.setChatSettings)
   const forgetLearned = useStore((s) => s.forgetLearned)
   const noLearn = conv.settings?.learn === false
+  const telegram = isTelegramChat(conv)
+  const label = chatLabel(conv)
   const fileCount = useChatFileCount(conv.id)
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState(false)
@@ -40,7 +44,8 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
 
   const entries = (): MenuEntry[] => [
     { label: 'Rename', run: () => { settled.current = false; setRenaming(true) } },
-    { label: conv.pinned_at ? 'Unpin' : 'Pin', run: () => void pinChat(conv.id, !conv.pinned_at) },
+    // The Telegram chat is always first in the list, so pinning means nothing there.
+    ...(telegram ? [] : [{ label: conv.pinned_at ? 'Unpin' : 'Pin', run: () => void pinChat(conv.id, !conv.pinned_at) }] as MenuEntry[]),
     {
       kind: 'submenu',
       label: 'Move to project',
@@ -82,18 +87,19 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
       <div
         className={`convo-item${sub ? ' sub' : ''} ${active ? 'active' : ''}`}
         aria-current={active ? 'page' : undefined}
+        title={telegram ? 'Telegram — messages from your phone show here too' : undefined}
         role="button"
         tabIndex={0}
         onClick={() => void selectChat(conv.id)}
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(conv.id) } }}
         onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }) }}
-        {...dragProps({ kind: 'conversation', id: conv.id, label: conv.title, projectId: conv.project_id })}
+        {...dragProps({ kind: 'conversation', id: conv.id, label, projectId: conv.project_id })}
         // A text field inside a draggable element cannot select by mouse: the drag wins.
         draggable={!renaming}
       >
         <ChatPulse conv={conv} size={sub ? 12 : 14} />
         <span className="convo-title">
-          {lead}
+          {telegram ? <TelegramIcon size={sub ? 11 : 13} /> : lead}
           {conv.settings?.private && <EyeOff size={11} className="convo-private" aria-label="Private chat" />}
           {renaming ? (
             <input
@@ -111,10 +117,10 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
               }}
               onBlur={(e) => commit(e.currentTarget.value)}
             />
-          ) : <>{conv.title}{fileCount > 0 && <span className="convo-files" title={`${fileCount} document${fileCount === 1 ? '' : 's'} in this chat`}><Paperclip size={11} />{formatCount(fileCount)}</span>}{trail}</>}
+          ) : <>{label}{fileCount > 0 && <span className="convo-files" title={`${fileCount} document${fileCount === 1 ? '' : 's'} in this chat`}><Paperclip size={11} />{formatCount(fileCount)}</span>}{trail}</>}
         </span>
         {attn !== 'idle' && <AttentionDot state={attn} detail={deskStatus && STATUS_LABEL[deskStatus]} />}
-        <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
+        <button className="icon-btn ghost" aria-label={`Chat options: ${label}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom }) }}><MoreHorizontal size={14} /></button>
       </div>
       {menuAt && <ContextMenu at={menuAt} items={entries()} onClose={() => setMenuAt(null)} />}

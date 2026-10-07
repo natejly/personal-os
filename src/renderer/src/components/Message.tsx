@@ -12,6 +12,7 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
@@ -263,6 +264,7 @@ export type ChatFace = { name: string; hue?: number; tone?: number }
 const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
+  const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
   // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
   const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
@@ -291,7 +293,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <UserText content={message.content} />}</div>
+            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
           )
         ) : (
           <div className="msg-body">
@@ -354,7 +356,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
-            {resendable && isUser && (
+            {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />
               </button>
@@ -420,6 +422,16 @@ export function ReplyAttachments({ files }: { files?: Attachment[] | null }): JS
     <>
       {images.length > 0 && <div className="reply-images">{images.map((a) => <ReplyImage key={a.id} file={a} />)}</div>}
       <AttachmentChips files={rest} />
+    </>
+  )
+}
+
+/** A message another chat sent (or answered with): "From <title>" opens that chat, then the body. */
+function ChatMessageText({ content, from }: { content: string; from: NonNullable<ReturnType<typeof parseChatMessage>> }): JSX.Element {
+  return (
+    <>
+      <div className="user-from">From <button type="button" className="link-btn" onClick={() => void useStore.getState().selectChat(from.fromChat)}>{from.title}</button></div>
+      <UserText content={from.body || content} />
     </>
   )
 }

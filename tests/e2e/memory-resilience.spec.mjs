@@ -79,8 +79,8 @@ test('everything at 820x520: project modal, project view tabs, memory panel, voi
   expect(create.y + create.height).toBeLessThanOrEqual(520)
   await page.keyboard.press('Escape')
   await page.locator('.sidebar').getByText('Tiny', { exact: true }).click()
-  for (const tab of ['Instructions', 'Context', 'Memory']) {
-    await page.locator('.tabs').getByRole('button', { name: new RegExp(tab) }).click()
+  for (const sec of ['Chats', 'Files', 'Context', 'Instructions', 'Memory']) {
+    await page.locator('.project-page').getByRole('region', { name: sec }).scrollIntoViewIfNeeded()
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(over).toBeLessThanOrEqual(1)
   }

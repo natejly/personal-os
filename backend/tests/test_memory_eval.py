@@ -16,10 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import memory_eval as me  # noqa: E402
-from personal_os import llm  # noqa: E402
 
 CATEGORIES = {"lexical", "paraphrase", "graph", "temporal", "negative", "supersession", "anaphoric"}
-SETTINGS = {**llm.DEFAULT_SETTINGS, "embeddingModel": me.OFFLINE_MODEL, "hybridRetrieval": True}
+SETTINGS = me.OFFLINE_SETTINGS  # provider fireworks, so the rerank model resolves; no key, the rerank stub is injected
 
 
 # ---- metric math ----
@@ -102,6 +101,17 @@ def run() -> dict:
 
 def test_every_text_has_a_recorded_vector(run: dict) -> None:
     assert run["fallbacks"] == 0, "vectors.npz is missing recordings: re-run scripts/memory_eval.py --live --record"
+
+
+def test_rerank_fixture_covers_every_candidate_set(run: dict) -> None:
+    assert run["rerank_misses"] == 0, "rerank_scores.json is missing pairs: re-run scripts/memory_eval.py --live --record"
+    assert run["rerank_timing"] == {}  # offline: no live call was made
+
+
+def test_offline_rerank_run_is_deterministic(run: dict) -> None:
+    assert SETTINGS.get("memoryRerank", True) is True  # default on: the run above is the reranked one
+    again = asyncio.run(me.evaluate(SETTINGS))
+    assert again["ranked"] == run["ranked"] and again["scores"] == run["scores"]
 
 
 def test_harness_runs_end_to_end_and_hides_history(run: dict) -> None:

@@ -25,6 +25,12 @@ LEXICAL_HITS = 15        # keyword hits per lexical pass (FTS, then CJK substrin
 CONTEXT_HITS = 40        # most log rows a turn asks retrieval for; the "memories" window share trims further
 SEARCH_HITS = 100        # most rows search_memory ranks before paging
 SEARCH_PAGE = 20         # rows per search_memory page
+# Rerank (search_reranked): a second-stage model reorders the fused rows; any failure leaves the fused order.
+RERANK_CANDIDATES = 30   # fused rows sent to the reranker; the rest keep their fused place after them (the call's cost grows with this)
+RERANK_TIMEOUT = 1.5     # seconds a turn waits for it; past that the turn keeps the fused order (a reply must not stall on a ranking aid)
+RERANK_MIN_CANDIDATES = 4  # fewer rows are not worth a network call: the order barely matters at that size
+RERANK_MIN_SCORE = 0.0   # scored rows below this are dropped; 0 keeps all (to be calibrated against the eval before it is raised)
+RERANK_BACKOFF = 300.0   # seconds after a failed call before trying again, like Embedder.BACKOFF_SECONDS: a dead route costs one wait, not one per turn
 
 # ---- Write-time dedupe ----
 # A new memory this close (cosine) to a live, unpinned row in scope supersedes it instead of adding a row: the same

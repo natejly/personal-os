@@ -24,20 +24,43 @@ test('every sidebar nav item opens its view and is marked current; Today brings 
   })
 })
 
-test('app switcher icons open Lists, Calendar, Mail and the page agent; one is pressed at a time', async ({ grain }) => {
-  const { page } = grain
-  const sw = page.getByRole('toolbar', { name: 'Apps' })
-  for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/]]) {
-    await sw.getByRole('button', { name }).click()
-    await heading(page, h)
-    await expect(sw.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true')
-    for (const other of ['Lists', 'Calendar', 'Mail'].filter((x) => x !== name)) {
-      await expect(sw.getByRole('button', { name: other })).toHaveAttribute('aria-pressed', 'false')
+test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its view and is marked current', async () => {
+  await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
+    const labels = await page.locator('.sidebar .nav-item:not(.nav-more) > span:first-of-type').allInnerTexts()
+    const order = ['Today', 'Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Memory', 'Library']
+    expect(labels.filter((l) => order.includes(l))).toEqual(order)
+    for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/], ['Health', /Health/]]) {
+      await sidebarItem(page, name).click()
+      await heading(page, h)
+      await expect(sidebarItem(page, name)).toHaveAttribute('aria-current', 'page')
+      await expect(sidebarItem(page, 'Today')).not.toHaveAttribute('aria-current', 'page')
     }
-  }
-  // the switcher is in every view's title bar, including chat
+    // the title bar no longer carries the app icons: no Apps toolbar, no icon per view
+    await expect(page.getByRole('toolbar', { name: 'Apps' })).toHaveCount(0)
+    await expect(page.locator('.app-switch')).toHaveCount(0)
+    expect(consoleErrors).toEqual([])
+  })
+})
+
+test('the title-bar Quick chat button opens and closes the page agent panel', async ({ grain }) => {
+  const { page } = grain
+  const btn = page.getByRole('button', { name: 'Quick chat (⌘I)' })
+  const panel = page.getByRole('complementary', { name: 'Page agent' })
+  // one button per title bar, and it is the only thing in the switcher slot
+  await expect(page.locator('.app-switcher button')).toHaveCount(1)
+  await expect(btn).toHaveAttribute('aria-pressed', 'false')
+  await expect(panel).toHaveCount(0)
+  await btn.click()
+  await expect(panel).toBeVisible()
+  await expect(page.locator('.app.page-agent-open')).toHaveCount(1)
+  await expect(btn).toHaveAttribute('aria-pressed', 'true')
+  await btn.click()
+  await expect(panel).toHaveCount(0)
+  await expect(page.locator('.app.page-agent-open')).toHaveCount(0)
+  await expect(btn).toHaveAttribute('aria-pressed', 'false')
+  // it is present in a chat's title bar too
   await page.getByRole('button', { name: /New chat/ }).first().click()
-  await expect(page.getByRole('toolbar', { name: 'Apps' })).toBeVisible()
+  await expect(btn).toBeVisible()
   expect(grain.consoleErrors).toEqual([])
 })
 
@@ -313,7 +336,7 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       await check(n)
     }
     for (const n of ['Lists', 'Calendar', 'Mail']) {
-      await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: n }).click()
+      await sidebarItem(page, n).click()
       await check(n)
     }
     await page.getByRole('button', { name: /New chat/ }).first().click()

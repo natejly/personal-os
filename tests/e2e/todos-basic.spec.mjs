@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures.mjs'
 import { openTodos, addBox, dayStr, ignoreErrs, row } from './helpers/todos.mjs'
 
-test('open from switcher and menu shortcut; add, reject blank, no duplicate on double Enter', async ({ grain }) => {
+test('open from the sidebar row and menu shortcut; add, reject blank, no duplicate on double Enter', async ({ grain }) => {
   const { page } = grain
   await openTodos(page)
   await expect(page.getByText('Nothing open')).toBeVisible()

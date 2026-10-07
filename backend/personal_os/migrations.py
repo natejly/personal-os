@@ -382,6 +382,11 @@ def _autonomous_by_default(c: sqlite3.Connection) -> None:
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('autonomousByDefault', ?)", (json.dumps(True),))
 
 
+def _drop_nav_placement(c: sqlite3.Connection) -> None:
+    """Views no longer move to the title bar: Lists, Calendar, Mail and Health are sidebar rows, so the stored placement is dead."""
+    c.execute("DELETE FROM settings WHERE key = 'navPlacement'")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
@@ -407,6 +412,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (21, "autonomous_by_default", _autonomous_by_default),
     (22, "drop_meetings_activity", _drop_meetings_activity),
     (23, "messages_kind", _messages_kind),
+    (24, "drop_nav_placement", _drop_nav_placement),
 ]
 
 

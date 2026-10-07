@@ -2,6 +2,9 @@
 import { join } from 'node:path'
 import { ROOT, spawnBackend, waitHealthy } from '../harness.mjs'
 
+/** A sidebar nav row by label (Lists, Calendar, Mail, Health, Files...). */
+export const navItem = (page, name) => page.locator('.sidebar .nav-item', { hasText: new RegExp(`^\\s*${name}`) }).first()
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /** Click a native menu item by its label (what its accelerator would do). Walks submenus. */

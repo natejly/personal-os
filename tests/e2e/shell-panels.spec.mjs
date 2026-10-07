@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { menu } from './helpers/shell.mjs'
+import { menu, navItem } from './helpers/shell.mjs'
 
 const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
 const panel = (page) => page.getByRole('complementary', { name: 'Page agent' })
@@ -27,14 +27,14 @@ test('page agent carries each view\'s content to the model', async ({ grain }) =
   await page.waitForSelector('.sidebar')
 
   // Todos
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+  await navItem(page, 'Lists').click()
   await heading(page, /Lists/)
   await expect(page.getByText('Zanzibar quarterly taxes').first()).toBeVisible()
   let body = await askPageAgent(grain)
   expect(body).toContain('Zanzibar quarterly taxes')
   await expect(panel(page).locator('.page-agent-ctx')).toContainText('Lists')
   // The panel follows the view: switch to Calendar, context label changes
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Calendar' }).click()
+  await navItem(page, 'Calendar').click()
   await expect(panel(page).locator('.page-agent-ctx')).toContainText('Calendar')
   // Files: open the doc, then ask
   await page.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()
@@ -70,7 +70,7 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await api('/todos', { method: 'POST', body: { title: 'Hint probe todo' } })
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+  await navItem(page, 'Lists').click()
   await menu(grain, 'Page Agent')
   const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)

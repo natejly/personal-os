@@ -16,7 +16,7 @@ Mental model:
 - **Chats** run a tool loop. Tools read and write the app, Google, the Mac and a sandbox.
 - **Memory and graph**: auto-learn saves memories and graph links after replies. **Projects** group chats with their own instructions, files and memories.
 - **Files** (⌘4) holds notes you write and uploads. Settings → Memory (⌘6) reviews memory and the writing Voice profile.
-- **Lists** (todos), **Calendar**, **Mail** and **Health** are apps at the top right of the title bar. Settings → Modules moves any view to the sidebar, the title bar or out of sight (`navPlacement`, `src/renderer/src/shell/nav.tsx`).
+- **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Modules hides any view. The top-right title-bar button opens the ⌘I panel.
 - **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
 - **Autonomy**: a reply can hand work to subagents (`agent_spawn`). "Work autonomously" in any chat (beside plan mode; Plan first / Ask as it goes / Work and propose, with a turn limit) turns it into a longer session with its own plan and workspace: a strip above the composer (state, turns, Needs you, Start/Pause/Resume/Stop) opens a side panel with Files / Changes / Review; settings are under Settings → Autonomy. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
@@ -32,7 +32,7 @@ First run, as a user:
 4. Drop or paste a file to attach it; it rides on the message as a chip and its text is inlined for the model up to a size cap.
 5. Set a **Working folder** on the chat if the assistant should touch files. With none set, file and shell tools work in `~/Grain` (`mac.py`).
 6. ⌘4 Files: ⌘⇧N new note, ⌘⇧D today's note, ⌘U upload. ⌘I opens the Page agent, a chat bound to the open note.
-7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are the title-bar icons (⌘2, ⌘3, ⌘5).
+7. Sidebar **+** next to Projects makes a project. Lists, Calendar and Mail are sidebar rows (⌘2, ⌘3, ⌘5).
 8. Spaces: ⌘⇧C, then Add widget or right-click the plane. Library for agents and automations.
 
 Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I page agent, ⌘⇧C

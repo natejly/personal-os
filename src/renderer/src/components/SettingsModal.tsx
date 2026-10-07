@@ -10,7 +10,7 @@ import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
 import { HOME_MODULES } from '../modules'
 import { homeModuleOn } from '../moduleToggles'
-import { navEntries, placeOf, type NavPlace } from '../shell/nav'
+import { navEntries } from '../shell/nav'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
 import { chatModelIds } from '../lib/modelLabel'
@@ -290,11 +290,6 @@ export default function SettingsModal(): JSX.Element {
   }
 
   const hidden = draft.hiddenViews ?? []
-  const setPlace = (v: string, p: NavPlace | 'hidden'): void => {
-    const shown = hidden.filter((x) => x !== v)
-    if (p === 'hidden') patch({ hiddenViews: [...shown, v] })
-    else patch({ hiddenViews: shown, navPlacement: { ...(draft.navPlacement ?? {}), [v]: p } })
-  }
   const homeOn = (k: string): boolean => homeModuleOn(draft, k)
   const toggleHome = (k: string): void =>
     patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
@@ -576,16 +571,17 @@ export default function SettingsModal(): JSX.Element {
               </AdvGroup>
 
               <AdvGroup id="layout" title="Layout" {...gp}>
-                <p className="muted small">Where each view lives: a row in the sidebar, an icon at the right of every title bar, or hidden. Menu shortcuts and ⌘K still reach a hidden view.</p>
+                <p className="muted small">Which views get a row in the sidebar. Menu shortcuts and ⌘K still reach a hidden view.</p>
                 <div className="setting-list">
                   {navEntries().map((e) => {
-                    const place: NavPlace | 'hidden' = hidden.includes(e.view) ? 'hidden' : placeOf(draft, e)
+                    const off = hidden.includes(e.view)
                     return (
                       <div key={e.view} className="place-row">
                         <span className="toggle-text"><b>{e.label}</b></span>
                         <div className="seg" role="group" aria-label={`Where ${e.label} shows`}>
-                          {([['sidebar', 'Sidebar'], ['apps', 'Title bar'], ['hidden', 'Hidden']] as const).map(([p, label]) => (
-                            <button key={p} aria-pressed={place === p} onClick={() => setPlace(e.view, p)}>{label}</button>
+                          {([[false, 'Sidebar'], [true, 'Hidden']] as const).map(([h, label]) => (
+                            <button key={label} aria-pressed={off === h}
+                              onClick={() => patch({ hiddenViews: [...hidden.filter((x) => x !== e.view), ...(h ? [e.view] : [])] })}>{label}</button>
                           ))}
                         </div>
                       </div>

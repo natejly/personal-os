@@ -520,7 +520,7 @@ def _check_url(url: str, ctx: dict[str, Any], settings: dict[str, Any], redirect
     # Tainted: the URL must match one the model did not author, whole. Allow-listing the *host* is not enough --
     # the path and the subdomain labels are model-authored bytes, i.e. an exfiltration channel to that host. Redirect
     # hops are chosen by the server, not by the model, so they carry no model-authored data and get the SSRF checks only.
-    if ctx.get("tainted") and not redirect:
+    if ctx.get("tainted") and not redirect and not permissions.get(settings, "allowAllConnections"):
         if not any(host == e or host.endswith("." + e) for e in _allowed_hosts(settings)) and _norm_url(url) not in _allowed_urls(ctx):
             raise UrlBlocked("fetch_url is restricted: this reply has already read untrusted content, so it can only fetch a URL exactly as "
                              f"the user or a web search gave it, or any URL on an allow-listed host. '{url}' is neither", TAINTED_HINT)

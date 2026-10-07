@@ -82,6 +82,11 @@ DEFAULTS: dict[str, Any] = {
     # and a read-only reviewer checks the result against the brief before the desk may finish.
     "deskDoneGate": True,
     "deskSelfReview": True,
+    # Connections are unrestricted: the host allow-lists (fetch_url and browser after untrusted content, the shell and
+    # sandbox egress proxy) admit any public hostname, and every MCP tool runs without a per-tool grant unless a grant says
+    # "off". Private addresses, the MCP taint rule, deny rules and permissionMode are unchanged. migration 25 turns it on for
+    # an install that already has user data; a fresh install starts off.
+    "allowAllConnections": False,
 }
 KEYS = frozenset(DEFAULTS)
 # An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.

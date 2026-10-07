@@ -164,6 +164,8 @@ def register(tb: Any) -> None:
 
     # ---------------- navigation ----------------
     def host_allowed(url: str) -> bool:
+        if permissions.get(settings(), "allowAllConnections"):
+            return True
         extra = {h for h in (str(x).strip().lower().lstrip(".") for x in (permissions.get(settings(), "browserAllowlist") or ())) if h}
         host = (urllib.parse.urlsplit(url).hostname or "").lower()
         return any(host == e or host.endswith("." + e) for e in extra)

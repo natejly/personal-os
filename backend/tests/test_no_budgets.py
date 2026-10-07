@@ -371,7 +371,7 @@ def test_migration_drops_nav_placement() -> None:
     con = sqlite3.connect(next(d.glob("*.db")))
     con.execute("PRAGMA user_version = 23")
     con.commit()
-    assert migrations.run(con) == [24]
+    assert migrations.run(con) == list(range(24, migrations.latest() + 1))
     left = {r[0] for r in con.execute("SELECT key FROM settings")}
     con.close()
     assert "navPlacement" not in left and "uiZoom" in left

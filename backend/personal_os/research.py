@@ -1,6 +1,6 @@
 """deep_research: plan sub-questions, fan researchers out as read-only subagents, then reconcile one cited answer.
 
-The researchers are ordinary subagents (subagents.py), so concurrency, depth, budget roll-up and Stop all behave as
+The researchers are ordinary subagents (subagents.py), so concurrency, depth, usage roll-up and Stop all behave as
 they do for agent_spawn. This module only plans, reads their JSON reports, and writes the final answer. Sources go
 through the shared citation registry (tools._cite), so [n] chips and the sources list work unchanged. The trail
 (plan, steps, sources considered, dropped claims) rides on the tool event under `research`; the model never sees it.
@@ -13,7 +13,7 @@ import re
 import urllib.parse
 from typing import Any
 
-from . import llm, redact
+from . import limits, llm, redact
 from .tools import ToolSpec, _cite, _obj, tool_error, web_ref
 
 RESEARCH_TOOLS = ["web_search", "fetch_url", "read_feed", "youtube_video", "github_read"]
@@ -96,7 +96,7 @@ async def run(tb: Any, ctx: dict[str, Any], question: str, depth: str = "normal"
     steps: list[dict[str, Any]] = []
     claims: list[dict[str, str]] = []
     dropped = 0
-    sem = asyncio.Semaphore(max(1, sub._int("subagentMaxConcurrent") - len(sub.running())))
+    sem = asyncio.Semaphore(max(1, limits.slots(sub.settings(), "subagentMaxConcurrent") - len(sub.running())))
 
     async def researcher(step: dict[str, Any]) -> None:
         nonlocal dropped

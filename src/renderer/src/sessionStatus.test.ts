@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
-import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
+import { chatNotice, finishNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -153,6 +153,30 @@ test('the server wins where it holds more, and its own rows come through untouch
   assert.deepEqual(ids(merged), ['m1', 'm2'])
 })
 
+// Regression: ISSUE-008 — streamed text is duplicated in a default (autonomous) chat
+// Found by /qa on 2026-10-06
+// Report: .gstack/qa-reports/run-20261006T212932Z/
+test('a refetch that holds more than the stream has applied cannot replace the reply the stream is still filling', () => {
+  // The stored row already has the whole reply while this window still has deltas to apply; taking the longer copy
+  // would let those deltas append to text that already holds them.
+  const local = convo([msg('m1', 'plain line 0\n', { reasoning: 'think' })])
+  const remote = convo([msg('m1', 'plain line 0\nplain line 1\n', { reasoning: 'think harder' })])
+  const live = mergeConversation(local, remote, true, 'm1').messages?.[0]
+  assert.equal(live?.content, 'plain line 0\n')
+  assert.equal(live?.reasoning, 'think')
+  const idle = mergeConversation(local, remote, true).messages?.[0]
+  assert.equal(idle?.content, 'plain line 0\nplain line 1\n', 'with no stream filling it the stored copy still wins')
+  assert.equal(mergeConversation(local, remote, true, 'other').messages?.[0].content, 'plain line 0\nplain line 1\n')
+})
+
+test('a refetch mid-reply keeps the untrusted mark the stream raised, which the stored row only gets when the run ends', () => {
+  const local = convo([msg('m1', 'x')], { settings: { tainted: true, taint_sources: ['web_fetch'] } as Conversation['settings'] })
+  const remote = convo([msg('m1', 'x')])
+  assert.deepEqual(mergeConversation(local, remote, true).settings.taint_sources, ['web_fetch'])
+  assert.equal(mergeConversation(local, remote, true).settings.tainted, true)
+  assert.ok(!mergeConversation(local, remote, false).settings.tainted, 'with nothing streaming the stored row is the truth (a cleared mark stays cleared)')
+})
+
 test('tool events and spans survive a refetch that has none of them yet', () => {
   const events = [{ id: 't1', name: 'web_search', pending: false } as unknown as ToolEvent]
   const trace = [{ id: 's1' } as unknown as Span]
@@ -222,6 +246,7 @@ test('chatNotice: one kind per status transition, none for a stop or a steer seg
   assert.equal(chatNotice('error', 'error', ev('error', { message: 'x' })), null)
   assert.equal(chatNotice('working', 'working', seg), null)
   assert.equal(chatNotice('working', 'done', done(null, true)), null, 'a stopped reply is not news')
+  assert.equal(chatNotice('working', 'done', ev('done', { id: null, error: null, stopped: false })), null, 'a silent wake left no reply')
   assert.equal(chatNotice('working', 'working', ev('delta', { id: 'm1', text: 'a' })), null)
 })
 
@@ -232,4 +257,20 @@ test('a stale fetch keeps the local error and outcome the stream stamped', () =>
   assert.equal(merged.messages?.[0].outcome, 'interrupted')
   const fresh = mergeConversation(convo([local]), convo([msg('m1', 'text', { error: 'Server said' })]), false)
   assert.equal(fresh.messages?.[0].error, 'Server said', 'the server row still wins when it has one')
+})
+
+test('finishNotice: once, when a chat or desk run replies or fails; never for a silent wake, a stop, a job or a worker', () => {
+  const run = (o: Record<string, unknown> = {}): RunInfo => ({ run_id: 'r1', conversation_id: 'c1', message_id: 'm1', seq: 3, started_at: 1, live: true, answering: true, status: 'running', kind: 'chat', replied: false, ...o }) as RunInfo
+  const live = run()
+  assert.equal(finishNotice(undefined, live), null, 'a run that has only begun')
+  assert.equal(finishNotice(live, run({ answering: false, replied: true })), 'reply', 'the reply becoming whole')
+  assert.equal(finishNotice(run({ answering: false, replied: true }), run({ answering: false, replied: true, live: false, status: 'done' })), null, 'the end after the reply is not a second notice')
+  assert.equal(finishNotice(undefined, run({ live: false, status: 'done', replied: true })), 'reply', 'a run first seen already ended')
+  assert.equal(finishNotice(live, run({ live: false, status: 'done', replied: false })), null, 'a silent wake never rings')
+  assert.equal(finishNotice(live, run({ live: false, status: 'error', error: 'boom' })), 'failed')
+  assert.equal(finishNotice(live, run({ answering: false, replied: true, error: 'boom' })), 'failed', 'a reply that ended in an error')
+  assert.equal(finishNotice(live, run({ answering: false, replied: true, stopped: true })), null, 'a stopped reply is not news')
+  assert.equal(finishNotice(live, run({ kind: 'desk', answering: false, replied: true })), 'reply')
+  assert.equal(finishNotice(live, run({ kind: 'job', answering: false, replied: true })), null)
+  assert.equal(finishNotice(live, run({ kind: 'worker', answering: false, replied: true })), null)
 })

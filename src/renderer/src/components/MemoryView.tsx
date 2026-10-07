@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Download, Upload } from 'lucide-react'
 import { useStore, type Scope } from '../store'
-import type { Memory, MemoryProposal } from '@shared/types'
+import type { Memory, MemoryProposal, MemorySource } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import { api } from '../lib/api'
 import { downloadJson, pickJson } from '../lib/jsonFile'
+import { memorySections } from '../lib/memorySections'
 
-const KINDS = ['fact', 'preference', 'goal', 'note']
+const KINDS = ['fact', 'preference', 'instruction', 'goal', 'note']
 
 function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX.Element {
   const { updateMemory, deleteMemory, selectChat, projects } = useStore()
+  const expired = m.invalid_at == null && m.expires_at != null && m.expires_at * 1000 <= Date.now()
   const isolated = projects.some((p) => p.id === m.project_id && p.memory_mode === 'isolated')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(m.content)
@@ -18,13 +20,20 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
     if (versions) setVersions(null)
     else void api.memories.history(m.id).then(setVersions).catch(() => setVersions([]))
   }
+  // undefined: not asked yet; null: the source message is gone.
+  const [src, setSrc] = useState<MemorySource | null | undefined>(undefined)
+  const [showSrc, setShowSrc] = useState(false)
+  const toggleSource = (): void => {
+    setShowSrc((v) => !v)
+    if (src === undefined) void api.memories.source(m.id).then(setSrc).catch(() => setSrc(null))
+  }
   const commit = (): void => {
     setEditing(false)
     if (draft.trim() && draft !== m.content) void updateMemory(m.id, { content: draft })
     else setDraft(m.content)
   }
   return (
-    <div className={`mem-row ${m.pinned ? 'pinned' : ''}`}>
+    <div className={`mem-row ${m.pinned ? 'pinned' : ''} ${expired ? 'expired' : ''}`}>
       <div className="mem-main">
         {editing ? (
           <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit}
@@ -37,9 +46,20 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           <span className="tag" title={m.source === 'auto' ? 'Extracted automatically' : 'Added by you'}>{m.source === 'auto' ? <Wand2 size={10} /> : <User size={10} />}{m.source}</span>
           {showProject && <ProjectChip projectId={m.project_id} showPersonal />}
           {m.project_id && !isolated && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
-          {m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
+          {m.source_message_id
+            ? <button className="link small" title="Show the message this was learned from" aria-expanded={showSrc} onClick={toggleSource}>source</button>
+            : m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
           <span className="muted">{new Date(m.updated_at * 1000).toLocaleDateString()}</span>
+          {m.expires_at != null && <span className="muted">until {new Date((m.expires_at - 1) * 1000).toLocaleDateString()}</span>}
         </div>
+        {showSrc && src !== undefined && (src
+          ? (
+            <div>
+              <blockquote className="mem-source">“{src.quote}”</blockquote>
+              <div className="mem-meta"><span className="muted">{src.title}</span><button className="link small" onClick={() => void useStore.getState().openChatAt(src.conversation_id, src.message_id)}>Open in chat</button></div>
+            </div>
+          )
+          : <p className="muted small">The source message is gone.</p>)}
         {versions && (versions.length < 2
           ? <p className="muted small">No earlier versions.</p>
           : versions.map((v) => <p key={v.id} className="muted small" style={v.id === m.id ? { fontWeight: 600 } : { textDecoration: 'line-through' }}>{new Date(v.created_at * 1000).toLocaleDateString()} · {v.content}</p>))}
@@ -79,12 +99,12 @@ function ProposalRow({ p, byId, labels, onApply, onDismiss }: { p: MemoryProposa
 function HistoryRow({ m, byId, onRestore }: { m: Memory; byId: Map<string, Memory>; onRestore: () => void }): JSX.Element {
   const next = m.superseded_by ? byId.get(m.superseded_by) : undefined
   return (
-    <div className="mem-row history">
+    <div className={`mem-row history ${m.invalid_at == null ? 'expired' : ''}`}>
       <div className="mem-main">
         <p className="mem-before">{m.content}</p>
         <div className="mem-meta">
-          <span className="muted">{next ? `replaced by “${next.content}”` : 'forgotten'}</span>
-          <span className="muted">{m.invalid_at ? new Date(m.invalid_at * 1000).toLocaleDateString() : ''}</span>
+          <span className="muted">{next ? `replaced by “${next.content}”` : (m.invalid_at == null ? (m.expires_at != null ? `until ${new Date((m.expires_at - 1) * 1000).toLocaleDateString()}` : 'expired') : 'forgotten')}</span>
+          {m.invalid_at != null && <span className="muted">{new Date(m.invalid_at * 1000).toLocaleDateString()}</span>}
         </div>
       </div>
       <div className="mem-actions">
@@ -112,10 +132,11 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const [showHistory, setShowHistory] = useState(false)
   const [all, setAll] = useState<Memory[]>([])
 
+  const sections = useMemo(() => memorySections(memories), [memories])
   useEffect(() => { void refreshMemories(query) }, [query, refreshMemories])
   const loadHistory = (): void => { void api.memories.listWithHistory(scope).then(setAll).catch(() => setAll([])) }
   useEffect(() => { if (showHistory) loadHistory() }, [showHistory, scope, memories]) // eslint-disable-line react-hooks/exhaustive-deps
-  const past = showHistory ? all.filter((m) => m.invalid_at != null && (!query || m.content.toLowerCase().includes(query.toLowerCase()))) : []
+  const past = showHistory ? all.filter((m) => (m.invalid_at != null || (m.expires_at != null && m.expires_at * 1000 <= Date.now())) && (!query || m.content.toLowerCase().includes(query.toLowerCase()))) : []
   const byId = new Map(all.map((m) => [m.id, m]))
   const [proposals, setProposals] = useState<MemoryProposal[]>([])
   const [tidying, setTidying] = useState(false)
@@ -208,7 +229,13 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
           <p className="muted small">{autoLearn ? 'Grain saves facts and preferences from your chats as you go' : 'Learning from chats is off in Settings'}, or type one in the box above.</p>
         </div>
       ))}
-      {memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
+      {query && memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
+      {!query && ([['Profile', 'Always loaded into every chat in this scope.', sections.profile], ['Log', 'Dated facts, newest first. Recalled when relevant.', sections.log], ['Notes', 'Kept until a date, then moved to History.', sections.notes]] as const).map(([title, hint, rows]) => rows.length > 0 && (
+        <section key={title} className="mem-section">
+          <h5>{title}<span className="muted small">{hint}</span></h5>
+          {rows.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
+        </section>
+      ))}
       {past.map((m) => <HistoryRow key={m.id} m={m} byId={byId} onRestore={() => void restore(m.id)} />)}
     </div>
   )

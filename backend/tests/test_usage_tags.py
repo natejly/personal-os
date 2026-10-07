@@ -28,19 +28,7 @@ def test_usage_tags() -> None:
         row = c.execute("SELECT tag, round FROM usage_log WHERE tag='job:j1'").fetchone()
     assert (row["tag"], row["round"]) == ("job:j1", 3)
 
-    assert not u.alert_state({})["over"]
-    st = u.alert_state({"usageAlerts": {"dailyCost": 0.5, "monthlyCost": 0}})
-    assert st["daily"]["over"] and not st["monthly"]["over"] and st["over"]
-
-    # the app announces once per day however many rows follow
-    sent: list = []
-    appmod.usage = u
-    appmod.events.publish = lambda ev, data: sent.append((ev, data))
-    cfg = {"usageAlerts": {"dailyCost": 0.5, "monthlyCost": 0}}
-    appmod._alerted.clear()
-    appmod._check_usage_alert(cfg)
-    appmod._check_usage_alert(cfg)
-    assert len(sent) == 1 and sent[0][0] == "usage_alert" and sent[0][1]["period"] == "daily"
+    assert not hasattr(u, "alert_state") and not hasattr(appmod, "_check_usage_alert"), "spend alerts are gone"
 
 
 def test_old_db_migrates() -> None:

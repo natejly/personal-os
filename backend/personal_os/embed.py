@@ -57,6 +57,16 @@ def rrf(lists: Sequence[Sequence[str]], weights: Sequence[float] | None = None, 
     return sorted(scores.items(), key=lambda kv: -kv[1])
 
 
+def _log_usage(model: str, raw: Any, duration_ms: int, chars: int) -> None:
+    """One usage row per embeddings request (kind 'embedding'); a provider that reports no usage is estimated from length."""
+    try:
+        reported = raw.get("prompt_tokens") if isinstance(raw, dict) else None
+        llm._emit_usage(model, "embedding", {"prompt_tokens": reported, "completion_tokens": 0} if reported is not None else None,
+                        duration_ms, chars, 0)
+    except Exception:  # noqa: BLE001 - accounting must never break indexing or recall
+        pass
+
+
 async def embed_texts(settings: dict[str, Any], texts: list[str], model: str | None = None) -> list[list[float]]:
     """POST {baseUrl}/v1/embeddings (OpenAI shape), 32 texts per request. Raises EmbedError."""
     name = model or str(settings.get("embeddingModel") or "")
@@ -67,11 +77,14 @@ async def embed_texts(settings: dict[str, Any], texts: list[str], model: str | N
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             for i in range(0, len(texts), BATCH):
                 batch = texts[i:i + BATCH]
+                t0 = time.time()
                 r = await client.post(llm._url(settings, "/embeddings"), headers=llm._headers(settings),
                                       json={"model": name, "input": batch})
                 if r.status_code >= 400:
                     raise EmbedError(f"{r.status_code}: {r.text[:200]}")
-                rows = sorted(r.json()["data"], key=lambda d: d.get("index", 0))
+                body = r.json()
+                rows = sorted(body["data"], key=lambda d: d.get("index", 0))
+                _log_usage(name, body.get("usage"), int((time.time() - t0) * 1000), sum(len(t) for t in batch))
                 if len(rows) != len(batch):
                     raise EmbedError("embedding count mismatch")
                 out.extend(list(map(float, d["embedding"])) for d in rows)

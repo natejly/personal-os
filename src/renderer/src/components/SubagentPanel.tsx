@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { SubagentView } from '@shared/types'
 import { api } from '../lib/api'
-import { useStore } from '../store'
+import { useStore, useWorkerFace, useWorkers } from '../store'
 import Face from './Face'
 import MarkdownPreview from './MarkdownPreview'
 
-const DONE = ['done', 'error', 'interrupted']
+const DONE = ['done', 'error', 'interrupted', 'stopped']
 
 /**
  * One subagent, opened from its run card or its face in the crew ring: the transcript as it grows, and a box to
@@ -40,6 +40,9 @@ export default function SubagentPanel({ id }: { id: string }): JSX.Element {
 
   const role = String(view?.run.input?.role ?? view?.agent?.role ?? 'agent')
   const parentConv = view?.run.input?.conversation_id as string | undefined
+  // A worker's face follows its resume chain and its Library agent; a plain subagent wears its own id.
+  const worker = useWorkers(parentConv).find((x) => x.id === id)
+  const face = useWorkerFace({ id, agent: worker?.agent ?? role, origin: worker?.origin })
 
   const submit = async (): Promise<void> => {
     const t = text.trim()
@@ -64,7 +67,7 @@ export default function SubagentPanel({ id }: { id: string }): JSX.Element {
     <div className="modal-backdrop" onClick={() => openSubagent(null)}>
       <div className="modal subagent-panel modal-free" role="dialog" aria-label={`Subagent ${role}`} onClick={(e) => e.stopPropagation()}>
         <header>
-          <h2><Face name={id} status={view?.agent?.state ?? status} size={22} /> {role} <span className="muted">{id.slice(-4)}</span></h2>
+          <h2><Face {...face} status={view?.agent?.state ?? status} size={22} /> {role} <span className="muted">{id.slice(-4)}</span></h2>
           <span className="muted small">{view?.agent?.now || status}</span>
           <button className="icon-btn ghost" aria-label="Close" onClick={() => openSubagent(null)}><X size={14} /></button>
         </header>

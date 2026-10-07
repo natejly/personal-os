@@ -73,10 +73,6 @@ def _norm_tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def jaccard(a: str, b: str) -> float:
-    return _jaccard_sets(_norm_tokens(a), _norm_tokens(b))
-
-
 def _jaccard_sets(ta: set[str], tb: set[str]) -> float:
     return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
 
@@ -315,7 +311,10 @@ class Consolidator:
         if any(r is None or r["pinned"] or r["invalid_at"] is not None or r["content"] != pl["snapshot"].get(r["id"]) for r in rows):
             return False
         first = rows[0]
-        merged = self.memories.supersede(first["id"], pl["text"], source="auto")
+        # The merged row keeps the newest source among its parts, so a tidy-up does not orphan its provenance.
+        src = max((r for r in rows if r["source_message_id"] or r["source_conversation_id"]), key=lambda r: r["created_at"], default=None)
+        prov = {"conversation_id": src["source_conversation_id"], "message_id": src["source_message_id"]} if src else None
+        merged = self.memories.supersede(first["id"], pl["text"], source="auto", provenance=prov)
         if not merged:
             return False
         for r in rows[1:]:

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Search, List, Share2, PenLine } from 'lucide-react'
+import { Search, Columns2, List, Share2, PenLine } from 'lucide-react'
 import { useStore, type MemoryMode, type Scope } from '../store'
 import MemoryView from './MemoryView'
 import GraphView from './GraphView'
 import StyleView from './StyleView'
 
 const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string }[] = [
+  { key: 'split', label: 'Split', icon: <Columns2 size={13} />, title: 'Memories and graph side by side' },
   { key: 'list', label: 'List', icon: <List size={13} />, title: 'Memories only' },
   { key: 'graph', label: 'Graph', icon: <Share2 size={13} />, title: 'Knowledge graph only' },
   { key: 'style', label: 'Voice', icon: <PenLine size={13} />, title: 'How you write, and the samples it was learned from' }
@@ -32,17 +33,19 @@ export default function MemoryPanel({ projectId }: { projectId?: string; embedde
 
   useEffect(() => { void loadScope(scope) }, [scope, loadScope])
 
+  const entityCount = graph.nodes.filter((n) => !n.properties?.self && !n.properties?.literal).length
   const showStyle = mode === 'style'
-  const showList = mode === 'list'
-  const showGraph = mode === 'graph'
+  // 'style' is a page of its own: a voice profile has nothing to sit side by side with.
+  const showList = !showStyle && mode !== 'graph'
+  const showGraph = !showStyle && mode !== 'list'
 
   return (
     <div className="memory-panel embedded">
       <div className="memory-toolbar">
-        <span className="muted small">{showStyle ? styleCount : `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} · ${graph.nodes.length} entit${graph.nodes.length === 1 ? 'y' : 'ies'}, ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}`}</span>
+        <span className="muted small">{showStyle ? styleCount : `${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} · ${entityCount} entit${entityCount === 1 ? 'y' : 'ies'}, ${graph.edges.length} relation${graph.edges.length === 1 ? '' : 's'}`}</span>
         <div className="toolbar-right">
           {!showStyle && (
-            <label className="search"><Search size={14} /><input placeholder={showGraph ? 'Find entity' : 'Search memory'} value={q} onChange={(e) => setQ(e.target.value)} /></label>
+            <label className="search"><Search size={14} /><input placeholder={showGraph && !showList ? 'Find entity' : 'Search memory'} value={q} onChange={(e) => setQ(e.target.value)} /></label>
           )}
           <div className="seg" role="group" aria-label="Memory layout">
             {MODES.map((m) => (

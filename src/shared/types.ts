@@ -14,8 +14,7 @@ export interface Project {
 }
 
 /**
- * A cited source. An excerpt has chunk_id; a read span (kind 'range': a pinned file, a read_document slice, doc or
- * meeting lines) has start/end into the text its viewer loads; a web page (source 'web') has url and opens in the browser.
+ * A cited source. An excerpt has chunk_id; a read span (kind 'range': a pinned file, a read_document slice, or doc) has start/end into the text its viewer loads; a web page (source 'web') has url and opens in the browser.
  */
 export interface Citation {
   name: string
@@ -31,8 +30,6 @@ export interface Citation {
   kind?: 'range'
   start?: number
   end?: number
-  meeting_id?: string
-  part?: string
   url?: string
   title?: string
   domain?: string
@@ -44,23 +41,21 @@ export interface Citation {
 export interface ContextUsed {
   project: { id: string; name: string } | null
   memories: { id: string; content: string; project_id: string | null }[]
-  nodes: { id: string; label: string; type: string }[]
+  nodes: { id: string; label: string; type: string; kind?: 'self' | 'value' }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
   /** Every source the reply may cite. `n` is its citation number ("[n]"); absent on messages saved before citations. */
   chunks: Citation[]
-  /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
-  activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
   skills?: { id: string; name: string; description: string }[]
   /** What the user was looking at when they asked, when the turn came from the page agent (⌘I). */
   page: PageContext | null
   /** The writing-style profile this reply drafted with; null when there is none or the chat opted out. */
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
-  /** The recent-meetings block, verbatim; null when meetings are off or the chat opted out. */
-  meetings: string | null
   /** Pinned documents carried whole this turn. Absent on older messages. */
   pinned?: { document_id: string; name: string }[]
-  /** Items dropped per section because it hit its token budget (contextBudget). */
+  /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
+  profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
+  /** Items dropped per section because it hit its share of the model's context window. */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
   tools_deferred?: number
@@ -231,6 +226,12 @@ export interface ShowItem {
   name?: string
   mime?: string
   size?: number
+  /** kind=file: an upload; its bytes come from /documents/{id}/raw instead of a path. */
+  documentId?: string
+  /** kind=file: a chat's output (Files → Artifacts); its bytes come from this backend route, since /local/raw refuses the data folder. */
+  rawPath?: string
+  /** An upload only: the original bytes were kept (false = just the extracted text is left). */
+  hasOriginal?: boolean
   /** Where a split panel puts it; unset replaces the active pane (or fills the right one once split). */
   pane?: 'left' | 'right'
 }
@@ -314,17 +315,18 @@ export interface PlanStepRef {
   title: string
 }
 
-/** What the user authorises on a plan card: the steps to keep, by their proposed index, with any edited arguments. */
-export interface PlanEdit {
-  idx: number
-  arguments?: Record<string, unknown>
-}
+/**
+ * What the user authorises on a plan card, one entry per KEPT step (POST /approvals `steps`, plans.parse_plan_edits):
+ * the step by its 0-based proposed index, with `arguments` only when the user edited them. A step left out is
+ * dropped; `steps: null` approves the plan as proposed.
+ */
+export interface PlanEdit { idx: number; arguments?: Record<string, unknown> }
 
 export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule' | 'allow_host'
 
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {
-  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | null
+  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | 'destructive' | null
   /** The subject the card is about, e.g. `Bash(git push origin)` or `doom_loop(fs_grep)`. */
   subject: string | null
   rule: string | null
@@ -365,14 +367,15 @@ export interface ApprovalLogEntry {
   agent: string | null
   tool: string
   args_summary: string
-  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) */
+  /** allow_once | always | deny | edited | plan | auto (ran after the review gate allowed it) | review (desk reviewer) | review-ask (sent to the user) */
   decision: string
-  /** once | conversation | global | rule | plan */
+  /** once | conversation | global | rule | plan | auto-review | allow-all */
   scope: string | null
   rule: unknown
   note: string | null
   reviewer_verdict: string | null
   reviewer_reason: string | null
+  /** 'high' | 'medium' | 'low' when the automatic reviewer gave one. */
   reviewer_model: string | null
   reviewer_ms: number | null
   call_id: string | null
@@ -432,6 +435,12 @@ export interface McpTool {
   /** Set when the server stopped offering it; the row is kept so the slug cannot be reused. */
   missing_since: number | null
   effective: McpEffective
+  /** The server's own annotations, as sent. Self-reported and unverified: never a reason to trust a tool. */
+  annotations?: Record<string, unknown>
+  /** readOnlyHint is true. The server's claim, not a guarantee. */
+  read_only?: boolean
+  /** destructiveHint is true and readOnlyHint is not. Turning such a tool `on` needs an explicit confirm. */
+  destructive?: boolean
   /** Only on /mcp/tools: its server is connected right now. */
   ready?: boolean
   /** Set when the shape changed since the user last saw it; `quarantined` means it is withheld from the model. */
@@ -500,6 +509,8 @@ export interface McpServer {
   url: string
   headers: Record<string, string>
   description: string
+  /** The catalog entry this server was installed from; '' for a hand-added one. */
+  catalog_id?: string
   enabled: boolean
   /** Remote servers only: whether a browser sign-in is stored. null for stdio. */
   signed_in?: boolean | null
@@ -516,6 +527,8 @@ export interface McpServer {
     ready: boolean
     attempts: number
     server_info: McpReport['server_info']
+    resources?: { uri: string; name: string; description: string; mime_type: string }[]
+    prompts?: { name: string; description: string; arguments: { name: string; required?: boolean }[] }[]
   }
   tools: McpTool[]
   eval: McpEvalRecord | null
@@ -524,8 +537,8 @@ export interface McpServer {
 /** A launch config, as the add form holds it and as /mcp/check takes it. */
 export interface McpServerDraft {
   name: string
-  /** sse is refused by the API; a remote server is streamable HTTP. */
-  transport: 'stdio' | 'http'
+  /** A remote server is streamable HTTP, or the older SSE transport. */
+  transport: 'stdio' | 'http' | 'sse'
   command: string
   args: string[]
   cwd: string
@@ -537,12 +550,111 @@ export interface McpServerDraft {
   description: string
 }
 
+/** One field of a catalog entry's install form. A secret goes to the secret store, never into args or the URL. */
+export interface McpCatalogField {
+  id: string
+  label: string
+  secret?: boolean
+  required?: boolean
+  help?: string
+  placeholder?: string
+  default?: string
+  /** Plain fields only: split on newlines/commas into several args. */
+  multiple?: boolean
+}
+
+export interface McpCatalogEntry {
+  id: string
+  name: string
+  description: string
+  category: string
+  /** A lucide icon name in kebab-case. */
+  icon: string
+  publisher: string
+  /** Maintained by the vendor of the service. */
+  official: boolean
+  docs: string
+  transport: 'stdio' | 'http' | 'sse'
+  runtime: 'node' | 'python' | 'docker' | 'binary' | 'remote'
+  auth: 'none' | 'api_key' | 'oauth' | 'env'
+  fields: McpCatalogField[]
+  /** Ids of the servers already installed from this entry. */
+  installed: string[]
+  /** Local program detection (e.g. a coding CLI on this Mac); null when the entry has none. */
+  detected?: { found: boolean; path: string; hint: string } | null
+}
+
+/** Whether the program a local connector is launched with is on the PATH. */
+export interface McpRuntime {
+  command: string
+  found: boolean
+  path: string | null
+  hint: string
+}
+
+export interface McpCatalog {
+  entries: McpCatalogEntry[]
+  categories: string[]
+  runtimes: Record<string, McpRuntime>
+}
+
+/** A search hit from the public MCP registry. Never verified by Grain. */
+export interface McpRegistryResult {
+  id: string
+  name: string
+  description: string
+  version: string
+  repository: string | null
+  verified: false
+  transport: 'stdio' | 'http' | 'sse'
+  install: { command: string; args: string[]; url: string; env: Record<string, string> }
+  secret_keys: string[]
+  env_keys: string[]
+  docs?: string
+}
+
+/** One server found in another app's config. Env and header values never reach the renderer. */
+export interface McpImportServer {
+  ref: string
+  key: string
+  name: string
+  transport: 'stdio' | 'http' | 'sse'
+  command: string
+  args: string[]
+  url: string
+  env_keys: string[]
+  header_keys: string[]
+  /** Env keys whose values will go to the secret store. */
+  secret_keys: string[]
+  installed: boolean
+  /** Label of another source that already lists this same server. */
+  duplicate_of?: string
+  /** False when the server is switched off in the app it came from. */
+  enabled?: boolean
+}
+
+export interface McpImportSource {
+  id: 'claude_desktop' | 'claude_code' | 'cursor' | 'vscode' | 'windsurf' | 'codex' | 'opencode'
+  label: string
+  path: string
+  found: boolean
+  error: string | null
+  servers: McpImportServer[]
+}
+
 /** The trail a deep_research call leaves on its tool event (never shown to the model). */
 export interface ResearchTrail {
   plan: string[]
   steps: { q: string; status: string; sources: { url: string; title: string }[]; claims: number }[]
   sources_considered: { url: string; title: string; n?: number }[]
   dropped: number
+}
+
+/** On a connector tool's `tool_call` event. The flags are the server's own claims. */
+export interface McpToolOrigin {
+  server: string
+  read_only: boolean
+  destructive: boolean
 }
 
 export interface ToolEvent {
@@ -571,7 +683,7 @@ export interface ToolEvent {
   /** Rule context for an ask card: the suggested rules to save and whether a session grant is offered. */
   permission?: PermissionCard | null
   /** The review gate's verdict on this call; 'ask' is why a card opened. */
-  review?: { verdict: 'allow' | 'ask'; reason: string; model: string; ms: number } | null
+  review?: { verdict: 'allow' | 'ask' | 'deny'; reason: string; model: string; ms: number; confidence?: string } | null
   /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
@@ -580,6 +692,8 @@ export interface ToolEvent {
   interrupted?: boolean
   /** Arguments were repaired before the call ran. */
   repaired?: boolean
+  /** Set on a connector's tool: which connector, and what the server claims about it (unverified). */
+  mcp?: McpToolOrigin | null
   /** Refused before the gate: broken JSON, unknown name or signature mismatch. */
   invalid?: 'arguments' | 'name' | 'schema'
   /** Handle of the stored full result (read_tool_result). */
@@ -598,7 +712,7 @@ export interface ToolEvent {
   edited_arguments?: Record<string, unknown> | null
 }
 
-/** Why a reply stopped early: a budget axis, or the repetition breaker. */
+/** Why a reply stopped early. `rounds`, `tokens`, `time` and `cost` only appear on rows stored by an older version. */
 export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
 export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact'
@@ -678,6 +792,36 @@ export interface Message {
   followups?: string[] | null
   /** Set on a user message that replaced an earlier one (edit-and-resend). */
   edited_from?: string | null
+  /** Null for something a person said. Any other value ('wake', 'nudge', ...) is a hidden control turn for the model, never rendered. */
+  kind?: string | null
+}
+
+/** GET /conversations/{id}/workers: one detached background worker of a chat (the assistant's `delegate` tool). */
+export type WorkerStatus = 'queued' | 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted' | 'stopped'
+export interface WorkerInfo {
+  id: string
+  conversation_id: string
+  title: string
+  goal: string
+  status: WorkerStatus
+  /** One-line current action while running, else ''. */
+  now: string
+  queue_position: number | null
+  started_at: number
+  ended_at: number | null
+  resume_of: string | null
+  /** An ended worker with a stored transcript can continue with its history. */
+  resumable: boolean
+  pending_approvals: { call_id: string; tool: string; args: Record<string, unknown> }[]
+  /** The role or Library agent it runs as ('general' for the chat's own tools). */
+  agent?: string
+  /** The id of the worker this one continues (through any chain of resumes), else its own: the face's seed. */
+  origin?: string
+  /** An ended worker's final report, else ''. */
+  report?: string
+  depth: number
+  /** Info only. */
+  cost: number | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -692,15 +836,9 @@ export interface ConversationSettings {
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
-  /** Set only when the chat is created. Memory, graph, voice and auto-learn are then forced off for good,
-   *  and the chat is left out of chat search. */
-  private?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
-  /** Inject what the activity monitor observed. Defaults on, but only ever has an effect while the
-   *  monitor is running and its own `injectContext` is left on. */
-  useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
   /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
@@ -712,11 +850,8 @@ export interface ConversationSettings {
   planMode?: 'off' | 'auto' | 'always'
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
   skipPermissions?: boolean
-  /** Inject the recent-meetings block. Optional because stored conversations predate the key; a
-   *  missing value reads as on, the way the backend's `.get(..., True)` does. */
-  useMeetings?: boolean
   autoLearn: boolean
-  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. Unlike `private`, it can be switched at any time. */
+  /** False: the chat stays in history and search, but auto-learn, skill drafting and graph extraction skip it. It can be switched at any time. */
   learn?: boolean
   /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
   titleSource?: 'auto' | 'user'
@@ -734,11 +869,10 @@ export interface ConversationSettings {
   deskId?: string
   /** The doc this chat is bound to: opening the doc brings the chat back in the page agent panel. */
   docId?: string
-  /** A folder the user bound this chat to (the Folder control under the composer): granted to the shell, file and
-   *  coding-agent tools for this chat's runs, first in the root list. "" or absent means none. */
-  workingFolder?: string
   /** The chat this one was branched from (POST /conversations/{id}/fork). */
   forkedFrom?: string
+  /** Set on the Telegram bridge's conversation: the sidebar pins it first under the label "Telegram". */
+  telegram?: boolean
 }
 
 /** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */
@@ -779,9 +913,14 @@ export interface Memory {
   valid_from?: number | null
   invalid_at?: number | null
   superseded_by?: string | null
+  /** Unix seconds after which the row is expired: out of the live list and the prompt, kept in history. Null or absent: never expires. */
+  expires_at?: number | null
   source_conversation_id?: string | null
   source_message_id?: string | null
 }
+
+/** The message a memory was learned from, with the quoted passage (GET /memories/{id}/source). */
+export interface MemorySource { conversation_id: string; message_id: string; title: string; quote: string }
 
 /** A pending tidy-up the user can apply or dismiss (backend consolidate.py). Nothing applies by itself. */
 export interface MemoryProposal {
@@ -847,6 +986,18 @@ export interface GraphNode {
   updated_at: number
 }
 
+/** A rebuild of the graph from existing chat messages (`/graph/backfill`). */
+export interface GraphBackfillStatus {
+  running: boolean
+  done: number
+  total: number
+  errors: number
+  started_at: number | null
+  finished_at: number | null
+  cancelled: boolean
+  project_id: string | null
+}
+
 export interface GraphEdge {
   id: string
   project_id: string | null
@@ -856,6 +1007,8 @@ export interface GraphEdge {
   properties: Record<string, unknown>
   created_at: number
   fact?: string
+  confidence?: number | null
+  source_message_id?: string | null
   valid_at?: number | null
   invalid_at?: number | null
 }
@@ -884,6 +1037,8 @@ export interface Document {
   pinned?: number
   preview?: string
   text?: string
+  /** The uploaded bytes are still stored; false for rows from before originals were kept. */
+  has_original?: boolean
 }
 
 /** POST /documents: the stored row plus what the server could make of the file. */
@@ -1142,23 +1297,6 @@ export interface TasksSyncStatus {
   syncing: boolean
 }
 
-/** One-way todos -> Google Calendar mirror (`/integrations/google/todo-calendar`). */
-export interface TodoCalendarStatus {
-  config: {
-    enabled: boolean
-    /** Empty until the first pass resolves or creates the calendar. */
-    calendarId: string
-    calendarName: string
-    intervalMinutes: number
-    keepCompleted: boolean
-  }
-  /** Unix seconds of the last successful pass. */
-  last_sync: number | null
-  last_error: string | null
-  last_result: Record<string, number> | null
-  syncing: boolean
-}
-
 export interface DriveFile {
   id: string
   name: string
@@ -1169,6 +1307,13 @@ export interface DriveFile {
   owner: string | null
 }
 
+export interface GmailAttachment {
+  id: string
+  name: string
+  mime: string
+  size: number
+}
+
 export interface GmailFullMessage {
   id: string
   thread_id: string
@@ -1177,6 +1322,7 @@ export interface GmailFullMessage {
   subject: string | null
   date: string | null
   body: string
+  attachments?: GmailAttachment[]
 }
 
 export interface GmailLabel {
@@ -1299,6 +1445,13 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
+  /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
+  provider?: string | null
+  /** Which providers have a key saved. Never the keys. Missing on an older backend. */
+  providerKeysSet?: Record<string, boolean>
+  firecrawlApiKeySet?: boolean
+  /** FIRECRAWL_API_KEY is set in the backend's environment; used when the field is empty. Never the value. */
+  firecrawlEnvKey?: boolean
   braveApiKeySet?: boolean
   tavilyApiKeySet?: boolean
   exaApiKeySet?: boolean
@@ -1317,6 +1470,9 @@ export interface Settings {
   retrievalMode?: 'hybrid' | 'bm25'
   /** Reorder fused candidates with retrievalRerankModel before trimming. */
   retrievalRerank?: boolean
+  /** Also reorder recalled memories with the rerank model. On unless false. */
+  memoryRerank?: boolean
+  /** Rerank model shared by document search and memory recall; blank means the provider's default. */
   retrievalRerankModel?: string
   /** 0-1: vector-only hits below this similarity are dropped. */
   retrievalMinSimilarity?: number
@@ -1326,14 +1482,14 @@ export interface Settings {
   retrievalCandidates?: number
   /** Also retrieve from the user's own Docs, not just uploaded files. */
   useDocsInContext?: boolean
-  /** Embed meeting text for by-meaning meeting search (sends it to the embedding provider). */
-  meetingEmbeddings?: boolean
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
   /** Suggest up to 3 next questions as chips under the latest reply (uses the extraction model). */
   followUps: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
+  /** Default type for Files; a doc with its own `typography` ignores it. */
+  docTypography?: DocTypography
   theme: 'dark' | 'light' | 'system'
   /** Pastel highlight colour. Missing on older settings rows means sage. */
   accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog'
@@ -1345,32 +1501,21 @@ export interface Settings {
   quickCaptureShortcut?: string
   /** Electron accelerator for the global quick-ask bar (a one-line prompt that starts a new chat). */
   quickAskShortcut?: string
-  /** Read-aloud voice (a speechSynthesis voice URI); empty is the system default. */
-  ttsVoice?: string
-  /** Read-aloud speaking rate, 0.8 to 1.5. */
-  ttsRate?: number
-  /** Voice chat ends itself after this many replies. */
-  voiceLoopMaxTurns?: number
-  /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
+  /** Hold-to-talk dictation chord for the chat composer mic, e.g. 'Control+Alt+D'. */
   dictationChord?: string
-  /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
+  /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork defaults off. */
   homeWidgets?: Record<string, boolean>
-  /** Sidebar views the user removed. Missing means meetings and activity are hidden. */
+  /** Sidebar views the user removed. Missing means every view is shown. */
   hiddenViews?: string[]
-  /** Where a view's entry lives, by view id: a sidebar row or a title-bar icon. Missing means the module's own default. */
-  navPlacement?: Record<string, 'sidebar' | 'apps'>
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
-  maxToolRounds: number
   /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
   mcpDeferAbove?: number
   /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
   toolDeferAbove?: number
   /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
   mcpServerNotes?: boolean
-  /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
-  skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
   embeddingModel?: string
   /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
@@ -1387,8 +1532,12 @@ export interface Settings {
   autoReviewModel?: string
   /** External and schedules tools that always show a card. Every other tool that acts outside the app runs on a plain yes. */
   alwaysAsk?: string[]
-  /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
+  /** Legacy; the UI no longer shows it. permissionMode decides. */
   skipPermissions?: boolean
+  /** auto: a second model checks risky actions; manual: ask before each; allow_all: no checks, no cards. Default auto. */
+  permissionMode?: 'auto' | 'manual' | 'allow_all'
+  /** Lifts the host allow-lists (fetch, browse, shell network) and the per-tool approval for connector tools. Independent of permissionMode. */
+  allowAllConnections?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */
@@ -1401,11 +1550,15 @@ export interface Settings {
   compactKeepRecent?: number
   microKeep?: number
   microAt?: number
-  /** Per-reply budgets; 0 means unlimited. */
-  /** Token budget per context section (0 = unlimited): memories, graph, chunks, activity, meetings, pinned. */
-  contextBudget?: Record<string, number>
-  maxRunTokens?: number
-  maxRunSeconds?: number
+  /** Coding sessions: how many run at once (1-20, default 3). */
+  codingSessionMaxConcurrent?: number
+  /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
+  delegationForce?: boolean
+  delegationAfterRounds?: number
+  /** Workers running at once (1-16, default 4); the rest queue. */
+  workerMaxConcurrent?: number
+  /** Send the assistant's reply to a finished worker to Telegram (default off). */
+  telegramPushWorkerResults?: boolean
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1419,8 +1572,10 @@ export interface Settings {
   snapshotsEnabled?: boolean
   /** Reported by GET /settings, never stored: folder snapshots need a version-control binary on this Mac. */
   snapshotsAvailable?: boolean
-  /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
+  /** Grain works anywhere on the Mac, so this no longer limits anything. The backend still accepts and stores it. */
   workspaceRoots?: string[]
+  /** New chats start working autonomously (Ask as it goes) unless switched off per chat. Missing means on. */
+  autonomousByDefault?: boolean
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
   /** Linux sandbox containers: the image a fresh one starts from, the CLI. */
@@ -1454,6 +1609,13 @@ export interface Settings {
   workEnvPackages?: string[]
   /** fs_edit and an overwriting write refuse a file this chat has not read. Missing means on. */
   requireReadBeforeWrite?: boolean
+  /** When set, Firecrawl answers web search and page reads first; the other engines are the fallback. Empty = the FIRECRAWL_API_KEY environment variable, if any. */
+  firecrawlApiKey?: string
+  /** Texting channel: Telegram bot, owner-only. */
+  telegramEnabled?: boolean
+  /** Also send approvals and finish notices for chat runs not started from Telegram. */
+  telegramNotifyLongRuns?: boolean
+  telegramLongRunMinutes?: number
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
@@ -1468,10 +1630,6 @@ export interface Settings {
   githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
-  /** Informational spend alerts in $ (0 = off); never stops a run. */
-  usageAlerts?: { dailyCost: number; monthlyCost: number }
-  /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
-  deskMaxTurns?: number
   deskMaxLive?: number
   /** Relaunch desks a restart interrupted mid-turn. Never one with an unknown-outcome call or a pending card. Off by default. */
   deskAutoResume?: boolean
@@ -1502,10 +1660,6 @@ export interface Settings {
   pimProvider: PimProvider
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
   gmailSendHold?: { enabled: boolean; seconds: number }
-  /** Read-only here: the full shape is MeetingConfig, patched through /meetings/config so the merge is a deep one. */
-  meetings?: { enabled: boolean }
-  /** The quiet daily digest in the Agent Inbox (digest.py): on by default, written once a day at `hour`. */
-  digest?: { enabled?: boolean; hour?: number }
 }
 
 export interface ModelPrice {
@@ -1551,13 +1705,19 @@ export interface UsageReport {
   daily: (UsageBucket & { day: string })[]
   hourly: { hour: number; calls: number }[]
   weekday: { weekday: string; calls: number }[]
-  by_model: (UsageBucket & { model: string })[]
+  /** Today, this week (from Monday) and this month, local time, whatever `days` is. `since` is the first day. */
+  periods?: Record<UsagePeriod, UsageBucket & { since: string }>
+  /** One row per model: the proxy alias and the provider's full id (`ids`) are merged under the short name. */
+  by_model: (UsageBucket & { model: string; ids?: string[] })[]
+  /** What the calls were for (chat, jobs, memory, embeddings...), in display order. */
+  by_feature?: (UsageBucket & { feature: string; label: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
   by_tag: (UsageBucket & { tag: string })[]
-  alerts?: { daily: { spent: number; limit: number; over: boolean }; monthly: { spent: number; limit: number; over: boolean }; over: boolean }
   prices: Record<string, ModelPrice>
 }
+
+export type UsagePeriod = 'today' | 'week' | 'month'
 
 export interface ModelInfo {
   id: string
@@ -1573,14 +1733,14 @@ export type ChatEvent =
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; review?: ToolEvent['review']; plan?: PlanStepRef | null; agent?: string; mcp?: McpToolOrigin | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   /** The card was answered (by this window, another one, or a steer): settles a replayed card so it is not asked twice. */
   | { event: 'tool_decision'; data: { message_id: string; id: string; decision: ApprovalDecision } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
   | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason']; model?: string; why?: string } }
-  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
+  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null; attachments?: Attachment[] | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
@@ -1592,10 +1752,6 @@ export type ChatEvent =
   | { event: 'parked'; data: { message_id: string; call_id: string; name: string } }
   /** A desk's row changed: the rail's label, its status, its counters. */
   | { event: 'desk_status'; data: Desk }
-  /** A doc recording's segment, status or summary moved; see `RecordingEvent`. */
-  | { event: 'recording'; data: RecordingEvent }
-  /** Live dictation words, volatile until a final or the settled segment replaces them. */
-  | { event: 'preview'; data: PreviewEvent }
   /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
   | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
@@ -1619,6 +1775,8 @@ export interface Learned {
   skill_revisions?: { id: string; name: string; why: string; revises: string }[]
   conversation_id?: string
   message_id?: string
+  /** Ids of memories the model suggested pinning to the standing preferences. */
+  pin_suggested?: string[]
 }
 
 /**
@@ -1635,23 +1793,36 @@ export type BackgroundEvent =
   /** The learn worker re-read a scope's writing samples into a new voice profile. */
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
-  | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
-  /** A doc recording's segment, status or summary moved. */
-  | { event: 'recording'; data: RecordingEvent }
-  | { event: 'preview'; data: PreviewEvent }
   /** A run's answering / status state moved: lets every window know about a reply it did not start. */
   | { event: 'run_state'; data: RunInfo }
   /** A conversation's title was rewritten off the run (model title or regenerate). */
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
   /** A shell job started, ended or was killed: the Running list refetches. */
   | { event: 'shell_jobs'; data: { live: number } }
+  /** A background worker changed status or asked for approval. */
+  | { event: 'workers'; data: { conversation_id: string; worker: WorkerInfo } }
   | { event: 'todos_changed'; data: Record<string, never> }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }
   /** A ship checklist moved (ship.py): the whole row, so the card and the job row update without a refetch. */
   | { event: 'ship_checklist'; data: ShipChecklist }
+  /** A coding session moved (codingagents.py): the whole summary row. */
+  | { event: 'coding_session'; data: CodingSession }
+
+/** GET /coding-sessions: one background Claude Code or OpenCode session started through the coding_session_* tools. */
+export interface CodingSession {
+  id: string; agent: 'claude' | 'opencode'; name: string
+  status: 'starting' | 'working' | 'needs_you' | 'blocked' | 'done' | 'stopped' | 'failed'
+  attention: Attention; detail: string | null; repo_path: string; worktree: string; branch: string | null
+  external_id: string | null; model: string | null; permission_mode: string | null; log_tail: string
+  /** `claude attach <id>`, set while a Claude Code session waits on a permission prompt. */
+  attach_hint?: string | null
+  created_at: number; updated_at: number; ended_at: number | null
+}
+/** GET /coding-sessions/{id}/diff: what the session changed in its worktree. `diff` only with ?full=1. */
+export interface CodingSessionDiff { worktree: string; branch: string | null; status: string; diff_stat: string; log: string; diff?: string; truncated: boolean }
 
 /** One step of a ship checklist. awaiting_confirm is only ever the merge step. */
 export type ShipStepStatus = 'pending' | 'running' | 'green' | 'red' | 'skipped' | 'awaiting_confirm'
@@ -1680,6 +1851,18 @@ export interface SandboxInfo {
   name: string; conversation_id: string | null; title: string | null; status: string; created: string
   last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
 }
+export interface TelegramStatus {
+  enabled: boolean
+  has_token: boolean
+  bot_username: string | null
+  paired: boolean
+  owner_name: string | null
+  status: 'disabled' | 'no_token' | 'not_paired' | 'connected' | 'error' | 'bad_token' | 'conflict' | 'locked'
+  last_error: string | null
+  last_poll_at: number | null
+  pairing: { code: string; link: string; expires_at: number } | null
+}
+
 export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {
@@ -1713,6 +1896,8 @@ export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>
+  /** Store an HTML fence's source for the preview scheme; returns the id for `previewUrl`. */
+  previewPut: (source: string) => Promise<string>
   /** Supervisor state and restart history; `restartBackend` also works from `failed`. */
   backendInfo: () => Promise<BackendInfo>
   restartBackend: () => Promise<BackendInfo>
@@ -1763,6 +1948,7 @@ export interface GrainApi {
   print: {
     payload: () => Promise<{ title: string; content: string } | null>
     ready: () => void
+    /** 'save': the path of the PDF written into Downloads. 'bytes': the PDF itself. */
     exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => Promise<string | Uint8Array | null>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
@@ -1776,8 +1962,18 @@ export interface GrainApi {
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
+  /** Bring the main window forward (a notification was clicked while it was hidden). */
+  showMain: () => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
+  /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
+  codingAttach: (externalId: string) => Promise<boolean>
+  /** System access wizard: side-effect-free status reads, one grant per row, and an allowlisted Settings pane opener. */
+  sysAccess: {
+    status: () => Promise<import('./systemAccess').MainStatus>
+    grant: (id: string) => Promise<{ state: import('./systemAccess').AccessState; note?: string }>
+    openPane: (url: string) => Promise<boolean>
+  }
   /** The agent's interactive browser (hidden windows owned by main). The renderer never gets the bridge secret. */
   agentBrowser: {
     list: () => Promise<AgentBrowserSession[]>
@@ -1834,12 +2030,8 @@ export const DESK_LIVE: DeskStatus[] = ['planning', 'working', 'needs_approval']
 export type DeskAutonomy = 'plan' | 'ask' | 'propose'
 export type PlanDecision = 'approve' | 'edit' | 'reject'
 
-/** One entry of POST /cowork/plans/{id}'s `steps`. `idx` is 1-based, exactly as the card numbers it. */
-export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; drop?: boolean }
 
 
-
-export interface DeskBudget { maxTurns?: number }
 /** Something the user hands a desk: a doc, an uploaded document, or a local file under the home folder. */
 export type DeskInputRef = { kind: 'doc'; id: string } | { kind: 'document'; id: string } | { kind: 'path'; path: string }
 
@@ -1865,7 +2057,6 @@ export interface Desk {
   workspace: string
   turn: number
   cost: number
-  budget: DeskBudget
   last_error: string | null
   archived: boolean
   /** Derived: the status is in DESK_LIVE. */
@@ -2003,8 +2194,8 @@ export interface PromotionResult {
 
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
-  | 'chat' | 'todos' | 'calendar' | 'note'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'doc' | 'face' | 'crew'
+  | 'chat' | 'todos' | 'calendar'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'doc' | 'face' | 'crew'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -2046,8 +2237,6 @@ export interface Canvas {
 /** One row of the bulk `PUT /canvases/{id}/layout` body; every field but `id` is optional. */
 export interface WindowLayout { id: string; x?: number; y?: number; w?: number; h?: number; z?: number; state?: WindowState }
 
-export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
-
 /** One row in the trash (GET /trash). Deleting is soft: it sits here for `retention_days`, then is purged. */
 export type TrashKind = 'project' | 'conversation' | 'doc' | 'document' | 'memory' | 'todo'
 export interface TrashItem {
@@ -2070,7 +2259,7 @@ export interface TrashListing {
 
 /**
  * A doc: long-form markdown the user writes in the Docs editor. Distinct from `Document` (a file they
- * uploaded, for retrieval) and from `Note` (canvas mode's sticky note).
+ * uploaded, for retrieval).
  */
 export interface Doc {
   id: string
@@ -2090,6 +2279,35 @@ export interface Doc {
   size?: number
   content?: string
   pending?: number | DocRevision[]
+  /** This doc's own type; null or absent follows Settings → docTypography. */
+  typography?: DocTypography | null
+}
+
+/** A font choice for the rendered and edit views: family, px size, and measure (line width) in ch. */
+export interface DocTypography {
+  font?: 'serif' | 'sans' | 'mono' | 'book'
+  size?: number
+  measure?: number
+}
+
+/**
+ * One row of a doc's comments. A thread row (parent_id null) anchors to `quote` in the rendered text, with
+ * ~32 chars of context either side and the offset it was made at; a reply carries its thread's id and no
+ * anchor. `resolved` is read off the thread row.
+ */
+export interface DocComment {
+  id: string
+  doc_id: string
+  parent_id: string | null
+  author: 'user' | 'agent'
+  body: string
+  quote: string
+  prefix: string
+  suffix: string
+  offset_hint: number
+  resolved: number
+  created_at: number
+  updated_at: number
 }
 
 /**
@@ -2134,7 +2352,7 @@ export interface DocRevision {
   /** Pending only: the doc moved since this was proposed, so it is reviewed against the current body. */
   stale?: boolean
   stat_vs_current?: { added: number; removed: number } | null
-  /** An append proposal (a recording summary): the section to add. While pending, `before`/`after` are
+  /** An append proposal: the section to add. While pending, `before`/`after` are
    *  resolved against the doc as it stands, so the diff is just this section; null for ordinary edits. */
   append?: string | null
   /** GET /docs/revisions/{id} only: a unified diff, for copying out. */
@@ -2170,7 +2388,7 @@ export interface CanvasPreset {
 export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind =
-  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'note' | 'file' | 'nav'
+  | 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'file' | 'nav'
   /** A Files doc: opens as a doc window editing it in place. */
   | 'doc'
   /** A desk, a saved workflow or one run of it: each opens as a crew window showing its agents. */
@@ -2238,13 +2456,17 @@ export interface RunInfo {
   ended_at?: number | null
   error?: string | null
   attention?: Attention
+  /** True once the run published a visible assistant reply; a silent control turn never sets it. */
+  replied?: boolean
+  /** The user stopped it. */
+  stopped?: boolean
 }
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
 
 export type JobKind = 'cron' | 'once' | 'watch' | 'mail' | 'calendar'
-/** Inbox run rows: a job kind, or the synthetic daily digest (digest.py), which no job fired. */
-export type RunKind = JobKind | 'digest'
+/** Inbox run rows. */
+export type RunKind = JobKind
 
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
@@ -2300,20 +2522,12 @@ export interface Job {
   watch_dir: string | null
   /** The model this job's runs use. null = the default model. */
   model: string | null
-  /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
-  budget: JobBudget | null
   /** 'desk': each fire opens a desk with `prompt` as its brief, instead of a proposal-only chat run. */
   target: 'run' | 'desk'
   /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
   desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
-  desk_budget: Record<string, number> | null
   /** The agent definition this routine runs as (its prompt, skills, boundaries and tool overrides). null = plain. */
   agent_id?: string | null
-}
-
-export interface JobBudget {
-  maxRunTokens?: number
-  maxRunSeconds?: number
 }
 
 export type JobNotifyMode = 'problems' | 'always' | 'never'
@@ -2368,8 +2582,6 @@ export interface JobRunSummary {
   tool_calls: number
   proposals: number
   pending_proposals: number
-  /** Digest only: one fix-it link per setup gap, to a view or a Settings tab (names, so this file imports nothing). */
-  links?: { label: string; view?: string; settings?: string }[]
   /** Marked read in the Agent Inbox (inbox_seen). A read card collapses to one line. */
   seen: boolean
   /** The run's own report, from the event tape. Shown as the body; headed sections are split out for display only. */
@@ -2436,7 +2648,7 @@ export interface JobNotifyEvent {
   target: string
 }
 
-export type InboxQueueKey = 'doc_edits' | 'meetings' | 'skills' | 'workflows' | 'memory' | 'suggestions'
+export type InboxQueueKey = 'doc_edits' | 'skills' | 'workflows' | 'memory'
 
 export interface AgentInbox {
   needs_you: {
@@ -2503,619 +2715,26 @@ export type BusKind = 'window-bounds' | 'window-state' | 'window-config' | 'chat
  */
 export interface BusMessage { kind: BusKind; windowId?: string; canvasId?: string; refId?: string; data?: Record<string, unknown> }
 
-/** ---- activity monitor ---------------------------------------------------
- *  Observed computer activity, summarized locally and fed back as chat context.
- *  Every signal is opt-in and off until switched on. */
-
-/** The signals that can be collected, most benign first. */
-export type ActivitySignal = 'apps' | 'browserUrls' | 'input' | 'text' | 'micAudio' | 'outputAudio'
-
-export interface ActivityAudioConfig {
-  /** ffmpeg avfoundation device index, as a string. Empty means "not chosen yet". */
-  micDevice: string
-  /** A loopback device (BlackHole/Loopback) - macOS cannot record its own output without one. */
-  outputDevice: string
-  chunkSeconds: number
-  /** Speech-to-text model on the configured LLM base URL. */
-  model: string
-  /** Transcripts shorter than this are dropped as noise. */
-  minChars: number
-}
-
-export interface ActivityConfig {
-  enabled: boolean
-  signals: Record<ActivitySignal, boolean>
-  sampleSeconds: number
-  /** No input for this long counts as away from the machine. */
-  idleSeconds: number
-  rollupMinutes: number
-  /** How long raw samples live before they are deleted. */
-  retentionHours: number
-  summaryRetentionDays: number
-  /** Days of detail kept in activity.md. */
-  contextDays: number
-  /** Feed the summaries into chats at all. */
-  injectContext: boolean
-  /** Scrub credential- and PII-shaped strings before anything is stored. */
-  redact: boolean
-  /** Apps never recorded, not even by name. */
-  excludeApps: string[]
-  /** Window titles / URLs containing any of these are skipped. */
-  excludeTitlePatterns: string[]
-  /** Drop a window only when every named field (substring or /regex/) matches. */
-  excludeRules: { app?: string; title?: string; url?: string }[]
-  /** Strings or /regex/ that are never scrubbed. */
-  redactAllow: string[]
-  /** Strings or /regex/ that are always scrubbed. */
-  redactDeny: string[]
-  /** Score a candidate needs before it is scrubbed (0.2-0.9). */
-  redactThreshold: number
-  /** Category rules; null means the shipped default tree. */
-  categories: ActivityCategoryRule[] | null
-  audio: ActivityAudioConfig
-  /** Blank falls back to the extraction model, then the default model. */
-  summaryModel: string
-  profileEveryHours: number
-  /** Record-everything mode: every signal on, redaction off, both exclusion lists emptied. */
-  recordEverything: boolean
-  insights: ActivityInsightConfig
-}
-
-export interface ActivityInsightConfig {
-  enabled: boolean
-  /** How often the habit/suggestion pass runs on its own. 0 turns the schedule off. */
-  everyHours: number
-  lookbackDays: number
-  /** A pattern has to recur on at least this many days before it counts. */
-  minDays: number
-  maxSuggestions: number
-  /** Write confident habits into the app's memory, where chats already read from. */
-  autoMemory: boolean
-  memoryConfidence: number
-}
-
-/** One thing the miner noticed, computed locally with no model. This is the evidence. */
-export interface ActivityPattern {
+/** What came back from asking macOS for a grant. `prompted` is false when macOS refuses to ask at all. */
+export interface PermissionGrantResult {
   id: string
-  /** app_routine | site_habit | thrash | deep_work | day_shape | after_hours | input_load |
-   *  recurring_window | topic | switch_rate */
-  kind: string
-  title: string
-  detail: string
-  support: number
-  days: number
-  confidence: number
-  evidence: Record<string, unknown>
-}
-
-/** A durable statement about how the user works. Owns at most one row in the memory panel. */
-export interface ActivityHabit {
-  id: string
-  key: string
-  statement: string
-  kind: string
-  confidence: number
-  /** How many passes have seen it. */
-  support: number
-  evidence: string[]
-  /** The memory this habit wrote; `''` when it was not confident enough, or autoMemory is off. */
-  memory_id: string
-  first_seen: number
-  last_seen: number
-}
-
-export type InsightKind = 'automation' | 'platform' | 'hygiene'
-export type InsightStatus = 'new' | 'accepted' | 'done' | 'dismissed' | 'snoozed'
-/** `prompt` is the common one and it acts on nothing: it hands back a message to send. */
-export type InsightActionType = 'prompt' | 'todo' | 'memory' | 'none'
-
-export interface InsightAction {
-  type: InsightActionType
-  prompt?: string
-  title?: string
-  content?: string
-}
-
-/** A proposal, never a change. Dismissing one is permanent; a refresh will not raise it again. */
-export interface ActivitySuggestion {
-  id: string
-  key: string
-  kind: InsightKind
-  title: string
-  detail: string
-  why: string
-  impact: string
-  effort: 'low' | 'medium' | 'high'
-  action: InsightAction
-  /** Pattern ids this rests on. */
-  evidence: string[]
-  confidence: number
-  status: InsightStatus
-  status_note: string
-  snooze_until: number
-  created_at: number
-  updated_at: number
-}
-
-export interface ActivityInsights {
-  enabled: boolean
-  generated_at: number
-  last_run: number
-  next_run: number
-  last_error: string
-  window: { days?: number; first_day?: string; last_day?: string }
-  totals: { focus_seconds?: number; idle_seconds?: number; keys?: number; clicks?: number; scrolls?: number; switches?: number }
-  apps: { app: string; seconds: number; days: number }[]
-  /** Host only - never a path or a query string. */
-  hosts: { host: string; visits: number; days: number }[]
-  hours: { hour: number; seconds: number }[]
-  patterns: ActivityPattern[]
-  habits: ActivityHabit[]
-  suggestions: ActivitySuggestion[]
-  counts: { open: number; accepted: number; dismissed: number; habits: number; days: number }
-}
-
-/** What came back from applying one suggestion. `prompt` means nothing happened yet - send it. */
-export interface ActivityApplyResult {
-  type: InsightActionType
-  prompt?: string
-  todo?: Todo
-  memory?: Memory
-  suggestion: ActivitySuggestion
-}
-
-/** What macOS currently thinks about one permission. `n/a` means nothing on this Mac needs it. */
-export type ActivityPermissionState = 'granted' | 'denied' | 'unasked' | 'unknown' | 'n/a' | ''
-
-/** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
-export interface ActivityCapability {
-  id: string
-  label: string
-  ok: boolean
-  detail: string
-  /** Empty when `ok`. */
-  fix: string
-  /** Set only for the macOS permissions; `''` for rows that are just a yes/no about this machine. */
-  state: ActivityPermissionState
-  /** True when pressing Grant can make macOS ask for this one. */
-  requestable: boolean
-  /** Deep link into the matching Privacy & Security pane; `''` when there isn't one. */
-  settings_url: string
-  /** Which signals this row gates. */
-  signals: ActivitySignal[]
-  /** Missing this only costs one optional signal, never the monitor as a whole. */
-  optional: boolean
-  /** The grant only reaches a running process after a restart. */
-  restart: boolean
-  /** Per-browser Automation states on the `automation` row. */
-  extra: { name: string; state: ActivityPermissionState }[]
-}
-
-/** What came back from pressing Grant. `prompted` is false when macOS refuses to ask at all. */
-export interface ActivityGrantResult {
-  id: string
-  state: ActivityPermissionState
+  state: 'granted' | 'denied' | 'unasked' | 'unknown' | 'n/a'
   prompted: boolean
   note: string
 }
 
-export interface ActivityStatus {
-  running: boolean
-  paused: boolean
-  /** Unix seconds the pause lifts itself. */
-  pause_until: number | null
-  platform_supported: boolean
-  config: ActivityConfig
-  capabilities: ActivityCapability[]
-  collectors: { id: string; alive: boolean; error: string }[]
-  counts: { events: number; pending: number; summaries: number }
-  /** One live sentence about the current window, computed without the LLM. */
-  now: string
-  last_rollup: number | null
-  last_error: string
-  profile_updated_at: number | null
-  /** Where activity.md lives on disk. */
-  md_path: string
-  audio_devices: { index: string; name: string }[]
-  /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
-  secure_input: boolean
-  /** Record-everything mode is on: every signal recording and the gate's filters down. */
-  recordEverything: boolean
-  /** Redactions so far today, by entity. Counts only. */
-  redactions?: Record<string, number>
-}
-
-export interface ActivityCategoryRule {
-  name: string[]
-  rule?: { type: 'regex' | 'none'; pattern?: string; fields?: ('app' | 'title')[]; hosts?: string[] }
-  /** Productivity, -2 (distracting) to 2 (productive); inherited from the parent when absent. */
-  score?: number
-}
-
-export interface ActivityCategoryReport {
-  days: { day: string; total_seconds: number; cats: Record<string, number> }[]
-  totals: Record<string, number>
-  productivity: number | null
-  top_uncategorized_apps: { app: string; seconds: number }[]
-}
-
-export interface ActivityRedactTest {
-  redacted: string
-  active: boolean
-  spans: { entity: string; score: number; start: number; end: number }[]
-}
-
-export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'
-
-export interface ActivityEvent {
-  id: string
-  ts: number
-  kind: ActivityEventKind
-  app: string
-  bundle: string
-  title: string
-  url: string
-  /** Redacted typed text or transcript; empty for count-only rows. */
-  text: string
-  meta: Record<string, unknown>
-  duration_ms: number
-  rolled_up: number
-  expires_at: number
-}
-
-export interface ActivitySummary {
-  id: string
-  /** Local YYYY-MM-DD. */
-  day: string
-  period_start: number
-  period_end: number
-  headline: string
-  body: string
-  apps: string[]
-  event_count: number
-  created_at: number
-}
-
-export interface ActivityContextFile {
-  path: string
-  /** The whole activity.md. */
-  markdown: string
-  /** The trimmed block chats actually receive. */
-  injected: string
-}
-
-/** ---- meetings -----------------------------------------------------------
- *  A recorded conversation plus the notes taken during it. The fourth text-bearing type, and
- *  distinct from the other three: `Doc` is markdown the user writes, `Document` is a file they
- *  uploaded and had chunked for retrieval, `Note` is canvas mode's sticky. A meeting is the only
- *  one whose body is partly machine-made, so it keeps the two apart — `notes` is what the user
- *  typed and has exactly one writer, `enhanced` is only ever set by accepting a MeetingRevision.
- *  Nothing here expires: unlike ActivityEvent there is no `expires_at`, so /activity/purge cannot
- *  reach a meeting. */
-
-export type MeetingStatus =
-  | 'scheduled' | 'recording' | 'stopped' | 'transcribing' | 'enhancing' | 'ready' | 'failed' | 'notes_only'
-
-/** Shapes the enhance prompt and the notes skeleton; keys into meeting_notes.TEMPLATES. */
-export type MeetingTemplate = 'general' | 'standup' | 'one_on_one' | 'user_interview' | 'sales_call' | 'lecture'
-
-/** A named piece of user-written prose: a template's instructions or a recipe's prompt. */
-export interface SavedPrompt {
-  id: string
-  name: string
-  instructions?: string
-  prompt?: string
-}
-
-/** A list row: counts and a preview, never a body. */
-export interface Meeting {
-  id: string
-  title: string
-  project_id: string | null
-  status: MeetingStatus
-  template: MeetingTemplate
-  /** First 240 characters of the notes, for the list rail. */
-  notes_preview: string
-  words: number
-  segment_count: number
-  /** An enhance proposal is waiting to be accepted or rejected. */
-  has_pending: boolean
-  duration_ms: number
-  attendee_count: number
-  started_at: number | null
-  scheduled_start: number | null
-  ended_at: number | null
-  updated_at: number
-  /** Last recorder/stt/enhance failure, shown as a banner; empty when fine. */
-  error: string
-  /** The doc this recording belongs to; null for an ordinary meeting. */
-  doc_id: string | null
-  doc_mode: DocRecordingMode | null
-  /** The `doc_revisions.id` of the latest proposed summary, if one was made. */
-  summary_revision_id: string | null
-}
-
-/** How a recording relates to its doc: `record` keeps a transcript and proposes a summary,
- *  `dictate` types what is said into the note and keeps no summary. */
-export type DocRecordingMode = 'record' | 'dictate'
-/** Where a recording's summary stands in the doc it was proposed into. */
-export type SummaryState = 'none' | 'pending' | 'applied' | 'rejected'
-/** GET /docs/{id}/recordings row. */
-export interface DocRecording extends Meeting { summary_state: SummaryState }
-/** The app-wide `recording` event: a segment settled, the recorder changed state, or a summary landed. */
-export interface RecordingEvent {
-  kind: 'segment' | 'status' | 'summary'
-  meeting_id: string
-  doc_id: string | null
-  doc_mode: DocRecordingMode | null
-  segment?: MeetingSegment
-  status?: string
-  revision_id?: string | null
-  error?: string | null
-}
-
-/** The app-wide `preview` event: in-flight dictation text. Never durable; the settled segment replaces it. */
-export interface PreviewEvent {
-  session: string
-  kind: 'volatile' | 'final'
-  text: string
-  t0: number
-  t1: number
-}
-
-/** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
-export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
-  /** What the user typed. No model ever writes this. */
-  notes: string
-  /** The accepted enhanced markdown; empty until a revision is applied. */
-  enhanced: string
-  summary: string
-  attendees: MeetingAttendee[]
-  /** What was actually captured, e.g. ['mic'] on a machine with no loopback device. */
-  sources: string[]
-  calendar_event_id: string | null
-  calendar_id: string | null
-  calendar_link: string
-  /** Meet/Zoom/Teams URL; a calendar event's own `meet` field is hangoutLink only. */
-  conference_link: string
-  keep_audio: boolean
-  /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
-  speaker_names: Record<string, string>
-  /** Summary line index (in `enhanced`) to the transcript segment ids it was written from. */
-  summary_evidence?: Record<string, string[]>
-  /** Retained wav bytes, against the disk ceiling. */
-  audio_bytes: number
-  conversation_id: string | null
-  /** The newest unresolved enhance proposal, if any. */
-  pending: MeetingRevision | null
-  actions: MeetingActionItem[]
-}
-
-export interface MeetingAttendee {
-  email: string
-  name: string
-  /** accepted | declined | tentative | needsAction */
-  response: string
-  organizer: boolean
-  self: boolean
-}
-
-/** One closed ffmpeg segment and its transcription. */
-export interface MeetingSegment {
-  id: string
-  meeting_id: string
-  /** Attribution is channel-level only: mic = you, output/import = everyone else. */
-  channel: 'mic' | 'output' | 'import'
-  /** ffmpeg's segment number, so ordering survives a restart. */
-  seq: number
-  /** Seconds from the start of the meeting, off the recording clock rather than when transcription returned. */
-  t_start: number
-  t_end: number
-  /** Absolute epoch seconds of the segment's first sample. */
-  started_at: number
-  duration_ms: number
-  text: string
-  /** '' until diarized; 'me' by convention for mic. */
-  speaker: string
-  /** recorded | transcribing | done | failed | empty | discarded */
-  state: string
-  /** 'proxy' | 'local', for the usage/debug line. */
-  backend: string
-  error: string
-  /** Where the kept wav sits; '' when the audio was not kept. */
-  wav_path?: string
-  /** GET /meetings/{id}/segments?since= only: the rowid to poll from next. */
-  cursor?: number
-}
-
-/**
- * An enhance proposal. EXTENDS DocRevision on purpose: <DiffView> is typed `revision: DocRevision`
- * (DiffView.tsx:101) and the backend's `_rev_view` emits those exact field names with `doc_id` set
- * to the meeting id, so the existing diff UI renders a meeting revision with no adapter.
- */
-export interface MeetingRevision extends DocRevision {
-  meeting_id: string
-  template: string
-  model: string
-  /** The LLM failed and this is the mechanical fallback. */
-  degraded: boolean
-  decisions: string[]
-  topics: string[]
-}
-
-/** Recorded here first and promoted into a Todo on demand, so the review screen can show which already are tasks. */
-export interface MeetingActionItem {
-  id: string
-  meeting_id: string
-  text: string
-  /** Attendee email or display name; empty when unassigned. */
-  owner: string
-  /** YYYY-MM-DD, empty when none. */
-  due: string
-  status: 'proposed' | 'added' | 'dismissed'
-  /** The todo it became. No FK on purpose: deleting the task must not erase that this meeting produced the item. */
-  todo_id: string | null
-}
-
-/** Mirrors meetings.DEFAULT_CONFIG. Patched through /meetings/config rather than /settings, so the merge is a deep one. */
-export interface MeetingConfig {
-  enabled: boolean
-  /** Unix seconds the consent modal was acknowledged; 0 means never, and recording stays blocked. */
-  consentedAt: number
-  /** Start capturing when a calendar meeting begins instead of only offering to. */
-  autoRecord: boolean
-  /** How early a calendar event is offered as a candidate. */
-  nudgeSeconds: number
-  /** AVFoundation uniqueID, or ffmpeg avfoundation index as a string. Empty means default / not chosen. */
-  micDevice: string
-  /** The name that index had when it was chosen, so a reshuffled device list is refused rather than recorded. */
-  micDeviceName: string
-  /** Loopback device when the Core Audio tap is unavailable. Empty when the tap is used. */
-  outputDevice: string
-  outputDeviceName: string
-  /** Channels to capture; validated against meetings.SOURCES ('mic', 'output'). */
-  sources: string[]
-  /** Segment-muxer length: how far behind live the transcript runs. */
-  segmentSeconds: number
-  /** Hard cap so no capture can run unbounded. */
-  maxMeetingSeconds: number
-  /** How long stop() waits for the transcription queue to drain. */
-  drainSeconds: number
-  /** 'off' blocks Start outright rather than recording audio nothing will read. */
+/** Voice input (settings key `voice`), read and patched through /voice/config. */
+export interface VoiceConfig {
   sttBackend: 'auto' | 'speech' | 'whistle' | 'proxy' | 'local' | 'off'
-  /** Speech-to-text model on the configured LLM base URL. */
+  /** Speech-to-text model on the configured LLM base URL (the proxy backend). */
   sttModel: string
-  /** whisper.cpp ggml model file, for the local backend. */
+  /** whisper.cpp ggml model file for the local backend; blank takes the first .bin in the data dir's models folder. */
   whisperModelPath: string
-  template: MeetingTemplate | string
-  /** User-authored prose templates; ids start with c_. */
-  customTemplates: SavedPrompt[]
-  /** Saved focus lines for a summary; prompts are capped at 300 characters. */
-  recipes: SavedPrompt[]
-  /** 'auto' follows the transcript's majority language, otherwise a language name. */
-  summaryLanguage: string
-  enhanceOnStop: boolean
-  /** Names and jargon given to the transcriber, along with the attendees. */
-  terms: string[]
-  /** Blank falls back to the extraction model, then the default model. */
-  enhanceModel: string
-  /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
-  maxTranscriptChars: number
-  /** A recording with fewer spoken words than this is not summarised. */
-  minSummaryWords?: number
-  /** Seed the speech model with the meeting title and attendee names. */
-  vocabularyPrompt?: boolean
-  keepAudio: boolean
-  /** Doc recordings pause after this many silent minutes; 0 never pauses. */
-  silencePauseMinutes: number
-  /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
-  maxAudioBytes: number
-  /** Scrub credential-shaped strings before anything is stored. Never activity's identity rules, which
-   *  replace every email with [email] and every phone number with [phone]. */
-  redactSecrets: boolean
-  /** Feed recent meetings into chats at all. */
-  injectContext: boolean
-  /** Auto-stop this long after the scheduled end. Purely time-based: there is no voice-activity detection. */
-  autoStopGraceSeconds: number
-  calendarIds: string[]
-  /** Events with fewer attendees than this are never offered. */
-  minAttendees: number
-  /** Skip STT for segments with no speech, and drop known silence hallucinations. */
-  vadGate: boolean
-  /** Dictation only: show in-flight words in a pill at the caret (on-device Speech; never typed in). */
-  livePreview: boolean
-  vadMinSpeechRatio: number
-  hallucinationFilter: boolean
   whisperVadModelPath: string
-  /** Longest audio file an import accepts. */
-  maxImportSeconds: number
-  /** Separate remote speakers on retained audio (needs the optional sherpa-onnx backend). */
-  diarize: boolean
-  diarizeBackend: 'auto' | 'none' | 'sherpa'
-  diarizeSegmentationModel: string
-  diarizeEmbeddingModel: string
-  diarizeThreshold: number
-  diarizeSpeakers: number
-  /** Run each dictated clip through a model that only fixes punctuation, case and fillers. */
+  /** Drop known silence hallucinations and repeated-word runs. */
+  hallucinationFilter: boolean
+  /** Run each transcribed clip through a model that only fixes punctuation, case and fillers. */
   dictationCleanup: boolean
-}
-
-/** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
-export interface MeetingCapability {
-  id: string
-  label: string
-  ok: boolean
-  detail: string
-  /** Empty when `ok`. */
-  fix: string
-  /** The macOS permission behind this row (an id `POST /activity/permissions/*` accepts), when there is one. */
-  permission?: string
-  /** macOS can still be asked: the Grant button makes the system dialog appear. */
-  requestable?: boolean
-  /** Deep link into the right Privacy & Security pane. */
-  settings_url?: string
-}
-
-/** GET /meetings/status. Cheap enough to poll: unlike /activity/status it never spawns a subprocess. */
-export interface MeetingStatusInfo {
-  enabled: boolean
-  /** The consent modal has been acknowledged. */
-  consented: boolean
-  config: MeetingConfig
-  active: {
-    meeting_id: string
-    status: MeetingStatus
-    started_at: number
-    elapsed_ms: number
-    segments_done: number
-    segments_pending: number
-    /** Waiting on the transcription queue, for the honest "~20s behind · N queued" line. */
-    queued: number
-    /** Pause keeps capture running and throws the audio away, so `channels[].alive` stays true while
-     *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
-    paused: boolean
-    channels: { channel: string; alive: boolean; error: string; silent_for_s?: number }[]
-    /** The recorder paused itself after a long silence; the bar asks "Still recording?". */
-    auto_paused?: boolean
-    error: string
-    /** Set when the live recording belongs to a doc; null for an ordinary meeting. */
-    doc_id: string | null
-    doc_mode: DocRecordingMode | null
-    /** The clip length this session was started with, so "N s behind" is per recording. */
-    segment_seconds: number
-  } | null
-  upcoming: MeetingCandidate[]
-  /** `loopback` marks the devices that can carry system audio. */
-  devices: { index: string; name: string; loopback: boolean }[]
-  stt: { backend: string; ok: boolean; detail: string }
-  counts: { total: number; pending: number }
-}
-
-/** POST /meetings/preflight. `ok` false blocks Start rather than warning. */
-export interface MeetingPreflight {
-  ok: boolean
-  blockers: MeetingCapability[]
-  capabilities: MeetingCapability[]
-  /** A real round trip: a synthesized silent wav, recorded and transcribed. */
-  selftest: { ok: boolean; backend: string; record_ms: number; transcribe_ms: number; text: string; error: string }
-}
-
-/** A calendar event the 45s tick offers to take notes on. No LLM is involved. */
-export interface MeetingCandidate {
-  event_id: string
-  calendar_id: string
-  title: string
-  /** Google's ISO timestamps, as CalendarEvent carries them. */
-  start: string
-  end: string
-  attendee_count: number
-  /** Someone other than the user is invited. */
-  has_external: boolean
-  conference_link: string
-  /** Set once a meeting row exists for this event, so the nudge is not offered twice. */
-  meeting_id: string | null
-  /** Invitees other than the user; local only, they become the doc header. */
-  attendees?: { email: string; name?: string }[]
 }
 
 /** Reply tracker row (`/mail/watch`): who owes whom an answer. */
@@ -3284,7 +2903,6 @@ export interface AgentDef {
   name: string
   description: string
   model: string | null
-  steps: number | null
   tools: string[]
   /** Approved skill names folded into its prompt. */
   skills: string[]
@@ -3299,14 +2917,14 @@ export interface AgentDef {
   boundaries: string
   /** "What this agent should remember": fenced into its system prompt after the boundaries. */
   notes: string
-  /** Its own working folder when a chat has none bound; empty = none. */
+  /** Its own working folder; empty = none. */
   workspace: string
   /** Tool modes for this agent only: above the project's, below the chat's. Empty = inherit. */
   tool_modes: Record<string, ToolMode>
 }
 export interface BuiltinAgent { name: string; description: string; tools: string[]; hue: number | null }
 /** The editable fields of a definition: what the editor holds and what a draft returns. */
-export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'steps' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
+export type AgentFields = Pick<AgentDef, 'name' | 'description' | 'model' | 'tools' | 'skills' | 'hue' | 'hidden' | 'body'>
   & Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes'>>
 /** The fields that ride beside the definition text (PATCH /agents/defs/{id}/scope keeps the approval). */
 export type AgentScope = Partial<Pick<AgentDef, 'label' | 'boundaries' | 'notes' | 'workspace' | 'tool_modes' | 'skills'>>

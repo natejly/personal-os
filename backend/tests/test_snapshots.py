@@ -1,9 +1,10 @@
-"""Whole-folder snapshots and undo (snapshots.py). Offline: temp roots and a temp data dir.
+"""Whole-folder snapshots and undo (snapshots.py): a desk workspace, or the folder a shell runs in. Offline: temp roots and a temp data dir.
 
 Run: python backend/tests/test_snapshots.py
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -41,7 +42,7 @@ DB = Database(tempfile.mkdtemp(prefix="snapdb-"))
 store = RunStore(DB)
 ROOT = Path(tempfile.mkdtemp(prefix="snaproot-")).resolve()
 DESKS = Path(tempfile.mkdtemp(prefix="snapdesk-")).resolve()
-SETTINGS: dict[str, Any] = {"workspaceRoots": [str(ROOT)]}
+SETTINGS: dict[str, Any] = {"workspaceRoots": [str(ROOT)]}  # a legacy setting: nothing reads it for scope
 S = Snapshots(DB, DB.data_dir / "snapshots", lambda: SETTINGS, lambda d: DESKS / d)
 
 check(sn.available(), "git is present")
@@ -64,21 +65,36 @@ run_id = "run-1"
 store.create(run_id, None)
 
 # roots and call classification
-check(S.roots() == [ROOT], "granted root listed")
+check(S.roots() == [], "no desk, no root: the setting names no folder to snapshot")
 (DESKS / "d1").mkdir()
-check(S.roots("d1") == [ROOT, DESKS / "d1"], "desk workspace is a root")
+check(S.roots("d1") == [DESKS / "d1"], "the desk workspace is the root in a desk")
+HOME = Path.home().resolve()
+check(S.snapshottable(ROOT) and not S.snapshottable(HOME) and not S.snapshottable(Path("/")) and not S.snapshottable(HOME.parent)
+      and not S.snapshottable(HOME / "missing"), "a plain project folder, never home, / or a parent of home")
+DATA = Path(os.environ["PERSONAL_OS_DATA_DIR"]).resolve()
+check(not S.snapshottable(DATA) and not S.snapshottable(DATA.parent) and not S.snapshottable(DATA / "sub")
+      and not S.snapshottable(Path("/Applications/Grain.app")), "never Grain's own data folder, a parent of it or the app")
+cred = Path(tempfile.mkdtemp(prefix="snapcred-")).resolve() / ".ssh"
+cred.mkdir()
+check(not S.snapshottable(cred), "never a credential store")
 check(sn.read_only_shell("ls -la | grep foo") and sn.read_only_shell("git status"), "read-only shell recognised")
 check(not sn.read_only_shell("rm draft.md && python build.py") and not sn.read_only_shell("echo hi > f")
       and not sn.read_only_shell("find . -delete") and not sn.read_only_shell("git commit -m x"), "mutating shell recognised")
 check(not any(sn.read_only_shell(c) for c in ("sort -o notes.txt notes.txt", "uniq a.txt b.txt", "tree -o out.txt",
                                                 "git diff --output=patch.diff")), "commands that write by flag are mutating")
-check(S.wants("shell_run", {"command": "rm draft.md && python build.py"}, None), "mutating shell is snapshotted")
-check(not S.wants("shell_run", {"command": "ls"}, None), "read-only shell is not")
-check(S.wants("write_local_file", {"path": str(ROOT / "new.txt")}, None), "write inside a root is snapshotted")
-check(not S.wants("write_local_file", {"path": "/tmp/elsewhere.txt"}, None), "write outside every root is not")
+check(S.wants("shell_run", {"command": "rm draft.md && python build.py", "cwd": str(ROOT)}, None), "mutating shell in a plain folder is snapshotted")
+check(S.roots_for_call("shell_run", {"command": "rm x", "cwd": str(ROOT)}, None) == [ROOT], "the folder it runs in is the root")
+check(not S.wants("shell_run", {"command": "rm draft.md && python build.py"}, None), "no folder named (home, or where the last cd ended): not")
+check(not S.wants("shell_run", {"command": "rm x", "cwd": str(HOME)}, None) and not S.wants("shell_run", {"command": "rm x", "cwd": "sub"}, None),
+      "home and a relative folder are not")
+check(not S.wants("shell_run", {"command": "ls", "cwd": str(ROOT)}, None), "read-only shell is not")
+check(S.roots_for_call("shell_run", {"command": "rm x", "cwd": str(ROOT)}, "d1") == [DESKS / "d1"], "in a desk the workspace is snapshotted instead")
+check(not S.wants("write_local_file", {"path": str(ROOT / "new.txt")}, None), "the file tools keep a pre-image per file (filesnap), not a folder snapshot")
+check(S.roots_for_call("fs_edit", {"path": "work/a.txt"}, "d1") == [DESKS / "d1"] and not S.roots_for_call("fs_edit", {"path": "/tmp/x"}, "d1"),
+      "a file tool snapshots only the desk workspace it writes in")
 check(not S.wants("web_search", {}, None), "other tools are not")
 
-S.before(run_id, S.roots_for_call("shell_run", {"command": "rm draft.md"}, None))
+S.before(run_id, S.roots_for_call("shell_run", {"command": "rm draft.md", "cwd": str(ROOT)}, None))
 S.before(run_id, [ROOT])  # once per run per root
 rows = S.rows(run_id)
 check(len(rows) == 1 and rows[0]["before_tree"], "one before-snapshot")
@@ -165,6 +181,24 @@ check(c.post("/runs/run-3/undo").json()["reverted"] == ["r.txt"] and (ROOT / "r.
 check(c.post("/runs/run-3/undo").status_code == 409, "second undo is a 409")
 check(c.post("/runs/run-3/redo").json()["reverted"] == ["r.txt"] and (ROOT / "r.txt").read_text() == "2", "POST redo")
 
+# a chat's changes: every run of the conversation, newest first, with the ids Undo / Redo need
+from personal_os.repos import Conversations  # noqa: E402
+
+CID = Conversations(DB).create(None, "t", "m")["id"]
+check(c.get(f"/conversations/{CID}/changes").json() == {"available": True, "runs": []}, "a chat with no snapshots has no runs")
+for i, rid in enumerate(("cr-1", "cr-2")):
+    (ROOT / f"c{i}.txt").write_text("1")
+    store.create(rid, CID)
+    store.update(rid, message_id=f"cm-{i}")
+    S.before(rid, [ROOT])
+    (ROOT / f"c{i}.txt").write_text("2")
+    S.finish(rid)
+cc = c.get(f"/conversations/{CID}/changes").json()
+check([x["run_id"] for x in cc["runs"]] == ["cr-2", "cr-1"] and cc["runs"][0]["message_id"] == "cm-1", "newest run first, with its message id")
+check(all(x["count"] == 1 and x["state"] == "applied" and x["started_at"] for x in cc["runs"]), "each item is a run summary")
+check(c.post("/runs/cr-2/undo").status_code == 200 and c.get(f"/conversations/{CID}/changes").json()["runs"][0]["state"] == "undone", "undo from the list shows undone")
+check(c.get("/conversations/other/changes").json()["runs"] == [], "unknown chat: empty")
+
 # after `done` the changes are readable at once, even while the run is still closing (auto-learn tail)
 (ROOT / "d.txt").write_text("1")
 store.create("run-4", None)
@@ -194,7 +228,7 @@ check(S.summary("run-5")["state"] == "applied" and (ROOT / "e.txt").read_text() 
 # without git the feature reports itself unavailable
 real = sn.shutil.which
 sn.shutil.which = lambda _n: None  # type: ignore[assignment]
-check(not S.enabled() and not S.wants("shell_run", {"command": "rm x"}, None), "no git: nothing is snapshotted")
+check(not S.enabled() and not S.wants("shell_run", {"command": "rm x", "cwd": str(ROOT)}, None), "no git: nothing is snapshotted")
 check(c.post("/runs/run-3/undo").status_code == 503, "no git: routes say unavailable")
 sn.shutil.which = real  # type: ignore[assignment]
 

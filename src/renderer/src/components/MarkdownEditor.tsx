@@ -1,5 +1,6 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import CaretMenu from '../features/notes/CaretMenu'
+import DocFind from './DocFind'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
@@ -8,7 +9,7 @@ import { describeImage, linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { wrapToggle } from '../features/notes/format'
 import { wordCount } from '../features/notes/stats'
-import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
+import { diffRange, replaceInTextarea } from '../features/notes/textEdit'
 import { TAG_BODY } from '../features/notes/tags'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
 import '../styles/notes.css'
@@ -33,7 +34,7 @@ export interface EditorHandleProps {
   onScrollFraction?: (f: number) => void
   /** Opt in: typing `/` at a line start or after a space opens the command menu. */
   slash?: boolean
-  /** Commands appended after the built-in ones (Record, Dictate, ...). Only used with `slash`. */
+  /** Commands appended after the built-in ones (Daily file, templates, ...). Only used with `slash`. */
   extraCommands?: SlashCommand[]
   /** Opt in: docs `[[` can link to. Also turns on the `[[...]]` tint in the highlight layer. */
   linkTargets?: { id: string; title: string }[]
@@ -45,12 +46,12 @@ export interface EditorHandleProps {
   onCaretLine?: (line: number) => void
   /** Opt in: reading time and the size of the selection in the status bar. */
   richStatus?: boolean
-  /** In-flight dictation words, drawn in a pill at the caret. Display only: never part of `value`. */
-  previewText?: string
   /** Keep the caret line at ~45% of the editor height as you type. */
   typewriter?: boolean
   /** Dim everything outside the current paragraph; hides the gutter and status bar. */
   focusMode?: boolean
+  /** ⌘F opens the find bar even before anything in the editor was clicked (the main Files editor). */
+  findFallback?: boolean
 }
 
 export type { MarkdownEditorHandle }
@@ -247,11 +248,20 @@ const Gutter = memo(forwardRef<HTMLDivElement, { lineCount: number; cur: number 
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, previewText = '', typewriter = false, focusMode = false
+  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, typewriter = false, focusMode = false, findFallback = false
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
   const surface = useRef<HTMLDivElement>(null)
+  const findRoot = useCallback(() => mirror.current, [])
+  // The mirror and the textarea share a box and a scroll offset, so a match's rect says where to scroll the textarea.
+  const findReveal = useCallback((r: Range) => {
+    const el = ta.current
+    if (!el) return
+    const top = r.getBoundingClientRect().top - el.getBoundingClientRect().top
+    if (top < 40 || top > el.clientHeight - 40) el.scrollTop += top - el.clientHeight / 2
+  }, [])
+  const findClose = useCallback(() => ta.current?.focus(), [])
   const gutter = useRef<HTMLDivElement>(null)
   const [caret, setCaret] = useState({ line: 1, col: 1 })
   const [sel, setSel] = useState({ start: 0, end: 0 })
@@ -382,14 +392,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   // After the mirror has repainted this value, so the marker position is for the text the user sees.
   useLayoutEffect(placeMenu, [placeMenu, value, wrap])
 
-  // The in-flight dictation pill: hangs below the caret, drawn here and never written into `value`.
-  const [pill, setPill] = useState<{ top: number; left: number } | null>(null)
-  useLayoutEffect(() => {
-    const sr = surface.current?.getBoundingClientRect()
-    const r = previewText && mirror.current && sr ? measureCaret(mirror.current, sel.end) : null
-    setPill(r && sr ? { top: r.top - sr.top + r.height + 4, left: Math.max(0, Math.min(r.left - sr.left, sr.width - 120)) } : null)
-  }, [previewText, sel.end, value, wrap])
-
   const pick = (i: number): void => {
     const el = ta.current
     if (!el || !trigger) return
@@ -419,13 +421,6 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       const s = el.selectionStart
       replaceInTextarea(el, s, el.selectionEnd, text, caretOffset === undefined ? undefined : s + caretOffset)
       trackCaret()
-    },
-    insertQuietly: (text) => {
-      const el = ta.current
-      if (!el || el.readOnly) return false
-      insertWithoutFocus(el, el.selectionStart, el.selectionEnd, text)
-      trackCaret()
-      return true
     },
     replaceRange: (start, end, text, selStart, selEnd) => {
       const el = ta.current
@@ -550,7 +545,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     }
     // Every chord here avoids the app menu's accelerators (src/main/index.ts): a menu accelerator never
     // reaches the page. So ⇧⌘B (⌘B toggles the sidebar), ⇧⌘I (⌘I asks about the page; ⌥⌘I is dev
-    // tools) and ⌃⌘M (⇧⌘M opens Meetings).
+    // tools) and ⌃⌘M.
     if (mod && e.shiftKey && e.key.toLowerCase() === 'b') {
       e.preventDefault()
       return apply(wrapSelection(el, '**'))
@@ -629,7 +624,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           onBlur={() => setDismissed(menuKey)}
           onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
-        {pill && <div className="caret-pill" role="status" aria-live="off" style={pill}>{previewText}</div>}
+        <DocFind scope={surface} textRoot={findRoot} reveal={findReveal} onClose={findClose} fallback={findFallback} />
         {menuOpen && anchor && trigger && (
           <CaretMenu
             items={menuItems}

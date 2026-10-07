@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { ROOT } from './harness.mjs'
-import { menu, withGrain, launchSupervised, killBackend, restartBackendOnSamePort, ALL_VIEWS_ON } from './helpers/shell.mjs'
+import { menu, navItem, withGrain, launchSupervised, killBackend, restartBackendOnSamePort, ALL_VIEWS_ON } from './helpers/shell.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const kill = (pid) => process.kill(pid, 'SIGKILL')
@@ -84,7 +84,7 @@ test('external backend killed mid-session: actions fail readably, a replacement 
     // within 10 s the UI must say something: a toast, a banner or the failed screen
     const down = page.locator('.toast, .backend-banner, .backend-error, [role="alert"]').first()
     // provoke a request (the shell polls nothing by itself when the backend is external)
-    await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+    await navItem(page, 'Lists').click()
     await page.getByRole('textbox', { name: /Add|New todo|Quick add/i }).first().fill('while down').catch(() => {})
     await page.keyboard.press('Enter').catch(() => {})
     await expect(down).toBeVisible({ timeout: 10_000 })
@@ -103,7 +103,7 @@ test('external backend killed mid-session: actions fail readably, a replacement 
       // earlier conversation survived the restart (same data dir)
       await expect(page.locator('.sidebar .convo-item').first()).toBeVisible()
     } finally {
-      second.stop()
+      await second.stop()
     }
   })
 })
@@ -135,13 +135,11 @@ test('RootBoundary: a hand-edited settings row that crashes the shell shows reco
 const VIEWS = [
   ['Today', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Today/ }).click()],
   ['Chat', async (p) => p.getByRole('button', { name: /New chat/ }).first().click()],
-  ['Lists', async (p) => p.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()],
-  ['Calendar', async (p) => p.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Calendar' }).click()],
-  ['Mail', async (p) => p.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Mail' }).click()],
+  ['Lists', async (p) => navItem(p, 'Lists').click()],
+  ['Calendar', async (p) => navItem(p, 'Calendar').click()],
+  ['Mail', async (p) => navItem(p, 'Mail').click()],
   ['Files', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()],
-  ['Meetings', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Meetings/ }).click()],
   ['Library', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Library/ }).click()],
-  ['Activity', async (p) => p.locator('.sidebar .nav-item', { hasText: /^\s*Activity/ }).click()],
   ['Space', async (p, g) => { await (await import('./helpers/shell.mjs')).menu(g, 'Toggle Spaces') }]
 ]
 for (const [name, go] of VIEWS) {

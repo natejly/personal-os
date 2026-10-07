@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
 import { ABOUT_EXAMPLES, STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { PermissionsPanel } from '../PermissionsPanel'
 import './onboarding.css'
 
 /** Opens in the real browser: the main process turns window.open into shell.openExternal. */
@@ -17,6 +18,7 @@ const TITLES: Record<WizardState['step'], string> = {
   test: 'Testing the connection',
   google: 'Connect your accounts',
   about: 'Tell Grain about you',
+  permissions: 'Give Grain access',
   done: 'You are all set'
 }
 
@@ -116,7 +118,7 @@ export default function Onboarding(): JSX.Element {
   const canNext = !blocker && state.step !== 'done'
   // Leaving the Google step unconnected, or the about step empty, is a skip, and the one forward button
   // says so: it steps back to a quiet style so the step's own action stays the main one.
-  const skipping = (state.step === 'google' && !google?.connected && !microsoft?.connected) || (state.step === 'about' && !state.about.trim())
+  const skipping = (state.step === 'google' && !google?.connected && !microsoft?.connected) || (state.step === 'about' && !state.about.trim()) || state.step === 'permissions'
   const advance = (): void => {
     if (state.step === 'done') { if (saved.state === 'ok') finish(); return }
     if (state.step === 'test' && state.test.state === 'fail') return void runTest()
@@ -225,7 +227,7 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'google' && (
           <>
             <p className="muted">Optional. Connecting Google or Microsoft lets the assistant read your Calendar and mail. Google also adds Tasks and Drive. You can skip this and do it later in Settings.</p>
-            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, and creates a &ldquo;Grain Todos&rdquo; calendar that shows todos with a due date. Both can be switched off in Settings → Integrations.</p>
+            <p className="muted">With Google, connecting also turns on two-way sync between Todos and Google Tasks, which can be switched off in Settings → Integrations.</p>
             {google?.connected ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (
@@ -256,11 +258,17 @@ export default function Onboarding(): JSX.Element {
           </>
         )}
 
+        {state.step === 'permissions' && (
+          <>
+            <p className="muted">Optional. Grain can work anywhere on this Mac; Full Disk Access also opens Desktop, Documents, Downloads, Mail and Messages. Grant what you want Grain to use; you can do this later in Settings → System access.</p>
+            <PermissionsPanel compact />
+          </>
+        )}
+
         {state.step === 'done' && (
           <div role="status" aria-live="polite">
             {saved.state === 'saving' && <p className="muted"><Loader2 size={13} className="spin" /> Saving…</p>}
             {saved.state === 'ok' && <p className="ob-lead">Grain is connected to {provider?.name}. Start a chat and ask it anything.</p>}
-            {saved.state === 'ok' && <p className="muted small">Meetings and Activity are on, and nothing records without your say: a meeting records only after you accept the recording notice, and Activity sees more only after you grant macOS permissions in its panel. A quiet daily digest in the Agent Inbox lists what is still missing.</p>}
             {saved.state === 'fail' && (
               <>
                 <p className="ob-error" role="alert">Could not save your setup: {saved.error}</p>

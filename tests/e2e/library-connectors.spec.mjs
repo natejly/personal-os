@@ -17,7 +17,7 @@ test('add the stub through the UI (path with spaces), it connects and lists tool
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
   await expect(page.getByText('No connectors yet')).toBeVisible()
-  await page.getByRole('button', { name: 'Add a connector' }).click()
+  await page.getByRole('button', { name: 'Add custom' }).click()
   await page.getByPlaceholder('Filesystem', { exact: true }).fill('Stub')
   await page.getByPlaceholder(/npx -y/).fill(`${quoted(PY)} ${quoted(STUB)} --mode friendly`)
   await page.getByRole('button', { name: 'Add connector' }).click()
@@ -106,7 +106,7 @@ test('remove connector (two-step) and persistence across relaunch', async ({ gra
 test('a bad command shows a clear error; restart / logs / check do not crash', async ({ grain }) => {
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
-  await page.getByRole('button', { name: 'Add a connector' }).click()
+  await page.getByRole('button', { name: 'Add custom' }).click()
   await page.getByPlaceholder('Filesystem', { exact: true }).fill('Broken')
   await page.getByPlaceholder(/npx -y/).fill('/definitely/not/a/binary --flag')
   await page.getByRole('button', { name: 'Check it first' }).click()
@@ -122,7 +122,7 @@ test('a bad command shows a clear error; restart / logs / check do not crash', a
   await srv.getByRole('button', { name: /Check/ }).click()
   await expect(srv.locator('.mcp-report').first()).toBeVisible({ timeout: 60_000 })
   // empty command refused client-side
-  await page.getByRole('button', { name: 'Add a connector' }).click()
+  await page.getByRole('button', { name: 'Add custom' }).click()
   await page.getByRole('button', { name: 'Add connector' }).click()
   await expect(page.getByText('Enter the command that starts the server')).toBeVisible()
   expect((await api('/mcp/servers')).length).toBe(1)
@@ -131,8 +131,8 @@ test('a bad command shows a clear error; restart / logs / check do not crash', a
 test('remote HTTP connector form validation, paste of config JSON', async ({ grain }) => {
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
-  await page.getByRole('button', { name: 'Add a connector' }).click()
-  await page.getByRole('button', { name: 'Remote' }).click()
+  await page.getByRole('button', { name: 'Add custom' }).click()
+  await page.getByRole('button', { name: 'HTTP', exact: true }).click()
   await page.getByRole('button', { name: 'Add connector' }).click()
   await expect(page.getByText(/Enter the server's https:\/\/ URL/).first()).toBeVisible()
   for (const bad of ['ftp://x.example/mcp', 'not a url', 'https://']) {
@@ -183,7 +183,7 @@ test('enable/disable toggle; 820x520 layout; hostile server is flagged', async (
 test('double-clicking Add connector adds one; a silent server ends in a clear error', async ({ grain }) => {
   const { page, api } = grain
   await openLibrary(page, 'Connectors')
-  await page.getByRole('button', { name: 'Add a connector' }).click()
+  await page.getByRole('button', { name: 'Add custom' }).click()
   await page.getByPlaceholder('Filesystem', { exact: true }).fill('Quiet')
   await page.getByPlaceholder(/npx -y/).fill(quoted(PY) + ' ' + quoted(STUB) + ' --mode silent')
   await page.getByRole('button', { name: 'Add connector' }).dblclick()

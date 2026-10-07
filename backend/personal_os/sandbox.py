@@ -47,7 +47,7 @@ def _warm_mpl(py: str) -> None:
         os.makedirs(MPL_CACHE, exist_ok=True)
         if any(n.startswith("fontlist-") for n in os.listdir(MPL_CACHE)):
             return
-        cmd = [py, "-I", "-c", "import matplotlib.font_manager"]
+        cmd = [py, "-I", "-B", "-c", "import matplotlib.font_manager"]
         if sys.platform == "darwin" and shutil.which("sandbox-exec"):
             cmd = ["sandbox-exec", "-p", _mac_profile(MPL_CACHE, py), *cmd]
         subprocess.run(cmd, capture_output=True, timeout=180,
@@ -91,28 +91,48 @@ def _sbpl_re(p: str) -> str:
     return re.sub(r'([.^$*+?()\[\]{}|\\"])', r"\\\1", p)
 
 
-# Files that run code or configure tools the next time the user, git, an editor or an agent opens the folder. No shell
-# write may touch them under any root, a desk workspace included: the block goes last, so it beats every allow above it.
+# Files that run code or configure tools the next time the user, git, an editor or an agent opens the folder (or at login:
+# launch agents and daemons). No shell write may touch them, a desk workspace included: the block goes last, so it beats every
+# allow above it.
 _PROTECTED_WRITES = r"""(deny file-write* (regex #"/\.(zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|profile|envrc|gitconfig|mcp\.json)$")
                   (regex #"/\.git/(hooks|config|info)(/|$)") (regex #"/\.vscode/(tasks|settings)\.json$")
-                  (regex #"/\.husky(/|$)") (regex #"/\.auth_token$") (regex #"/personal-os\.db"))
+                  (regex #"/\.husky(/|$)") (regex #"/\.auth_token$") (regex #"/personal-os\.db")
+                  (regex #"/Library/(LaunchAgents|LaunchDaemons)(/|$)"))
 """
+
+
+def _credential_denies(home: str) -> str:
+    """The credential stores of mac.sensitive_reason as SBPL terms, denied for read AND write: a command that really needs one
+    runs unsandboxed, which is a card the user answers. Key files by suffix (.pem, .key) are not here: system certificates
+    use them. `home` is the real path of the home folder."""
+    from . import mac
+    homes = list(dict.fromkeys([home, os.path.expanduser("~")]))
+    subs = [f"(subpath {_q(os.path.join(h, d))})" for h in homes for d in mac.CRED_HOME_DIRS]
+    subs += [f"(subpath {_q(d)})" for d in mac.SYSTEM_KEYCHAINS]
+    lits = [f"(literal {_q(os.path.join(h, f))})" for h in homes for f in mac.CRED_HOME_FILES]
+    support = "|".join(_sbpl_re(os.path.join(h, "Library", "Application Support")) for h in homes)
+    browsers = "|".join(_sbpl_re(d) for d in mac.BROWSER_DIRS)
+    names = "|".join(_sbpl_re(n) for n in mac.BROWSER_FILE_NAMES)
+    rx = [rf'(regex #"^({support})/({browsers})/(.*/)?({names})$")', r'(regex #"/\.env($|\.)")', r'(regex #"/\.auth_token$")',
+          r'(regex #"/personal-os\.db")', r'(regex #"/id_(rsa|dsa|ecdsa|ed25519)$")']
+    return "\n".join(f"(deny file-read* file-write* {t})" for t in [*subs, *lits, *rx])
 
 
 def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None,
                   allow_hosts: list[str] | None = None, loopback: bool = False) -> str:
     """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
 
-    Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
-    *secrets* are the denylist: ssh/gpg/aws/gcloud/keychains, any .env, the app's own data dir and database. Writes
-    are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never reach the app's data dir
-    or code, ~/Library, home dotfiles, or anything in `_PROTECTED_WRITES` (rc files, git hooks and config, editor tasks),
-    where a write would run later outside the sandbox, even when a granted root contains them (the home folder itself
-    as a workspace root). Network is off unless `network`; with `proxy_port` (and not `network`) the one thing it may
-    connect to is the allowlisting proxy on localhost at that port (egress.py).
+    Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads AND writes are open
+    (`(allow file-write*)` everywhere) and the protected places are the denylist, in this order (the last match wins):
+    (1) no write to Grain's own data folder, app bundles or code, and no read of the data folder or code; (2) the late
+    re-allows: `writable` folders that sit inside the data folder (a desk workspace, the opencode state dir) and the work
+    venv; (3) the credential stores, denied for read and write (`_credential_denies`); (4) `_PROTECTED_WRITES`, the files
+    that run code later outside the sandbox (rc files, git hooks and config, editor tasks, launch agents, the auth token,
+    the database). Network is off unless `network`; with `proxy_port` (and not `network`) the one thing it may connect to
+    is the allowlisting proxy on localhost at that port (egress.py).
     """
+    from . import mac
     home, root, data = _paths()
-    w = " ".join(f"(subpath {_q(os.path.realpath(p))})" for p in writable)
     net = "(allow network*)" if network else "(deny network*)"
     if proxy_port and not network:
         net += f'\n(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))'
@@ -131,16 +151,16 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
         wb = None
     if wb:
         late = f"(allow file-read* (subpath {_q(os.path.realpath(os.path.dirname(wb)))}))\n"
-    # A desk workspace lives inside the app data dir, which the deny above covers. Re-allow only those
-    # writable folders, then repeat the secret-name denies so a database or .env still loses.
-    creds = " ".join([*(f"(subpath {_q(os.path.join(home, d))})" for d in (".docker", ".azure")),
-                      *(f"(literal {_q(os.path.join(home, f))})" for f in (".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"))])
     data_real, home_real = os.path.realpath(data), os.path.realpath(home)
+    # The data folder as configured and as resolved, and the app bundles: never written. The folder is never read either.
+    kept = [str(x) for x in mac.protected_paths() if x.suffix.lower() != ".app"] + [data, data_real]
+    data_subs = " ".join(f"(subpath {_q(d)})" for d in dict.fromkeys(kept))
+    bundles = " ".join(f"(subpath {_q(str(b))})" for b in dict.fromkeys(x for x in mac.protected_paths() if x.suffix.lower() == ".app"))
+    # A desk workspace lives inside the app data dir, which the deny above covers. Re-allow only those writable folders; the
+    # credential block after them repeats the secret-name denies, so a database or .env there still loses.
     inside = list(dict.fromkeys(rp for p in writable if (rp := os.path.realpath(p)).startswith(data_real + os.sep)))
     if inside:
-        w_in = " ".join(f"(subpath {_q(p)})" for p in inside)
-        late += f"(allow file-read* file-write* {w_in})\n"
-        late += '(deny file-read* file-write* (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))\n'
+        late += f"(allow file-read* file-write* {' '.join(f'(subpath {_q(p)})' for p in inside)})\n"
     return f"""(version 1)
 (deny default)
 {net}
@@ -150,23 +170,18 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
 (allow process-info*)
 (allow signal (target same-sandbox))
 (allow file-read*)
-(allow file-write* {w})
+(allow file-write*)
 (allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty") (literal "/dev/dtracehelper"))
 (allow mach-lookup)
 (allow ipc-posix-shm)
 (allow pseudo-tty)
 (deny appleevent-send)
-(deny file-write* (subpath {_q(data)}) (subpath {_q(data_real)}) (literal {_q(os.path.join(root, ".env"))})
-                  (subpath {_q(os.path.join(root, "backend", "personal_os"))})
-                  (subpath {_q(os.path.join(home_real, "Library"))}) (regex #"^{_sbpl_re(home_real)}/\\.[^/]+"))
-(deny file-read* (subpath {_q(data)}) (literal {_q(os.path.join(root, ".env"))})
-                 (subpath {_q(os.path.join(root, "backend", "personal_os"))})
-                 (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".gnupg"))})
-                 (subpath {_q(os.path.join(home, ".aws"))}) (subpath {_q(os.path.join(home, ".config", "gcloud"))})
-                 (subpath {_q(os.path.join(home, ".kube"))}) {creds}
-                 (subpath {_q(os.path.join(home, "Library", "Keychains"))})
-                 (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
-{late}{_PROTECTED_WRITES}"""
+(deny file-write* {data_subs} {bundles} (literal {_q(os.path.join(root, ".env"))})
+                  (subpath {_q(os.path.join(root, "backend", "personal_os"))}))
+(deny file-read* {data_subs} (literal {_q(os.path.join(root, ".env"))})
+                 (subpath {_q(os.path.join(root, "backend", "personal_os"))}))
+{late}{_credential_denies(home_real)}
+{_PROTECTED_WRITES}"""
 
 
 def _mac_profile(work: str, py: str, socket_path: str | None = None, workspace: str | None = None) -> str:
@@ -442,7 +457,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
     started_ns = time.time_ns()
     cwd = os.path.realpath(workspace) if workspace else work
     pre = _limits_for(timeout) if workspace else _limits
-    cmd = [py, "-I", script]
+    cmd = [py, "-I", "-B", script]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg"}
     sock = None
     if bridge is not None:
@@ -452,7 +467,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         sock = bridge.socket_path
         env["GRAIN_TOOLS_SOCK"] = sock
         # -I keeps the script's own folder off sys.path, so put it back for the client module and run main.py by path.
-        cmd = [py, "-I", "-c", "import sys, runpy; sys.path.insert(0, %r); runpy.run_path(%r, run_name='__main__')" % (work, script)]
+        cmd = [py, "-I", "-B", "-c", "import sys, runpy; sys.path.insert(0, %r); runpy.run_path(%r, run_name='__main__')" % (work, script)]
     if any(k in code for k in ("matplotlib", "pyplot", "seaborn")):
         _warm_mpl(py)
     env["MPLCONFIGDIR"] = _seed_mpl(work)

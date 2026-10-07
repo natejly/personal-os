@@ -31,7 +31,7 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user", "gmail_send"})  # gmail_send: the email card is the user writing, not granting
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
@@ -647,6 +647,193 @@ def hardline(cmd: str, parsed: Parsed | None = None) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- destructive floor
+# Allow everything still shows a card for these: deletes that skip the Trash, disk wipes and history rewrites on a remote.
+# Best effort over the same parser as the hardline list; the sandbox and the hardline list are still the boundary.
+
+RM_COMMANDS = {"rm", "unlink", "srm", "shred"}
+GIT_GLOBAL_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+DISKUTIL_WIPES = re.compile(r"^(erase|secureErase|zeroDisk|randomDisk|reformat|partitionDisk)", re.I)
+APFS_WIPES = {"deletecontainer", "deletevolume", "erasevolume"}
+DEV_OK = ("/dev/null", "/dev/zero", "/dev/stdout", "/dev/stderr", "/dev/tty")
+
+
+def temp_roots(extra: Iterable[str] = ()) -> list[str]:
+    """Folders whose contents are scratch: deleting inside them is not a permanent loss of user files."""
+    import tempfile
+    roots = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders", tempfile.gettempdir(),
+             os.environ.get("TMPDIR") or "", *extra]
+    out: list[str] = []
+    for r in roots:
+        if r:
+            for v in (os.path.normpath(r), os.path.realpath(r)):
+                if v not in out and v != "/":
+                    out.append(v)
+    return out
+
+
+def _in_temp(arg: str, cwd: str | None, roots: list[str]) -> bool:
+    a = arg
+    for var in ("${TMPDIR}", "$TMPDIR"):
+        if a.startswith(var):
+            a = (os.environ.get("TMPDIR") or "/tmp") + a[len(var):]
+    a = _expand_home(a)
+    if "$" in a or "`" in a:
+        return False  # a variable or substitution we cannot resolve: assume it names user files
+    glob = bool(re.search(r"[*?\[]", a))
+    if glob:
+        a = os.path.dirname(re.split(r"[*?\[]", a)[0] + "x") or "."
+    if not os.path.isabs(a):
+        a = os.path.join(cwd or os.path.expanduser("~"), a)
+    for p in {os.path.normpath(a), os.path.realpath(a)}:
+        for r in roots:
+            if p.startswith(r + "/") or (glob and p == r):
+                return True
+    return False
+
+
+def _git_force_push(args: list[str]) -> bool:
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in GIT_GLOBAL_ARG else 1
+    if i >= len(args) or args[i] != "push":
+        return False
+    rest = args[i + 1:]
+    return any(a in ("-f", "--force", "--mirror", "--delete", "-d") or a.startswith("--force-with-lease")
+               or (a.startswith("-") and not a.startswith("--") and "f" in a)
+               or (a.startswith("+") and len(a) > 1) or (a.startswith(":") and len(a) > 1) for a in rest)
+
+
+def _destructive_tokens(tokens: list[str], raw: list[str], cwd: str | None, roots: list[str]) -> str | None:
+    if not tokens:
+        return None
+    name = os.path.basename(tokens[0])
+    args = tokens[1:]
+    if name in RM_COMMANDS:
+        paths, flags = [], True
+        for a in args:
+            if flags and a == "--":
+                flags = False
+            elif flags and a.startswith("-") and a != "-":
+                continue
+            else:
+                paths.append(a)
+        if not paths:
+            # `xargs rm`, `find ... | xargs rm`: the names arrive on stdin, nothing to judge them by
+            return f"mass delete through xargs {name}" if any(os.path.basename(w) == "xargs" for w in raw) else None
+        outside = [a for a in paths if not _in_temp(a, cwd, roots)]
+        if outside:
+            return f"permanent delete ({name} {' '.join(outside[:3])})"
+        return None
+    if name == "find" and any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for a in args):
+        execs = [os.path.basename(args[j + 1]) for j, a in enumerate(args[:-1]) if a in ("-exec", "-execdir", "-ok", "-okdir")]
+        if "-delete" in args or any(e in RM_COMMANDS for e in execs):
+            starts = []
+            for a in args:
+                if a.startswith("-") or a in ("(", "!", ")"):
+                    break
+                starts.append(a)
+            if not starts or not all(_in_temp(a, cwd, roots) for a in starts):
+                return "mass delete (find -delete)" if "-delete" in args else "mass delete (find -exec rm)"
+    if name == "git" and _git_force_push(args):
+        return "git force-push"
+    if name == "diskutil" and args:
+        sub = args[1:] if args[0].lower() == "apfs" else args
+        if args[0].lower() == "apfs" and sub and sub[0].lower() in APFS_WIPES:
+            return "diskutil apfs " + sub[0]
+        if DISKUTIL_WIPES.match(args[0]):
+            return "diskutil " + args[0]
+    if name == "dd" and any(a.startswith("of=/dev/") and a[3:] not in DEV_OK for a in args):
+        return "dd to a device"
+    if name.startswith("mkfs") or name == "newfs" or name.startswith("newfs_"):
+        return "formatting a filesystem"
+    return None
+
+
+def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -> str | None:
+    """Why this shell command cannot be taken back (a delete that skips the Trash, a disk wipe, a force-push), or None.
+    Looks through chains, pipes, env/sudo/nohup wrappers, $() and backticks, `sh -c` / `eval` strings and, best effort,
+    ( subshells ) and { groups }. Deleting inside a temp folder (temp_roots, plus `scratch`) does not count."""
+    roots = temp_roots(scratch)
+
+    def walk(text: str, depth: int, here: str | None) -> str | None:
+        if depth > 4:
+            return None
+        p = split_command(text)
+        segs = p.segments + p.nested
+        if p.opaque:  # a subshell or group the splitter gives up on: split again with the brackets as separators
+            segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
+        for seg in segs:
+            tokens = strip_wrappers(seg.words, True)
+            if len(tokens) == 2 and tokens[0] == "cd" and "$" not in tokens[1].replace("$HOME", "").replace("$TMPDIR", ""):
+                # `cd /tmp/x && rm -rf build`: later relative paths are judged from there (a literal folder only)
+                t = tokens[1].replace("$TMPDIR", os.environ.get("TMPDIR") or "/tmp")
+                t = _expand_home(t)
+                here = os.path.normpath(t if os.path.isabs(t) else os.path.join(here or os.path.expanduser("~"), t))
+                continue
+            why = _destructive_tokens(tokens, seg.words, here, roots)
+            if why:
+                return why
+            inner = _shell_c(tokens)
+            if inner is None and tokens and os.path.basename(tokens[0]) == "eval":
+                inner = " ".join(tokens[1:])
+            if inner is not None and (why := walk(inner, depth + 1, here)):
+                return why
+        return None
+    return walk(normalize(cmd or ""), 0, cwd)
+
+
+KEYCHAIN_SUBCOMMANDS = re.compile(r"^(find-|dump-keychain|export|delete-|add-|set-|unlock-keychain|import)")
+
+
+def touches_protected(cmd: str, cwd: str | None = None) -> str | None:
+    """Why a command run OUTSIDE the sandbox reaches what the sandbox would have kept it from: a credential store, Grain's
+    own data folder or app (mac.sensitive_reason / protected_reason) named by any path-like word, or the Keychain CLI.
+    Best effort: a path built at run time is not seen."""
+    from . import mac
+    text = normalize(cmd or "")
+    p = split_command(text)
+    segs = p.segments + p.nested
+    if p.opaque:
+        segs += split_command(re.sub(r"[(){}`]", ";", text)).segments
+    for seg in segs:
+        tokens = strip_wrappers(seg.words, True)
+        if tokens and os.path.basename(tokens[0]) == "security" and len(tokens) > 1 and KEYCHAIN_SUBCOMMANDS.match(tokens[1]):
+            return "Keychain access (security " + tokens[1] + ")"
+        if (inner := _shell_c(tokens)) is not None and (why := touches_protected(inner, cwd)):
+            return why
+        words = [w.split("=", 1)[1] if w.startswith("-") and "=" in w else w for w in tokens[1:]]
+        for w in words + [t for _, t in seg.redirects]:
+            if not w or w in EXEMPT_PATHS or not (w.startswith(("/", "~", "$HOME", "${HOME}", ".")) or "/" in w):
+                continue
+            if "$" in w.replace("${HOME}", "").replace("$HOME", ""):
+                continue
+            if re.search(r"[*?\[]", w):
+                w = os.path.dirname(re.split(r"[*?\[]", w)[0] + "x") or "."
+            spelled = _expand_home(w)
+            if not os.path.isabs(spelled) and cwd:
+                spelled = os.path.join(cwd, spelled)
+            real = _real(w, cwd)
+            why = mac.sensitive_reason(os.path.normpath(spelled), real) or mac.protected_reason(spelled, real)
+            if why:
+                return f"{w}: {why}"
+    return None
+
+
+def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
+                    scratch: Iterable[str] = ()) -> tuple[str, str] | None:
+    """What Allow everything still cards for this call, as (card kind, reason): an unsandboxed command that names a
+    credential store or Grain's own data or app ("external_directory"), or a command `destructive` flags
+    ("destructive"), sandboxed or not. None for anything else."""
+    if tool != "shell_run" or not isinstance(args, dict):
+        return None
+    cmd = str(args.get("command") or "")
+    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd)):
+        return "external_directory", why
+    why = destructive(cmd, cwd, scratch)
+    return ("destructive", why) if why else None
+
+
 # ---------------------------------------------------------------- subjects
 
 @dataclass(frozen=True)
@@ -764,12 +951,10 @@ def _roots(roots: Iterable[str]) -> list[str]:
     return [os.path.realpath(_expand_home(r)) for r in roots if r]
 
 
-def _inside(path: str, roots: list[str]) -> bool:
-    return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots)
-
-
-def _outside_dirs(seg: Seg, tokens: list[str], roots: list[str], cwd: str | None) -> list[str]:
-    """Directories this subcommand touches that sit outside every granted root."""
+def _guarded_paths(seg: Seg, tokens: list[str], cwd: str | None) -> list[str]:
+    """Paths this subcommand names that are a credential store or Grain's own data folder or app (mac.sensitive_reason /
+    mac.protected_reason), judged as spelled and as resolved: the file itself, or the folder for a glob."""
+    from . import mac
     out: list[str] = []
     targets: list[str] = [t for op, t in seg.redirects if t not in EXEMPT_PATHS]
     name = os.path.basename(tokens[0]) if tokens else ""
@@ -782,14 +967,15 @@ def _outside_dirs(seg: Seg, tokens: list[str], roots: list[str], cwd: str | None
         targets += [w for w in pos if w != "-"]
     for t in targets:
         if "$" in t and not t.startswith(("$HOME", "${HOME}")):
-            out.append(t)  # an unresolved variable could point anywhere
-            continue
+            continue  # an unresolved variable cannot be judged
         if re.search(r"[*?\[]", t):
             t = os.path.dirname(re.split(r"[*?\[]", t)[0] + "x") or "."
+        spelled = _expand_home(t)
+        if not os.path.isabs(spelled) and cwd:
+            spelled = os.path.join(cwd, spelled)
         p = _real(t, cwd)
-        d = p if (os.path.isdir(p) or t.endswith("/")) else os.path.dirname(p)
-        if not _inside(d, roots) and d not in out:
-            out.append(d)
+        if (mac.sensitive_reason(os.path.normpath(spelled), p) or mac.protected_reason(spelled, p)) and p not in out:
+            out.append(p)
     return out
 
 
@@ -823,7 +1009,7 @@ class Verdict:
     external: list[str] = field(default_factory=list)
 
 
-def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, roots: list[str], cwd: str | None) -> Verdict:
+def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, cwd: str | None) -> Verdict:
     v = Verdict(subjects=[f"Bash({cmd})"])
     why = hardline(cmd)
     if why:
@@ -860,18 +1046,17 @@ def _evaluate_bash(tool: str, cmd: str, rules: RuleSet, roots: list[str], cwd: s
                 asked.append(f"Bash({_canon(strip_wrappers(seg.words, True))})")
                 v.rule = v.rule or hit.text
                 break
-    # Paths outside the workspace are judged by the agg tokens, wrappers and all.
+    # A credential store or Grain's own data is judged by the agg tokens, wrappers and all.
     outside: list[str] = []
-    if roots:
-        for seg in judged:
-            for d in _outside_dirs(seg, strip_wrappers(seg.words, True), roots, cwd):
-                for r in rules.deny:
-                    if _matches(r, Subject("external_directory", d), tool, cwd):
-                        v.action, v.rule = "deny", r.text
-                        v.refusal = f"blocked by your permission rule {r.text}"
-                        return v
-                if not any(_matches(r, Subject("external_directory", d), tool, cwd) for r in rules.allow) and d not in outside:
-                    outside.append(d)
+    for seg in judged:
+        for d in _guarded_paths(seg, strip_wrappers(seg.words, True), cwd):
+            for r in rules.deny:
+                if _matches(r, Subject("external_directory", d), tool, cwd):
+                    v.action, v.rule = "deny", r.text
+                    v.refusal = f"blocked by your permission rule {r.text}"
+                    return v
+            if not any(_matches(r, Subject("external_directory", d), tool, cwd) for r in rules.allow) and d not in outside:
+                outside.append(d)
     v.external = outside
     # allow: every subcommand of the line itself needs a verdict.
     unallowed: list[str] = []
@@ -921,7 +1106,8 @@ def _suggest_bash(parsed: Parsed, rules: RuleSet, outside: list[str]) -> list[st
 
 def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | None, *,
              roots: Iterable[str] = (), cwd: str | None = None) -> Verdict:
-    """The rule verdict for one call: deny > ask > allow, None when no rule has an opinion."""
+    """The rule verdict for one call: deny > ask > allow, None when no rule has an opinion. `roots` only names where a
+    relative path in a shell command starts (the first entry, the desk workspace); it limits nothing."""
     rs = rules if isinstance(rules, RuleSet) else load_rules(rules)
     rl = _roots(roots)
     if cwd is None and rl:
@@ -929,7 +1115,7 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
     args = args if isinstance(args, dict) else {}
     if tool == "shell_run":
         c = args.get("cwd")
-        return _evaluate_bash(tool, str(args.get("command") or ""), rs, rl, _real(c) if isinstance(c, str) and c else cwd)
+        return _evaluate_bash(tool, str(args.get("command") or ""), rs, _real(c) if isinstance(c, str) and c else cwd)
     subs = subject_for(tool, args)
     v = Verdict(subjects=[f"{s.kind}({s.value})" if s.value else s.kind for s in subs])
     verdict, rule = _decide(rs, subs, tool, cwd)
@@ -1066,11 +1252,8 @@ def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
 
 
 def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
-    """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
-    conv = conv_settings or {}
-    if "skipPermissions" in conv:
-        return bool(conv["skipPermissions"])
-    return bool(permissions.get(cfg or {}, "skipPermissions"))
+    """Whether approval cards are skipped: only the global Allow all mode does (a chat's own skipPermissions is legacy)."""
+    return permissions.get(cfg or {}, "permissionMode") == "allow_all"
 
 
 def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",
@@ -1079,11 +1262,12 @@ def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = Fals
 
     Stays a card: a plan or desk question (the user deciding, not granting a tool), a forced ask (taint,
     doom loop, desk ask-as-you-go), an ask rule or an outside-folder write (`fenced`), an external or
-    schedules tool, and a shell command no read-only list or allow rule already cleared (a shell_run that
-    is still `ask` here was not cleared).
+    schedules tool (except coding_session_start/send, which skip lifts), and a shell command no read-only list
+    or allow rule already cleared (a shell_run that is still `ask` here was not cleared).
     """
     if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
-            and danger not in ("external", "schedules") and name not in ("shell_run", "opencode_run")):
+            and (danger not in ("external", "schedules") or name in ("coding_session_start", "coding_session_send"))
+            and name not in ("shell_run", "opencode_run")):
         return "on"
     return mode
 

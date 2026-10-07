@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Conversation } from '@shared/types'
-import { adjacentChatId, partitionChats, projectRows, sidebarOrder } from './chatRows'
+import { adjacentChatId, chatLabel, isTelegramChat, partitionChats, sidebarOrder } from './chatRows'
 
 const NOW = new Date('2026-10-02T12:00:00').getTime()
 const t = (daysAgo: number): number => (NOW - daysAgo * 86_400_000) / 1000
@@ -44,10 +44,32 @@ test('adjacentChatId clamps and starts from the first row', () => {
   assert.equal(adjacentChatId([], 'a', 1), null)
 })
 
-test("a project's rows interleave its chats and notes, newest first; personal items stay out", () => {
-  const rows = projectRows([c('a', 2, { project_id: 'p' }), c('b', 0)], [
-    { id: 'n1', project_id: 'p', title: 'n1', updated_at: t(1) }, { id: 'n2', project_id: 'p', title: 'n2', updated_at: t(3) }
-  ])
-  assert.deepEqual(rows.p.map((r) => `${r.kind}:${r.id}`), ['doc:n1', 'chat:a', 'doc:n2'])
-  assert.deepEqual(Object.keys(rows), ['p'])
+const tg = (id: string, extra: Partial<Conversation> = {}): Conversation => c(id, 5, { settings: { telegram: true } as Conversation['settings'], ...extra })
+
+test('the Telegram chat is first in pinned without a pin, ahead of a newer pin, and not in the date groups', () => {
+  const list = [c('a', 0), c('p', 1, { pinned_at: 99 }), tg('phone')]
+  const { pinned, groups } = partitionChats(list, '', NOW)
+  assert.deepEqual(pinned.map((x) => x.id), ['phone', 'p'])
+  assert.deepEqual(groups.flatMap((g) => g.items.map((x) => x.id)), ['a'])
+  assert.equal(sidebarOrder(list, NOW)[0].id, 'phone')
+})
+
+test('the Telegram chat stays listed once when it is also pinned or in a project', () => {
+  const { pinned, groups } = partitionChats([tg('phone', { pinned_at: 1, project_id: 'p' }), c('x', 0, { pinned_at: 5 })], '', NOW)
+  assert.deepEqual(pinned.map((x) => x.id), ['phone', 'x'])
+  assert.equal(groups.length, 0)
+})
+
+test('a query matches the Telegram chat by its label or its title, and without a flag nothing changes', () => {
+  const list = [tg('phone', { title: 'Hi there' }), c('tele-plain', 0)]
+  assert.deepEqual(partitionChats(list, 'tele', NOW).pinned.map((x) => x.id), ['phone'])
+  assert.deepEqual(partitionChats(list, 'hi th', NOW).pinned.map((x) => x.id), ['phone'])
+  assert.deepEqual(partitionChats([c('a', 0)], '', NOW).pinned, [])
+})
+
+test('chatLabel is Telegram for the flagged chat, else the title', () => {
+  assert.equal(isTelegramChat(tg('phone')), true)
+  assert.equal(isTelegramChat(c('a', 0)), false)
+  assert.equal(chatLabel(tg('phone', { title: 'x' })), 'Telegram')
+  assert.equal(chatLabel(c('a', 0, { title: 'Plans' })), 'Plans')
 })

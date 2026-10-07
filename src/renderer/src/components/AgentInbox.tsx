@@ -1,6 +1,6 @@
 /**
  * The Agent Inbox on Today. Two sections: "Needs you" (pending approvals and proposals, desks waiting on the user, and
- * a link into every other review queue: doc edits, meeting notes, skills, workflow runs, memory tidy-ups) and
+ * a link into every other review queue: doc edits, skills, workflow runs, memory tidy-ups) and
  * "While you were away" (what the scheduled jobs did, late fires and failures included).
  *
  * Everything here is rendered from the backend's journal rows — agent_runs, run_events, approvals and
@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore, type SettingsTab, type View } from '../store'
+import { useStore, useChatTainted, useChatFaceById } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -23,6 +23,7 @@ import { SAFE_MD } from './Message'
 import { AUTONOMY } from '../lib/deskStatus'
 import Face from './Face'
 import { ShipChecklistView } from './toolcards/ShipChecklistCard'
+import { TOOL_CARDS } from './toolcards'
 import type { ShipChecklist } from '@shared/types'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -71,6 +72,8 @@ function ApprovalRow({ a, onDesk, onChat }: {
   onChat: (conversationId: string) => void
 }): JSX.Element {
   const approveTool = useStore((s) => s.approveTool)
+  // The row only says it was forced; the chat's own mark says why, when this window has the chat loaded.
+  const tainted = useChatTainted(a.conversation_id)
   const [open, setOpen] = useState(false)
   const line = argLine(a.args)
 
@@ -80,7 +83,7 @@ function ApprovalRow({ a, onDesk, onChat }: {
         <Dot tone="needs-you" label="Waiting on your approval" />
         <span className="inbox-tool">{a.tool}</span>
         <span className="inbox-line" title={line}>{line}</span>
-        {a.forced && <span className="chip warn">untrusted content in that chat</span>}
+        {a.forced && <span className="chip warn">{tainted ? 'untrusted content in that chat' : 'asks each time'}</span>}
         <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
         {a.desk_id || OPEN_ONLY.has(a.tool) ? (
           <button className="primary-btn sm" disabled={!a.desk_id && !a.conversation_id}
@@ -122,6 +125,17 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
     // A refused decision leaves the proposal pending: the message shows here and the draft stays open to fix.
     setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
+  }
+  // A proposed email is the same editable card as in the chat; Accept there is Send (or Save draft), Reject is Discard.
+  const MailCard = p.tool === 'gmail_send' || p.tool === 'gmail_draft' ? TOOL_CARDS[p.tool] : undefined
+  if (MailCard) {
+    const event = { id: p.id, name: p.tool, arguments: p.args, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: true }
+    return (
+      <li className="inbox-item">
+        <MailCard event={event} pending conversationId={p.conversation_id ?? undefined}
+          decide={async (ok, edited) => { const e = await decideProposal(p.id, ok, edited); if (e) useStore.getState().toast(e, 'error') }} />
+      </li>
+    )
   }
   // Closing the row ends the edit too: Accept must never send text from boxes that are not on screen.
   const toggle = (): void => {
@@ -193,10 +207,7 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
-  const setView = useStore((s) => s.setView)
-  const openSettings = useStore((s) => s.openSettings)
-  // The daily digest's fix-it links: one per setup gap, to the view or Settings tab that fixes it.
-  const links = r.links ?? []
+  const chatFace = useChatFaceById(r.conversation_id)
   // An unread problem opens itself; reading it (Mark all read included) collapses it.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
@@ -210,7 +221,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   return (
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-row">
-        <Face name={r.job} status={r.status} size={18} />
+        <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
         <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
         <span className="inbox-line" title={line}>{line}</span>
@@ -238,12 +249,6 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           {r.summary ? <ReportBody text={r.summary} /> : (
             !r.error && <p className="muted">It wrote nothing. {r.tool_calls} tool call{r.tool_calls === 1 ? '' : 's'}.</p>
           )}
-          {links.map((l) => (
-            <button key={l.label} className="ghost-btn sm"
-              onClick={() => { if (l.settings) openSettings(l.settings as SettingsTab); else if (l.view) setView(l.view as View) }}>
-              {l.label} <ArrowRight size={13} />
-            </button>
-          ))}
         </>
       )}
     </li>
@@ -574,24 +579,11 @@ function ShipStart({ jobId, prev }: { jobId: string; prev: ShipChecklist | null 
   )
 }
 
-/** The fixed time cap of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
-const JOB_MAX_MINUTES = 4
-
-/** Which model a job's runs use, and the tighter caps it may set for itself. */
+/** Which model a job's runs use. */
 function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<typeof api.jobs.update>[1]) => Promise<void> }): JSX.Element {
   const models = useStore((s) => s.models)
   const ids = chatModelIds(models)
   if (job.model && !ids.includes(job.model)) ids.unshift(job.model)
-  const budget = job.budget ?? {}
-  // A cleared or out-of-range field drops that cap, so the job falls back to the fixed one.
-  const setCap = (key: 'maxRunSeconds', raw: string, scale: number, max: number): void => {
-    const n = Number(raw) * scale
-    const next = { ...budget }
-    if (raw.trim() && n > 0 && n <= max * scale) next[key] = n
-    else delete next[key]
-    if (next[key] === budget[key]) return
-    void save({ budget: Object.keys(next).length ? next : null })
-  }
   return (
     <div className="job-run-settings">
       <label className="small">
@@ -602,18 +594,6 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
           {ids.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
         </select>
       </label>
-      <details>
-        <summary className="muted small">Advanced: a tighter time limit per run</summary>
-        <label className="small">
-          <span className="muted">Max minutes</span>{' '}
-          <input key={`s${budget.maxRunSeconds ?? ''}`} type="number" min={0.5} max={JOB_MAX_MINUTES} step={0.5}
-            placeholder={String(JOB_MAX_MINUTES)} defaultValue={budget.maxRunSeconds ? budget.maxRunSeconds / 60 : ''}
-            aria-label={`Max minutes per run of ${job.name}`}
-            onBlur={(e) => setCap('maxRunSeconds', e.target.value, 60, JOB_MAX_MINUTES)} />
-        </label>
-        <p className="muted small">Every scheduled run already stops after {JOB_MAX_MINUTES} minutes; this can
-          only lower that, and your own settings still win when they are stricter.</p>
-      </details>
     </div>
   )
 }
@@ -795,7 +775,7 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const draft = useStore((s) => s.routineDraft)
   const [showJobs, setShowJobs] = useState(!!draft)
   const [adding, setAdding] = useState(!!draft)
@@ -830,9 +810,7 @@ export default function AgentInbox(): JSX.Element | null {
       if (first) void openDoc(first.id)
       else openFiles('notes')
     }
-    else if (key === 'meetings') setView('meetings')
-    else if (key === 'suggestions') setView('activity')
-    else if (key === 'memory') { setMemoryMode('list'); openSettings('memory') }
+    else if (key === 'memory') useStore.getState().openMemory('list')
     else { setLibraryTab(key === 'workflows' ? 'automations' : key); setView('library') }
   }
   const away = box.while_you_were_away

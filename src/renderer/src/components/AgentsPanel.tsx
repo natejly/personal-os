@@ -9,7 +9,7 @@ import AgentHome from './AgentHome'
 import Face from './Face'
 import { ConfirmDelete } from './SkillsPanel'
 
-const BLANK: AgentFields = { name: '', description: '', model: null, steps: null, tools: [], skills: [], hue: null, hidden: false, body: '', label: '', boundaries: '', workspace: '', tool_modes: {} }
+const BLANK: AgentFields = { name: '', description: '', model: null, tools: [], skills: [], hue: null, hidden: false, body: '', label: '', boundaries: '', workspace: '', tool_modes: {} }
 
 /** What rides beside the text when a definition is saved. Notes are not here: the agent's Memory tab owns them. */
 const scopeOf = (f: AgentFields): AgentScope => ({ label: f.label ?? '', boundaries: f.boundaries ?? '', workspace: f.workspace ?? '', tool_modes: f.tool_modes ?? {} })
@@ -127,7 +127,7 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       <label>When to hand work to it<input value={f.description} placeholder="One line another agent can match a task against" onChange={(e) => set({ description: e.target.value })} /></label>
       <label>Instructions<textarea rows={6} value={f.body} placeholder="Who it is, what it does, what it must not do, how it reports back." onChange={(e) => set({ body: e.target.value })} /></label>
       <label>Boundaries<textarea rows={3} maxLength={2000} value={f.boundaries ?? ''} placeholder="What it must ask you before doing, and what it never does." onChange={(e) => set({ boundaries: e.target.value })} /></label>
-      <label>Working folder<input value={f.workspace ?? ''} placeholder="Optional, e.g. ~/Documents/Taxes (used when a chat has none bound)" onChange={(e) => set({ workspace: e.target.value })} /></label>
+      <label>Working folder<input value={f.workspace ?? ''} placeholder="Optional, e.g. ~/Documents/Taxes" onChange={(e) => set({ workspace: e.target.value })} /></label>
       <details className="agent-pick">
         <summary>Tools <span className="tag">{f.tools.length}</span></summary>
         <input className="agent-filter" placeholder="Filter tools" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -165,7 +165,6 @@ function AgentEditor({ initial, save, onDone }: { initial: AgentFields; save: (t
       </details>
       <div className="agent-face-row">
         <label>Model<input value={f.model ?? ''} placeholder="default" onChange={(e) => set({ model: e.target.value || null })} /></label>
-        <label>Tool rounds<input type="number" min={1} max={60} value={f.steps ?? ''} placeholder="default" onChange={(e) => set({ steps: e.target.value ? Number(e.target.value) : null })} /></label>
         <label className="chip-check-row"><input type="checkbox" checked={f.hidden} onChange={(e) => set({ hidden: e.target.checked })} /> Hidden from the roster replies see</label>
       </div>
       {err && <p className="muted small" role="alert">{err}</p>}

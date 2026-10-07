@@ -18,8 +18,12 @@ import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListen
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 import { startUpdater } from './updater'
+import { registerSystemAccess } from './systemAccess'
 import { background, goBackground, reveal } from './background'
+import { attachContextMenu } from './attachContextMenu'
+import { registerPreviewScheme, servePreviews } from './htmlPreview'
 
+registerPreviewScheme() // before ready
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
 
@@ -77,18 +81,15 @@ function createWindow(): void {
   })
   guardNavigation(win.webContents)
 
-  // Right-click on selected text offers the same four verbs as the floating toolbar.
-  win.webContents.on('context-menu', (_e, params) => {
-    if (!params.selectionText.trim() || !win || win.isDestroyed()) return
-    const verbs = ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
+  // Right-click: spelling fixes on a misspelled word, the edit items in a field, and on selected text
+  // the same four verbs as the floating toolbar.
+  attachContextMenu(
+    win,
+    ['Explain', 'Summarize', 'Verify', 'Ask…'].map((label) => ({
       label,
       click: () => sendMenu(`selection:${label.replace('…', '').toLowerCase()}`)
     }))
-    const edit: Electron.MenuItemConstructorOptions[] = params.isEditable
-      ? [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }]
-      : [{ role: 'copy' }]
-    Menu.buildFromTemplate([...edit, { type: 'separator' }, ...verbs]).popup({ window: win })
-  })
+  )
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -239,12 +240,9 @@ function buildMenu(): void {
         item('view-docs'),
         item('view-mail'),
         item('view-memory'),
-        item('view-activity'),
         // No digit for these: the graph is a mode of Memory (⌘6) and Uploads is a Files section (⌘4, ⌘U).
         { label: 'Knowledge Graph…', click: () => sendMenu('view:graph') },
         { label: 'Uploads', click: () => sendMenu('view:documents') },
-        // ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
-        item('view-meetings'),
         { label: 'Library', click: () => sendMenu('view:library') },
         { type: 'separator' },
         // Inside the Markdown editor ⌘K is still the link chord: the renderer hands it back.
@@ -361,6 +359,7 @@ else app.on('second-instance', () => { if (app.isReady()) showMain() })
 
 if (gotLock) app.whenReady().then(async () => {
   goBackground()
+  servePreviews()
   registerAgentBrowserIpc()
   registerDeskNotify(() => win, showMain, sendMenu)
   handle('ui:zoom', (e, percent: number) => {
@@ -383,19 +382,15 @@ if (gotLock) app.whenReady().then(async () => {
   })
   registerPrintIpc()
   handle('print:export-pdf', async (e, title: string, content: string, filename: string, mode: 'save' | 'bytes') => {
-    let dest: string | null = null
-    if (mode === 'save') {
-      const win = BrowserWindow.fromWebContents(e.sender)
-      const opts = { title: 'Export as PDF', defaultPath: join(app.getPath('documents'), basename(String(filename))), filters: [{ name: 'PDF', extensions: ['pdf'] }] }
-      const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
-      if (r.canceled || !r.filePath) return null
-      dest = r.filePath
-    }
-    const pdf = await renderNotePdf(String(title), String(content))
-    if (!dest) return new Uint8Array(pdf)
-    writeFileSync(dest, pdf)
-    shell.showItemInFolder(dest)
-    return dest
+    if (mode !== 'save') return new Uint8Array(await renderNotePdf(String(title), String(content)))
+    // The save sheet comes first so a cancel renders nothing; the sheet itself confirms an overwrite.
+    const name = basename(String(filename)).replace(/[/:]/g, ' ')
+    const opts = { title: 'Download PDF', defaultPath: join(app.getPath('downloads'), name), filters: [{ name: 'PDF', extensions: ['pdf'] }] }
+    const parent = BrowserWindow.fromWebContents(e.sender)
+    const r = parent ? await dialog.showSaveDialog(parent, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return null
+    writeFileSync(r.filePath, await renderNotePdf(String(title), String(content)))
+    return r.filePath
   })
   handle('data:choose-input-files', async () => {
     const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })
@@ -428,8 +423,10 @@ if (gotLock) app.whenReady().then(async () => {
     if (st !== 'not-determined') return st
     return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : 'denied'
   })
+  registerSystemAccess()
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  on('app:show', () => showMain())  // a chat notification was clicked: bring the main window forward
   registerPopouts(() => win)
   registerQuickAsk((id) => { showMain(); sendMenu(`open-chat:${id}`) })
   registerBus()

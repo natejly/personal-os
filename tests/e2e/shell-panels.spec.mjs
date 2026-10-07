@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { menu } from './helpers/shell.mjs'
+import { menu, navItem } from './helpers/shell.mjs'
 
 const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ hasText: re }).first()).toBeVisible()
 const panel = (page) => page.getByRole('complementary', { name: 'Page agent' })
@@ -27,14 +27,14 @@ test('page agent carries each view\'s content to the model', async ({ grain }) =
   await page.waitForSelector('.sidebar')
 
   // Todos
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+  await navItem(page, 'Lists').click()
   await heading(page, /Lists/)
   await expect(page.getByText('Zanzibar quarterly taxes').first()).toBeVisible()
   let body = await askPageAgent(grain)
   expect(body).toContain('Zanzibar quarterly taxes')
   await expect(panel(page).locator('.page-agent-ctx')).toContainText('Lists')
   // The panel follows the view: switch to Calendar, context label changes
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Calendar' }).click()
+  await navItem(page, 'Calendar').click()
   await expect(panel(page).locator('.page-agent-ctx')).toContainText('Calendar')
   // Files: open the doc, then ask
   await page.locator('.sidebar .nav-item', { hasText: /^\s*Files/ }).click()
@@ -70,7 +70,7 @@ test('page agent: width resizes with the handle and persists; hints send on clic
   await api('/todos', { method: 'POST', body: { title: 'Hint probe todo' } })
   await page.reload()
   await page.waitForSelector('.sidebar')
-  await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: 'Lists' }).click()
+  await navItem(page, 'Lists').click()
   await menu(grain, 'Page Agent')
   const w = () => panel(page).evaluate((e) => Math.round(e.getBoundingClientRect().width))
   await expect.poll(w).toBe(380)
@@ -185,10 +185,10 @@ test('sidebar chat pulse shows a reply streaming in another chat, then settles',
   await expect(rowA.locator('.face .mo-always')).toBeVisible()
   await expect(rowA.locator('.face .mo-always')).toHaveCount(0, { timeout: 20_000 })
   // finished while out of sight: unread dot until opened
-  await expect(rowA.locator('.pulse')).toHaveCount(1)
+  await expect(rowA.locator('.pulse.unread')).toHaveCount(1)
   await rowA.click()
   await expect(page.locator('.msg.assistant').last()).toContainText('finally done')
-  await expect(rowA.locator('.pulse')).toHaveCount(0, { timeout: 10_000 })
+  await expect(rowA.locator('.pulse.unread')).toHaveCount(0, { timeout: 10_000 })
   void a
   expect(grain.consoleErrors).toEqual([])
 })
@@ -199,7 +199,7 @@ test('theme: Settings switches light/dark/system; system follows prefers-color-s
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
   await menu(grain, 'Settings…')
   const dlg = page.getByRole('dialog')
-  await dlg.getByRole('tab', { name: /Behavior/ }).click()
+  await dlg.getByRole('tab', { name: /Appearance/ }).click()
   const group = dlg.getByRole('radio', { name: /^Light$/ })
   await expect(group).toBeVisible()
   await dlg.getByRole('radio', { name: /^Dark$/ }).click()
@@ -221,7 +221,7 @@ test('theme: Settings switches light/dark/system; system follows prefers-color-s
   expect((await grain.api('/settings')).theme).toBe('system')
   // discarding restores
   await menu(grain, 'Settings…')
-  await dlg.getByRole('tab', { name: /Behavior/ }).click()
+  await dlg.getByRole('tab', { name: /Appearance/ }).click()
   await dlg.getByRole('radio', { name: /^Dark$/ }).click()
   await expect.poll(theme).toBe('dark')
   await page.keyboard.press('Escape')

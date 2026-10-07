@@ -12,6 +12,7 @@ const api: GrainApi = {
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),
+  previewPut: (source) => ipcRenderer.invoke('preview:put', source),
   backendInfo: () => ipcRenderer.invoke('backend:info'),
   restartBackend: () => ipcRenderer.invoke('backend:restart'),
   onBackendState: (cb) => listen<BackendInfo>('backend:state', cb),
@@ -62,13 +63,20 @@ const api: GrainApi = {
     /** The hidden print window asks for its note, then says it has finished drawing it. */
     payload: () => ipcRenderer.invoke('print:payload'),
     ready: () => ipcRenderer.send('print:ready'),
-    /** Print a note to PDF: 'save' asks where (and reveals the file), 'bytes' hands the PDF back. null when cancelled. */
+    /** Print a note to PDF: 'save' writes it into Downloads under a free name and returns the path, 'bytes' hands the PDF back. */
     exportPdf: (title: string, content: string, filename: string, mode: 'save' | 'bytes') => ipcRenderer.invoke('print:export-pdf', title, content, filename, mode)
   },
   closeSelf: () => ipcRenderer.send('window:close-self'),
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),
   deskNotify: (payload) => ipcRenderer.send('desk:notify', payload),
+  showMain: () => ipcRenderer.send('app:show'),
   micAccess: () => ipcRenderer.invoke('media:mic-access'),
+  codingAttach: (id) => ipcRenderer.invoke('coding:attach', id),
+  sysAccess: {
+    status: () => ipcRenderer.invoke('sysaccess:status'),
+    grant: (id) => ipcRenderer.invoke('sysaccess:grant', id),
+    openPane: (url) => ipcRenderer.invoke('sysaccess:open-pane', url)
+  },
   agentBrowser: {
     list: () => ipcRenderer.invoke('agentBrowser:list'),
     show: (session: string) => ipcRenderer.invoke('agentBrowser:show', session),

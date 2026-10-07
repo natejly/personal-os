@@ -40,30 +40,30 @@ def run_of(partial: str | None, *, steps: int = 0, tools: int = 0, content: str 
     return r
 
 
-def test_every_budget_stop_chains_on_progress() -> None:
-    for p in ("rounds", "tokens", "time"):
-        check(_chain_kind(BASE, run_of(p, tools=1)) == "continue", f"{p} stop with a clean tool call chains, no plan needed")
-        check(_chain_kind(BASE, run_of(p, steps=1)) == "continue", f"{p} stop with a consumed step chains")
-        check(_chain_kind(BASE, run_of(p)) is None, f"{p} stop with no progress does not chain")
-    check(_chain_kind(BASE, run_of("loop", tools=3)) is None, "a stuck loop never chains")
-    check(_chain_kind(BASE, run_of("blocked", tools=3)) is None, "a card the user must answer never chains")
-    check(_should_chain(BASE, run_of("time", tools=1)) is True, "_should_chain is the boolean of the same decision")
+def test_only_a_reply_that_just_ended_chains() -> None:
+    check(_chain_kind(BASE, run_of(None, tools=1)) == "nudge", "a reply that ended on its own gets a nudge")
+    for p in ("loop", "blocked", "length", "incomplete", "rounds", "tokens", "time"):
+        check(_chain_kind(BASE, run_of(p, tools=3)) is None, f"a {p} stop never chains (old stored outcomes included)")
+    check(_should_chain(BASE, run_of(None)) is True, "_should_chain is the boolean of the same decision")
 
 
 def test_guards() -> None:
-    r = run_of("time", tools=1)
+    r = run_of(None, tools=1)
     check(_chain_kind({**BASE, "status": "review"}, r) is None, "a desk that is not working never chains")
-    check(_chain_kind({**BASE, "turn": 99}, r) is None, "turn cap")
-    check(_chain_kind({**BASE, "cost": 99.0}, r) == "continue", "spend never stops a desk")
+    check(_chain_kind({**BASE, "turn": 99}, r) == "nudge", "there is no turn cap")
+    check(_chain_kind({**BASE, "cost": 99.0}, r) == "nudge", "spend never stops a desk")
+    check(_chain_kind({**BASE, "budget": {"maxTurns": 1}, "turn": 5}, r) == "nudge", "a stored desk budget is ignored")
     check(_chain_kind(BASE, r, error="boom") is None, "an errored turn does not chain")
     r.stop.set()
     check(_chain_kind(BASE, r) is None, "a stopped run does not chain")
 
 
 def test_ask_desk_without_a_plan_is_working() -> None:
-    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of("time", tools=1)) == "continue",
-          "claim_run leaves a plan-less ask desk in `planning`; it still chains")
-    check(_chain_kind({**BASE, "status": "planning", "autonomy": "plan"}, run_of("time", tools=1)) is None,
+    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of(None, steps=1)) == "nudge",
+          "claim_run leaves a plan-less ask desk in `planning`; a turn that consumed a plan step still chains")
+    check(_chain_kind({**BASE, "status": "planning", "autonomy": "ask"}, run_of(None, tools=1)) is None,
+          "an ask desk's reply that ended is the answer, whatever tools it used: no nudge")
+    check(_chain_kind({**BASE, "status": "planning", "autonomy": "plan"}, run_of(None, tools=1)) is None,
           "a plan-autonomy desk still drafting its plan does not")
 
 
@@ -72,9 +72,8 @@ def test_single_nudge() -> None:
     check(_chain_kind(BASE, run_of(None, content=continue_message("nudge", "my notes"))) is None,
           "a nudged turn that also just ends settles - never two nudges in a row, even with notes appended")
     check(_chain_kind({**BASE, "status": "blocked"}, run_of(None)) is None, "desk_ask/desk_done already moved the desk: no nudge")
-    check(_chain_kind({**BASE, "turn": 99}, run_of(None)) is None, "caps hold for a nudge too")
     check(_chain_kind(BASE, run_of(None), error="x") is None, "an error is not nudged")
-    check(_chain_kind(BASE, run_of("rounds", tools=1, content=DESK_NUDGE)) == "continue", "a nudged turn can still continue")
+    check(_chain_kind(BASE, run_of(None, content=DESK_NUDGE)) is None, "the nudge fires at most once in a row")
 
 
 FULL = {"desk_list_files", "desk_read_file", "desk_write_file", "fs_edit", "fs_glob", "fs_grep", "shell_run", "run_python",
@@ -337,7 +336,7 @@ def test_auto_resume_respects_the_cap() -> None:
 
 
 def main() -> None:
-    for t in (test_every_budget_stop_chains_on_progress, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_a_token_in_a_parked_report_is_stripped, test_plan_hint_and_footer,
+    for t in (test_only_a_reply_that_just_ended_chains, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_a_token_in_a_parked_report_is_stripped, test_plan_hint_and_footer,
               test_over_the_cap_every_way_in_queues, test_the_drain_launches_oldest_first_up_to_the_cap,
               test_auto_resume_relaunches_only_what_is_safe, test_auto_resume_respects_the_cap):
         t()

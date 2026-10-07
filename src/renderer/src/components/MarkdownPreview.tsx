@@ -1,6 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchBlobUrl } from '../features/notes/api'
-import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import type { PluggableList } from 'unified'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -19,8 +19,6 @@ import { fenceKind } from '../lib/htmlFence'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
 import remarkAi from '../features/notes/remarkAi'
 import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
-import RecordingChip from '../features/docrec/RecordingChip'
-import { recordingIdFromHref } from '../features/docrec/recordingBlock'
 import { taskLineMap } from '../features/notes/tasks'
 import remarkCites, { citeNumber, citeTitle, type CiteInfo } from '../lib/remarkCites'
 import '../styles/notes.css'
@@ -112,7 +110,7 @@ function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?:
   if (lang === 'chart') return <ChartBlockM source={code} streaming={!!streaming} />
   if (lang === 'interactive') return <InteractiveBlockM source={code} streaming={!!streaming} />
   if (lang === 'mermaid') return <MermaidBlockM source={code} streaming={!!streaming} />
-  // Model HTML/SVG never runs in the app's origin: both render in a sandboxed srcdoc iframe (HtmlBlock).
+  // Model HTML/SVG never runs in the app's origin: html previews load from the grain-preview: scheme and svg from srcdoc, both in a sandboxed iframe (HtmlBlock).
   if (fenceKind(lang) === 'html') return <HtmlBlockM source={code} streaming={!!streaming} />
   if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
   return (
@@ -154,9 +152,6 @@ function TaskInput({ node, ...props }: React.InputHTMLAttributes<HTMLInputElemen
   return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(block, line)} />
 }
 
-/** The default transform blanks unknown schemes; recording blocks are the one extra it must keep. */
-const recUrl = (u: string): string => (recordingIdFromHref(u) ? u : defaultUrlTransform(u))
-
 const wikiTarget = (href?: string): string | null => {
   if (!href?.startsWith(WIKI_HREF)) return null
   try { return decodeURIComponent(href.slice(WIKI_HREF.length)) } catch { return null }
@@ -171,8 +166,6 @@ export interface MarkdownPreviewProps {
   knownTitles?: ReadonlySet<string>
   /** Opt in to clickable task checkboxes; called with the 1-based line in `source`. */
   onToggleTask?: (line: number) => void
-  /** Opt in to recording blocks (`grain-recording:ID` links) as live chips; called with the recording id. */
-  onRecording?: (id: string) => void
   /** Excerpt numbers this reply may cite: `[n]` for one of them becomes a chip that calls onCite. */
   cites?: ReadonlyMap<number, CiteInfo>
   onCite?: (n: number) => void
@@ -195,7 +188,7 @@ const MdBlock = memo(function MdBlock({ source, streaming, remark, components, u
   )
 })
 
-const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording, cites, onCite }: MarkdownPreviewProps): JSX.Element {
+const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, cites, onCite }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
   // A streaming message first has its half-written tail closed (streamRepair.ts); a finished one is parsed as stored.
   const md = useMemo(() => normalizeMathBlocks(streaming ? repairStreamingMarkdown(source) : source), [source, streaming])
@@ -205,11 +198,8 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
   wikiRef.current = onWikilink
   const taskRef = useRef(onToggleTask)
   taskRef.current = onToggleTask
-  const recRef = useRef(onRecording)
-  recRef.current = onRecording
   const citeRef = useRef(onCite)
   citeRef.current = onCite
-  const rec = !!onRecording
   const wiki = !!onWikilink
   const cite = !!onCite && !!cites?.size
   const tasks = !!onToggleTask
@@ -229,9 +219,9 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
   const remark = useMemo((): PluggableList => [...REMARK, ...(wiki ? [remarkWikilinks] : []),
     ...(cite ? [[remarkCites, { known: new Set(cites!.keys()) }] as never] : [])], [wiki, cite, cites])
   const components = useMemo((): Components => {
-    if (!wiki && !tasks && !rec && !cite) return MD_COMPONENTS
+    if (!wiki && !tasks && !cite) return MD_COMPONENTS
     const c: Components = { ...MD_COMPONENTS }
-    if (wiki || rec || cite) {
+    if (wiki || cite) {
       c.a = (p) => {
         const n = cite ? citeNumber(p.href) : null
         if (n !== null) {
@@ -240,8 +230,6 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
               onClick={() => citeRef.current?.(n)}>{n}</button>
           )
         }
-        const recId = rec ? recordingIdFromHref(p.href) : null
-        if (recId) return <RecordingChip id={recId} label={textOf(p.children)} onOpen={(i) => recRef.current?.(i)} />
         const target = wikiTarget(p.href)
         if (target === null) return <ExternalLink {...p} />
         const unknown = !!known && !known.has(titleKey(target))
@@ -261,14 +249,13 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
       }
     }
     return c
-  }, [wiki, rec, tasks, cite, cites, known])
+  }, [wiki, tasks, cite, cites, known])
 
   const body = (
     <>
       {blocks.map((b, i) => (
         <BlockIdx.Provider key={i} value={i}>
-          <MdBlock source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components}
-            urlTransform={rec ? recUrl : undefined} />
+          <MdBlock source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components} />
         </BlockIdx.Provider>
       ))}
     </>

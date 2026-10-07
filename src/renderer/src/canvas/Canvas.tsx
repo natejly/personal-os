@@ -51,7 +51,7 @@ const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.m
  * store sorts `windows` by z (`byZ`) and a click raises the window it hit, so rendering in store
  * order made the clicked window the last keyed child -- and React moves a reordered child by
  * re-inserting its DOM node. Re-insertion restarts the `win-open` animation and reloads every iframe
- * and `<webview>` inside the window, which is why clicking a widget looked like it reloaded it.
+ * inside the window, which is why clicking a widget looked like it reloaded it.
  * Creation order never changes, so a raise now rewrites nothing but `zIndex` -- and stacking has
  * always come from that, never from DOM order.
  */

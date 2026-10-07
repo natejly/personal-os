@@ -9,8 +9,8 @@ from .db import Database, new_id, now, row_to_dict
 
 # Mirrors the WidgetKind union in src/shared/types.ts, which is the source of truth.
 WIDGET_KINDS = (
-    "chat", "todos", "calendar", "note",
-    "memory", "graph", "documents", "recap", "project", "usage", "activity", "doc", "face", "crew",
+    "chat", "todos", "calendar",
+    "memory", "graph", "documents", "recap", "project", "usage", "doc", "face", "crew",
 )
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
 SNAP_MODES = ("off", "grid", "guides", "both")
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS canvas_windows (
   id TEXT PRIMARY KEY,
   canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,                       -- WidgetKind
-  ref_id TEXT,                              -- conversation / note / project id, no foreign key
+  ref_id TEXT,                              -- conversation / doc / project id, no foreign key
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   title TEXT NOT NULL DEFAULT '',           -- '' = derive from the underlying object
   x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,
@@ -259,8 +259,3 @@ class Canvases:
         """ref_id carries no foreign key, so deleting the referent has to sweep its windows."""
         with self.db.tx() as c:
             return c.execute("DELETE FROM canvas_windows WHERE kind=? AND ref_id=?", (kind, ref_id)).rowcount
-
-    def reset_popped(self) -> int:
-        """Called at startup: no BrowserWindow survives a relaunch, so 'popped' rows are stale."""
-        with self.db.tx() as c:
-            return c.execute("UPDATE canvas_windows SET state='normal', updated_at=? WHERE state='popped'", (now(),)).rowcount

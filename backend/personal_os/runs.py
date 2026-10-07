@@ -253,6 +253,36 @@ class RunStore:
             log.warning("could not persist event %s#%s of run %s", event, seq, run_id, exc_info=True)
             return False
 
+    def append_transcript(self, run_id: str, seq: int, data: Any) -> bool:
+        """A subagent's whole history as one `transcript` event. Only the newest is kept: a worker writes one every round."""
+        ok = self.append(run_id, seq, "transcript", data)
+        if ok:
+            try:
+                self._exec("DELETE FROM run_events WHERE run_id=? AND type='transcript' AND seq<?", (run_id, seq))
+            except sqlite3.Error:
+                log.warning("could not drop old transcripts of run %s", run_id, exc_info=True)
+        return ok
+
+    def mark_input(self, run_id: str, **fields: Any) -> None:
+        """Set keys inside a run's stored input (a worker's wake bookkeeping). Never raises."""
+        if not fields:
+            return
+        sets = ",".join(f"'$.{k}',json(?)" for k in fields)
+        try:
+            self._exec(f"UPDATE agent_runs SET input=json_set(input,{sets}) WHERE run_id=?", (*[_dumps(v) for v in fields.values()], run_id))
+        except sqlite3.Error:
+            log.warning("could not update the input of run %s", run_id, exc_info=True)
+
+    def workers(self, conversation_id: str | None = None, undelivered: bool = False) -> list[dict[str, Any]]:
+        """Worker runs (kind='worker'), newest first: one conversation's, or every ended worker whose wake is still owed."""
+        where, params = ["kind='worker'"], []
+        if conversation_id:
+            where.append("json_extract(input,'$.conversation_id')=?")
+            params.append(conversation_id)
+        if undelivered:
+            where.append("ended_at IS NOT NULL AND COALESCE(json_extract(input,'$.wake_delivered'),1)=0")
+        return [self._run_row(r) for r in self._all(f"SELECT * FROM agent_runs WHERE {' AND '.join(where)} ORDER BY started_at DESC, rowid DESC", params)]  # type: ignore[misc]
+
     def events(self, run_id: str, since: int = 0, until: int | None = None) -> list[RunEvent]:
         sql, params = "SELECT seq, type, data FROM run_events WHERE run_id=? AND seq>?", [run_id, since]
         if until is not None:
@@ -531,6 +561,8 @@ class Run:
         self.steps_consumed = 0
         # Tool calls that ran and returned without an error: the other half of a desk turn's progress.
         self.tool_ok = 0
+        # Every tool call the model made this turn, run or refused: a turn with none (and no plan) was a plain answer.
+        self.tool_calls = 0
         # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
         self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None
@@ -544,11 +576,14 @@ class Run:
         # Set when the reply's `done` goes out. The task lives on past that — auto-learn is the last
         # thing it does — so `live` alone cannot tell a working run from one that is only tidying up.
         self.replied = False
+        self.silent = False  # a reply the loop removed (NO_REPLY): nothing to show or forward
         self.seq = 0
         self.status = "running"
         self.error: str | None = None
-        # Budget snapshot (Budget.snapshot() in app.py), persisted with each status change and at the end.
+        # Usage snapshot (RunMeter.snapshot() in app.py; the column keeps its old name), persisted with each status change and at the end.
         self.budget: dict[str, Any] | None = None
+        # time.monotonic() of the last event or status change: the idle watchdog of an unattended run reads it.
+        self.last_active = time.monotonic()
         # Cooperative stop, also registered as _active[message_id] so /messages/{mid}/stop still works.
         self.stop = asyncio.Event()
         # Set by stop and steer. stream_chat waits on it so a blocked provider read ends now, not at
@@ -597,11 +632,14 @@ class Run:
                 "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
                 "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
                 "turn": self.turn, "ended_at": self.ended_at, "error": self.error,
+                # A visible reply was published: a silent wake (its reply row is deleted) did not, and a stopped one is not news.
+                "replied": self.replied and not getattr(self, "silent", False), "stopped": self.stop.is_set(),
                 "attention": for_run({"status": self.status})}
 
     def set_status(self, status: str) -> None:
         if status == self.status:
             return
+        self.last_active = time.monotonic()
         self.status = status
         if self.store is not None:
             self.store.update(self.run_id, status=status, budget=self.budget, last_seq=self.seq)
@@ -616,6 +654,7 @@ class Run:
 
     def publish(self, event: str, data: Any) -> None:
         self.seq += 1
+        self.last_active = time.monotonic()
         if event == "assistant_message":
             self.message_seq = self.seq
         item = (self.seq, event, data)

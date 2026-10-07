@@ -85,7 +85,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     e.grant = (tmp_path / "home" / "proj").resolve()
     e.grant.mkdir(parents=True)
     monkeypatch.setattr(mac, "home", lambda: (tmp_path / "home").resolve())
-    e.settings = {"workspaceRoots": [str(e.grant)]}
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(tmp_path / "data"))  # where the desk workspace lives: off limits outside the desk
+    e.settings = {}
     e.tb = Toolbox(None, None, None, lambda: e.settings, workspace=e.ws)  # type: ignore[arg-type]
     e.ctx = {"conversation_id": "c1", "desk_id": DESK, "settings": e.settings, "tainted": False, "taint_sources": [], "message_id": None}
     e.chat = {"conversation_id": "c1", "settings": e.settings, "tainted": False, "taint_sources": [], "message_id": None}
@@ -234,17 +235,22 @@ def test_paths_are_contained(env: Any) -> None:
     outside = env.grant.parent / "elsewhere"
     outside.mkdir()
     (outside / "a.md").write_text("x")
-    for bad in ("../a.md", "work/../../a.md", "/etc/hosts", str(outside / "a.md"), "~/a.md"):
+    # in a desk a relative path stays inside the workspace, whatever it does with `..` or a link
+    for bad in ("../a.md", "work/../../a.md"):
         out = env.call("convert_document", path=bad, to="docx")
         assert "error" in out, bad
     assert "error" in env.call("convert_document", path="work/a.md", to="docx", output="../escape.docx")
-    # a symlink planted inside the workspace that points out is refused too
     (env.root / "work" / "link").symlink_to(outside)
     assert "error" in env.call("convert_document", path="work/link/a.md", to="docx")
+    # Grain's own data folder is off limits to an absolute path, and so is a credential file
+    (env.grant / ".env").write_text("x")
+    other_desk = env.ws.ensure("other")
+    for bad in (str(other_desk / "work" / "a.md"), str(env.grant / ".env"), "/Applications/Grain.app/Contents/Info.plist"):
+        assert "error" in env.call("convert_document", path=bad, to="docx"), bad
     assert not env.fake.calls
 
 
-def test_outside_a_desk_an_absolute_path_under_a_granted_root(env: Any) -> None:
+def test_outside_a_desk_an_absolute_path_may_be_anywhere(env: Any) -> None:
     (env.grant / "a.md").write_text("x")
     out = env.call("convert_document", ctx=env.chat, path=str(env.grant / "a.md"), to="docx")
     assert out["output"] == str(env.grant / "a.docx"), out
@@ -258,11 +264,18 @@ def test_outside_a_desk_an_absolute_path_under_a_granted_root(env: Any) -> None:
     nochat = {k: v for k, v in env.chat.items() if k != "conversation_id"}
     rel = env.call("convert_document", ctx=nochat, path="a.md", to="docx")
     assert "error" in rel and "workspace" in rel["error"]
+    # a folder that is neither the grant nor inside the home folder works the same
     other = env.grant.parent / "elsewhere"
     other.mkdir()
     (other / "a.md").write_text("x")
-    assert "error" in env.call("convert_document", ctx=env.chat, path=str(other / "a.md"), to="docx")
-    assert "error" in env.call("convert_document", ctx=env.chat, path=str(env.grant / "a.md"), to="docx", output=str(other / "o.docx"))
+    assert env.call("convert_document", ctx=env.chat, path=str(other / "a.md"), to="docx")["output"] == str(other / "a.docx")
+    out = env.call("convert_document", ctx=env.chat, path=str(env.grant / "a.md"), to="docx", output=str(other / "o.docx"))
+    assert out["output"] == str(other / "o.docx")
+    assert "error" in env.call("convert_document", ctx=env.chat, path=str(env.grant / "a.md"), to="docx",
+                               output=str(Path(env.ws.root) / "o.docx"))  # into Grain's own folder: no
+
+
+
 
 
 # ---- render_preview ----
@@ -349,13 +362,13 @@ def test_render_outside_a_desk_lands_beside_the_file(env: Any) -> None:
     assert p.is_absolute() and p.is_file() and p.parent == Path(os.path.realpath(env.grant)) / "previews"
 
 
-def test_render_refuses_a_previews_link_that_leads_out(env: Any, tmp_path: Path) -> None:
+def test_render_refuses_a_previews_link_that_leads_into_grains_folder(env: Any, tmp_path: Path) -> None:
     (env.grant / "b.pdf").write_bytes(b"%PDF")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (env.grant / "previews").symlink_to(outside)
+    inside = tmp_path / "data" / "stolen"
+    inside.mkdir(parents=True)
+    (env.grant / "previews").symlink_to(inside)
     out = env.call("render_preview", ctx=env.chat, path=str(env.grant / "b.pdf"), pages="1")
-    assert "error" in out and not list(outside.iterdir())
+    assert "error" in out and not list(inside.iterdir())
 
 
 # ---- doc_guide ----
@@ -366,7 +379,7 @@ BANNED = ("excel", "powerpoint", "microsoft", "google", "canva", "notion", "copi
 def test_every_guide_is_sound(env: Any, fmt: str) -> None:
     out = env.call("doc_guide", format=fmt)
     g = out["guide"]
-    assert 800 < len(g) <= deliver.GUIDE_MAX_CHARS, len(g)
+    assert 800 < len(g) <= 4500, len(g)
     low = g.lower()
     assert "check your work" in low and "render_preview" in low or fmt == "csv"
     assert "```python" in g and "outputs/" in g

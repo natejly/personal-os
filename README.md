@@ -25,10 +25,9 @@ instructions, files, memories and graph.
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
 
-Lists, Calendar, Mail and Health are apps in the title bar, at the top right of
-every view; Meetings and Activity are shown too (showing a view records
-nothing). Settings → Modules puts any of them in the sidebar, in the title bar,
-or out of sight. Bars are 40 px and
+Lists, Calendar, Mail and Health are sidebar rows under Today and Files.
+Settings → Appearance → Sidebar turns any of them off (it takes effect at once). A **Quick chat** button at the top right of
+every view opens the ⌘I panel. Bars are 40 px and
 sidebar rows 26 px, so more fits on screen.
 
 ## How to use
@@ -49,11 +48,6 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    From any app, press ⌥Space (or the menubar item) for a small ask bar: type a
    line, optionally attach your clipboard text, and the reply streams in place.
    Open in chat continues it in the main window.
-   The speaker button on a reply reads it aloud (voice and speed in Settings →
-   Chat). `/voice`, or the waveform button by the mic, starts hands-free voice
-   chat: speak, pause, and the message is sent and the reply read back, then it
-   listens again until Esc, the button, or the turn cap; an open approval card
-   pauses it.
    Drop or paste a file to attach it: it rides on the message as a chip, and its
    text is given to the model up to a size cap. Set a **Working folder** for the
    chat if the assistant should read or write files there; the **Style** picker
@@ -62,17 +56,15 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    uses `~/Grain`. Tools run on their own, and a tool in *ask* mode stops the
    reply with an approve/deny card. Mail sends, calendar deletes, moving or
    trashing files, shortcuts, Python installs and scheduling always ask.
-3. **Files.** ⌘4 opens Files, with two sections: *Notes* and *Uploads* (⌘U).
-   ⌘⇧N makes a note, ⌘⇧D opens today's. Record or dictate into any note on
-   macOS, and the transcript stays apart from your text. Paste or drop an image into
+3. **Files.** ⌘4 opens Files, with three sections: *Notes*, *Uploads* (⌘U) and *Artifacts*.
+   ⌘⇧N makes a note, ⌘⇧D opens today's. Paste or drop an image into
    a note and it shows inline, then gets a description and its text read so search finds it. ⌘I opens the Page agent
    panel; a note has its own chat there, and opening another note switches to
    that one's chat. The assistant can edit a note (you accept each diff) and can
    delete one after asking; Settings → Trash restores it.
-4. **Lists, Calendar, Mail.** These are apps at the top right of the title bar
+4. **Lists, Calendar, Mail.** These are rows in the sidebar
    (⌘2, ⌘3, ⌘5). Lists holds your todos in a rail of lists, with a one-line add
-   row. With Google connected, todos sync both ways with Google Tasks, and todos
-   that have a due date also appear on a "Grain Todos" calendar. Double-click the
+   row. With Google connected, todos sync both ways with Google Tasks. Double-click the
    calendar to add an event; Mail drafts and sends with a 90 s undo.
 5. **Projects and memory.** In the sidebar, **+** next to Projects makes a
    project: instructions, knowledge files, and memories that apply only inside
@@ -82,8 +74,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    Under each reply, "Used N memories" and "Learned M" chips show what it read
    and saved (with Undo), and a chat's menu has **Don't learn from this chat**.
 6. **Spaces.** ⌘⇧C opens Spaces, a desktop of live windows. Use **Add widget**
-   or right-click the plane to add a chat, lists, calendar, note, memory, graph,
-   uploads, recap, project, usage, activity, face or crew window; drag a chat, a
+   or right-click the plane to add a chat, lists, calendar, doc, memory, graph,
+   uploads, recap, project, usage, face or crew window; drag a chat, a
    Files note or a sidebar row onto it. ⌘⌃O pops a window out of the Space into
    its own OS window. Save a layout as a preset from the Spaces bar, and lock a
    Space with ⌃⌘L so it cannot be rearranged. See [docs/spaces.md](docs/spaces.md).
@@ -92,12 +84,11 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
    approve it. Click an agent to open its page: its chats, its routines (jobs
    that run as it), the skills it carries, notes it always remembers and its
    recent activity. Start a chat as an agent, type `@name` in any chat to reach
-   it, or let a reply hand work to subagents with `agent_spawn`.
+   it, or let a reply hand work to a background worker with `delegate` (naming a Library agent runs the worker as it).
    Subagents appear as indented rows under the reply that started them, with
    live status; click one to open and message it. A crew window shows the
-   delegating agent as a big face with its subagents around it. Longer jobs: turn on **Work
-   autonomously** under the composer, pick Plan first, Ask as it goes or Work and
-   propose, and watch the strip above the composer; its side panel holds the
+   delegating agent as a big face with its subagents around it. Longer jobs: open **Mode**
+   under the composer and pick Plan first, Ask as it goes or Autonomous, and watch the strip above the composer; its side panel holds the
    workspace files, changes and review. Library
    → Automations holds workflows, which you approve once. `/schedule` or the
    `schedule_task` tool books a run for later; its results arrive in the Agent
@@ -109,7 +100,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 8. **Settings you will touch.** Tools: each tool's mode (on, ask, off), Allowed
    hosts, and Workspace folders. When a reply that read the web wants to fetch a
    page, approve the card or click **Allow <host> from now on**. Modules: which
-   views appear, and whether each sits in the sidebar, the title bar or nowhere.
+   views get a sidebar row.
    Data: daily backups (the newest 7 plus one a week), **Back up now**, restore
    on next start, and **Export all data** as a zip. Behavior → Appearance: theme, accent and Zoom (80-160%, ⌘= / ⌘−, ⌥⌘0 to reset).
 
@@ -156,16 +147,16 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   its reason. Its "ask" always wins, over allow rules and grants alike; an
   unreadable answer or an error asks too, safe tools are never reviewed, and a
   background run only records the verdict. Off by default. Web search retries a failed key, then falls back to keyless engines
-  rather than failing. Fetching a URL after the reply read untrusted content
+  rather than failing. A Firecrawl key (Settings, or `FIRECRAWL_API_KEY` in `.env`) makes Firecrawl the first engine for web search and page reads, with the other engines as the fallback. Fetching a URL after the reply read untrusted content
   asks once; the card can also add the host to Settings → Permissions → Allowed hosts.
-  Hovering a tool row or a title-bar app button shows what it does. Tool calls
+  Hovering a tool row or a sidebar row shows what it does. Tool calls
   render inline with arguments, results and timing, and every reply carries an
   execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
 - **Memory.** One panel (Settings → Memory, ⌘6) holding what the app remembers about you, over a shared
   scope filter and search box — the first two halves side by side, either alone,
-  or the voice profile on its own:
+  or the voice profile on its own (Split is the default):
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget, see a memory's past versions, and export or import
@@ -197,15 +188,18 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     in instead, still showing the diff and still undoable from the history.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. Export menu → *Export as PDF…* typesets the note (maths,
-    code, tables) for A4 or Letter, or files the PDF straight into Uploads. On macOS any note can be recorded or dictated into, with the
-    transcript kept apart from the text and a summary proposed for you to
-    accept. See [docs/docs-editor.md](docs/docs-editor.md).
-  - *Uploads* — any file up to 20 MB (⌘U). Text, PDF and Word are read; other
+    code, tables) for A4 or Letter, or files the PDF straight into Uploads. See [docs/docs-editor.md](docs/docs-editor.md).
+  - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
+  - *Artifacts* — everything the assistant made in any chat (documents, data,
+    images, code, browser downloads), from plain chats and autonomous sessions
+    alike, grouped by chat, newest first, with a link back to the chat. Nothing is
+    copied: the list is an index of the files where they were saved. A chat in the
+    trash keeps its artifacts here until it is erased for good.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
   space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, lists, calendar,
-  notes, memory, graph, uploads, recap, project, usage, activity, face and crew
+  docs, memory, graph, uploads, recap, project, usage, face and crew
   windows sit side by side. Drag anything from the sidebar, or a Files note
   (it becomes its own editable `doc` window), or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
@@ -216,52 +210,16 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Health.** Daily metrics (water, steps, sleep, weight, mood, or your own)
   with goals, a Today card, and `health_*` tools for the assistant. COROS and
   Garmin sync through MCP. See [docs/health.md](docs/health.md).
-- **Activity monitor** (macOS, on by default, records only what macOS has
-  granted). Watches what you actually
-  do — frontmost app and window, browser URLs, typing and click rhythm, the text
-  you type, microphone and system audio — summarizes it every few minutes, and
-  writes the result to `context/activity.md`, which is fed back into chats so the
-  assistant knows what you were working on. Every signal is a separate switch;
-  password managers and sign-in windows are never recorded; macOS secure input
-  stops keystroke capture dead; credentials and PII are redacted before anything
-  is stored; raw samples expire after 48h. The raw log is browsable row by row
-  and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
-- **Habits and automation suggestions.** On top of that data, a local miner keeps
-  one counts-only row per day — which outlives the 48h sample retention — and
-  detects what recurs: the apps that own your mornings, the site you open eleven
-  times a day, the two apps you ping-pong between, where your long uninterrupted
-  stretches actually land, how much of the day lands after seven. Those patterns
-  are the panel's evidence, computed with no model and no network. A slower pass
-  then turns them into **habits**, each owning one row in your Memory panel so
-  chats already know how you work, and **suggestions** for what the app could do
-  instead — a digest widget to replace the tab reflex, a project for the topic that
-  keeps coming back, a calendar block around your real focus window. Suggestions
-  are proposals: the common action opens a chat pre-loaded with the request rather
-  than acting, "not now" hides one for a week, and dismissing one is permanent.
-- **Meetings** (macOS, on by default; nothing records until you consent on the
-  first Record). A notepad that listens: type
-  during a call while the recorder captures it natively (AVAudioEngine and, on
-  macOS 14.2+, a Core Audio tap for the far side of the call), segments
-  transcribe in the background, and afterwards the enhance pass proposes your
-  outline with the transcript filled in around it — as a diff you accept or
-  reject. Your typed notes live in their own column and no model ever writes
-  them. Calendar events happening now offer a Record button; action items become
-  todos on a click. Nothing is recorded until you acknowledge a modal naming the
-  exact directory the audio lands in. Transcription prefers on-device Speech,
-  then whisper.cpp or the Whistle local backend, then your LLM proxy. Meetings never expire, are unreachable
-  from the activity monitor's purge, and never reach auto-learn. See
-  [docs/meetings.md](docs/meetings.md).
-- **Work autonomously** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
+- **Mode** (a control beside plan mode in any chat). A chat hands its task to a desk that keeps
   working in the same conversation, in its own folder, and has one plan you approve before it acts. Several run at
-  once. Long autonomy is bought by chaining bounded replies, never by a longer leash: each
-  turn is an ordinary reply with an ordinary budget, and the desk chains another
-  only while the approved plan still has steps left and the last turn actually
-  consumed one, up to a turn limit you can tighten per chat (the caps are in Settings → Autonomy). Three modes: Plan first (nothing consequential runs until you
+  once. Each turn is an ordinary reply that runs until the work is done, the desk asks you something,
+  or stuck detection stops a loop; a turn that simply trails off gets one nudge to finish or ask. Three modes: Plan first (nothing consequential runs until you
   approve a plan, and those tools are withheld rather than offered and refused),
-  Ask as it goes (one card per change), and Work and propose (it may plan an external
+  Ask as it goes (no plan up front; risky actions follow the permission mode), and Autonomous (it may plan an external
   action and never perform one). A strip above the composer shows the state, turns used and
   how many things need you, with Start, Pause, Resume and Stop, and opens a side panel
-  with Files, Changes and Review tabs. Questions, parked cards, the plan and interruption notices appear at the
+  with Files, Changes and Review tabs. While a lone agent is working the strip stays out of the way
+  (the composer's Stop covers it); it appears once a background worker is live or the desk needs you. Questions, parked cards, the plan and interruption notices appear at the
   end of the transcript. Autonomous chats are listed with the other chats with a status dot, and the Chats header
   carries the Needs-you count. Nothing it writes reaches the app until you accept
   it: it works in `cowork/<desk>/` and nominates files for review, and every
@@ -278,14 +236,17 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
 - **Agent inbox.** Everything agents left for you, in one list on Today, with the
   total on the sidebar's Today row: approval cards from any chat, desks waiting on
   you, scheduled-job proposals and paused jobs, and a count with a link for every
-  other review queue (proposed doc edits, meeting notes, skills and workflow runs
-  to approve, memory tidy-ups, activity suggestions). A plan or a desk's question
+  other review queue (proposed doc edits, skills and workflow runs
+  to approve, memory tidy-ups). A plan or a desk's question
   opens where it is decided rather than offering a bare Allow.
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
   the procedures it can be asked to repeat; **Agents**, roles with their own
   face, instructions, tools and skills (describe one and the model drafts it; you
   edit and approve); **Automations**, which holds workflows (multi-step jobs you
-  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox.
+  approve once) and commands (prompt templates you write); and **Connectors**, the MCP servers whose tools join the toolbox. Install them
+  from a curated catalog, search the official MCP Registry, or import the servers you already set up in
+  Claude Desktop, Claude Code or Cursor. Every connector tool asks by default, grants are bound to the
+  tool's schema, and keys live in the Keychain. See [docs/connectors.md](docs/connectors.md).
   A skill is the one place prose a model wrote could land inside a later system
   prompt, so authoring is lint-gated: warnings are quality, but any sentence that
   claims authority over the assistant's permissions is an error that blocks
@@ -294,9 +255,12 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   candidate — there is no tool that approves one, and a revision of an approved
   procedure is forked beside it rather than overwriting the text in use. The
   preview shows the real injected block, assembled by the function the chat uses.
+  Writing one is tooled: say what it is for and the model drafts the steps into the
+  form for you to edit (nothing is saved until you add it), and the lint reads the
+  draft as you type.
   Skills can be imported by URL, and a Popular skills catalog offers presets.
   The memory extractor turns repeated friction in a chat into one suggested skill.
-- **Agents and subagents.** A reply can delegate to subagents (`agent_spawn`).
+- **Agents and subagents.** A reply can hand work to a background worker (`delegate`); desks, workflows and crews start subagents (`agent_spawn`).
   They show as indented rows under that reply with live status; click one to open
   and message it. A crew window shows the delegating agent as a big face with its
   subagents around it. Subagents get the chat's tools minus asking, planning and
@@ -315,8 +279,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   message that starts with `@name` goes to that agent's latest chat, and an
   `@name` elsewhere hints the reply to hand the work to it. See
   [docs/agents.md](docs/agents.md).
-- **Context management.** Per-chat toggles for memory, graph, files, activity,
-  meetings, auto-learn and tools; an inspector showing exactly what was injected into
+- **Context management.** Per-chat toggles for memory, graph, files,
+  auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
   JSON spec rendered as a bar / line / area / pie / scatter chart, each with
@@ -358,7 +322,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
-  it runs in a fresh chat on a tighter budget, it can read and write inside
+  it runs in a fresh chat, it can read and write inside
   Grain, and anything that would leave the app — mail, calendar events, Docs —
   comes back to the Agent inbox as a **proposal** you accept, edit or reject.
   Accepting is what actually sends it, exactly once. A run cannot schedule
@@ -375,8 +339,8 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
   Awaiting approval, Open questions), each claim with its evidence, and the inbox
   shows them as sections.
 - **Google Workspace.** Sign in once with your own OAuth client; Calendar,
-  Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos and creates a
-  "Grain Todos" calendar that mirrors todos with a due date.
+  Gmail, Tasks, Drive, Docs and Sheets become assistant tools. Connecting turns on two-way Tasks sync with your todos. The planner puts its
+  Focus blocks on a calendar named "Grain Todos".
 
 ## Architecture
 
@@ -396,9 +360,8 @@ Electron (TypeScript)               Python (FastAPI)                      LiteLL
 
 Electron spawns the backend on a free port with a data directory under the
 app's user-data folder. State is one SQLite file plus folders beside it:
-`uploads/` and `doc_assets/` (your files and pasted images), `recordings/` (meeting
-audio you keep), `cowork/` (desk workspaces), `context/` (`activity.md`),
-`backups/` and `logs/`. API keys and Google tokens are kept in the macOS
+`uploads/` and `doc_assets/` (your files and pasted images), `cowork/` (desk
+workspaces), `backups/` and `logs/`. API keys and Google tokens are kept in the macOS
 Keychain, or a 0600 file in the data folder when the Keychain is unavailable.
 In development, `scripts/dev.sh` runs LiteLLM, the backend (autoreload) and
 Electron (HMR) together.
@@ -410,6 +373,11 @@ is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
 wizard asks a few things about you and has you pick a model provider (Fireworks
 AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
 OpenAI-compatible endpoint). Google is connected from Settings → Integrations. With no workspace folder set, file and shell tools work in `~/Grain`.
+
+On your own Mac, `npm run install-app` puts the build at `/Applications/Grain.app` (keep only that
+copy). If a self-signed "Grain Local Signing" identity is in your keychain, `npm run package` signs
+with it, so macOS keeps Full Disk Access and other grants across rebuilds; otherwise builds are
+ad-hoc signed. See [docs/releasing.md](docs/releasing.md#signing).
 
 ## Development
 
@@ -462,9 +430,9 @@ signed in. Tokens and the client secret are kept in the macOS Keychain (a 0600
 file in the data folder if the Keychain is unavailable). `gmail_send` is a
 separate tool you can keep off; `gmail_draft` never sends.
 
-Connecting turns on two-way sync between your todos and Google Tasks, and
-creates a calendar named "Grain Todos" that mirrors every todo with a due date.
-Both can be switched off under Integrations.
+Connecting turns on two-way sync between your todos and Google Tasks, which can
+be switched off under Integrations. Todos are not copied onto your calendar; the
+planner puts its Focus blocks on a calendar named "Grain Todos".
 
 When a token is revoked, expires (a "Testing" consent screen kills refresh
 tokens after 7 days) or is missing a permission that was unticked on the consent
@@ -543,8 +511,8 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘7 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory / Activity |
-| ⌘⇧M | Meetings (maths while typing in a doc) |
+| ⌘0 … ⌘6 | Today / Chats / Lists / Calendar / Files / Mail / Settings → Memory |
+| ⌘⇧M | Maths (while typing in a doc) |
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
@@ -554,11 +522,11 @@ and its verdict is kept on the row.
 | ⌃⌘I | Toggle context panel |
 | ⌘⇧C | Toggle Spaces (Spaces menu) |
 | ⌃1 … ⌃9 | Go to space 1–9 |
-| ⌘, | Settings: Provider & cost, Permissions, Autonomy, Memory, Behavior, Modules, Integrations, Meetings, Data |
+| ⌘, | Settings: Model, Usage, Permissions, Integrations, Texting, Memory, Appearance, System access, Advanced |
 | ⌘/ or ? | Help: every shortcut, searchable, plus the Using Grain guide (also Help menu) |
 | Enter / Shift+Enter | Send / newline |
 
-A view turned off in Settings → Modules keeps its shortcut, which then offers
+A view turned off in Settings → Appearance keeps its shortcut, which then offers
 to turn the view back on instead of opening it.
 
 ## How a reply is built
@@ -571,7 +539,7 @@ to turn the view back on instead of opening it.
    neighbours as `A —[relation]→ B` triples.
 4. **Document excerpts**: top BM25 matches over chunks in scope.
 5. **Tools**: the effective tool set after global, project and chat overrides.
-   The model may call tools for up to `maxToolRounds` rounds; each call and
+   The model calls tools until it is done (stuck detection stops a loop); each call and
    result streams to the UI and is stored on the message. A tool in **ask**
    mode pauses the stream until you approve it (once, for the chat, or always)
    or deny it, in which case the model is told to continue without it.
@@ -702,6 +670,46 @@ clock stops while the card is open), and a run with nobody to ask refuses it. At
 most 50 calls and 300 seconds; stdout is kept as 40% head and 60% tail up to 50 KB,
 the whole text behind a handle, and stderr to 10 KB.
 
+## Coding sessions
+
+`coding_session_start(agent, repo_path, prompt, new_worktree?, branch?, model?, permission_mode?, name?)` hands a
+coding task to Claude Code (`agent: "claude"`) or OpenCode (`agent: "opencode"`) on a git repo inside a workspace
+folder and returns at once; the agent works in the background and the app follows it. With `new_worktree` the agent
+gets its own branch and `git worktree` under `<repo>/.claude/worktrees/` (default branch `grain/<task>-<hex>`, never
+`main` or `master`), so the repo's checkout stays as it was. Each session is a row in `coding_sessions` (migration 11)
+and every change is published as a `coding_session` event, which the "Coding sessions" section of the chat's context drawer and the tool cards read.
+
+| Driver | Where it runs | How it is followed |
+| --- | --- | --- |
+| Claude Code | `claude --bg` in the repo or worktree, **outside** Grain's sandbox, with your own account and tools | the CLI's own files under `~/.claude/jobs/<id>/` (`state.json`, `timeline.jsonl`), read as untrusted text |
+| OpenCode | the `opencode` you installed, run under the OS sandbox as a background job in the shell registry, with its own model and sign-in; writes stay in the workspace folder that holds the repo | the job's event stream; a follow-up continues the same OpenCode session |
+
+**Permissions.** Claude Code keeps its normal prompting: Grain passes no permission flag. A permission prompt shows as
+`needs_you` (attention: needs you) and you answer it in a terminal with `claude attach <id>`; the card says so.
+`permission_mode` (`acceptEdits` or `bypassPermissions`, Claude Code only) relaxes the prompting for that one session
+only; a call that sets it is always a card, whatever the tool's mode or any standing grant, and the card spells out
+what the mode allows. OpenCode has nobody at its prompt, so it runs under whatever its own config permits inside the
+sandbox and takes no `permission_mode`. Starting and following up are `external` tools: they ask first in a chat and are only
+proposals in an unattended run, and they ask again once the reply has read untrusted content. Subagents are gated
+the same way as `opencode_run`.
+
+| Tool | Danger | Default |
+| --- | --- | --- |
+| `coding_session_start` | external | ask |
+| `coding_session_send(id, message)` | external | ask |
+| `coding_session_stop(id)` | executes | on |
+| `coding_session_list`, `coding_session_status(id, lines?)`, `coding_session_diff(id, full?)` | safe | on |
+
+`send` only reaches a session that is `done` or `stopped`: continuing one that is still running would start a copy
+of it, so it is refused until the session finishes or is stopped. `diff` runs `git status`, `git diff --stat` and the
+commits ahead of `origin/main` in the session's worktree (the full patch with `full: true`, cut at 60 KB). Nothing here
+removes a session (`claude rm` is never run), force-pushes or pushes at all; shipping the branch is `ship_checklist`.
+OpenCode jobs end at the shell registry's 600 second cap; a follow-up carries on.
+
+Routes: `GET /coding-sessions`, `GET /coding-sessions/{id}`, `GET /coding-sessions/{id}/logs?limit=`,
+`GET /coding-sessions/{id}/diff?full=0|1`, `POST /coding-sessions/{id}/stop`, `POST /coding-sessions/{id}/send`
+(`{message}`, 409 when the session cannot take one).
+
 ## Traces
 
 Each assistant message carries a `trace`: spans of kind `context`, `llm`, `tool`
@@ -720,55 +728,20 @@ proxy does not price can be set by hand in Settings, which re-prices the whole
 history. When a provider does not return a usage block, tokens are estimated
 from character counts and the row is flagged `estimated`.
 
-## Activity monitor
+## Voice input
 
-On by default, but a signal that needs a macOS grant stays off until you grant it
-in the **Activity** panel (⌘7), where each signal is a
-separate switch with a plain description of what it records — or flip **Record
-everything** for one switch that records everything, with the redaction and
-“never record” filters down. Turning that mode off restores the settings it
-replaced rather than resetting to defaults.
-
-One script installs what can be installed and prints what is left to grant:
+The mic button in the chat composer dictates into the message box. On-device Speech is the default
+when macOS has granted it; otherwise Whistle, whisper.cpp or your LLM proxy (a default `litellm.yaml`
+has nothing behind `/v1/audio/transcriptions`, so pick a backend in Settings → Advanced → Voice and shortcuts).
 
 ```bash
-./scripts/activity-setup.sh
-```
-
-The panel's access checklist probes all six macOS permissions — Accessibility,
-Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk
-Access — says which signals each one gates, and offers a **Grant** button that
-asks macOS directly plus a deep link to the right Settings pane. Restart the app
-after granting: a keystroke tap created before the grant stays dead. In
-development the grants go to **Electron**, not Personal OS.
-
-Full design, privacy model, API and limits:
-[docs/activity-monitor.md](docs/activity-monitor.md).
-
-## Meetings
-
-On by default and a separate switch from the activity monitor; calendar
-detection runs, recording waits for your consent. Open the
-**Meetings** view (⌘⇧M), pick a microphone, and press **Test** before you rely on
-it. On-device Speech is the default when macOS has granted it; otherwise a
-default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so the
-self-test is what tells you transcription works, and a failing one blocks
-Record rather than warning.
-
-ffmpeg, whisper.cpp and BlackHole are optional fallbacks, not a setup tax:
-
-```bash
-cd backend && uv pip install -e '.[activity]'   # AVAudioEngine, process tap, Speech
-# only if you want the fallbacks:
-brew install ffmpeg                             # truncated-wav repair
+cd backend && uv pip install -e '.[mac]'        # Speech and the macOS permission probes
+# only if you want the alternatives:
+cd backend && uv pip install -e '.[whistle]'    # a 17 MB on-device model
 brew install whisper-cpp                        # instead of Apple Speech
-brew install blackhole-2ch                      # system audio on macOS older than 14.2
 ```
 
-Attribution is channel-level — you versus them — not per person.
-
-Full design, pipeline, privacy model, the Audio MIDI Setup recipe, API and limits:
-[docs/meetings.md](docs/meetings.md).
+Setup, settings and permissions: [docs/voice-input.md](docs/voice-input.md).
 
 ## Sandbox
 
@@ -788,9 +761,7 @@ src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py
                     docs.py · recap.py · usage.py · trace.py · llm.py
-                    activity.py collectors, privacy gate, rollup, activity.md
-                    meetings.py repo + service · meeting_notes.py templates/enhance
-                    meeting_recorder.py capture threads · stt.py · audiocap.py · native_audio.py · redact.py
+                    stt.py voice input · macos.py permission probes · audiocap.py · redact.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
@@ -799,9 +770,9 @@ docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
 docs/agents.md      Agents: scope, boundaries, routines, agent page, @mentions
 docs/health.md      Health: metrics and connected services
-docs/activity-monitor.md  Activity monitor: signals, privacy model, API
-docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
-docs/digest.md      The quiet daily digest in the Agent Inbox
+docs/voice-input.md Voice input: backends, settings, permissions
+docs/connectors.md  Connectors: MCP catalog, import, security model, writing your own
+examples/mcp/       Two small example MCP servers (Python, TypeScript)
 docs/permissions.md Permissions: the one store, its migration, the one Settings tab
 docs/help.md        In-app help and the shortcut registry
 ```
@@ -814,7 +785,7 @@ with the per-track source reports under [docs/research/](docs/research/).
 
 Track 5's four security defects (G1–G4: sandbox profile, SSRF guard, sidecar
 auth, CSP images) were fixed on 2026-09-29. Much of what the roadmap then listed
-as later work has shipped since: durable runs, budgets, taint tracking and the
+as later work has shipped since: durable runs, taint tracking and the
 undo journal, skills, MCP connectors, scripts that call tools, local file tools
 and the agent browser (see [CHANGELOG.md](CHANGELOG.md)). What is still open is
 the planned items below, plus whatever in the roadmap is not in
@@ -828,8 +799,7 @@ its models join the picker. The LiteLLM key stays the fallback. The flow must
 name the account being charged before the first call, since a Plus or Pro
 subscription is not a pool of API credits.
 
-**Private inference.** Jobs that read the sensitive store (activity summaries,
-meeting enhance, auto-learn, voice extraction) go to a local model through
+**Private inference.** Jobs that read the sensitive store (auto-learn, voice extraction) go to a local model through
 LiteLLM's `ollama/` route and fail closed if it is down, while chat can stay on
 a cloud model. `extractionModel` today is only a cheaper LiteLLM name, not an
 on-device guarantee.
@@ -839,7 +809,7 @@ are useless with the lid closed: scheduled tasks, the morning brief, and
 watches that propose into the Agent inbox. Each task has one home, local or
 cloud. The worker keeps its own per-domain database (see
 [docs/sources-of-truth.md](docs/sources-of-truth.md)), proposes rather than
-acts, and never sees the filesystem, activity log or meeting audio.
+acts, and never sees the filesystem.
 
 **RLHF on company data (enterprise, later).** Approve/deny, accept/reject and
 edited-vs-sent signals become labelled pairs for a tenant-local policy trained

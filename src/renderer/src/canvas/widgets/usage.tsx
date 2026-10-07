@@ -3,12 +3,13 @@ import { AlertCircle, Gauge, RefreshCw } from 'lucide-react'
 import type { UsageReport } from '@shared/types'
 import { api } from '../../lib/api'
 import ChartBlock from '../../components/ChartBlock'
-import { Tile, compact, money, ms, shortDay, spec } from '../../components/UsageView'
+import { Tile, compact, ms, shortDay, spec } from '../../components/UsageView'
+import { costNote, costText } from '../../lib/usageFormat'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const RANGES = [7, 30, 90] as const
 
-export default function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
+function UsageWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const days = typeof win.config.days === 'number' ? win.config.days : 30
   const [report, setReport] = useState<UsageReport | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -68,7 +69,7 @@ export default function UsageWidget({ window: win, live, onConfig }: WidgetProps
       ) : (
         <div className="widget-scroll">
           <div className="usage-tiles">
-            <Tile label="Spend" value={money(t.cost)} sub={t.unpriced ? `${t.unpriced} unpriced` : `over ${report.days} days`} />
+            <Tile label="Cost" value={costText(t)} sub={costNote(t) || `over ${report.days} days`} />
             <Tile label="Tokens" value={compact(t.tokens)} sub={`${compact(t.prompt_tokens)} in · ${compact(t.completion_tokens)} out`} />
             <Tile label="Calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} learn`} />
             <Tile label="Latency" value={ms(t.avg_ms)} sub="per model call" />

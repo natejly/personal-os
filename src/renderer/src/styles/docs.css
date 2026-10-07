@@ -170,15 +170,6 @@
 .doc-title-input:hover { border-color: var(--border); }
 .doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
 
-/* .model-picker pins every svg to the right; this picker leads with a folder icon on the left. */
-.doc-folder-pick svg:first-child { right: auto; left: 8px; }
-/* Specific enough to beat .model-picker select, which sets its own padding and would otherwise run
-   the path under the folder icon. Nested paths are longer, so the box is wider too. */
-.doc-toolbar .doc-folder-pick select { padding-left: 26px; font-size: 12px; max-width: 220px; }
-/* The pickers give way first when the row is tight. */
-.doc-toolbar .doc-folder-pick { flex: 0 1 auto; min-width: 0; }
-.doc-toolbar .doc-folder-pick select { min-width: 0; max-width: 100%; }
-
 /* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
 .dot-badge {
   position: absolute; top: -2px; right: -2px;
@@ -190,7 +181,7 @@
 
 /* ---- panes ---- */
 .doc-panes { flex: 1 1 0; min-height: 220px; display: grid; overflow: hidden; position: relative; }
-.doc-panes.edit, .doc-panes.preview { grid-template-columns: minmax(0, 1fr); }
+.doc-panes.edit, .doc-panes.preview, .doc-panes.read { grid-template-columns: minmax(0, 1fr); }
 .doc-panes.split { grid-template-columns: minmax(0, var(--doc-split, 50%)) minmax(0, 1fr); }
 .resize-handle.doc-split-edge { left: calc(var(--doc-split, 50%) - 3px); }
 /* Stacked panes have no vertical divider to move. */
@@ -199,8 +190,57 @@
 /* A reading column of about 72 characters, centred: with the preview on its own the pane is far
    wider than a line should be. The side padding is what narrows it, so every block shares one edge
    whatever its own font size, and in a narrow split pane it falls back to the plain gutter. */
-.docs-render { overflow-y: auto; padding: 18px max(22px, calc((100% - 72ch) / 2)); min-height: 0; }
+.docs-render { overflow-y: auto; padding: 18px max(22px, calc((100% - var(--doc-measure, 72ch)) / 2)); min-height: 0; }
 .docs-render > .muted { color: var(--text-faint); }
+/* The doc's type (typography.ts sets the custom properties on .doc-panes); unset, each view keeps its default. */
+.docs-render.markdown { font-family: var(--doc-font, inherit); font-size: var(--doc-size, inherit); line-height: var(--doc-line, 1.55); }
+.docs-render.reading { padding-top: 28px; padding-bottom: 60px; }
+.doc-edit-toggle { white-space: nowrap; }
+.doc-edit-toggle.on { color: var(--accent); }
+
+/* ---- comments ---- */
+/* The marks are highlight-registry ranges (DocComments.tsx), so the rendered DOM is never wrapped. */
+::highlight(doc-comment) { background: color-mix(in srgb, var(--warn) 26%, transparent); }
+::highlight(doc-comment-active) { background: color-mix(in srgb, var(--warn) 52%, transparent); }
+.doc-comment-fab button { display: inline-flex; align-items: center; gap: 5px; }
+.doc-comments { padding: 2px 2px 8px; }
+.doc-thread {
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+  background: var(--bg-elev); cursor: default;
+}
+.doc-thread.active { border-color: var(--accent); }
+.doc-thread.resolved { opacity: 0.72; }
+.doc-thread-quote {
+  display: flex; align-items: center; gap: 5px; width: 100%; margin: 0 0 6px; padding: 1px 0 1px 7px;
+  border: 0; border-left: 2px solid var(--warn); border-radius: 0; background: none;
+  color: var(--text-muted); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.doc-thread-quote > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-thread-quote:hover { color: var(--text); }
+.doc-thread.draft .doc-thread-quote { cursor: default; }
+.doc-thread-detached { flex: none; color: var(--warn); }
+.doc-comment { margin: 4px 0; }
+.doc-comment-head { display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.doc-comment-head .spacer { flex: 1; }
+.doc-comment-who { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.doc-comment-who.agent { color: var(--accent); }
+.doc-comment-body { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.doc-comment-compose textarea {
+  width: 100%; margin-top: 4px; padding: 5px 7px; resize: vertical; min-height: 44px;
+  border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-input); color: var(--text);
+  font: inherit; font-size: 12.5px; outline: 0;
+}
+.doc-comment-compose textarea:focus { border-color: var(--accent); }
+.doc-thread-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.doc-comments-foot { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+
+/* ---- font picker ---- */
+.notes-menu.doc-type-menu { min-width: 232px; padding: 8px; }
+.doc-type { display: flex; flex-direction: column; gap: 8px; }
+.doc-type .seg button { flex: 1; }
+.doc-type-row { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.doc-type-row > span { flex: 1; }
+.doc-type-row > b { min-width: 5ch; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* ---- editor: textarea over a highlighted mirror ---- */
 .md-editor {
@@ -209,10 +249,11 @@
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0; overflow: hidden;
 
-  /* The two layers must agree exactly or the highlight slides off the text. */
-  --ed-font: var(--mono);
-  --ed-size: 13px;
-  --ed-line: 1.65;
+  /* The two layers must agree exactly or the highlight slides off the text. A doc's own type
+     (--doc-*, set on .doc-panes) replaces the defaults; both layers read the same variables. */
+  --ed-font: var(--doc-font, var(--mono));
+  --ed-size: var(--doc-size, 13px);
+  --ed-line: var(--doc-line, 1.65);
   --ed-pad: 14px;
 }
 .md-gutter {
@@ -231,7 +272,7 @@
    layers, so the mirror and the textarea wrap at the same place. */
 .md-mirror, .md-input {
   position: absolute; inset: 0;
-  margin: 0; padding: var(--ed-pad) max(var(--ed-pad), calc((100% - 88ch) / 2));
+  margin: 0; padding: var(--ed-pad) max(var(--ed-pad), calc((100% - var(--doc-measure, 88ch)) / 2));
   border: 0; overflow: auto;
   font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
   white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
@@ -298,7 +339,7 @@
 .docs-history > header { display: flex; align-items: center; padding: 2px 4px 8px; }
 .docs-history h3 { margin: 0; font-size: 13px; flex: 1; }
 .docs-history .pad { padding: 0 4px 8px; }
-/* The panel's tab strip: Outline, Recordings, Links, History. */
+/* The panel's tab strip: Outline, Comments, Links, History. */
 .docs-panel-tabs { gap: 2px; flex-wrap: wrap; }
 .docs-panel-tab {
   display: inline-flex; align-items: center; gap: 5px;
@@ -312,7 +353,6 @@
   background: var(--accent-solid); color: var(--on-accent);
   font-size: 9.5px; line-height: 14px; text-align: center;
 }
-.docs-panel-live { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
 .docs-panel-tabs .spacer { flex: 1; }
 
 /* ---- diff card ---- */
@@ -390,7 +430,7 @@
   .docs-body.tree-hidden, .docs-body.tree-hidden:has(.docs-history) { grid-template-columns: minmax(0, 1fr); }
   .docs-history-edge, .doc-split-edge { display: none; }
   /* The side panel becomes a drawer over the lower part of the editor instead of vanishing: it is the only place
-     Recordings, Outline and History live, and the toolbar (Record, Stop, the panel toggle) must stay reachable above it. */
+     Outline, Comments and History live, and the toolbar (the panel toggle) must stay reachable above it. */
   .docs-history { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: min(55%, 360px); border-left: 0; border-top: 1px solid var(--border); background: var(--bg-elev, var(--bg)); box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18); }
   .doc-panes.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
@@ -400,4 +440,4 @@
 .doc-tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
 .doc-tag-chip:hover { color: var(--text); }
 .doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }
-.doc-save-state { background: var(--warn); }
+.doc-save-state { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--warn); }

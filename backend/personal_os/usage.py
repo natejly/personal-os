@@ -2,6 +2,8 @@
 
 Prices come from the LiteLLM proxy's /model/info (its bundled price map) and can be
 overridden per model in settings["modelPrices"] as {"model": {"input": $/M tokens, "output": $/M tokens}}.
+A provider called directly (Fireworks, OpenAI, ...) publishes no price list here, so its calls stay unpriced
+(cost NULL, shown as unknown) until the user enters a price; nothing is guessed.
 """
 from __future__ import annotations
 
@@ -12,9 +14,19 @@ from typing import Any
 
 import httpx
 
+from . import providers
 from .db import Database, new_id, now
 
 PRICE_TTL = 600
+
+
+def short_model(model: str) -> str:
+    """'accounts/fireworks/models/ember-1' -> 'ember-1'; 'fireworks_ai/x' -> 'x'. A plain alias is unchanged.
+
+    The proxy and a provider called directly name the same model differently, so prices and the per-model
+    breakdown match on this short name when the exact id has no row.
+    """
+    return (model or "").rstrip("/").rsplit("/", 1)[-1]
 
 
 class Pricing:
@@ -27,7 +39,7 @@ class Pricing:
         self._base = ""
 
     def caps(self, model: str) -> dict[str, Any]:
-        """{mode?, reasoning?, max_input_tokens?} the proxy reports for a model; {} when unknown."""
+        """{mode?, reasoning?, max_input_tokens?, max_output_tokens?} the proxy (or the Anthropic Models API) reports for a model; {} when unknown."""
         return dict(self._caps.get(model) or {})
 
     async def refresh(self, settings: dict[str, Any], force: bool = False) -> None:
@@ -41,6 +53,15 @@ class Pricing:
         self._base, self._fetched = base, time.time()
         headers = {"Authorization": f"Bearer {settings['apiKey']}"} if settings.get("apiKey") else {}
         try:
+            if providers.infer(base) == "anthropic":
+                # The Models API reports each model's output cap (max_tokens), which that provider requires on every call.
+                headers = {**headers, "x-api-key": str(settings.get("apiKey") or ""), "anthropic-version": "2023-06-01"}
+                async with httpx.AsyncClient(timeout=8) as c:
+                    r = await c.get(f"{base}/models", headers=headers, params={"limit": 1000})
+                if r.status_code < 400:
+                    self._caps = {m["id"]: {k: v for k, v in (("max_input_tokens", m.get("max_input_tokens")), ("max_output_tokens", m.get("max_tokens"))) if v}
+                                  for m in r.json().get("data", []) if m.get("id")}
+                return
             async with httpx.AsyncClient(timeout=8) as c:
                 r = await c.get(f"{base}/model/info", headers=headers)
             if r.status_code >= 400:
@@ -52,7 +73,8 @@ class Pricing:
                 if m.get("model_name"):
                     # Independent of prices: a model with no price row still reports what it can do.
                     found = {k: v for k, v in (("mode", info.get("mode")), ("reasoning", info.get("supports_reasoning")),
-                                               ("max_input_tokens", info.get("max_input_tokens"))) if v is not None}
+                                               ("max_input_tokens", info.get("max_input_tokens")),
+                                               ("max_output_tokens", info.get("max_output_tokens"))) if v is not None}
                     if found:
                         caps[m["model_name"]] = found
                 i, o = info.get("input_cost_per_token"), info.get("output_cost_per_token")
@@ -83,7 +105,11 @@ class Pricing:
     def cost(self, settings: dict[str, Any], model: str, prompt_tokens: int, completion_tokens: int,
              cached_tokens: int = 0, cache_write_tokens: int = 0) -> float | None:
         """Reasoning tokens are already inside completion_tokens, so they cost nothing extra here."""
-        p = self.table(settings).get(model)
+        table = self.table(settings)
+        p = table.get(model) or table.get(short_model(model))
+        if not p:
+            short = short_model(model)
+            p = next((v for k, v in table.items() if short_model(k) == short), None) if short else None
         if not p:
             return None
         cached = max(0, min(int(cached_tokens or 0), prompt_tokens))
@@ -91,6 +117,54 @@ class Pricing:
         uncached = prompt_tokens - cached - written
         return (uncached * p["input"] + cached * p.get("cache_read", p["input"]) + written * p.get("cache_write", p["input"])
                 + completion_tokens * p["output"]) / 1e6
+
+
+# What a call was for, from its kind and tag. Order is the display order.
+FEATURES: dict[str, str] = {
+    "chat": "Chat",
+    "jobs": "Scheduled jobs",
+    "desks": "Autonomous desks",
+    "memory": "Memory and graph",
+    "embeddings": "Embeddings",
+    "helpers": "Titles, suggestions and reviews",
+    "vision": "Vision and images",
+    "voice": "Voice",
+    "other": "Other",
+}
+_MEMORY_KINDS = {"learn", "style", "recall_index", "graph"}
+_EMBED_KINDS = {"embedding", "embeddings", "recall_query"}
+_HELPER_KINDS = {"title", "followups", "assist", "review"}
+_VISION_KINDS = {"vision", "image"}
+_VOICE_KINDS = {"stt", "tts"}
+
+
+def feature(kind: str, tag: str, model: str = "") -> str:
+    """One of FEATURES' keys. Jobs and desks are chat calls told apart by their tag; an embedding model's call is
+    an embedding whatever feature asked for it (older rows logged recall embeddings under recall_index)."""
+    tag, kind = tag or "", kind or ""
+    if tag.startswith("job:"):
+        return "jobs"
+    if tag.startswith("desk:"):
+        return "desks"
+    if kind in _EMBED_KINDS or "embed" in short_model(model).lower():
+        return "embeddings"
+    if tag == "graph-backfill" or kind in _MEMORY_KINDS:
+        return "memory"
+    if kind == "chat":
+        return "chat"
+    if kind in _HELPER_KINDS:
+        return "helpers"
+    if kind in _VISION_KINDS:
+        return "vision"
+    if kind in _VOICE_KINDS:
+        return "voice"
+    return "other"
+
+
+def period_starts(at: datetime | None = None) -> dict[str, datetime]:
+    """Local midnight today, Monday of this week and the 1st of this month."""
+    t = (at or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+    return {"today": t, "week": t - timedelta(days=t.weekday()), "month": t.replace(day=1)}
 
 
 def _bucket() -> dict[str, Any]:
@@ -133,32 +207,20 @@ class Usage:
             )
 
     def reprice(self, pricing: Pricing, settings: dict[str, Any]) -> int:
-        """Recompute cost for every row (after prices change). Returns rows updated."""
+        """Recompute cost for every row a price is known for (after prices change). Returns rows updated.
+
+        A row whose model has no price now keeps its old cost, so switching away from the proxy never erases history."""
         with self.db.tx() as c:
             rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens FROM usage_log").fetchall()
             n = 0
             for r in rows:
                 cost = pricing.cost(settings, r["model"], r["prompt_tokens"], r["completion_tokens"], r["cached_tokens"], r["cache_write_tokens"])
+                if cost is None:
+                    continue  # no price now (e.g. the proxy is gone): keep what the call was priced at when it ran
                 c.execute("UPDATE usage_log SET cost=? WHERE id=?", (cost, r["id"]))
                 n += 1
         return n
 
-    def alert_state(self, settings: dict[str, Any]) -> dict[str, Any]:
-        """Spend today and this calendar month against settings["usageAlerts"] (0 = off). Informational only."""
-        lim = settings.get("usageAlerts") if isinstance(settings.get("usageAlerts"), dict) else {}
-        t = datetime.now()
-        starts = {"daily": t.replace(hour=0, minute=0, second=0, microsecond=0), "monthly": t.replace(day=1, hour=0, minute=0, second=0, microsecond=0)}
-        out: dict[str, Any] = {}
-        with self.db.tx() as c:
-            for k, st in starts.items():
-                spent = c.execute("SELECT COALESCE(SUM(cost),0) FROM usage_log WHERE created_at >= ?", (st.timestamp(),)).fetchone()[0]
-                try:
-                    limit = float(lim.get(k + "Cost") or 0)
-                except (TypeError, ValueError):
-                    limit = 0.0
-                out[k] = {"spent": round(spent, 6), "limit": limit, "over": limit > 0 and spent >= limit}
-        out["over"] = out["daily"]["over"] or out["monthly"]["over"]
-        return out
     def conversation(self, conv_id: str) -> dict[str, Any]:
         """Everything one chat spent, from the rows tagged with its id. A chat with no rows is a zeroed bucket."""
         with self.db.tx() as c:
@@ -171,9 +233,22 @@ class Usage:
         return {"totals": _finish(total), "by_kind": [{"kind": k, **_finish(b)} for k, b in by_kind.items()],
                 "since": rows[0]["created_at"] if rows else None, "estimated": sum(1 for r in rows if r["estimated"])}
 
-    def report(self, days: int = 30) -> dict[str, Any]:
+    def periods(self, at: datetime | None = None) -> dict[str, dict[str, Any]]:
+        """Totals for today, this week (from Monday) and this month, whatever range the report shows."""
+        starts = period_starts(at)
+        first = min(starts.values()).timestamp()
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute("SELECT * FROM usage_log WHERE created_at >= ?", (first,)).fetchall()]
+        out = {k: _bucket() for k in starts}
+        for r in rows:
+            for k, start in starts.items():
+                if r["created_at"] >= start.timestamp():
+                    _add(out[k], r)
+        return {k: {"since": starts[k].strftime("%Y-%m-%d"), **_finish(b)} for k, b in out.items()}
+
+    def report(self, days: int = 30, at: datetime | None = None) -> dict[str, Any]:
         days = max(1, min(int(days), 365))
-        start_day = (datetime.now() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_day = ((at or datetime.now()) - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
         since = start_day.timestamp()
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute("SELECT * FROM usage_log WHERE created_at >= ? ORDER BY created_at", (since,)).fetchall()]
@@ -186,6 +261,8 @@ class Usage:
         by_kind: dict[str, dict[str, Any]] = {}
         by_project: dict[str, dict[str, Any]] = {}
         by_tag: dict[str, dict[str, Any]] = {}
+        by_feature: dict[str, dict[str, Any]] = {}
+        model_ids: dict[str, set[str]] = {}
         total = _bucket()
         for r in rows:
             t = datetime.fromtimestamp(r["created_at"])
@@ -196,7 +273,11 @@ class Usage:
             if r["kind"] == "chat":
                 hourly[t.hour] += 1
                 weekday[t.weekday()] += 1
-            _add(by_model.setdefault(r["model"], _bucket()), r)
+            # One row per model however it was addressed: the proxy's 'ember-1' and Fireworks' full id merge.
+            name = short_model(r["model"]) or r["model"]
+            _add(by_model.setdefault(name, _bucket()), r)
+            model_ids.setdefault(name, set()).add(r["model"])
+            _add(by_feature.setdefault(feature(r["kind"], r.get("tag") or "", r["model"]), _bucket()), r)
             _add(by_kind.setdefault(r["kind"], _bucket()), r)
             _add(by_tag.setdefault(r.get("tag") or "untagged", _bucket()), r)
             _add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", _bucket()), r)
@@ -207,7 +288,9 @@ class Usage:
             "daily": [{"day": d, **_finish(b)} for d, b in daily.items()],
             "hourly": [{"hour": h, "calls": n} for h, n in hourly.items()],
             "weekday": [{"weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d], "calls": n} for d, n in weekday.items()],
-            "by_model": sorted(({"model": m, **_finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
+            "periods": self.periods(at),
+            "by_model": sorted(({"model": m, "ids": sorted(model_ids[m]), **_finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
+            "by_feature": [{"feature": k, "label": FEATURES[k], **_finish(by_feature[k])} for k in FEATURES if k in by_feature],
             "by_kind": [{"kind": k, **_finish(b)} for k, b in by_kind.items()],
             "by_tag": sorted(({"tag": t, **_finish(b)} for t, b in by_tag.items()), key=lambda x: -x["cost"]),
             "by_project": sorted(({"project": p, **_finish(b)} for p, b in by_project.items()), key=lambda x: -x["tokens"]),

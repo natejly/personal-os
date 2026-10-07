@@ -62,5 +62,3 @@ export const def: WidgetDef = {
   chrome: 'full',
   Component: RecapWidget
 }
-
-export default RecapWidget

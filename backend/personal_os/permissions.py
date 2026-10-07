@@ -1,6 +1,6 @@
 """The one store for global permission settings: a single `permissions` row in the settings table.
 
-Shape: {"version": 1, <key>: <value>, ...} holding only what the user set; DEFAULTS fills the rest on read. Every
+Shape: {"version": 2, <key>: <value>, ...} holding only what the user set; DEFAULTS fills the rest on read. Every
 gate reads these values through `get(cfg, key)` (or `load()` for the whole set), and every writer goes through
 `save()` / `update()`, which validate nothing themselves: PUT /settings calls `validate()` first.
 
@@ -26,7 +26,7 @@ import sqlite3
 from typing import Any, Callable
 
 
-VERSION = 1
+VERSION = 2  # 2: permissionMode added; migrate_mode stamps it
 DEFAULT_IMAGE = "python:3.12-slim"  # microvm.DEFAULT_IMAGE
 KEY = "permissions"
 
@@ -36,25 +36,31 @@ DEFAULTS: dict[str, Any] = {
     # External and schedules tools that always show a card (tools.Toolbox.ask_locked): no map switches one on, no
     # card grants one whole-tool, and untrusted content in the reply forces its card. Every other tool that acts
     # outside the app runs on a plain yes. Sending mail and deleting things that are hard to get back stay here.
+    # Auto and Manual honour this list; Allow everything lifts it except gmail_send (ALWAYS_CARD, permrules.STILL_ASK).
     "alwaysAsk": ["gmail_send", "calendar_delete", "trash_local_file", "move_local_file", "run_shortcut",
                   "python_install", "schedule_task"],
     # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
-    # Chats with no own skipPermissions follow this. Off: tools that ask still show a card. On: those
-    # cards are skipped. Deny rules, plan cards, desk questions and scheduled jobs are unchanged.
+    # How calls that would run or ask are decided (autoreview.route): "auto" has a reviewer model read every call that is
+    # not known safe; "manual" is the per-tool modes, grants and rules alone; "allow_all" runs everything (unsandboxed
+    # shell included) except denied calls (hard-deny paths included), credential-store reads and writes, writes after
+    # untrusted content, the email card, and the shell floor (permrules.allow_all_floor: deletes that skip the Trash,
+    # disk wipes, force-pushes, and an unsandboxed command naming a credential store or Grain's own data or app).
+    "permissionMode": "auto",
+    # Legacy, kept so stored values load and PUT keeps accepting them. skipPermissions and autoReview are no longer read
+    # by any gate (migrate_mode folds an existing install into "auto"); unattendedApprovals is read only in manual mode.
     "skipPermissions": False,
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "deny",
-    # Review gate (autoreview.py): off | risky | all-writes. A second model looks at a call that would run unasked and may turn it into a card.
     "autoReview": "off",
-    "autoReviewModel": "",  # "" = the extraction model, else the chat model
+    "autoReviewModel": "",  # "" = the fast model, else the extraction model, else the chat model
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # How doc_edit lands. "review" proposes a diff; "apply" writes it.
     "docEditMode": "review",
-    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
-    # own workspace is always granted; anywhere else those tools ask first.
+    # Legacy: a list of folders the file tools once needed a grant for. The file tools now reach the whole Mac, so nothing
+    # reads it for scope; it is still stored and returned so an older client keeps working.
     "workspaceRoots": [],
     # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
     "planMode": "off",
@@ -79,6 +85,11 @@ DEFAULTS: dict[str, Any] = {
     # and a read-only reviewer checks the result against the brief before the desk may finish.
     "deskDoneGate": True,
     "deskSelfReview": True,
+    # Connections are unrestricted: the host allow-lists (fetch_url and browser after untrusted content, the shell and
+    # sandbox egress proxy) admit any public hostname, and every MCP tool runs without a per-tool grant unless a grant says
+    # "off". Private addresses, the MCP taint rule, deny rules and permissionMode are unchanged. migration 25 turns it on for
+    # an install that already has user data; a fresh install starts off.
+    "allowAllConnections": False,
 }
 KEYS = frozenset(DEFAULTS)
 # An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
@@ -86,6 +97,7 @@ IMAGE_REF = re.compile(r"^[a-z0-9][A-Za-z0-9._/:-]{0,254}(@sha256:[a-f0-9]{64})?
 HOST_LISTS = frozenset({"fetchAllowlist", "shellAllowedDomains", "browserAllowlist"})
 SANDBOX_RUNTIMES = ("docker", "podman", "nerdctl")
 CHOICES: dict[str, tuple[str, ...]] = {
+    "permissionMode": ("auto", "manual", "allow_all"),
     "unattendedApprovals": ("ask", "deny"),
     "autoReview": ("off", "risky", "all-writes"),
     "sandboxRuntime": SANDBOX_RUNTIMES,
@@ -94,6 +106,7 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "planMode": ("off", "auto", "always"),
 }
 CHOICE_ERRORS = {
+    "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
     "unattendedApprovals": "unattendedApprovals must be 'ask' or 'deny'",
     "autoReview": "autoReview must be 'off', 'risky' or 'all-writes'",
     "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
@@ -154,6 +167,16 @@ def _write(c: sqlite3.Connection, patch: dict[str, Any]) -> dict[str, Any]:
 def migrate(c: sqlite3.Connection) -> None:
     """Migration 5: the legacy top-level permission rows become the one `permissions` row."""
     _write(c, {})
+
+
+def migrate_mode(c: sqlite3.Connection) -> None:
+    """One-time, idempotent: a store older than version 2, or without a permissionMode, becomes "auto" whatever
+    skipPermissions / autoReview said. _write keeps every other key (workspaceRoots included) and stamps VERSION."""
+    row = c.execute("SELECT value FROM settings WHERE key = ?", (KEY,)).fetchone()
+    cur = _json(row[0]) if row else None
+    if isinstance(cur, dict) and (cur.get("version") or 0) >= 2 and cur.get("permissionMode") in CHOICES["permissionMode"]:
+        return
+    _write(c, {"permissionMode": "auto"})
 
 
 def update(db: Any, fn: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
@@ -218,12 +241,4 @@ def validate(key: str, v: Any, *, cap_modes: Callable[[dict[str, Any]], dict[str
     if key == "workspaceRoots":
         if not all(isinstance(x, str) for x in v):
             raise ValueError("workspaceRoots must be a list of folders")
-        # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
-        # would refuse is rejected here rather than stored and then silently ignored. The home folder itself is refused too.
-        from . import mac
-        for root in v:
-            try:
-                mac.allowed_root(root)
-            except mac.LocalPathError as e:
-                raise ValueError(f"{root} cannot be a workspace folder: {e}") from e
     return v

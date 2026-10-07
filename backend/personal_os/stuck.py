@@ -19,6 +19,7 @@ SAME_RESULT = 4     # one call, one result, this many times running
 ERROR_CYCLE = 3     # one call erroring this many times running
 ALTERNATIONS = 6    # A,B,A,B,A,B with nothing new coming back
 ERROR_STORM = 4     # one tool erroring this many times running, with different args
+NOT_RUN = 4         # calls in a row that never executed (disabled, not loaded, refused), however the args vary
 WINDOW = 24
 
 STUCK_NUDGE = ("You appear to be stuck: {detail}. Change approach: use a different tool or arguments, "
@@ -68,14 +69,27 @@ class Limits:
     error_cycle: int = ERROR_CYCLE
     alternations: int = ALTERNATIONS
     error_storm: int = ERROR_STORM
+    not_run: int = NOT_RUN
 
 
 class StuckDetector:
     def __init__(self, limits: Limits | None = None) -> None:
         self.limits = limits or Limits()
         self.obs: deque[Obs] = deque(maxlen=WINDOW)
+        self.not_run = 0
+        self.last_not_run = ""
+
+    def reset(self) -> None:
+        self.obs.clear()
+        self.not_run = 0
+
+    def skip(self, tool: str) -> None:
+        """A call that never executed. Any executed call (observe) ends the streak."""
+        self.not_run += 1
+        self.last_not_run = tool
 
     def observe(self, tool: str, args: Any, result: Any) -> None:
+        self.not_run = 0
         err = bool(result.get("error")) if isinstance(result, dict) else False
         self.obs.append(Obs(tool, args_digest(args), result_digest(result), err))
 
@@ -95,6 +109,8 @@ class StuckDetector:
 
     def check(self) -> Stuck | None:
         lim = self.limits
+        if self.not_run >= lim.not_run:
+            return Stuck("not_run", self.last_not_run, f"{self.last_not_run} and other calls were refused or unavailable {self.not_run} times in a row")
         t = self._tail(lim.same_result)
         if t and len({(o.tool, o.args_digest, o.result_digest) for o in t}) == 1:
             return Stuck("same_result", t[0].tool, f"{t[0].tool} returned the same result {len(t)} times in a row")

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
+import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, Files } from 'lucide-react'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
@@ -8,9 +8,10 @@ import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
-import PlanPanel from './PlanPanel'
+import WorkersPanel from './WorkersPanel'
 import ShowPanel from './ShowPanel'
 import SendToSpace from './SendToSpace'
+import ChatFilesButton from './ChatFilesPanel'
 import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import SidebarToggle from './SidebarToggle'
@@ -23,6 +24,8 @@ import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '..
 import DeskStrip, { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
+import TelegramIcon from './TelegramIcon'
+import { chatLabel, isTelegramChat } from '../lib/chatRows'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -35,6 +38,8 @@ function greeting(): string {
 /** `conversationId` is omitted in classic mode, where the focused session is the only one on screen. */
 export default function ChatView({ conversationId }: { conversationId?: string }): JSX.Element {
   const convo = useConversation(conversationId)
+  // The backend refuses an edit of, and a branch from, a desk or job transcript.
+  const isDeskOrJob = !!convo?.settings.deskId || !!convo?.settings.job_id
   const face = useChatFace(convo)
   const isStreamingHere = useIsStreaming(conversationId)
   const streamingMessageId = useStreamingMessageId(conversationId)
@@ -81,7 +86,25 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
   const last = msgs[msgs.length - 1]
   const watchId = latestBrowserMessage(msgs)
-  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
+  const { stick, unseen, jump, release } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
+
+  // "Open in chat" from a memory's source: scroll to that message once the transcript is in. The history is
+  // not windowed, so a message missing from a loaded chat is gone. The frame wait lets the stick-to-bottom
+  // pass for a fresh chat run first; release() then keeps it from pulling the view back down.
+  const chatJump = useStore((s) => s.chatJump)
+  useEffect(() => {
+    if (conversationId || !chatJump || chatJump.conversationId !== convo?.id || !msgs.length) return
+    const raf = requestAnimationFrame(() => {
+      const el = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(chatJump.messageId)}"]`)
+      useStore.setState({ chatJump: null })
+      if (!el) return useStore.getState().toast('That message is no longer in this chat', 'info')
+      release()
+      el.scrollIntoView({ block: 'center' })
+      el.classList.add('msg-flash')
+      setTimeout(() => el.classList.remove('msg-flash'), 2000)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [chatJump, msgs, conversationId, convo?.id, release])
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {
@@ -109,13 +132,20 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 onMouseDown={(e) => e.preventDefault()} onClick={() => { setEditingTitle(false); void retitleChat(convo.id) }}><Sparkles size={14} /></button>
             </>
           ) : (
-            <button className="title-btn" onClick={() => convo && setEditingTitle(true)} disabled={!convo}>
-              {convo?.title ?? 'New chat'}
-              {convo && <Pencil size={12} />}
-            </button>
+            <>
+              {convo && isTelegramChat(convo) && <span style={{ display: 'flex', alignItems: 'center', paddingLeft: 8, color: 'var(--text-muted)' }}><TelegramIcon size={14} /></span>}
+              <button className="title-btn" onClick={() => convo && setEditingTitle(true)} disabled={!convo}>
+                {convo ? chatLabel(convo) : 'New chat'}
+                {convo && <Pencil size={12} />}
+              </button>
+            </>
           )}
         </div>
         <div className="no-drag header-right">
+          {conversationId
+            ? <ChatFilesButton conversationId={convo?.id} />
+            : <button className={`icon-btn no-drag${deskPanel ? ' on' : ''}`} title="Documents in this chat" aria-label="Documents in this chat" aria-pressed={deskPanel} disabled={!convo?.id}
+              onClick={() => setDeskPanel((o) => !o)}><Files size={15} /></button>}
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
@@ -142,8 +172,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} showContextChips
-                      branchable={m.created_at > 0 && !convo?.settings.deskId && !convo?.settings.job_id}
+                    <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                      branchable={m.created_at > 0 && !isDeskOrJob}
                       browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />
                   </Fragment>
                 ))}
@@ -152,7 +182,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work.
                     A brand-new chat has no id yet, so its slot stays empty rather than showing a face that would change once the row lands. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
-                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face name={face.name || conversationId!} hue={face.hue} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
+                  <div className="msg assistant"><div className="avatar face-avatar">{(convo?.id ?? conversationId) && <Face {...face} name={face.name || conversationId!} status="streaming" />}</div><div className="bubble"><Thinking /></div></div>
                 )}
                 {desk && <DeskInline desk={desk} events={msgs.flatMap((m) => m.tool_events ?? [])} />}
                 {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
@@ -164,12 +194,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
             </button>
           )}
-          <PlanPanel conversationId={conversationId} />
+          <WorkersPanel conversationId={conversationId} />
           {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}
-        {desk && deskPanel && <DeskPanel desk={desk} onClose={() => setDeskPanel(false)} />}
+        {convo?.id && !conversationId && deskPanel && <DeskPanel key={convo.id} desk={desk} conversationId={convo.id} onClose={() => setDeskPanel(false)} />}
         {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
         {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

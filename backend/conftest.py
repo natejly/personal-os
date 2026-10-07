@@ -52,15 +52,6 @@ def _ensure_loop() -> None:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 
-def pytest_configure(config: Any) -> None:
-    # Tests flip activity config (record-everything restarts the monitor), which would spawn real mic,
-    # system-audio and keystroke threads; macOS kills a non-interactive process that does (exit -9).
-    # Tests drive collectors through work() directly, so thread start is a no-op here.
-    if CHILD:
-        from personal_os import activity
-        activity.Collector.start = lambda self: None  # type: ignore[method-assign]
-
-
 def pytest_collectstart(collector: Any) -> None:
     _ensure_loop()
 

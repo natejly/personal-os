@@ -3,6 +3,8 @@ import { scriptLLM } from './helpers/scriptllm.mjs'
 import { expect, realErrors, deskStatus, waitStatus, deskChat, openChat, strip, panel, openPanel, chatRow, WRITE, DELIVER, DONE, settingsFor } from './helpers/cowork.mjs'
 test.describe.configure({ timeout: 300_000 })
 
+// The card comes from the written tool's own mode ('ask'), not from the desk's autonomy level: an 'ask' desk follows the permission mode.
+const askWrites = { ...settingsFor, permissionMode: 'manual', tools: { desk_write_file: 'ask' } }
 const REVIEWED = (llm, ...steps) => llm.push(...steps, { text: 'reviewer ok' }, { text: 'final' })
 const deskFile = async (grain, id, path) => (await grain.api(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}`, { raw: true })).status
 
@@ -14,11 +16,12 @@ async function reviewDesk(grain, title, extra = []) {
   await waitStatus(grain, desk.id, 'review')
   await openChat(grain.page, title)
   await openPanel(grain.page, 'Review')
+  for (const t of ['Files', 'Changes']) await expect(panel(grain.page).locator('.desk-tabs').getByRole('button', { name: t })).toBeVisible()
   return { llm, desk }
 }
 
-test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwritten and the desk alive; Approve writes it', async ({ grain }) => {
-  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+test('autonomous desk: a tool set to ask shows a card (from the tool mode, not the autonomy level); Deny leaves the file unwritten and the desk alive; Approve writes it', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: askWrites })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain
@@ -29,7 +32,7 @@ test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwri
   await expect(cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first()).toBeVisible({ timeout: 60_000 })
   expect(await deskFile(grain, desk.id, 'outputs/report.md')).not.toBe(200)
   await expect(strip(page)).toContainText('Approval needed')
-  await expect(chatRow(page, 'Careful').locator('.convo-desk')).toHaveAttribute('aria-label', 'Approval needed')
+  await expect(chatRow(page, 'Careful').locator('.attn-dot')).toHaveAttribute('aria-label', /Approval needed/)
   llm.push({ text: 'ok, not writing it' })
   await cards.getByRole('button', { name: /^(Deny|Reject)$/ }).first().click()
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).not.toBe('needs_approval')
@@ -38,8 +41,8 @@ test('ask-as-it-goes desk: every change shows a card; Deny leaves the file unwri
   expect(realErrors(grain)).toEqual([])
 })
 
-test('ask-as-it-goes desk: Approve writes the file once', async ({ grain }) => {
-  await grain.api('/settings', { method: 'PUT', body: settingsFor })
+test('autonomous desk: approving a tool-mode card writes the file once', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: askWrites })
   const llm = await scriptLLM(grain)
   llm.push({ calls: [WRITE] })
   const { page } = grain
@@ -63,7 +66,7 @@ test('review: accept into a new doc, verified, the desk closes out and the chat 
   await expect.poll(() => deskStatus(grain, desk.id), { timeout: 60_000 }).toBe('done')
   await expect(strip(page)).toContainText('Done')
   await expect(chatRow(page, 'Reviewed')).toBeVisible()
-  await expect(chatRow(page, 'Reviewed').locator('.convo-desk')).toHaveCount(0) // done: nothing to flag
+  await expect(chatRow(page, 'Reviewed').locator('.attn-dot')).toHaveCount(0) // done: nothing to flag
   expect(realErrors(grain)).toEqual([])
 })
 

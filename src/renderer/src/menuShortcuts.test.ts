@@ -66,16 +66,20 @@ test('one page-agent action toggles the page agent once', () => {
   assert.equal(useStore.getState().pageAgentOpen, before)
 })
 
-test('a view action routes, and view:graph opens memory on the graph', () => {
+test('a view action routes, and view:graph opens Settings → Memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
-  // Memory lives in Settings → Memory now: the page underneath stays put.
+  // Memory is a Settings tab, not a page.
   fire('view:graph')
-  assert.equal(useStore.getState().view, 'todos')
   assert.equal(useStore.getState().settingsOpen, true)
   assert.equal(useStore.getState().settingsTab, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
-  useStore.getState().setSettingsOpen(false)
+  useStore.setState({ settingsOpen: false, settingsTab: 'model' })
+  fire('view:memory')
+  assert.equal(useStore.getState().settingsOpen, true)
+  assert.equal(useStore.getState().settingsTab, 'memory')
+  assert.equal(useStore.getState().memoryMode, 'split')
+  useStore.setState({ settingsOpen: false })
 })
 
 /** A stand-in DOM for the duration of `fn`: node has neither `document` nor `KeyboardEvent`. */
@@ -97,9 +101,9 @@ test('view:documents and upload open Files on uploads, where the upload input re
   })
   assert.equal(useStore.getState().filesSection, 'uploads')
   assert.deepEqual(clicked, ['doc-upload-input'])
-  // ⌘, after that still opens on Provider.
+  // ⌘, after that still opens on Model.
   fire('settings')
-  assert.equal(useStore.getState().settingsTab, 'provider')
+  assert.equal(useStore.getState().settingsTab, 'model')
   useStore.getState().setSettingsOpen(false)
 })
 
@@ -124,16 +128,16 @@ test('palette inside the Markdown editor is handed back as ⌘K (insert link)', 
 
 test('a hidden view stays shut: its shortcut toasts a way to turn it on', () => {
   const orig = useStore.getState().settings
-  useStore.setState({ settings: { ...orig, hiddenViews: ['activity'] }, toasts: [] })
+  useStore.setState({ settings: { ...orig, hiddenViews: ['library'] }, toasts: [] })
   useStore.getState().setView('todos')
-  fire('view:activity')
+  fire('view:library')
   assert.equal(useStore.getState().view, 'todos')
   const [t] = useStore.getState().toasts
-  assert.equal(t.text, 'Activity is turned off')
+  assert.equal(t.text, 'Library is turned off')
   assert.equal(t.action?.label, 'Turn on')
   t.action?.run()
   assert.equal(useStore.getState().settingsOpen, true)
-  assert.equal(useStore.getState().settingsTab, 'modules')
+  assert.equal(useStore.getState().settingsTab, 'appearance')
   useStore.getState().setSettingsOpen(false)
   // A view that is on still opens.
   fire('view:calendar')
@@ -231,9 +235,17 @@ test('⌘0…⌘n are contiguous, each used once, each a distinct target', async
     const d = /^CmdOrCtrl\+(\d)$/.exec(s.keys)
     return d && s.action ? [[Number(d[1]), s.action] as const] : []
   })
-  assert.equal(rows.length, 8, 'Today, Chats, Todos, Calendar, Files, Mail, Memory, Activity')
+  assert.equal(rows.length, 7, 'Today, Chats, Todos, Calendar, Files, Mail, Memory')
   const digits = rows.map(([d]) => d).sort((a, b) => a - b)
   assert.deepEqual(digits, digits.map((_, i) => i), 'no gaps, no repeats')
   assert.equal(new Set(rows.map(([, a]) => a)).size, rows.length, 'no two digits open the same thing')
   assert.ok(!rows.some(([, a]) => a === 'view:graph' || a === 'view:documents'))
+})
+
+test('the Quick chat button and the ⌘I menu item are the same toggle', () => {
+  const was = useStore.getState().pageAgentOpen
+  fire('page-agent')
+  assert.equal(useStore.getState().pageAgentOpen, !was)
+  useStore.getState().togglePageAgent()
+  assert.equal(useStore.getState().pageAgentOpen, was)
 })

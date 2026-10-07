@@ -1,16 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ClipboardEvent, ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, Check, ChevronRight, ExternalLink, FileText, Mail, Paperclip, Pencil, Reply, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
-import type { PendingSend, ToolEvent, Verification } from '@shared/types'
+import { AlertTriangle, ArrowLeft, Check, ChevronRight, ExternalLink, SquarePen, FileText, Mail, Paperclip, Pencil, Reply, Send, ShieldCheck, Trash2, Undo2, X } from 'lucide-react'
+import type { Document, PendingSend, ToolEvent, Verification } from '@shared/types'
 import { api, verificationMessage } from '../../lib/api'
-import { useStore } from '../../store'
+import { fmtBytes } from '../../lib/showPanel'
+import { useStore, useChatTainted } from '../../store'
 import {
-  clock, composeArgs, composeProblem, editedFields, gmailLink, looksMarkdown, markdownToPlain, parseAddressList,
-  parseMailMessage, parseMailRows, readPreview, recipientsFromArg, senderInitial, senderName, shortTime,
+  attachmentLabel, attachmentRefs, attachmentsOverLimit, clock, composeArgs, composeProblem, editedFields, gmailLink, looksMarkdown, markdownToPlain, parseAddressList,
+  parseMailMessage, parseMailRows, readPreview, recipientsFromArg, recipientsToArg, senderInitial, senderName, shortTime,
   type ComposeDraft, type Recipient, type MailRow
 } from '../../lib/mailCompose'
 import { registerToolCard, type ToolCardProps } from './registry'
 import '../../styles/mailcard.css'
+
+type DocInfo = Pick<Document, 'name' | 'mime' | 'size'>
+
+/** What an approval's attachment entries are: an Uploads document id is looked up for its name and size; a path (or a lookup that
+ *  fails) shows the file name until then. `learn` records a document the card just uploaded, so its chip never shows a bare id. */
+function useAttachmentInfo(refs: string[]): { info: Record<string, DocInfo>; learn: (d: Document) => void; label: (ref: string) => string } {
+  const key = refs.join('\n')
+  const [info, setInfo] = useState<Record<string, DocInfo>>({})
+  const learn = (d: Document): void => setInfo((f) => ({ ...f, [d.id]: d }))
+  useEffect(() => {
+    let live = true
+    for (const r of refs) {
+      if (r.startsWith('/') || info[r]) continue
+      api.documents.get(r).then((d) => { if (live) learn(d) }).catch(() => {})
+    }
+    return () => { live = false }
+  }, [key])  // eslint-disable-line react-hooks/exhaustive-deps
+  const label = (r: string): string => info[r] ? `${info[r].name}${info[r].size ? ` · ${fmtBytes(info[r].size)}` : ''}` : attachmentLabel(r)
+  return { info, learn, label }
+}
 
 const pretty = (v: unknown): string => JSON.stringify(v, null, 2)
 
@@ -222,26 +243,36 @@ function Status({ tone, icon, text, badge, right, why }: {
 
 // ---------------------------------------------------------------- the compose card
 
-function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Element {
+function ComposeCard({ event, pending, decide, rules, conversationId }: ToolCardProps): JSX.Element {
+  const tainted = useChatTainted(conversationId)
   const isSend = event.name === 'gmail_send'
   const original = event.arguments
   const account = useStore((s) => s.google?.email ?? null)
   const init = useMemo(() => recipientsFromArg(original.to), [original.to])
   const [to, setTo] = useState<Recipient[]>(init.ok)
   const [bad, setBad] = useState<string[]>(init.invalid)
+  const initCc = useMemo(() => recipientsFromArg(original.cc), [original.cc])
+  const initBcc = useMemo(() => recipientsFromArg(original.bcc), [original.bcc])
+  const [cc, setCc] = useState<Recipient[]>(initCc.ok)
+  const [badCc, setBadCc] = useState<string[]>(initCc.invalid)
+  const [bcc, setBcc] = useState<Recipient[]>(initBcc.ok)
+  const [badBcc, setBadBcc] = useState<string[]>(initBcc.invalid)
   const [subject, setSubject] = useState(String(original.subject ?? ''))
   const [body, setBody] = useState(String(original.body ?? ''))
+  const [atts, setAtts] = useState<string[]>(() => attachmentRefs(original.attachments))
+  const [uploading, setUploading] = useState(0)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<'send' | 'draft' | 'discard' | null>(null)
-  const [showMore, setShowMore] = useState(false)
+  const [showMore, setShowMore] = useState(() => initCc.ok.length + initCc.invalid.length + initBcc.ok.length + initBcc.invalid.length > 0)
   // What was just approved, so the card does not flash the model's original while the result is on its way.
   const [submitted, setSubmitted] = useState<Record<string, unknown> | null>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
 
-  const draft: ComposeDraft = { to, subject, body }
-  const changed = useMemo(() => editedFields(original, { to, subject, body }), [original, to, subject, body])
-  const problem = composeProblem(draft, bad)
+  const draft: ComposeDraft = { to, cc, bcc, subject, body, attachments: atts }
+  const changed = useMemo(() => editedFields(original, { to, cc, bcc, subject, body, attachments: atts }), [original, to, cc, bcc, subject, body, atts])
+  const problem = composeProblem(draft, [...bad, ...badCc, ...badBcc])
   const replyId = typeof original.reply_to_message_id === 'string' ? original.reply_to_message_id : ''
-  const attachments = Array.isArray(original.attachments) ? (original.attachments as unknown[]).map((a) => (typeof a === 'string' ? a : String((a as { name?: unknown })?.name ?? 'attachment'))) : []
+  const att = useAttachmentInfo(atts)
 
   useEffect(() => {  // grow with the text, within reason
     const el = bodyRef.current
@@ -272,7 +303,39 @@ function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Elem
   }
   const revert = (): void => {
     const r = recipientsFromArg(original.to)
-    setTo(r.ok); setBad(r.invalid); setSubject(String(original.subject ?? '')); setBody(String(original.body ?? ''))
+    setTo(r.ok); setBad(r.invalid); setCc(initCc.ok); setBadCc(initCc.invalid); setBcc(initBcc.ok); setBadBcc(initBcc.invalid)
+    setSubject(String(original.subject ?? '')); setBody(String(original.body ?? '')); setAtts(attachmentRefs(original.attachments))
+  }
+  const attach = async (files: File[]): Promise<void> => {
+    const toast = useStore.getState().toast
+    const sizes = atts.map((r) => att.info[r]?.size ?? 0)
+    for (const f of files) {
+      const over = attachmentsOverLimit(sizes, [f.size])
+      if (over) { toast(over, 'error'); continue }
+      sizes.push(f.size)
+      setUploading((n) => n + 1)
+      try {
+        const d = await api.documents.upload(null, f)
+        att.learn(d)
+        setAtts((a) => [...a, d.id])
+      } catch (e) { toast((e as Error).message, 'error') } finally { setUploading((n) => n - 1) }
+    }
+  }
+  // Hands the draft to the Mail compose window and denies this card with a note, so the agent knows where it went.
+  // Files that are only paths on disk have no stored copy to attach there and are left behind, with a toast.
+  const openInMail = async (): Promise<void> => {
+    if (busy) return
+    setBusy('discard')
+    try {
+      const docs = await Promise.all(atts.filter((r) => !r.startsWith('/')).map(async (r) => att.info[r] ? { id: r, ...att.info[r] } : api.documents.get(r).catch(() => null)))
+      const kept = docs.filter((d): d is NonNullable<typeof d> => d !== null).map((d) => ({ id: d.id, name: d.name, mime: d.mime, size: d.size }))
+      if (kept.length < atts.length) useStore.getState().toast(`${atts.length - kept.length} attachment(s) could not be carried over to Mail (files on disk are not stored); attach them there.`, 'error')
+      useStore.getState().openMailCompose({
+        to: [recipientsToArg(to), ...bad].filter(Boolean).join(', '), cc: [recipientsToArg(cc), ...badCc].filter(Boolean).join(', '),
+        bcc: [recipientsToArg(bcc), ...badBcc].filter(Boolean).join(', '), subject, body, replyToMessageId: replyId || null, attachments: kept
+      })
+      await decide(false, undefined, 'the user moved this email into the Mail compose window to finish and send it there')
+    } finally { setBusy(null) }
   }
   const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void go(isSend ? 'send' : 'draft') }
@@ -285,7 +348,7 @@ function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Elem
     <section className="mc mc-compose" aria-label={isSend ? 'Email to send' : 'Email draft'} onKeyDown={onKeyDown}>
       <header className="mc-head">
         <Mail size={14} />
-        <b>{isSend ? 'New message' : 'Draft'}</b>
+        <b>{isSend ? 'Review before sending' : 'Draft'}</b>
         <span className="mc-tag ask">{isSend ? 'waiting for you to send' : 'waiting for you to save'}</span>
         {changed.length > 0 && (
           <span className="mc-tag edited" title={`You changed: ${changed.join(', ')}`}><Pencil size={10} /> Edited
@@ -303,7 +366,12 @@ function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Elem
         </div>
         <RecipientField label="To" chips={to} bad={bad} disabled={off} onSubmit={() => void go(isSend ? 'send' : 'draft')}
           onChange={(c, b) => { setTo(c); setBad(b) }} />
-        {showMore && <p className="mc-note">Cc and Bcc are not supported by the send tool yet; add them as recipients in To.</p>}
+        {showMore && <>
+          <RecipientField label="Cc" chips={cc} bad={badCc} disabled={off} onSubmit={() => void go(isSend ? 'send' : 'draft')}
+            onChange={(c, b) => { setCc(c); setBadCc(b) }} />
+          <RecipientField label="Bcc" chips={bcc} bad={badBcc} disabled={off} onSubmit={() => void go(isSend ? 'send' : 'draft')}
+            onChange={(c, b) => { setBcc(c); setBadBcc(b) }} />
+        </>}
         <div className="mc-row">
           <span className="mc-label">Subject</span>
           <input className="mc-subject" value={subject} disabled={off} aria-label="Subject" placeholder="(no subject)"
@@ -312,25 +380,35 @@ function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Elem
       </div>
       <textarea ref={bodyRef} className="mc-body" value={body} disabled={off} aria-label="Message body" spellCheck
         onChange={(e) => setBody(e.target.value)} />
-      {attachments.length > 0 && (
-        <div className="mc-attach">{attachments.map((a) => <span key={a} className="mc-chip"><Paperclip size={10} /> {a}</span>)}</div>
-      )}
+      <div className="mc-attach edit" aria-label="Attachments">
+        {atts.map((r) => (
+          <span key={r} className="mc-chip" title={att.info[r]?.name ?? r}>
+            <Paperclip size={10} /> {att.label(r)}
+            <button type="button" className="mc-chip-x" disabled={off} aria-label={`Remove ${att.info[r]?.name ?? attachmentLabel(r)}`}
+              onClick={() => setAtts((a) => a.filter((x) => x !== r))}><X size={10} /></button>
+          </span>
+        ))}
+        {uploading > 0 && <span className="mc-chip">Uploading…</span>}
+        <input ref={fileRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => { void attach(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+        <button type="button" className="mc-link-btn" disabled={off} onClick={() => fileRef.current?.click()}><Paperclip size={11} /> Attach</button>
+      </div>
       {looksMarkdown(body) && (
         <div className="mc-hint">This looks like Markdown, and email shows it as plain text.
           <button type="button" className="mc-link-btn" disabled={off} onClick={() => setBody(markdownToPlain(body))}>Clean it up</button></div>
       )}
       {problem && (to.length > 0 || bad.length > 0 || changed.length > 0) && <div className="mc-problem" role="alert">{problem}</div>}
-      {event.forced && <div className="mc-hint">Approval is required because this chat read content from outside.</div>}
+      {event.forced && <div className="mc-hint">{tainted ? 'Approval is required because this chat read content from outside.' : 'Approval is required each time.'}</div>}
       <footer className="mc-foot">
-        <button type="button" className="primary-btn sm" disabled={!!problem || off} onClick={() => void go(isSend ? 'send' : 'draft')}
+        <button type="button" className="primary-btn sm" disabled={!!problem || off || uploading > 0} onClick={() => void go(isSend ? 'send' : 'draft')}
           title={problem ?? (isSend ? 'Send (⌘↵)' : 'Save to Drafts (⌘↵)')}>
           {isSend ? <><Send size={12} /> {busy === 'send' ? 'Sending…' : 'Send'}</> : <><FileText size={12} /> {busy === 'draft' ? 'Saving…' : 'Save draft'}</>}
         </button>
         {isSend && (
-          <button type="button" className="ghost-btn sm" disabled={!!problem || off} onClick={() => void go('draft')} title="Write it to Drafts without sending">
+          <button type="button" className="ghost-btn sm" disabled={!!problem || off || uploading > 0} onClick={() => void go('draft')} title="Write it to Drafts without sending">
             <FileText size={12} /> {busy === 'draft' ? 'Saving…' : 'Save as draft'}
           </button>
         )}
+        <button type="button" className="ghost-btn sm" disabled={off} onClick={() => void openInMail()} title="Finish this email in the Mail compose window"><SquarePen size={12} /> Open in Mail</button>
         <button type="button" className="ghost-btn sm" disabled={off} onClick={() => void discard()}><Trash2 size={12} /> Discard</button>
         <span className="mc-kbd">⌘↵ {isSend ? 'send' : 'save'}</span>
       </footer>
@@ -353,6 +431,10 @@ function ComposeResolved({ event, submitted }: { event: ToolEvent; submitted: Re
   const edited = event.edited_by === 'user' || (submitted !== null && !event.edited_arguments)
   const asDraft = result ? Boolean(result.draft_id) : Boolean(args.as_draft)
   const v = (result?.verification as Verification | undefined) ?? null
+  const att = useAttachmentInfo(attachmentRefs(args.attachments))
+  const cc = recipientsFromArg(args.cc)
+  const bcc = recipientsFromArg(args.bcc)
+  const names = (r: ReturnType<typeof recipientsFromArg>): string => r.ok.map((x) => x.name || x.email).concat(r.invalid).join(', ')
 
   let status: JSX.Element
   if (denied) {
@@ -384,9 +466,12 @@ function ComposeResolved({ event, submitted }: { event: ToolEvent; submitted: Re
       </header>
       <dl className="mc-summary">
         <dt>To</dt><dd>{to.ok.map((r) => r.name || r.email).concat(to.invalid).join(', ') || '—'}</dd>
+        {names(cc) && <><dt>Cc</dt><dd>{names(cc)}</dd></>}
+        {names(bcc) && <><dt>Bcc</dt><dd>{names(bcc)}</dd></>}
         <dt>Subject</dt><dd><b>{subject || '(no subject)'}</b></dd>
       </dl>
       <pre className="mc-preview">{body}</pre>
+      {attachmentRefs(args.attachments).length > 0 && <div className="mc-attach">{attachmentRefs(args.attachments).map((r, i) => <span key={i} className="mc-chip"><Paperclip size={10} /> {att.label(r)}</span>)}</div>}
       {status}
       <Details event={event} />
     </section>

@@ -38,7 +38,7 @@ def raw(method: str, path: str, body_text: str) -> Any:
 
 def _canvas_and_window() -> tuple[str, str]:
     cv = j("POST", "/canvases", {"name": "finite"})["id"]
-    w = j("POST", f"/canvases/{cv}/windows", {"kind": "note", "x": 10, "y": 20, "w": 300, "h": 200})["id"]
+    w = j("POST", f"/canvases/{cv}/windows", {"kind": "todos", "x": 10, "y": 20, "w": 300, "h": 200})["id"]
     return cv, w
 
 
@@ -63,7 +63,7 @@ def test_non_finite_window_geometry_is_refused() -> None:
 
 def test_non_finite_on_create_is_refused() -> None:
     cv, _ = _canvas_and_window()
-    for body in ('{"kind": "note", "x": Infinity}', '{"kind": "note", "h": NaN}'):
+    for body in ('{"kind": "todos", "x": Infinity}', '{"kind": "todos", "h": NaN}'):
         r = raw("POST", f"/canvases/{cv}/windows", body)
         check(r.status_code == 422, f"{body} -> {r.status_code} {r.text[:200]}")
 

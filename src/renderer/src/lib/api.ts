@@ -1,29 +1,29 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, Recap, Conversation, ConversationSettings, WorkerInfo, ContextUsed, ContextMeter, ConversationUsage, Document, GraphBackfillStatus, GraphData, GraphEdge, GraphNode, Message, MicrosoftStatus,
   ApprovalDecision, ApprovalLogEntry, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
-  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Memory, MemoryProposal, MemorySource, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, AgentFields, AgentScope, AgentHomeData, BuiltinAgent, SubagentView, Workflow, WorkflowRun, CrewView, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
-  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
+  Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Desk, DeskAutonomy, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
-  Doc, DocFolder, FullDoc, DocRevision,
+  Doc, DocFolder, FullDoc, DocRevision, DocComment, DocTypography,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
-  McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
-  ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
-  ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
+  McpCatalog, McpEffective, McpImportSource, McpRegistryResult, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   PendingSend, SendHoldConfig, Verification, Verified,
-  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
+  PermissionGrantResult, VoiceConfig,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail,
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail, TelegramStatus,
   TeachDraft, TeachRecording
 } from '@shared/types'
-import type { ShipChecklist } from '@shared/types'
+import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
+import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
+import type { ChatRunChanges } from './deskFiles'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
-export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
+export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
 /** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
 export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
 /** Reply tracker settings (modules/mailwatch.py). */
@@ -45,8 +45,6 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
-/** Route of one kept segment's audio. */
-export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
 /** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 export const getToken = (): string => token
 
@@ -170,7 +168,7 @@ const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include
 
 export interface MemoryExport { grain_memories: number; memories: { content: string; kind: string; pinned: boolean }[] }
 
-export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
+export interface DocHit { doc_id: string; title: string; snippet: string }
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
@@ -184,6 +182,8 @@ export const api = {
     status: () => req<SetupStatus>('/setup/status'),
     providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
     test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
+    /** The provider's own model list; `models` is null when it could not be read (see `error`). */
+    models: (body: SetupBody) => req<{ models: string[] | null; error: string | null }>('/setup/models', { method: 'POST', body: json(body) }),
     complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
@@ -193,6 +193,13 @@ export const api = {
   shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
   killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
   sandboxes: () => req<SandboxStatus>('/sandboxes'),
+  telegramStatus: () => req<TelegramStatus>('/telegram/status'),
+  telegramSaveToken: (token: string) => req<TelegramStatus>('/telegram/token', { method: 'PUT', body: json({ token }) }),
+  telegramRemoveToken: () => req<TelegramStatus>('/telegram/token', { method: 'DELETE' }),
+  telegramNewCode: () => req<TelegramStatus>('/telegram/pairing', { method: 'POST' }),
+  telegramUnpair: () => req<TelegramStatus>('/telegram/unpair', { method: 'POST' }),
+  telegramTest: () => req<{ ok: boolean; error?: string }>('/telegram/test', { method: 'POST' }),
+  telegramSetEnabled: (enabled: boolean) => req<TelegramStatus>('/telegram/enabled', { method: 'POST', body: json({ enabled }) }),
   resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
@@ -227,16 +234,16 @@ export const api = {
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
      *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
      *  a mail job passes kind:'mail' and `mail_query`; a calendar job passes kind:'calendar', `calendar_query` and `minutes_before`. target:'desk' makes each fire open a desk instead of a run. */
-    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget']; agent_id?: string | null }) =>
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; calendar_query?: string; minutes_before?: number; only_on_change?: boolean; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; agent_id?: string | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'calendar_query' | 'minutes_before' | 'only_on_change' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'target' | 'desk_autonomy'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
     preview: (cron: string, timezone?: string, n = 5) =>
       req<{ ok: boolean; error?: string; timezone?: string; next: number[] }>(
         `/jobs/preview?${new URLSearchParams({ cron, n: String(n), ...(timezone ? { timezone } : {}) })}`),
-    /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    /** Fire it now by hand. Still proposal-only; the cron schedule is untouched. */
     /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
     dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
     runs: (id: string, limit = 50) => req<(JobRunRecord | JobSkipRecord)[]>(`/jobs/${id}/runs?limit=${limit}`),
@@ -260,6 +267,15 @@ export const api = {
     confirm: (id: string) => req<ShipChecklist>(`/ship/${id}/confirm`, { method: 'POST' }),
     cancel: (id: string) => req<ShipChecklist>(`/ship/${id}/cancel`, { method: 'POST' }),
     retry: (id: string) => req<ShipChecklist>(`/ship/${id}/retry`, { method: 'POST' })
+  },
+  /** Background coding sessions (Claude Code / OpenCode) started by the agent. */
+  coding: {
+    list: () => req<{ sessions: CodingSession[] }>('/coding-sessions'),
+    get: (id: string) => req<CodingSession>(`/coding-sessions/${id}`),
+    logs: (id: string, limit = 4000) => req<{ id: string; output: string; status: string }>(`/coding-sessions/${id}/logs?limit=${limit}`),
+    diff: (id: string, full = false) => req<CodingSessionDiff>(`/coding-sessions/${id}/diff${full ? '?full=1' : ''}`),
+    stop: (id: string) => req<CodingSession>(`/coding-sessions/${id}/stop`, { method: 'POST' }),
+    send: (id: string, message: string) => req<CodingSession>(`/coding-sessions/${id}/send`, { method: 'POST', body: json({ message }) })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
@@ -353,8 +369,21 @@ export const api = {
     /** The same check on a config that has not been saved, so trust can be decided first. */
     checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }, NO_TIMEOUT),
     tools: () => req<{ tools: McpTool[]; grants: McpGrant[] }>('/mcp/tools'),
-    setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
-      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
+    /** `confirm` is required to turn a destructive tool `on`; without it the API answers 409. */
+    setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string, confirm?: boolean) =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null, ...(confirm ? { confirm: true } : {}) }) }),
+    catalog: () => req<McpCatalog>('/mcp/catalog'),
+    /** Env and header values the entry's fields fill go to the secret store backend-side. */
+    install: (id: string, values: Record<string, string>) =>
+      req<McpServer>(`/mcp/catalog/${encodeURIComponent(id)}/install`, { method: 'POST', body: json({ values }) }, NO_TIMEOUT),
+    registrySearch: (q: string, limit = 20) =>
+      req<{ results: McpRegistryResult[]; error: string | null }>(`/mcp/registry/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    importSources: () => req<{ sources: McpImportSource[] }>('/mcp/import/sources'),
+    importServers: (refs: string[]) =>
+      req<{ created: McpServer[]; skipped: { ref: string; reason: string }[] }>('/mcp/import', { method: 'POST', body: json({ refs }) }, NO_TIMEOUT),
+    /** Pasted config text: `{"mcpServers": {...}}`, a bare name-to-server map, or one server object. */
+    importJson: (text: string) =>
+      req<{ created: McpServer[]; skipped: { name: string; reason: string }[] }>('/mcp/import/json', { method: 'POST', body: json({ text }) }, NO_TIMEOUT),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
     acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
     clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
@@ -395,10 +424,6 @@ export const api = {
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
       req<TasksSyncStatus>('/integrations/google/tasks-sync', { method: 'PUT', body: json(patch) }),
     tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }, NO_TIMEOUT),
-    todoCalendar: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar'),
-    todoCalendarConfig: (patch: { enabled?: boolean; calendarId?: string; calendarName?: string; intervalMinutes?: number; keepCompleted?: boolean }) =>
-      req<TodoCalendarStatus>('/integrations/google/todo-calendar', { method: 'PUT', body: json(patch) }),
-    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }, NO_TIMEOUT),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
@@ -406,11 +431,17 @@ export const api = {
     /** Free slots as draft text; creates no draft or event. */
     suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
       req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }, NO_TIMEOUT),
-    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
-    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null; attachments?: string[]; cc?: string; bcc?: string }) =>
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
+    /** Stores one attachment of a message in Uploads (for the viewer, or to attach it to a forward). */
+    gmailAttachmentImport: (messageId: string, attachmentId: string) =>
+      req<Document>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/import`, { method: 'POST' }, NO_TIMEOUT),
+    /** Writes one attachment to the Downloads folder. */
+    gmailAttachmentSave: (messageId: string, attachmentId: string) =>
+      req<{ path: string; name: string }>(`/integrations/google/gmail/${messageId}/attachments/${encodeURIComponent(attachmentId)}/save`, { method: 'POST' }, NO_TIMEOUT)
   },
   /** Backups, restore and export (backend backups.py). */
   data: {
@@ -429,9 +460,7 @@ export const api = {
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
-    cleanDictation: (text: string) =>
-      req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
-    /** One mic clip (WAV, at most 2 minutes) through the meetings transcription backend. A backend failure is `error`, not a throw. */
+    /** One mic clip (WAV, at most 2 minutes) through the configured transcription backend. A backend failure is `error`, not a throw. */
     transcribe: (audio: Blob, prompt = '') => {
       const fd = new FormData()
       fd.append('audio', audio, 'clip.wav')
@@ -451,7 +480,7 @@ export const api = {
     /** Chats working autonomously list among the rest. */
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}&include_desks=true`),
     get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
-    create: (projectId: string | null, model?: string, isPrivate = false) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model, ...(isPrivate ? { private: true } : {}) }) }, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
@@ -470,6 +499,12 @@ export const api = {
     /** Files the chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/). */
     outputs: (id: string) => req<ChatOutputs>(`/conversations/${id}/outputs`),
     downloadOutput: (id: string, path: string) => saveDownload(`/conversations/${id}/outputs/download?path=${encodeURIComponent(path)}`, path)
+  },
+  /** Detached background workers of a chat (the assistant's `delegate` tool). Resuming starts a new worker (new id) with the old one's history. */
+  workers: {
+    list: (convId: string) => req<{ workers: WorkerInfo[] }>(`/conversations/${encodeURIComponent(convId)}/workers`),
+    stop: (id: string) => req<{ ok: boolean; worker: WorkerInfo }>(`/workers/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+    resume: (id: string, text?: string) => req<{ worker: WorkerInfo }>(`/workers/${encodeURIComponent(id)}/resume`, { method: 'POST', body: json(text ? { text } : {}) })
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {
@@ -587,6 +622,7 @@ export const api = {
   undoExternal: (id: string) => req<{ ok: boolean; kind: string }>(`/external-undo/${encodeURIComponent(id)}`, { method: 'POST' }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
+  conversationChanges: (id: string) => req<{ available: boolean; runs: ChatRunChanges[] }>(`/conversations/${id}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
@@ -622,6 +658,7 @@ export const api = {
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
     history: (id: string) => req<Memory[]>(`/memories/${id}/history`),
+    source: (id: string) => req<MemorySource>(`/memories/${id}/source`),
     exportFile: (s: Scope) => req<MemoryExport>(`/memories/export?${scope(s)}`),
     importFile: (file: unknown, projectId: string | null) => req<{ added: number; skipped: number }>('/memories/import', { method: 'POST', body: json({ file, project_id: projectId }) }),
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
@@ -648,7 +685,11 @@ export const api = {
     deleteNode: (id: string) => req(`/graph/nodes/${id}`, { method: 'DELETE' }),
     createEdge: (e: { project_id: string | null; source_id: string; target_id: string; relation: string }) => req<GraphEdge>('/graph/edges', { method: 'POST', body: json(e) }),
     updateEdge: (id: string, patch: Partial<Pick<GraphEdge, 'relation' | 'properties'>>) => req<GraphEdge>(`/graph/edges/${id}`, { method: 'PUT', body: json(patch) }),
-    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' })
+    deleteEdge: (id: string) => req(`/graph/edges/${id}`, { method: 'DELETE' }),
+    /** `project_id`: null is personal chats, 'all' every chat, else one project. */
+    backfill: (project_id?: string | null) => req<GraphBackfillStatus>('/graph/backfill', { method: 'POST', body: json({ project_id: project_id ?? null }) }),
+    backfillStatus: () => req<GraphBackfillStatus>('/graph/backfill'),
+    cancelBackfill: () => req<GraphBackfillStatus>('/graph/backfill', { method: 'DELETE' })
   },
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),
@@ -661,6 +702,11 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    /** An office file as HTML (word-processor formats) or the extracted markdown (sheets, slides, the rest). */
+    preview: (id: string) => req<{ kind: 'html'; html: string } | { kind: 'markdown'; text: string }>(`/documents/${id}/preview`),
+    /** Hand the stored original to the default app / show it in Finder. A 400 carries why not (e.g. the file can run code). */
+    open: (id: string) => req<{ ok: boolean }>(`/documents/${id}/open`, { method: 'POST' }),
+    reveal: (id: string) => req<{ ok: boolean }>(`/documents/${id}/reveal`, { method: 'POST' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
     /** Re-chunk every uploaded file with the current chunker. */
     reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),
@@ -669,38 +715,18 @@ export const api = {
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
-  activity: {
-    status: () => req<ActivityStatus>('/activity/status'),
-    config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),
-    start: () => req<ActivityStatus>('/activity/start', { method: 'POST' }),
-    stop: () => req<ActivityStatus>('/activity/stop', { method: 'POST' }),
-    pause: (minutes = 30) => req<ActivityStatus>('/activity/pause', { method: 'POST', body: json({ minutes }) }),
-    resume: () => req<ActivityStatus>('/activity/resume', { method: 'POST' }),
-    events: (hours = 24, limit = 200, kind = '') => req<ActivityEvent[]>(`/activity/events?hours=${hours}&limit=${limit}&kind=${encodeURIComponent(kind)}`),
-    deleteEvent: (id: string) => req(`/activity/events/${id}`, { method: 'DELETE' }),
-    summaries: (days = 7) => req<ActivitySummary[]>(`/activity/summaries?days=${days}`),
-    deleteSummary: (id: string) => req(`/activity/summaries/${id}`, { method: 'DELETE' }),
-    /** Summarize what is pending now instead of waiting for the interval. */
-    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }, NO_TIMEOUT),
-    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }, NO_TIMEOUT),
-    context: () => req<ActivityContextFile>('/activity/context'),
-    requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
-    openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
-    categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
-    setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
-    categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
-    redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
-    recordEverything: (on: boolean) => req<ActivityStatus>('/activity/record-everything', { method: 'POST', body: json({ on }) }),
-    purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
-    /** Habits and automation suggestions mined from the same data. */
-    insights: () => req<ActivityInsights>('/activity/insights'),
-    /** Re-mine the patterns with no model call: free, offline, and the evidence the panel shows. */
-    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }, NO_TIMEOUT),
-    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }, NO_TIMEOUT),
-    setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
-      req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
-    applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
-    forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
+  system: {
+    access: () => req<BackendAccess>('/system/access'),
+    shellCheck: () => req<ShellCheck>('/system/shell-check', { method: 'POST' }),
+    /** Asks macOS for a grant (`screen_recording`, `microphone`, ...). The system dialog appears at most once per app. */
+    requestPermission: (id: string, browser = '') => req<{ result: PermissionGrantResult }>('/system/permissions/request', { method: 'POST', body: json({ id, browser }) }),
+    /** Opens the matching System Settings pane. */
+    openPermissionSettings: (id: string) => req<{ ok: boolean }>('/system/permissions/open', { method: 'POST', body: json({ id }) })
+  },
+  /** Voice input (dictation) settings; a partial patch comes back as the whole config. */
+  voice: {
+    getConfig: () => req<VoiceConfig>('/voice/config'),
+    setConfig: (patch: Partial<VoiceConfig>) => req<VoiceConfig>('/voice/config', { method: 'PUT', body: json(patch) })
   },
   cowork: {
     desks: {
@@ -708,12 +734,12 @@ export const api = {
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
       /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
-      create: (d: { brief?: string; conversation_id?: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
+      create: (d: { brief?: string; conversation_id?: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; start?: boolean; inputs?: DeskInputRef[] }) =>
         req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
       /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
       addInputs: (id: string, inputs: DeskInputRef[]) =>
         req<{ added: { path: string; bytes: number; source: string }[] }>(`/cowork/desks/${id}/inputs`, { method: 'POST', body: json({ inputs }) }),
-      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
+      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; clear_project?: boolean }) =>
         req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
       delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
@@ -778,7 +804,7 @@ export const api = {
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
     save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, autosave(patch)),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string; typography?: DocTypography }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
     move: (id: string, scope: string, folder: string) =>
@@ -797,75 +823,15 @@ export const api = {
     revision: (revId: string) => req<DocRevision>(`/docs/revisions/${revId}`),
     accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/reject`, { method: 'POST' }),
-    restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' })
-  },
-  /** Recorded calls. `status`/`preflight`/`pending` are the only ones safe to poll; everything else is a user action. */
-  meetings: {
-    /** `includeDocs` adds recordings made inside a doc; the Meetings rail shows them, Home does not. */
-    list: (s: Scope = 'all', q = '', includeDocs = false) => req<Meeting[]>(`/meetings?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}&include_docs=${includeDocs}`),
-    get: (id: string) => req<FullMeeting>(`/meetings/${id}`),
-    create: (m: { title?: string; project_id?: string | null; template?: string; status?: string; calendar_event_id?: string | null; calendar_id?: string | null; calendar_link?: string; conference_link?: string; attendees?: unknown[]; scheduled_start?: number | null; scheduled_end?: number | null }) =>
-      req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
-    /** PUT, not PATCH — notes autosave through here, and `status` is the service's to write, not a body's. */
-    patch: (id: string, patch: { title?: string; notes?: string; enhanced?: string; summary?: string; template?: string; keep_audio?: boolean; conversation_id?: string | null; project_id?: string | null; clear_project?: boolean }) =>
-      req<FullMeeting>(`/meetings/${id}`, autosave(patch)),
-    del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
-    status: () => req<MeetingStatusInfo>('/meetings/status'),
-    preflight: (force = false) => req<MeetingPreflight>(`/meetings/preflight?force=${force}`),
-    config: () => req<MeetingConfig>('/meetings/config'),
-    /** Returns the whole status, like `/activity/config` does — the config is under `.config`. */
-    setConfig: (patch: Partial<MeetingConfig>) => req<MeetingStatusInfo>('/meetings/config', { method: 'PUT', body: json(patch) }),
-    consent: () => req<MeetingStatusInfo>('/meetings/consent', { method: 'POST' }),
-    /** The whole preflight, not just its `selftest` key: a passing round trip also clears what it blocked. */
-    selftest: () => req<MeetingPreflight>('/meetings/selftest', { method: 'POST' }),
-    suggest: () => req<MeetingCandidate[]>('/meetings/suggest'),
-    pending: () => req<{ pending: number }>('/meetings/pending'),
-    start: (id: string) => req<FullMeeting>(`/meetings/${id}/start`, { method: 'POST' }),
-    /** Blocks while the transcription backlog drains (up to `drainSeconds`), so give it time. */
-    stop: (id: string) => req<FullMeeting>(`/meetings/${id}/stop`, { method: 'POST' }),
-    pause: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/pause`, { method: 'POST' }),
-    resume: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/resume`, { method: 'POST' }),
-    /** `since` is a rowid cursor: 0 is the whole tail with cursors, then pass back the last row's. */
-    segments: (id: string, since = 0, limit = 200) => req<MeetingSegment[]>(`/meetings/${id}/segments?since=${since}&limit=${limit}`),
-    /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
-    enhance: (id: string, force = false, template?: string) =>
-      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }, NO_TIMEOUT),
-    accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
-    reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
-    actions: (id: string) => req<MeetingActionItem[]>(`/meetings/${id}/actions`),
-    /** Empty `ids` promotes every item still proposed. Returns the full list afterwards. */
-    addTodos: (id: string, ids: string[] = [], projectId?: string | null) =>
-      req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
-    dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
-    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }, NO_TIMEOUT),
-    /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
-    segmentAudio: async (id: string, segId: string): Promise<string> => {
-      const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-      return URL.createObjectURL(await r.blob())
-    },
-    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
-    /** Typed-line marks for a doc recording: `line` is the line's first characters, `t` the recording offset in seconds. */
-    putNoteMarks: (id: string, marks: { line: string; t: number }[]) =>
-      req<{ marks: { line: string; t: number }[] }>(`/meetings/${id}/note-marks`, { method: 'PUT', body: json({ marks }) }),
-    /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
-    setSpeakers: (id: string, names: Record<string, string>) =>
-      req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
-    /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
-    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }, NO_TIMEOUT),
-    /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
-    importAudio: (id: string, file: File) => {
-      const fd = new FormData()
-      fd.append('file', file)
-      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd }, NO_TIMEOUT)
-    }
-  },
-  notes: {
-    list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
-    get: (id: string) => req<Note>(`/notes/${id}`),
-    create: (n: { body?: string; color?: string; project_id?: string | null }) => req<Note>('/notes', { method: 'POST', body: json(n) }),
-    update: (id: string, patch: { body?: string; color?: string; project_id?: string | null; clear_project?: boolean }) => req<Note>(`/notes/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/notes/${id}`, { method: 'DELETE' })
+    restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' }),
+    /** Comment threads and replies, flat; the panel groups them by parent_id. */
+    comments: (id: string) => req<DocComment[]>(`/docs/${id}/comments`),
+    addComment: (id: string, c: { body: string; quote: string; prefix: string; suffix: string; offset_hint: number }) =>
+      req<DocComment>(`/docs/${id}/comments`, { method: 'POST', body: json(c) }),
+    replyComment: (threadId: string, body: string) => req<DocComment>(`/docs/comments/${threadId}/replies`, { method: 'POST', body: json({ body }) }),
+    /** `body` edits the text (own comments only); `resolved` closes or reopens the whole thread. */
+    patchComment: (cid: string, patch: { body?: string; resolved?: boolean }) => req<DocComment>(`/docs/comments/${cid}`, { method: 'PATCH', body: json(patch) }),
+    deleteComment: (cid: string) => req(`/docs/comments/${cid}`, { method: 'DELETE' })
   },
   /** Space presets (`/canvas-presets`): named templates of a canvas. */
   presets: {

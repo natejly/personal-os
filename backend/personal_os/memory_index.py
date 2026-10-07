@@ -1,23 +1,30 @@
-"""Hybrid memory retrieval: BM25, embedding similarity, recency/pin and graph-seed rankings fused with RRF.
+"""Hybrid memory retrieval: BM25, embedding similarity and graph-seed rankings fused with RRF, gated by relevance.
+
+A row is returned only if it matched (a lexical hit, a cosine at or above the floor, or a graph seed); recency
+only orders matched rows. No match, no rows: the always-on standing preferences live in the profile instead.
 
 Embeddings are optional and come from the shared embed.Embedder (the same route and back-off the document
 retriever uses). Vectors live in `memory_vectors`, stored like retrieval.py stores chunk vectors: float32,
 L2-normalised, so cosine is a dot product. With no embedding route every public call still works and ranks
-on the lexical, recency and graph signals alone; nothing here raises into a chat turn.
+on the lexical and graph signals alone; nothing here raises into a chat turn.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import logging
+import re
 import time
+from datetime import datetime
 from typing import Any
 
 import numpy as np
 
+from . import memory_limits as ml
 from .db import Database
+from . import graph_recall, providers, retrieval_rerank, temporal_query
 from .embed import Embedder, pack, rrf, unpack
-from .repos import Graph, Memories, _scope_clause, fts_query
+from .repos import Graph, Memories, _scope_clause, live_mem
 
 log = logging.getLogger("grain.memory_index")
 
@@ -32,11 +39,6 @@ CREATE TABLE IF NOT EXISTS memory_vectors (
 );
 """
 
-INDEX_BATCH = 200       # memories embedded per index() call
-VECTOR_CAP = 5000       # rows scanned by the brute-force cosine ranker
-RANK_DEPTH = 50         # how deep each ranker reads
-QUERY_TIMEOUT = 2.0     # seconds a chat turn waits for the query embedding
-
 
 def _hash(text: str) -> str:
     return hashlib.sha1(text.strip().encode("utf-8")).hexdigest()
@@ -47,6 +49,9 @@ class MemoryIndex:
         self.db, self.memories, self.graph = db, memories, graph
         self.embedder = embedder or Embedder()
         self._tasks: set[asyncio.Task[Any]] = set()
+        self.recall: Any = None  # GraphRecall, set by app: node vectors for graph-seeded ranking
+        self.rerank_fn: Any = None  # tests/eval stub this; None = retrieval_rerank.rerank_scores
+        self._rerank_down_until = 0.0
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -61,14 +66,14 @@ class MemoryIndex:
     def _stale(self, model: str) -> list[Any]:
         with self.db.tx() as c:
             rows = c.execute(
-                """SELECT m.id, m.content, v.content_hash, v.model FROM memories m
-                   LEFT JOIN memory_vectors v ON v.memory_id=m.id WHERE m.invalid_at IS NULL AND m.deleted_at IS NULL""").fetchall()
+                f"""SELECT m.id, m.content, v.content_hash, v.model FROM memories m
+                   LEFT JOIN memory_vectors v ON v.memory_id=m.id WHERE {live_mem('m')}""").fetchall()
         return [r for r in rows if r["model"] != model or r["content_hash"] != _hash(r["content"])]
 
     def pending_count(self, model: str) -> int:
         return len(self._stale(model))
 
-    async def index(self, settings: dict[str, Any], memory_ids: list[str] | None = None, limit: int = INDEX_BATCH) -> int:
+    async def index(self, settings: dict[str, Any], memory_ids: list[str] | None = None, limit: int = ml.INDEX_BATCH) -> int:
         """Embed live memories whose vector is missing, stale or from another model. Idempotent. Returns how many."""
         if not self.enabled(settings) or not self.embedder.available(settings):
             return 0
@@ -104,71 +109,168 @@ class MemoryIndex:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def query_vec(self, settings: dict[str, Any], query: str, timeout: float = QUERY_TIMEOUT) -> np.ndarray | None:
+    async def query_vec(self, settings: dict[str, Any], query: str, timeout: float = ml.QUERY_TIMEOUT) -> np.ndarray | None:
         """The query's embedding, or None (off, route down, too slow, or an empty query)."""
         if not query.strip() or not self.enabled(settings) or not self.embedder.available(settings):
             return None
         try:
-            vecs = await asyncio.wait_for(self.embedder.embed(settings, [query[:2000]]), timeout)
+            vecs = await asyncio.wait_for(self.embedder.embed(settings, [query[:ml.QUERY_CHARS]]), timeout)
         except Exception:  # noqa: BLE001 - timeouts included
             return None
         return vecs[0] if vecs else None
 
-    # ---------- rankers ----------
-    def _bm25(self, c: Any, where: str, args: list[Any], query: str) -> list[str]:
-        fq = fts_query(query)
-        if not fq:
-            return []
-        rows = c.execute(
-            f"""SELECT m.id FROM memories_fts f JOIN memories m ON m.id=f.memory_id
-                WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL AND m.deleted_at IS NULL
-                ORDER BY bm25(memories_fts) LIMIT ?""", (fq, *args, RANK_DEPTH)).fetchall()
-        return [r["id"] for r in rows]
+    async def near_duplicate(self, settings: dict[str, Any], project_id: str | None, text: str) -> dict[str, Any] | None:
+        """The live, unpinned memory in scope whose meaning is closest to `text`, if its cosine reaches
+        NEAR_DUP_SIMILARITY; else None (also with embeddings off, down or slow). Never raises.
+        ponytail: rows with no vector yet are not compared, so a fact saved before the backfill ran can be duplicated once."""
+        try:
+            qv = await self.query_vec(settings, text)
+            model = self.embedder.model(settings) if qv is not None else ""
+            if qv is None or not model:
+                return None
+            where, args = _scope_clause(project_id, include_global=False)  # a project save never rewrites a personal row
+            with self.db.tx() as c:
+                rows = c.execute(
+                    f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
+                        WHERE v.model=? AND m.pinned=0 AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
+                    (model, *args, ml.VECTOR_CAP)).fetchall()
+            best = max(((float(unpack(r["vec"]) @ qv), r["memory_id"]) for r in rows if r["dim"] == qv.shape[0]), default=None)
+            return self.memories.get(best[1]) if best and best[0] >= ml.NEAR_DUP_SIMILARITY else None
+        except Exception:  # noqa: BLE001 - dedupe is best effort; the caller just creates the row
+            log.exception("memory near-duplicate check failed")
+            return None
 
+    # ---------- rankers ----------
     def _cosine(self, c: Any, where: str, args: list[Any], qvec: np.ndarray | None, model: str) -> list[str]:
+        """Rows at or above the similarity floor, best first."""
         if qvec is None or not model:
             return []
         rows = c.execute(
             f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
-                WHERE v.model=? AND m.invalid_at IS NULL AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} LIMIT ?""",
-            (model, *args, VECTOR_CAP)).fetchall()
+                WHERE v.model=? AND {live_mem('m')} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
+            (model, *args, ml.VECTOR_CAP)).fetchall()
+        scored = [(float(unpack(r["vec"]) @ qvec), r["memory_id"]) for r in rows if r["dim"] == qvec.shape[0]]
+        scored = [s for s in scored if s[0] >= ml.MEMORY_MIN_SIMILARITY]
+        scored.sort(key=lambda s: -s[0])
+        return [mid for _, mid in scored[:ml.RANK_DEPTH]]
+
+    def _graph_seeded(self, c: Any, where: str, args: list[Any], project_id: str | None, query: str,
+                      qvec: np.ndarray | None = None, model: str = "") -> list[str]:
+        """Memories that name an entity the query seeds, best graph position first (a memory naming a seed itself beats
+        one naming only a neighbour), ties newest first. The self node and value nodes are left out: every
+        "User prefers ..." memory would otherwise match "User"."""
+        vec_hits = self.recall.similar(project_id, qvec, model) if self.recall is not None and qvec is not None else None
+        rank: dict[str, int] = {}  # name -> position of the best node carrying it: seeds first, then neighbours as subgraph orders them
+        for pos, n in enumerate(graph_recall.subgraph(self.graph, project_id, query, vec_hits)["nodes"]):
+            if not (graph_recall.is_self(n) or graph_recall.is_literal(n)):
+                for nm in graph_recall.names(n):
+                    if len(nm) > 2:
+                        rank.setdefault(nm.lower(), pos)
+        if not rank:
+            return []
+        # Whole words, as graph_recall.mentions matches: "Sam" must not seed every memory that says "same".
+        named = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(lb) for lb in sorted(rank, key=len, reverse=True)) + r")(?!\w)")
+        rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND {live_mem()} ORDER BY updated_at DESC", args).fetchall()
+        best = {r["id"]: min(rank[m.group(0)] for m in named.finditer(r["content"].lower())) for r in rows if named.search(r["content"].lower())}
+        return sorted(best, key=best.get)[:ml.RANK_DEPTH]  # stable: ties keep newest first
+
+    def _temporal(self, c: Any, where: str, args: list[Any], window: temporal_query.Window, lexical: list[str],
+                  qvec: np.ndarray | None, model: str) -> list[str]:
+        """Rows learned inside the window that are also about the query: cosine >= TEMPORAL_MIN_SIMILARITY, best first.
+        With no query vector only lexical hits qualify (a window alone never matches), in their lexical order.
+        Limitation: valid_from/created_at is when Grain learned a fact, not when it happened."""
+        lo, hi = window.start.timestamp(), window.end.timestamp()
+        span = f"COALESCE(m.valid_from, m.created_at) >= ? AND COALESCE(m.valid_from, m.created_at) < ? AND {live_mem('m')}"
+        if qvec is None or not model:
+            ok = {r["id"] for r in c.execute(f"SELECT m.id FROM memories m WHERE {span} AND {where.replace('project_id', 'm.project_id')}",
+                                             (lo, hi, *args))}
+            return [i for i in lexical if i in ok]
+        rows = c.execute(
+            f"""SELECT v.memory_id, v.vec, v.dim FROM memory_vectors v JOIN memories m ON m.id=v.memory_id
+                WHERE v.model=? AND {span} AND {where.replace('project_id', 'm.project_id')} ORDER BY m.updated_at DESC LIMIT ?""",
+            (model, lo, hi, *args, ml.VECTOR_CAP)).fetchall()
         scored = [(float(unpack(r["vec"]) @ qvec), r["memory_id"]) for r in rows if r["dim"] == qvec.shape[0]]
         scored.sort(key=lambda s: -s[0])
-        return [mid for _, mid in scored[:RANK_DEPTH]]
+        return [mid for s, mid in scored if s >= ml.TEMPORAL_MIN_SIMILARITY][:ml.RANK_DEPTH]
 
-    def _recent(self, c: Any, where: str, args: list[Any]) -> list[str]:
-        rows = c.execute(f"SELECT id FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?",
-                         (*args, RANK_DEPTH)).fetchall()
-        return [r["id"] for r in rows]
-
-    def _graph_seeded(self, c: Any, where: str, args: list[Any], project_id: str | None, query: str) -> list[str]:
-        labels = [n["label"].lower() for n in self.graph.neighborhood(project_id, query)["nodes"] if len(n["label"]) > 2]
-        if not labels:
-            return []
-        rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
-        return [r["id"] for r in rows if any(lb in r["content"].lower() for lb in labels)][:RANK_DEPTH]
+    @staticmethod
+    def _proximity(window: temporal_query.Window, m: dict[str, Any]) -> float:
+        """Score factor in [1 - TEMPORAL_BOOST/2, 1 + TEMPORAL_BOOST/2] by how close the row's date is to the window."""
+        return 1.0 + ml.TEMPORAL_BOOST * (temporal_query.relevance(window, float(m.get("valid_from") or m.get("created_at") or 0.0)) - 0.5)
 
     def search(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
-               settings: dict[str, Any] | None = None, include_global: bool = True) -> list[dict[str, Any]]:
-        """Memories ranked by RRF over BM25, cosine, recency/pin and graph-seed rankings. Never raises."""
+               settings: dict[str, Any] | None = None, include_global: bool = True, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Memories that matched the query (lexical hit, cosine >= MEMORY_MIN_SIMILARITY, graph seed, or in-window and
+        on-topic when the query names a date), ranked by RRF over those rankers plus recency among the matches, then
+        nudged by closeness to the date window. No match returns []. Never raises."""
         try:
+            window = temporal_query.parse(query, now or temporal_query.local_now())
             where, args = _scope_clause(project_id, include_global)
             model = self.embedder.model(settings) if settings is not None else ""
+            lexical = [m["id"] for m in self.memories.matching(project_id, query, ml.RANK_DEPTH, include_global)]
             with self.db.tx() as c:
-                lists = [self._bm25(c, where, args, query),
-                         self._cosine(c, where, args, query_vec, model),
-                         self._recent(c, where, args),
-                         self._graph_seeded(c, where, args, project_id, query)]
-            # Recency is a tiebreaker-weight signal: it must not outvote an actual match.
-            ids = [i for i, _ in rrf(lists, weights=[1.0, 1.0, 0.5, 0.7])][:limit]
+                cos = self._cosine(c, where, args, query_vec, model)
+                graph = self._graph_seeded(c, where, args, project_id, query, query_vec, model)
+                dated = self._temporal(c, where, args, window, lexical, query_vec, model) if window else []
+                matched = list(dict.fromkeys([*lexical, *cos, *graph, *dated]))
+                if not matched:
+                    return []
+                recent = [r["id"] for r in c.execute(
+                    f"SELECT id FROM memories WHERE id IN ({','.join('?' * len(matched))}) ORDER BY updated_at DESC", matched)]
+            fused = rrf([lexical, cos, graph, recent, *([dated] if window else [])],
+                        weights=[ml.W_BM25, ml.W_COSINE, ml.W_GRAPH, ml.W_RECENT, *([ml.W_TEMPORAL] if window else [])])
+            if not window:
+                fused = fused[:limit]
+            rows = {m["id"]: m for m in (self.memories.get(i) for i, _ in fused) if m}
+            if window:
+                fused = sorted(((i, s * self._proximity(window, rows[i])) for i, s in fused if i in rows), key=lambda f: -f[1])[:limit]
         except Exception:  # noqa: BLE001 - retrieval must never break a reply
             log.exception("memory search failed")
             return []
-        rows = {m["id"]: m for m in (self.memories.get(i) for i in ids) if m}
-        return [rows[i] for i in ids if i in rows]
+        return [rows[i] for i, _ in fused if i in rows]
+
+    async def search_reranked(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
+                              settings: dict[str, Any] | None = None, include_global: bool = True,
+                              now: datetime | None = None) -> list[dict[str, Any]]:
+        """`search`, with the head of the fused list reordered by the rerank model. Same rows as `search` unless
+        RERANK_MIN_SCORE drops some; the fused order stands when reranking is off, has no model, is not worth a
+        call, is backed off, times out or fails. Scored rows carry `rerank_score`. Never raises."""
+        now = now or temporal_query.local_now()
+        fused = self.search(project_id, query, query_vec, limit=max(limit, ml.RERANK_CANDIDATES), settings=settings,
+                            include_global=include_global, now=now)
+        model = providers.rerank_model(settings) if settings else ""
+        if (not model or not settings.get("memoryRerank", True) or len(fused) < ml.RERANK_MIN_CANDIDATES
+                or time.monotonic() < self._rerank_down_until):
+            return fused[:limit]
+        head, tail = fused[:ml.RERANK_CANDIDATES], fused[ml.RERANK_CANDIDATES:]
+        try:
+            scored = await asyncio.wait_for((self.rerank_fn or retrieval_rerank.rerank_scores)(
+                settings, model, query, [m["content"] for m in head], timeout=ml.RERANK_TIMEOUT, top_n=len(head)),
+                ml.RERANK_TIMEOUT)
+            if scored is None:
+                raise RuntimeError("no rerank route")
+            order = [(i, s) for i, s in scored if 0 <= i < len(head)]
+        except Exception as e:  # noqa: BLE001 - timeouts, odd payloads, no route: the fused order is the answer
+            self._rerank_down_until = time.monotonic() + ml.RERANK_BACKOFF
+            log.warning("memory rerank unavailable, keeping fused order for %ds: %s", int(ml.RERANK_BACKOFF), e)
+            return fused[:limit]
+        out: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for i, s in order:
+            if i in seen:
+                continue
+            seen.add(i)
+            if ml.RERANK_MIN_SCORE > 0 and s < ml.RERANK_MIN_SCORE:
+                continue
+            out.append({**head[i], "rerank_score": s})
+        window = temporal_query.parse(query, now)
+        if window:  # the same date-closeness nudge as `search`; rerank_score stays the model's raw score
+            out.sort(key=lambda m: -m["rerank_score"] * self._proximity(window, m))
+        out += [m for i, m in enumerate(head) if i not in seen]  # rows the model skipped keep their place, after
+        return (out + tail)[:limit]
 
     def candidates(self, project_id: str | None, query: str, query_vec: np.ndarray | None, settings: dict[str, Any],
-                   limit: int = 40, top: int = 20) -> list[dict[str, Any]]:
+                   limit: int = ml.CANDIDATES, top: int = ml.CANDIDATES_TOP) -> list[dict[str, Any]]:
         """The extractor's reconciliation set: the top hybrid hits first, then pinned/recent rows up to `limit`."""
         out: dict[str, dict[str, Any]] = {}
         for m in self.search(project_id, query, query_vec, limit=top, settings=settings):

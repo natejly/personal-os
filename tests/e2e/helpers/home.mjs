@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
 
-export const TABS = ['Provider & cost', 'Tools', 'Memory', 'Behavior', 'Modules', 'Integrations', 'Meetings', 'Data']
+export const TABS = ['Model', 'Usage', 'Permissions', 'Integrations', 'Texting', 'Memory', 'Appearance', 'System access', 'Advanced']
 
 export const dialog = (page) => page.getByRole('dialog', { name: 'Settings' })
 
@@ -12,6 +12,21 @@ export async function openSettings(page, tab) {
   await expect(dialog(page)).toBeVisible()
   if (tab) await dialog(page).getByRole('tab', { name: tab }).click()
   return dialog(page)
+}
+
+/** Open Settings on its Advanced tab with one collapsed group (e.g. 'Approvals', 'Search', 'Data') expanded. */
+export async function openAdvanced(page, group) {
+  await openSettings(page, 'Advanced')
+  const summary = dialog(page).locator('.adv-group > summary', { hasText: group })
+  if (!(await summary.evaluate((el) => el.parentElement.open))) await summary.click()
+  return dialog(page)
+}
+
+/** Open Settings on its Memory tab; `layout` ('Split' | 'List' | 'Graph' | 'Voice') picks the panel layout, Split being the default. */
+export async function openMemory(page, layout) {
+  const d = await openSettings(page, 'Memory')
+  if (layout) await d.getByRole('group', { name: 'Memory layout' }).getByRole('button', { name: layout, exact: true }).click()
+  return d
 }
 
 export async function closeSettings(page) {

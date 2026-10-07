@@ -161,7 +161,7 @@ class FileSnapshots:
             raise Unavailable(f"snapshot is {row['status']}")
         p = Path(row["path"])
         try:
-            p = mac._writable_path(str(p))  # a row cannot point a restore outside the home folder
+            p = mac._writable_path(str(p))  # a row cannot point a restore into Grain's own folder
         except mac.LocalPathError as e:
             raise Unavailable(str(e)) from e
         if row["from_path"]:

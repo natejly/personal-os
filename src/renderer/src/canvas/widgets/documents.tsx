@@ -25,7 +25,7 @@ function Row({ d }: { d: Document }): JSX.Element {
   )
 }
 
-export default function DocumentsWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
+function DocumentsWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const documents = useStore((s) => s.documents)
   const projects = useStore((s) => s.projects)
   const refreshDocuments = useStore((s) => s.refreshDocuments)

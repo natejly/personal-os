@@ -160,13 +160,9 @@ export function resizedSpan(startMin: number, endMin: number, deltaMin: number, 
   return { startMin, endMin: Math.min(bottom, Math.max(startMin + SNAP_MIN, snapMin(endMin + deltaMin))) }
 }
 
-/**
- * The day-column grid, shared by the Calendar page and the calendar widget so the two render the same
- * thing. The column count is inline because `.cal-grid` hard-codes seven.
- */
-/** Drop the events that are only a todo's own all-day mirror (see backend todocal.py).
+/** Drop the events that are only a todo's own all-day marker.
  *
- * Both grids already draw a due todo as its own chip, so leaving the mirrored event in would
+ * Both grids already draw a due todo as its own chip, so leaving the linked event in would
  * show every dated todo twice. A todo given a time keeps its block: that time is the point of
  * dragging it onto an hour, and the chip and the block say different things.
  */
@@ -176,6 +172,10 @@ export function withoutTodoEvents(events: CalendarEvent[], todos: Todo[]): Calen
   return events.filter((e) => !(e.all_day && e.id && mirrored.has(e.id)))
 }
 
+/**
+ * The day-column grid, shared by the Calendar page and the calendar widget so the two render the same
+ * thing. The column count is inline because `.cal-grid` hard-codes seven.
+ */
 export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, onMove, onCreateAllDay, colorOf }: CalendarWeekProps): JSX.Element {
   const [creating, setCreating] = useState<Slot | null>(null)
   const [title, setTitle] = useState('')

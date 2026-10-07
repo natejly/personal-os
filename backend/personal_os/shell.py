@@ -1,13 +1,15 @@
-"""A host shell for the agent, confined to a workspace by the OS.
+"""A host shell for the agent, kept off the secrets by the OS.
 
-`shell_run` runs one command in /bin/zsh on the user's machine under macOS Seatbelt (sandbox.shell_profile): the
-whole disk is readable except secrets, writes land only in the folder the command runs in (a desk workspace or a
-granted `workspaceRoots` entry) and a private temp dir. The network has three modes: open (`shellNetwork`), off, or
+`shell_run` runs one command in /bin/zsh on the user's machine under macOS Seatbelt (sandbox.shell_profile): it may run
+in any folder and read and write anywhere the user could, except Grain's own data folder and app (never written), the
+credential stores (never read or written) and the files that run code later (rc files, git hooks, launch agents). The
+default folder is the desk workspace in a desk, else the home folder. The network has three modes: open (`shellNetwork`), off, or
 -- the default when a registry preset or allowed domains apply -- one allowlisting proxy on localhost (egress.py) and
 nothing else. The sandbox is the boundary, the approval card is the courtesy: nothing here relies on parsing the command.
 
 If the sandbox is unavailable (no sandbox-exec, another OS, or the profile fails to apply) the call is refused. The
-only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off.
+only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off
+(Allow everything runs it without one; `floor` is what that mode still cards).
 
 Background commands return a job id; shell_poll reads new output, shell_kill stops one. Jobs belong to the
 conversation that started them, die with its run and with the app, and are never adopted after a restart: the
@@ -47,8 +49,6 @@ MAX_TRACKED = 64
 FINISHED_KEEP_S = 30 * 60
 SPILL_DAYS = 7
 SAFE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-NO_ROOT = ("shell_run needs a folder to work in: there is no desk workspace and no workspace root. Ask the user to add "
-           "a folder under Settings (Workspace folders), set the chat's Working folder, or run it from a desk.")
 
 
 class ShellError(Exception):
@@ -65,11 +65,6 @@ def taint(ctx: dict[str, Any], src: str) -> None:
 def net_blocked_note(hosts: list[str]) -> str:
     return (f"The network proxy blocked: {', '.join(hosts[:8])}. The user can allow a host under Settings (shell allowed "
             "domains), or ask them with desk_ask.")
-
-
-# Credential shapes only. The entropy and card rules would also eat file paths, commit hashes and build ids, which are
-# most of what a shell prints, and the "word that announces a secret" sweep would eat ordinary source code.
-SHELL_REDACT = redact.COMMAND_OUTPUT_RULES
 
 
 def _scrub(text: str) -> str:
@@ -103,42 +98,26 @@ def _remember_cwd(conversation_id: str | None, p: str) -> None:
         _LAST_CWD.pop(next(iter(_LAST_CWD)))
 
 
-def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path]:
-    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder `mac.allowed_root` accepts,
-    so a root stored before that check (the home folder, "/") never widens what the shell may write."""
-    out: list[Path] = [_real(desk_root)] if desk_root else []
-    for r in permissions.get(settings, "workspaceRoots") or []:
-        if isinstance(r, str) and r.strip() and os.path.isabs(os.path.expanduser(r.strip())):
-            try:
-                p = mac.allowed_root(r)
-            except mac.LocalPathError:
-                continue
-            if p.is_dir() and p not in out:
-                out.append(p)
-    return out
-
-
-def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
-    """(cwd, the granted root that contains it). Raises ShellError with a message the model can act on."""
-    if not roots:
-        raise ShellError(NO_ROOT)
+def resolve_cwd(cwd: str | None, default: Path, desk: Path | None = None) -> Path:
+    """The folder a command runs in: any existing folder except Grain's own data folder and app (the active desk's
+    workspace, which lives in there, is fine). A relative cwd is relative to `default`. Raises ShellError with a message
+    the model can act on."""
     if not cwd or not str(cwd).strip():
-        return roots[0], roots[0]
+        return _real(default)
     raw = Path(os.path.expanduser(str(cwd).strip()))
-    p = _real(raw if raw.is_absolute() else roots[0] / raw)  # a relative cwd is relative to the default root
-    for r in roots:
-        if _inside(p, r):
-            if not p.is_dir():
-                raise ShellError(f"{p} is not a folder.")
-            return p, r
-    raise ShellError(f"{p} is outside the folders this shell may work in ({', '.join(str(r) for r in roots)}). "
-                     "Ask the user to add it under Settings (Workspace roots).")
+    p = _real(raw if raw.is_absolute() else default / raw)
+    if not (desk and _inside(p, _real(desk))) and (why := mac.protected_reason(raw if raw.is_absolute() else default / raw, p)):
+        raise ShellError(f"{p}: {why}.")
+    if not p.is_dir():
+        raise ShellError(f"{p} is not a folder.")
+    return p
 
 
 def reaches_out(settings: dict[str, Any]) -> bool:
     """True when a sandboxed command could send something off this Mac: open network, or a proxy with any allowed host."""
     return bool(permissions.get(settings, "shellNetwork")) or bool(
-        egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains")))
+        egress.allowed_set(permissions.get(settings, "shellRegistryAccess"), permissions.get(settings, "shellAllowedDomains"),
+                           permissions.get(settings, "allowAllConnections")))
 
 
 def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any], roots: list[Any]) -> bool:
@@ -162,10 +141,28 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     real = [_real(r) for r in roots]
     raw = str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or None
     try:
-        where, _root = resolve_cwd(raw, real)
+        where = resolve_cwd(raw, real[0], real[0])
     except ShellError:
         return False
     return any(_inside(where, r) for r in real)
+
+
+def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str] | None:
+    """(card kind, reason) when Allow everything still cards this shell_run (permrules.allow_all_floor), judged from the folder it will run in.
+    Relative paths resolve against cwd, else where the last command ended, else the desk workspace, else home; a desk's
+    work/ folder counts as scratch beside the temp folders."""
+    from . import permrules
+    desk: Path | None = None
+    did = str(ctx.get("desk_id") or "")
+    if did and getattr(tb, "workspace", None) is not None:
+        try:
+            desk = Path(tb.workspace.desk_root(did))
+        except Exception:  # noqa: BLE001 - no desk folder: judge from home
+            desk = None
+    base = str(desk) if desk else str(mac.home())
+    raw = os.path.expanduser(str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or "")
+    cwd = (raw if os.path.isabs(raw) else os.path.join(base, raw)) if raw else base
+    return permrules.allow_all_floor("shell_run", args, cwd, [str(desk / "work")] if desk else [])
 
 
 # ---- environment and output shaping ----
@@ -247,6 +244,7 @@ class Job:
         self.want_notify = notify      # notify is only honoured for background jobs; a promoted foreground job takes it up
         self.on_timeout = "kill"       # background | kill: what a foreground timeout does
         self.max_background = 4
+        self.pool = "shell"            # concurrency pool a background job counts against ("coding" for coding sessions)
         self.promoted = asyncio.Event()  # set when a foreground job that hit its timeout carries on in the background
         self.egress_token: str | None = None
         self.net: dict[str, list[str]] | None = None   # what the proxy saw, frozen when the job ends
@@ -366,8 +364,8 @@ class ShellJobs:
             except Exception:  # noqa: BLE001 - a UI refresh must never fail a shell job
                 pass
 
-    def running_background(self) -> int:
-        return sum(1 for j in self.jobs.values() if j.background and j.status in ("running", "orphaned"))
+    def running_background(self, pool: str = "shell") -> int:
+        return sum(1 for j in self.jobs.values() if j.background and j.pool == pool and j.status in ("running", "orphaned"))
 
     def drain_notes(self, conversation_id: str | None) -> list[str]:
         return self.notes.pop(conversation_id or "", [])
@@ -375,8 +373,11 @@ class ShellJobs:
     # -- starting and finishing --
     async def start(self, argv: list[str], *, command: str, cwd: str, env: dict[str, str], tmp: str | None,
                     conversation_id: str | None, run_id: str | None, background: bool, notify: bool,
-                    timeout: float, max_background: int, on_timeout: str = "kill", egress_token: str | None = None) -> Job:
-        if background and self.running_background() >= max_background:
+                    timeout: float | None, max_background: int, on_timeout: str = "kill", egress_token: str | None = None,
+                    pool: str = "shell") -> Job:
+        if background and self.running_background(pool) >= max_background:
+            if pool != "shell":
+                raise ShellError(f"{max_background} {pool} jobs are already running; wait for one to finish or stop one.")
             raise ShellError(f"{max_background} background jobs are already running (shellMaxBackground). "
                              "shell_poll or shell_kill one first.")
         self._make_room()
@@ -384,7 +385,7 @@ class ShellJobs:
                   BG_BUFFER if background else FG_CAPTURE)
         job.tmp = tmp
         job.want_notify = notify   # a foreground job that is later promoted announces its end like a background one
-        job.on_timeout, job.max_background, job.egress_token = on_timeout, max_background, egress_token
+        job.on_timeout, job.max_background, job.egress_token, job.pool = on_timeout, max_background, egress_token, pool
         try:
             job.proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
@@ -414,7 +415,8 @@ class ShellJobs:
         except (asyncio.CancelledError, ValueError):
             pass
 
-    async def _watch(self, job: Job, timeout: float) -> None:
+    async def _watch(self, job: Job, timeout: float | None) -> None:
+        """`timeout` None waits for the process to exit, however long that takes (a coding session)."""
         assert job.proc
         timed_out = False
         try:
@@ -461,7 +463,7 @@ class ShellJobs:
 
     def _promote(self, job: Job) -> bool:
         """Turn a foreground job that hit its timeout into a background one, if the caller allowed it and a slot is free."""
-        if job.background or job.on_timeout != "background" or self.running_background() >= job.max_background:
+        if job.background or job.on_timeout != "background" or self.running_background(job.pool) >= job.max_background:
             return False
         job.background, job.notify, job.cap = True, job.want_notify, BG_BUFFER
         job.promoted.set()
@@ -652,14 +654,15 @@ def register(tb: Any) -> None:
         in_desk = bool(ctx.get("desk_id"))
         if not in_desk:
             on_timeout = "kill"
-        # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that is
-        # still inside a granted root (the roots may have changed since), otherwise the default folder.
-        roots = granted_roots(s, desk_root(ctx))
+        # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that
+        # folder is still there, otherwise the default folder (the desk workspace, else the home folder).
+        dr = desk_root(ctx)
+        default = dr or mac.home()
         try:
-            where, root = resolve_cwd(cwd, roots)
+            where = resolve_cwd(cwd, default, dr)
             if not (cwd and str(cwd).strip()) and remembered_cwd(ctx.get("conversation_id")):
                 try:
-                    where, root = resolve_cwd(remembered_cwd(ctx.get("conversation_id")), roots)
+                    where = resolve_cwd(remembered_cwd(ctx.get("conversation_id")), default, dr)
                 except ShellError:
                     pass
         except ShellError as e:
@@ -687,7 +690,8 @@ def register(tb: Any) -> None:
         wrapped = f"trap {shlex.quote('pwd -P >' + shlex.quote(os.path.join(tmp, CWD_FILE)) + ' 2>/dev/null')} EXIT\n{command}"
         argv = [shell_bin, "-c", wrapped]
         env = scrubbed_env(tmp)
-        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"))
+        allowed = egress.allowed_set(permissions.get(s, "shellRegistryAccess"), permissions.get(s, "shellAllowedDomains"),
+                                     permissions.get(s, "allowAllConnections"))
         proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
         token: str | None = None
         port: int | None = None
@@ -701,11 +705,13 @@ def register(tb: Any) -> None:
                 token = jobs.egress.new_run(allowed)
                 env.update(jobs.egress.env(token))
         if not unsandboxed:
-            writable = [str(root), tmp]
-            dr = desk_root(ctx)
+            writable = [tmp]  # the profile lets a command write anywhere but the protected places; this is the run's own scratch dir
             if dr:
-                writable.append(str(dr))
+                writable.append(str(dr))  # a desk workspace sits inside the protected data folder and is let back in
             argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None), *argv]
+        if unsandboxed:  # the approval log has the call; this line is for the backend log (no card under Allow everything)
+            log.warning("shell_run unsandboxed in %s (conversation %s): %s", _scrub(str(where)), ctx.get("conversation_id"),
+                        _scrub(command)[:500])
         if network or unsandboxed:
             # Whatever a networked or unconfined command prints may be third-party text.
             taint(ctx, "shell_run:unsandboxed" if unsandboxed else "shell_run:network")
@@ -768,9 +774,9 @@ def register(tb: Any) -> None:
         shown, cut = truncate(text)
         if job.end_cwd:
             try:
-                ended, _r = resolve_cwd(job.end_cwd, roots)
+                ended = resolve_cwd(job.end_cwd, default, dr)
             except ShellError:
-                ended = None  # it cd'd out of every granted root: the next call starts from the default folder again
+                ended = None  # it ended somewhere it may not run (or the folder is gone): the next call starts from the default folder again
             if ended:
                 _remember_cwd(ctx.get("conversation_id"), str(ended))
                 base["cwd"] = _scrub(str(ended))
@@ -789,18 +795,20 @@ def register(tb: Any) -> None:
                 out["result_id"] = row["id"]
         _note_shell_copies(ctx, since_ns)
         return out
-    spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac inside the working folder. It is sandboxed by the OS: the "
-                    "disk is readable except secrets, files can be written only inside the working folder, and the network is "
+    spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac. It is sandboxed by the OS: it can read and write anywhere "
+                    "on this Mac except Grain's own data folder and app, credential stores (~/.ssh, keychains, browser cookies and "
+                    "passwords, .env files) and the files that run code later (shell rc files, git hooks, launch agents); the network is "
                     "open only if the user enabled it, otherwise limited to package registries and the user's allowed domains "
-                    "through a proxy (anything else is blocked), or off. cwd must be inside the desk workspace or a workspace "
-                    "root; by default it is where the last command in this conversation ended (cd persists, environment "
-                    "variables do not), else that folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
+                    "through a proxy (anything else is blocked), or off. macOS-protected folders (Desktop, Documents, Downloads...) need "
+                    "Full Disk Access in System Settings. cwd is any folder on this Mac; by default it is where the last command in this "
+                    "conversation ended (cd persists, environment variables do not), else the desk workspace in a desk, else the home folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
                     "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
-                    "unsandboxed=true escapes the sandbox and always asks the user.",
-                    _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "A folder inside the working folder"},
+                    "unsandboxed=true escapes the sandbox and asks the user (except under Allow everything). Under Allow everything "
+                    "a command that deletes outside a temp folder, wipes a disk or force-pushes still asks.",
+                    _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "Any folder on this Mac; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
                           "unsandboxed": {"type": "boolean", "default": False},
@@ -810,7 +818,7 @@ def register(tb: Any) -> None:
                               {"command": "npm test", "cwd": "app", "timeout_s": 300},
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
-    # Unsandboxed always asks; so does a reply that read untrusted content while a command could reach out, and no
+    # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
     # standing grant, session grant or allow rule buys that card off (it is forced).
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (bool(ctx.get("tainted")) and reaches_out(cfg(ctx)))
     R("shell_run", spec)
@@ -848,9 +856,9 @@ def register(tb: Any) -> None:
                              shell_kill, "shell", "writes", examples=[{"job_id": "a1b2c3"}]))
 
 
-# ---- fixed commands with no model in the loop (ship.py) ----
+# ---- fixed commands with no model in the loop (ship.py, codingagents.py; `label` names the caller in the job registry) ----
 async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[str, Any], *, sandboxed: bool,
-                    timeout: float) -> tuple[bool, str]:
+                    timeout: float, label: str = "ship", extra_env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run one argv through the shell job registry and wait for it: (exit code 0, scrubbed output).
 
     sandboxed=True is shell_run's sandbox: writes only in `cwd` and a private tmp dir, network only when shellNetwork is
@@ -870,8 +878,10 @@ async def run_fixed(jobs: ShellJobs, argv: list[str], cwd: str, settings: dict[s
         env.update(GIT_TERMINAL_PROMPT="0", GH_PROMPT_DISABLED="1")
         if os.environ.get("SSH_AUTH_SOCK"):
             env["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+    if extra_env:
+        env.update(extra_env)
     job = await jobs.start(argv, command=shlex.join(argv[-3:] if sandboxed else argv), cwd=cwd, env=env, tmp=tmp,
-                           conversation_id="ship", run_id=None, background=False, notify=False, timeout=timeout,
+                           conversation_id=label, run_id=None, background=False, notify=False, timeout=timeout,
                            max_background=int(settings.get("shellMaxBackground") or 4), on_timeout="kill")
     try:
         await jobs.wait(job)

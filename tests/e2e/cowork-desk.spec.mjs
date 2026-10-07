@@ -14,14 +14,14 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   await expect(page.locator('.msg.assistant').last()).toContainText('Shall I go ahead', { timeout: 60_000 })
   const [chat] = await grain.api('/conversations?include_desks=true')
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'Finished.' })
-  await turnOn(page, 'Work and propose')
-  await expect(strip(page)).toBeVisible()
+  await turnOn(page, 'Autonomous')
+  await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   const id = await deskOf(grain, chat.id)
   expect(id).toBeTruthy()
   expect((await grain.api(`/cowork/desks/${id}`)).conversation_id).toBe(chat.id) // no second conversation
   await waitStatus(grain, id, 'review')
   await expect(strip(page)).toContainText('Ready to review')
-  await expect(chatRow(page, chat.title).locator('.convo-desk')).toHaveAttribute('aria-label', 'Ready to review')
+  await expect(chatRow(page, chat.title).locator('.attn-dot')).toHaveAttribute('aria-label', /Ready to review/)
   await openPanel(page, 'Review')
   await expect(panel(page).locator('.desk-output')).toContainText('The report')
   await panel(page).getByRole('button', { name: 'Preview' }).click()
@@ -32,5 +32,18 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   expect(d.outputs[0].status).toMatch(/accepted|promoted/)
   expect(['done', 'review']).toContain(d.status)
   expect((await grain.api('/docs')).some((x) => /report/i.test(x.title) || /Hello from the desk/.test(x.content || ''))).toBe(true)
+  expect(realErrors(grain)).toEqual([])
+})
+
+test('with autonomy on by default a new chat is a desk from its first message', async ({ grain }) => {
+  await grain.api('/settings', { method: 'PUT', body: { autonomousByDefault: true } })
+  await grain.page.reload()
+  const { page } = grain
+  await newChat(page)
+  await say(page, '!!reply Hello there.')
+  await expect(page.locator('.msg.assistant').last()).toContainText('Hello there.', { timeout: 60_000 })
+  expect(await grain.api('/conversations')).toEqual([]) // desks are left out of the plain list
+  const [chat] = await grain.api('/conversations?include_desks=true')
+  await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   expect(realErrors(grain)).toEqual([])
 })

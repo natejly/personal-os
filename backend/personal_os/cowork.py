@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
+  budget          TEXT NOT NULL DEFAULT '{}',      -- legacy; no longer read
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -149,10 +149,6 @@ AUTONOMY = ("plan", "ask", "propose")
 OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "mail_draft")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
 
-# The `kind` column's vocabulary. `status` is the fallback; the others let the timeline and the
-# Needs-you queue be styled without re-deriving meaning from the body text.
-EVENT_KINDS = ("status", "plan", "step", "output", "question", "blocked", "review", "failed",
-               "promoted", "interrupted", "note")
 TERMINAL = ("done", "failed", "stopped")
 # The statuses that hand work back: the chat a desk was started from is told when one is reached (see origin_report).
 REPORT_ON = ("review", "done", "failed")
@@ -171,7 +167,7 @@ You are working on your own, in the background, in a private workspace directory
 under `work/`; anything the user should keep goes under `outputs/` and is nominated with
 `desk_deliver`. If you need a decision only the user can make, call `desk_ask` and end your turn —
 do not guess and do not trail off. When the brief is finished, call `desk_done` with a short summary.
-Your work runs as several bounded turns, and a new turn sees only your earlier replies, not their tool
+Your work may continue over several turns, and a new turn sees only your earlier replies, not their tool
 results. Keep `work/PROGRESS.md` current — done, next, decisions, where files are — and update it before
 a turn ends; you will be shown it at the start of the next one."""
 
@@ -202,6 +198,17 @@ CHAT_HANDOFF = ("The user has asked you to carry on with the task in this conver
                 "so far is your brief. Work it through to done in your workspace; call `desk_ask` if only the user can "
                 "decide something, and `desk_done` when it is finished.")
 CONTINUE_MESSAGES = {"continue": DESK_CONTINUE, "resume": DESK_RESUME, "nudge": DESK_NUDGE}
+# The kind a desk turn's user row carries when its content starts with one of the backend's own texts. Queued
+# wakes concatenate their messages (a user's words may come first), so only the leading text decides.
+_INTERNAL_PREFIXES = ((DESK_NUDGE, "nudge"), (DESK_CONTINUE, "continue"), (DESK_RESUME, "resume"), (CHAT_HANDOFF, "handoff"))
+
+
+def internal_kind(content: str | None) -> str | None:
+    """'nudge' / 'continue' / 'resume' / 'handoff' when `content` opens with that backend text, else None (a person's words)."""
+    text = (content or "").lstrip()
+    return next((k for p, k in _INTERNAL_PREFIXES if text.startswith(p)), None)
+
+
 NOTES_CAP = 3000
 NOTES_FILE = "work/PROGRESS.md"
 
@@ -608,8 +615,9 @@ class Desks:
     @_notifies
     def claim_run(self, id: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
         """The start lock: the UPDATE's rowcount decides, so a double Start makes one run, not two.
-        None means somebody else already started this desk. A desk with no plan claims into
-        `planning`, one with a plan into `working` — the CASE keeps it a single statement, because a
+        None means somebody else already started this desk. A plan-autonomy desk with no plan claims into
+        `planning`; any other desk into `working` (an ask or propose desk works from its first turn, so the rail
+        never says Planning for it) — the CASE keeps it a single statement, because a
         SELECT before the UPDATE would make the losing caller fail with a snapshot error instead of
         waiting for the winner to commit."""
         if not from_statuses:
@@ -618,7 +626,7 @@ class Desks:
         marks = ",".join("?" for _ in from_statuses)
         with self.db.tx() as c:
             cur = c.execute(
-                "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' THEN 'planning' ELSE 'working' END,"
+                "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' AND autonomy='plan' THEN 'planning' ELSE 'working' END,"
                 " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, queued_at=NULL, queued_message='',"
                 " updated_at=?"
                 f" WHERE id=? AND status IN ({marks})",
@@ -639,12 +647,13 @@ class Desks:
             return self._one(c, id)
 
     def settle(self, id: str, *, partial: str | None, stopped: bool, error: str | None,
-               chain: bool = False) -> dict[str, Any]:
+               chain: bool = False, answered: bool = False) -> dict[str, Any]:
         """What a finished desk turn means, decided from the three facts the run ends with.
 
         `chain=True` says the supervisor has already decided another turn follows, so the desk stays
-        `working`; that flag is why a budget-window stop can be settled honestly without the row
-        having to guess. A desk that is no longer LIVE settled itself during the turn (`desk_ask`,
+        `working`; that flag is why an early stop can be settled honestly without the row
+        having to guess. `answered=True` says the turn was a plain answer from an `ask` desk (no tool, no plan): it is
+        `done` with reason "answered" instead of the review/blocked an unfinished reply gets. A desk that is no longer LIVE settled itself during the turn (`desk_ask`,
         `desk_done`, a park, a pause) and is left exactly as it is — only a stop or a crash outranks
         a decision the desk already made.
         """
@@ -659,11 +668,13 @@ class Desks:
             return desk
         elif chain:
             return desk
+        elif answered:
+            target, reason = "done", "answered"
         elif partial == "blocked":
             target, reason = "blocked", "approval"
         elif partial:
-            # rounds | tokens | time from Budget.exceeded(), or "loop" from the repeat breaker.
-            target, reason = "review", "budget" if partial != "loop" else "loop"
+            # "loop" from the stuck breakers, or length | incomplete from the provider ending the reply early.
+            target, reason = "review", "loop" if partial == "loop" else "cut_short"
         else:
             # The reply ended without `desk_done`. A terminal state is a decision, not an inference,
             # so this is never `done`: it is review when there is something to review and otherwise a

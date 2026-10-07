@@ -12,7 +12,7 @@ import { rowButton } from '../lib/rowButton'
 import Face, { SPACE_HUE } from './Face'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
-const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'note', 'file', 'nav', 'doc']
+const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'project', 'file', 'nav', 'doc']
 
 /** Keep a fixed popover this far inside the viewport. */
 const MENU_GAP = 8
@@ -152,7 +152,7 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         )}
         {project && <span className="space-hint">{project.name}</span>}
         {locked && <Lock size={11} className="space-lock" />}
-        <span className="count">{count}</span>
+        {count > 0 && <span className="count">{count}</span>}
         <button
           className="icon-btn ghost xs"
           aria-label={`Actions for ${name}`}

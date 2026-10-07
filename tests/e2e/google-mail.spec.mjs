@@ -1,4 +1,7 @@
 import { test, expect, openApp, resize } from './helpers/google.mjs'
+import { readdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { newChat, say } from './helpers/blocks.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 
@@ -238,4 +241,117 @@ test('backend gone mid-session: a failed send keeps the composed message', async
   await expect(dlg).toBeVisible() // a failed send never discards the message
   await expect(dlg.getByPlaceholder('Write your email…')).toHaveValue('do not lose me')
   await expect(dlg.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
+})
+
+test('an incoming attachment lists with its size and downloads to the Downloads folder', async ({ grain }) => {
+  const { page } = grain
+  await openMail(grain)
+  await row(page, 'Subject 5 ').click()
+  const reader = page.locator('.mail-reader')
+  const att = reader.locator('.mail-attach-row', { hasText: 'report5.pdf' })
+  await expect(att).toContainText('2 KB')
+  await att.getByRole('button', { name: 'Download report5.pdf' }).click()
+  await expect(toast(page, 'Saved to')).toBeVisible()
+  await expect.poll(() => readdirSync(grain.downloads)).toEqual(['report5.pdf'])
+  expect(grain.consoleErrors).toEqual([])
+})
+
+test('compose attaches a file, Save draft and Send carry it', async ({ grain }) => {
+  const { page } = grain
+  await openMail(grain)
+  await page.getByRole('button', { name: 'Compose' }).click()
+  const dlg = page.locator('.mail-compose')
+  const file = join(grain.downloads, 'notes.txt')
+  writeFileSync(file, 'attached text')
+  await dlg.getByLabel('Attach files').setInputFiles(file)
+  const chip = dlg.locator('.mail-attach-chip', { hasText: 'notes.txt' })
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText('13 B')
+  await dlg.getByLabel('To').fill('dana@example.com')
+  await dlg.getByLabel('Subject').fill('With a file')
+  await dlg.getByPlaceholder('Write your email…').fill('see attached')
+  await dlg.getByRole('button', { name: 'Save draft' }).click()
+  await expect(toast(page, 'Draft saved')).toBeVisible()
+  await expect.poll(async () => (await writes(grain, 'mail.draft')).length).toBe(1)
+  expect((await writes(grain, 'mail.draft'))[0].attachments).toEqual(['notes.txt'])
+  // the same again through Send (held, then released)
+  await page.getByRole('button', { name: 'Compose' }).click()
+  await dlg.getByLabel('Attach files').setInputFiles(file)
+  await expect(dlg.locator('.mail-attach-chip', { hasText: 'notes.txt' })).toBeVisible()
+  await dlg.getByLabel('To').fill('dana@example.com')
+  await dlg.getByLabel('Subject').fill('Sent with a file')
+  await dlg.getByRole('button', { name: 'Send', exact: true }).click()
+  await page.locator('.pending-send').getByRole('button', { name: 'Send now' }).click()
+  await expect.poll(async () => (await writes(grain, 'mail.send')).length).toBe(1)
+  expect((await writes(grain, 'mail.send'))[0].attachments).toEqual(['notes.txt'])
+  // a chip can be removed before sending
+  await page.getByRole('button', { name: 'Compose' }).click()
+  await dlg.getByLabel('Attach files').setInputFiles(file)
+  await dlg.getByRole('button', { name: 'Remove notes.txt' }).click()
+  await expect(dlg.locator('.mail-attach-chip')).toHaveCount(0)
+})
+
+test('forward carries the original attachments as chips', async ({ grain }) => {
+  const { page } = grain
+  await openMail(grain)
+  await row(page, 'Subject 5 ').click()
+  await expect(page.locator('.mail-reader .mail-attach-row')).toBeVisible()
+  await page.locator('.mail-reader').getByRole('button', { name: 'Forward' }).click()
+  const dlg = page.locator('.mail-compose')
+  await expect(dlg.getByLabel('Subject')).toHaveValue('Fwd: Subject 5 with attachment')
+  await expect(dlg.getByLabel('To')).toHaveValue('')
+  await expect(dlg.locator('.mail-attach-chip', { hasText: 'report5.pdf' })).toBeVisible()
+  await expect(dlg.getByPlaceholder('Write your email…')).toHaveValue(/Forwarded message/)
+  await dlg.getByLabel('To').fill('dana@example.com')
+  await dlg.getByRole('button', { name: 'Save draft' }).click()
+  await expect.poll(async () => (await writes(grain, 'mail.draft')).length).toBe(1)
+  expect((await writes(grain, 'mail.draft'))[0].attachments).toEqual(['report5.pdf'])
+})
+
+test('an assistant email stops at the editable card with its attachment; nothing goes out until Send', async ({ grain }) => {
+  const { page } = grain
+  const fd = new FormData()
+  fd.append('file', new Blob(['quarterly numbers']), 'numbers.txt')
+  const doc = await (await fetch(`${grain.backend.url}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${grain.token}` }, body: fd })).json()
+  // Allow-all mode runs everything else unasked; an email still stops at the card, and no rule or grant lifts it.
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, permissionMode: 'allow_all' } })
+  await page.reload()
+  await newChat(page)
+  const args = { to: 'ann@example.com', cc: 'bo@example.com', subject: 'Numbers', body: 'Numbers attached.', attachments: [doc.id] }
+  await say(page, '!!tool gmail_send ' + JSON.stringify(args), { wait: false })
+  const card = page.getByRole('region', { name: 'Email to send' })
+  await expect(card).toBeVisible({ timeout: 30_000 })
+  await expect(card).toContainText('Review before sending')
+  await expect(card.getByLabel('Cc', { exact: true })).toBeVisible()
+  await expect(card.locator('.mc-attach .mc-chip', { hasText: 'numbers.txt' })).toContainText('17 B')
+  expect((await writes(grain, 'mail.send')).length).toBe(0)
+  expect((await grain.fake.state()).sent.length).toBe(0)
+  await card.getByRole('button', { name: 'Send', exact: true }).click()
+  const pending = page.locator('.pending-send')
+  await expect(pending).toHaveCount(1)
+  expect((await writes(grain, 'mail.send')).length).toBe(0) // held behind the undo window
+  await pending.getByRole('button', { name: 'Send now' }).click()
+  await expect.poll(async () => (await writes(grain, 'mail.send')).length).toBe(1)
+  expect((await writes(grain, 'mail.send'))[0].attachments).toEqual(['numbers.txt'])
+})
+
+test('Open in Mail hands the assistant email to the compose window and denies the card', async ({ grain }) => {
+  const { page } = grain
+  const fd = new FormData()
+  fd.append('file', new Blob(['quarterly numbers']), 'numbers.txt')
+  const doc = await (await fetch(`${grain.backend.url}/documents`, { method: 'POST', headers: { Authorization: `Bearer ${grain.token}` }, body: fd })).json()
+  await grain.api('/settings', { method: 'PUT', body: { toolDeferAbove: 0, tools: { gmail_send: 'ask' } } })
+  await page.reload()
+  await newChat(page)
+  await say(page, '!!tool gmail_send ' + JSON.stringify({ to: 'ann@example.com', bcc: 'bo@example.com', subject: 'Numbers', body: 'Numbers attached.', attachments: [doc.id] }), { wait: false })
+  const card = page.getByRole('region', { name: 'Email to send' })
+  await expect(card.locator('.mc-attach .mc-chip', { hasText: 'numbers.txt' })).toBeVisible({ timeout: 30_000 })
+  await card.getByRole('button', { name: 'Open in Mail' }).click()
+  const dlg = page.locator('.mail-compose')
+  await expect(dlg.getByLabel('To')).toHaveValue('ann@example.com')
+  await expect(dlg.getByLabel('Bcc')).toHaveValue('bo@example.com')
+  await expect(dlg.getByLabel('Subject')).toHaveValue('Numbers')
+  await expect(dlg.locator('.mail-attach-chip', { hasText: 'numbers.txt' })).toBeVisible()
+  await expect.poll(async () => (await grain.api('/approvals?status=all')).filter((a) => a.tool === 'gmail_send').pop()?.status).toBe('denied')
+  expect((await writes(grain, 'mail.send')).length).toBe(0)
 })

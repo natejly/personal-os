@@ -2,30 +2,14 @@ import { test, expect } from './fixtures.mjs'
 
 // The settings panels bound their numbers; the API behind them must too (the panel is not the only client).
 
-test('meetings settings: out-of-range numbers are clamped to the panel limits, unknown backends fall back', async ({ grain }) => {
+test('voice settings: an unknown transcription backend falls back to auto and unknown keys are ignored', async ({ grain }) => {
   const { api } = grain
-  await api('/meetings/config', { method: 'PUT', body: { segmentSeconds: 1, drainSeconds: -9, maxMeetingSeconds: 0, autoStopGraceSeconds: 99999, maxAudioBytes: -5, sttBackend: 'zzz' } })
-  let c = await api('/meetings/config')
-  expect(c).toMatchObject({ segmentSeconds: 5, drainSeconds: 0, maxMeetingSeconds: 300, autoStopGraceSeconds: 3600, maxAudioBytes: 0, sttBackend: 'auto' })
-  await api('/meetings/config', { method: 'PUT', body: { segmentSeconds: 99999, maxMeetingSeconds: 10 ** 9 } })
-  c = await api('/meetings/config')
-  expect(c.segmentSeconds).toBe(120)
-  expect(c.maxMeetingSeconds).toBe(28800)
-  // in-range values pass through untouched, and non-numbers do not break the store
-  await api('/meetings/config', { method: 'PUT', body: { segmentSeconds: 30, drainSeconds: 45 } })
-  c = await api('/meetings/config')
-  expect(c).toMatchObject({ segmentSeconds: 30, drainSeconds: 45 })
-})
-
-test('activity settings: a zero or negative interval, rollup or retention cannot be stored', async ({ grain }) => {
-  const { api } = grain
-  await api('/activity/config', { method: 'PUT', body: { sampleSeconds: 0, retentionHours: -5, idleSeconds: -1, rollupMinutes: 0, summaryRetentionDays: 0, contextDays: 999 } })
-  let c = (await api('/activity/status')).config
-  expect(c).toMatchObject({ sampleSeconds: 1, retentionHours: 1, idleSeconds: 30, rollupMinutes: 5, summaryRetentionDays: 1, contextDays: 30 })
-  await api('/activity/config', { method: 'PUT', body: { retentionHours: 10 ** 9, sampleSeconds: 12 } })
-  c = (await api('/activity/status')).config
-  expect(c.retentionHours).toBe(720)
-  expect(c.sampleSeconds).toBe(12)
+  await api('/voice/config', { method: 'PUT', body: { sttBackend: 'zzz', nonsense: 1 } })
+  const c = await api('/voice/config')
+  expect(c.sttBackend).toBe('auto')
+  expect(c).not.toHaveProperty('nonsense')
+  await api('/voice/config', { method: 'PUT', body: { sttBackend: 'local', dictationCleanup: true } })
+  expect(await api('/voice/config')).toMatchObject({ sttBackend: 'local', dictationCleanup: true })
 })
 
 test('health: a reading from a day that has not happened, an absurd number or a negative goal is refused with a reason', async ({ grain }) => {

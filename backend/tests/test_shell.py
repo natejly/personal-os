@@ -27,10 +27,12 @@ needs_seatbelt = pytest.mark.skipif(not HAVE_SEATBELT, reason="sandbox-exec is n
 
 
 class Box:
-    def __init__(self, tmp: Path, **settings: Any):
-        self.root = (tmp / "home" / "work").resolve()  # a granted root must sit inside the home folder (the fixture below)
+    def __init__(self, tmp: Path, pin_cwd: bool = True, **settings: Any):
+        self.root = (tmp / "home" / "work").resolve()  # the folder the commands run in; a shell may run anywhere
         self.root.mkdir(parents=True)
-        self.settings: dict[str, Any] = {"workspaceRoots": [str(self.root)], **settings}
+        shell._LAST_CWD.clear()  # where an earlier test's commands ended is not this test's default folder
+        self.pin_cwd = pin_cwd  # run in `root` unless a call names a folder (the default would be the home folder)
+        self.settings: dict[str, Any] = {**settings}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:  # stored tool results hang off a conversation row
             for cid in ("c1", "c2"):
@@ -40,11 +42,16 @@ class Box:
         self.ctx: dict[str, Any] = {"conversation_id": "c1", "message_id": None, "settings": self.settings,
                                     "tainted": False, "taint_sources": []}
 
+    def _args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "shell_run" and self.pin_cwd and "cwd" not in args:
+            args = {"cwd": str(self.root), **args}
+        return args
+
     def run(self, name: str, **args: Any) -> Any:
-        return asyncio.run(self.tb.call(name, args, self.ctx))
+        return asyncio.run(self.tb.call(name, self._args(name, args), self.ctx))
 
     async def arun(self, name: str, **args: Any) -> Any:
-        return await self.tb.call(name, args, self.ctx)
+        return await self.tb.call(name, self._args(name, args), self.ctx)
 
 
 @pytest.fixture(autouse=True)
@@ -76,34 +83,43 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     offline = {"tainted": True, "settings": {**box.settings, "shellNetwork": False, "shellRegistryAccess": False, "shellAllowedDomains": []}}
     assert not box.tb.forces_ask("shell_run", {"command": "ls"}, offline)
     from personal_os import llm
-    assert llm.DEFAULT_SETTINGS["workspaceRoots"] == [] and llm.DEFAULT_SETTINGS["shellNetwork"] is False
+    assert llm.DEFAULT_SETTINGS["shellNetwork"] is False
     assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)
 
 
-def test_cwd_must_be_inside_a_granted_root(tmp_path: Path, box: Box) -> None:
+def test_cwd_is_any_folder_except_the_protected_ones(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     other = tmp_path / "elsewhere"
     other.mkdir()
     (box.root / "sub").mkdir()
-    roots = shell.granted_roots(box.settings, None)
-    assert shell.resolve_cwd(None, roots)[0] == box.root
-    assert shell.resolve_cwd("sub", roots)[0] == box.root / "sub"
-    with pytest.raises(shell.ShellError, match="outside"):
-        shell.resolve_cwd(str(other), roots)
-    with pytest.raises(shell.ShellError, match="outside"):
-        shell.resolve_cwd("../elsewhere", roots)
-    (box.root / "link").symlink_to(other)  # a symlink out of the root is resolved first, then refused
-    with pytest.raises(shell.ShellError, match="outside"):
-        shell.resolve_cwd("link", roots)
-    with pytest.raises(shell.ShellError, match="Settings"):
-        shell.resolve_cwd(None, [])
-    r = box.run("shell_run", command="pwd", cwd=str(other))
-    assert r["error"] and "outside" in r["error"]
-    box.settings["workspaceRoots"] = []
-    assert "Workspace folders" in box.run("shell_run", command="pwd")["error"]
+    assert shell.resolve_cwd(None, box.root) == box.root
+    assert shell.resolve_cwd("sub", box.root) == box.root / "sub"  # relative = to the default folder
+    assert shell.resolve_cwd(str(other), box.root) == other         # outside the home folder is fine
+    assert shell.resolve_cwd("../../elsewhere", box.root) == other
+    (box.root / "link").symlink_to(other)
+    assert shell.resolve_cwd("link", box.root) == other
+    with pytest.raises(shell.ShellError, match="not a folder"):
+        shell.resolve_cwd("missing", box.root)
+    # Grain's own data folder is off limits, except the active desk's workspace inside it
+    data = tmp_path / "appdata"
+    desk = data / "desks" / "d1"
+    desk.mkdir(parents=True)
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    for bad in (str(data), str(data / "desks"), "/Applications/Grain.app"):
+        with pytest.raises(shell.ShellError, match="off limits"):
+            shell.resolve_cwd(bad, box.root)
+    with pytest.raises(shell.ShellError, match="off limits"):
+        shell.resolve_cwd(str(desk), box.root)
+    assert shell.resolve_cwd(str(desk), box.root, desk) == desk
+    assert shell.resolve_cwd(None, desk, desk) == desk
+    r = box.run("shell_run", command="pwd", cwd=str(data))
+    assert r["error"] and "off limits" in r["error"]
+    # no cwd and no desk: the home folder
+    from personal_os import mac
+    assert shell.resolve_cwd(None, mac.home()) == box.root.parent
 
 
 def test_desk_workspace_is_the_default_root(tmp_path: Path) -> None:
-    b = Box(tmp_path, workspaceRoots=[])
+    b = Box(tmp_path, pin_cwd=False)
     desk = (tmp_path / "desk").resolve()
     desk.mkdir()
 
@@ -120,13 +136,17 @@ def test_desk_workspace_is_the_default_root(tmp_path: Path) -> None:
 
 
 @needs_seatbelt
-def test_writes_inside_succeed_and_outside_fail(tmp_path: Path, box: Box) -> None:
+def test_writes_anywhere_succeed_except_the_protected_places(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    r = box.run("shell_run", command=f"python3 -c \"open('report.txt','w').write('x')\" && ls && touch {outside}/nope")
-    assert r["exit_code"] != 0 and "report.txt" in r["output"]
+    data = tmp_path / "appdata"
+    data.mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    r = box.run("shell_run", command=f"python3 -c \"open('report.txt','w').write('x')\" && ls && touch {outside}/yes; touch {data}/nope; echo done")
+    assert "done" in r["output"] and "report.txt" in r["output"]
     assert (box.root / "report.txt").exists()
-    assert not (outside / "nope").exists()
+    assert (outside / "yes").exists()          # outside the working folder (and outside home) is writable
+    assert not (data / "nope").exists()        # Grain's own data folder is not
     assert r["sandboxed"] is True and r["network"]["mode"] == "allowlist" and r["network"]["contacted"] == []  # the default: proxy only
     # the per-run tmp dir is writable, and gone afterwards
     t = box.run("shell_run", command="echo hi > $TMPDIR/t && cat $TMPDIR/t && echo $TMPDIR")
@@ -180,7 +200,7 @@ def test_desk_under_the_data_dir_stays_writable_but_its_database_does_not(tmp_pa
     (data / "personal-os.db").write_text("live")
     (desk / "personal-os.db").write_text("live")
     monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
-    b = Box(tmp_path, workspaceRoots=[])
+    b = Box(tmp_path, pin_cwd=False)
 
     class Ws:
         def ensure(self, desk_id: str) -> Path:
@@ -200,61 +220,68 @@ def test_profile_write_denies_sit_around_the_desk_reallow(tmp_path: Path, monkey
     monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
     p = sandbox.shell_profile([str(data / "desks" / "d1")])
     reallow = p.index("(allow file-read* file-write* (subpath")
-    assert p.index(f'(deny file-write* (subpath "{data}")') < reallow  # the data dir loses its write allow ...
+    assert p.index("(allow file-write*)\n") < p.index(f'(deny file-write* (subpath "{data}")') < reallow  # the data dir loses its write allow ...
     assert p.index('(deny file-read* file-write* (regex #"/\\.env') > reallow  # ... the desk gets it back, minus its secrets
     assert p.rindex("(deny file-write*") > reallow and "zshrc|" in p[p.rindex("(deny file-write*"):]  # rc files lose last
+    assert "LaunchAgents|LaunchDaemons" in p[p.rindex("(deny file-write*"):]  # so does anything that runs at login
+    # the blanket denies of ~/Library and home dotfiles are gone: those are ordinary folders now
     home = os.path.realpath(os.path.expanduser("~"))
-    assert f'(subpath "{os.path.join(home, "Library")}")' in p and "/\\.[^/]+" in p
+    assert f'(subpath "{os.path.join(home, "Library")}")' not in p and "/\\.[^/]+" not in p
 
 
-def test_home_and_non_home_roots_are_never_granted(tmp_path: Path, fake_home: Path) -> None:
-    from personal_os import fsx, mac
+def test_profile_is_unrestricted_for_writes_then_denies_protected_places(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = (tmp_path / "appdata").resolve()
+    data.mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    for p in (sandbox.shell_profile(["/tmp/w"]), sandbox.shell_profile(["/tmp/w", str(data / "state")], network=False, allow_hosts=["*:443"], loopback=True)):
+        assert "(allow file-write*)\n" in p                       # not confined to a folder
+        deny = p.index("(deny file-write* (subpath")
+        assert p.index("(allow file-write*)\n") < deny
+        assert f'(subpath "{data}")' in p[deny:deny + 400] and '(subpath "/Applications/Grain.app")' in p[deny:deny + 600]
+        home = os.path.realpath(os.path.expanduser("~"))
+        for cred in (".ssh", ".aws", ".gnupg", "Library/Keychains", "Library/Cookies"):  # denied for read AND write, after the data deny
+            line = f'(deny file-read* file-write* (subpath "{os.path.join(home, cred)}"))'
+            assert line in p and p.index(line) > deny, cred
+        assert "hosts.yml" in p and "Login Data" in p and "cookies\\.sqlite" in p and r"id_(rsa|dsa|ecdsa|ed25519)" in p
+        assert "/Library/Keychains" in p and "LaunchAgents" in p
+
+
+def test_workspace_roots_scope_nothing_any_more(tmp_path: Path, fake_home: Path) -> None:
+    from personal_os import fsx
     (fake_home / "proj").mkdir()
-    stored = {"workspaceRoots": [str(fake_home), "~", "/", str(tmp_path), str(fake_home / "proj")]}
-    assert shell.granted_roots(stored, None) == [fake_home / "proj"]
+    stored = {"workspaceRoots": [str(fake_home / "proj")]}
 
     class B:
         workspace = None
 
         def settings(self) -> dict[str, Any]:
             return stored
-    assert fsx.grants_for(B(), {}).roots == [fake_home / "proj"]
-    with pytest.raises(mac.LocalPathError, match="home folder"):
-        mac.allowed_root("~")
-    assert mac.allowed_path("~") == fake_home  # the file tools may still read under home
+    g = fsx.grants_for(B(), {})
+    assert g.desk is None and not hasattr(g, "roots")
+    assert not hasattr(shell, "granted_roots")
 
 
-def test_a_root_around_the_data_dir_is_never_granted(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from personal_os import fsx, mac
-    (fake_home / "proj" / "data").mkdir(parents=True)
-    (fake_home / "other").mkdir()
-    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(fake_home / "proj" / "data"))
-    with pytest.raises(mac.LocalPathError, match="contains the app's own data folder"):
-        mac.allowed_root(str(fake_home / "proj"))
-    stored = {"workspaceRoots": [str(fake_home / "proj"), str(fake_home / "other")]}
-    assert shell.granted_roots(stored, None) == [fake_home / "other"]
 
-    class B:
-        workspace = None
-
-        def settings(self) -> dict[str, Any]:
-            return stored
-    assert fsx.grants_for(B(), {}).roots == [fake_home / "other"]
 
 
 @needs_seatbelt
-def test_home_as_writable_folder_cannot_write_dotfiles_or_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The home folder is never granted as a root (mac.allowed_root), but should one reach the profile anyway, the
-    targeted denies still beat the blanket write allow."""
+def test_home_dotfiles_and_library_are_writable_except_what_runs_later(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the files that run code later (rc files, launch agents) and the credential stores are denied: the blanket
+    ~/Library and home-dotfile denies are gone."""
     import subprocess
     home = (tmp_path / "home").resolve()
-    (home / "Library").mkdir(parents=True)
+    (home / "Library" / "LaunchAgents").mkdir(parents=True)
+    (home / "Library" / "Preferences").mkdir(parents=True)
+    (home / ".ssh").mkdir()
     monkeypatch.setenv("HOME", str(home))
-    prof = sandbox.shell_profile([str(home)])
-    subprocess.run(["sandbox-exec", "-p", prof, "/bin/sh", "-c", "echo x >> .zshrc; echo y > Library/agent.plist; echo z > ok.txt"],
+    prof = sandbox.shell_profile([str(tmp_path / "scratch")])
+    subprocess.run(["sandbox-exec", "-p", prof, "/bin/sh", "-c",
+                    "echo x >> .zshrc; echo y > Library/LaunchAgents/agent.plist; echo k > .ssh/id_x; echo z > ok.txt; "
+                    "echo p > Library/Preferences/app.plist; echo c > .toolrc"],
                    cwd=home, capture_output=True, timeout=30)
-    assert (home / "ok.txt").exists()
-    assert not (home / ".zshrc").exists() and not (home / "Library" / "agent.plist").exists()
+    assert (home / "ok.txt").exists() and (home / "Library" / "Preferences" / "app.plist").exists() and (home / ".toolrc").exists()
+    assert not (home / ".zshrc").exists() and not (home / "Library" / "LaunchAgents" / "agent.plist").exists()
+    assert not (home / ".ssh" / "id_x").exists()
 
 
 @needs_seatbelt
@@ -281,7 +308,8 @@ def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.Mo
     monkeypatch.setenv("HOME", str(home))
     (box.root / ".env").write_text("API_KEY=abc")
     (box.root / "notes.txt").write_text("fine")
-    r = box.run("shell_run", command=f"cat {home}/.ssh/id_rsa; cat .env; cat notes.txt")
+    r = box.run("shell_run", command=f"cat {home}/.ssh/id_rsa; cat .env; cat notes.txt; echo x > .env.local; echo y > {home}/.ssh/new")
+    assert not (box.root / ".env.local").exists() and not (home / ".ssh" / "new").exists()  # credential stores: no writes either
     assert "PRIVATE" not in r["output"] and "API_KEY" not in r["output"] and "fine" in r["output"]
 
 
@@ -608,9 +636,10 @@ def test_shell_profile_shape() -> None:
     p = sandbox.shell_profile(["/tmp/w"], network=False)
     assert "(deny network*)" in p and "(allow network*)" not in p and "(deny default)" in p
     assert ".ssh" in p and "Keychains" in p and "gcloud" in p and r"\.env" in p
-    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials"):
+    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".vault-token",
+                   os.path.join(".cargo", "credentials.toml")):
         assert os.path.join(os.path.expanduser("~"), secret) in p, secret
-    assert "hooks" in p and "/tmp/w" in p
+    assert "hooks" in p
     assert "(allow network*)" in sandbox.shell_profile(["/tmp/w"], network=True)
 
 
@@ -771,27 +800,29 @@ def test_a_token_in_a_shell_cwd_is_stripped() -> None:
 
 
 @needs_seatbelt
-def test_cd_persists_between_calls_and_an_explicit_cwd_wins(box: Box) -> None:
-    (box.root / "a" / "b").mkdir(parents=True)
+def test_cd_persists_between_calls_and_an_explicit_cwd_wins(tmp_path: Path, box: Box) -> None:
+    box.pin_cwd = False  # the default folder is the home folder
+    home = box.root.parent
+    (home / "a" / "b").mkdir(parents=True)
     r = box.run("shell_run", command="cd a/b && echo in")
-    assert r["exit_code"] == 0 and r["cwd"] == str(box.root / "a" / "b")
+    assert r["exit_code"] == 0 and r["cwd"] == str(home / "a" / "b")
     r = box.run("shell_run", command="pwd")
-    assert r["output"].strip() == str(box.root / "a" / "b") and r["cwd"] == str(box.root / "a" / "b")
+    assert r["output"].strip() == str(home / "a" / "b") and r["cwd"] == str(home / "a" / "b")
     r = box.run("shell_run", command="pwd", cwd="a")
-    assert r["output"].strip() == str(box.root / "a")
+    assert r["output"].strip() == str(home / "a")
     # exit code and output are untouched by the wrapper, including when the command exits by itself
     r = box.run("shell_run", command="echo x; exit 7")
     assert r["exit_code"] == 7 and r["output"].strip() == "x"
-    # another conversation starts in the default folder; a cd outside every root is forgotten
+    # another conversation starts in the default folder; a cd anywhere else is remembered like any other
     box.ctx["conversation_id"] = "c2"
-    assert box.run("shell_run", command="pwd")["output"].strip() == str(box.root)
+    assert box.run("shell_run", command="pwd")["output"].strip() == str(home)
     r = box.run("shell_run", command="cd /tmp && true")
-    assert r["cwd"] == str(box.root) and shell.remembered_cwd("c2") is None
+    assert r["cwd"] == os.path.realpath("/tmp") and shell.remembered_cwd("c2") == os.path.realpath("/tmp")
     # a remembered folder that has since gone is not used
     box.ctx["conversation_id"] = "c1"
-    shell._remember_cwd("c1", str(box.root / "a"))
-    shutil.rmtree(box.root / "a")
-    assert box.run("shell_run", command="pwd")["output"].strip() == str(box.root)
+    shell._remember_cwd("c1", str(home / "a"))
+    shutil.rmtree(home / "a")
+    assert box.run("shell_run", command="pwd")["output"].strip() == str(home)
 
 
 @needs_seatbelt

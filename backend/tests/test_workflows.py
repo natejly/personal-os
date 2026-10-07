@@ -353,18 +353,16 @@ def test_run_reports_to_its_chat() -> None:
     check(len(said()) == 2, "a run with no chat posts nowhere")
 
 
-def test_step_sees_the_chats_working_folder() -> None:
+def test_a_chats_retired_working_folder_changes_nothing_for_its_steps() -> None:
     reset()
     folder = tempfile.mkdtemp(prefix="wf_folder_", dir=str(Path.home()))
     try:
         cid = appmod.convos.create(None, "t", "m")["id"]
-        appmod.convos.update(cid, {"settings": {"workingFolder": folder}})
+        appmod.convos.update(cid, {"settings": {"workingFolder": folder}})  # an old conversation still loads
         w = save(DIGEST)
         r = store.create_run(w, {"folder": "/a"}, conversation_id=cid)
-        roots = engine._ctx(store.get_run(r["id"]), asyncio.Event())["settings"]["workspaceRoots"]
-        check(roots and roots[0] == str(Path(folder).resolve()), "a step run from a chat with a working folder sees it in workspaceRoots")
-        r2 = store.create_run(w, {"folder": "/a"})
-        check(folder not in (engine._ctx(store.get_run(r2["id"]), asyncio.Event())["settings"].get("workspaceRoots") or []), "a run with no chat does not")
+        cfg = engine._ctx(store.get_run(r["id"]), asyncio.Event())["settings"]
+        check(folder not in (cfg.get("workspaceRoots") or []), "a working folder is not injected into the step's workspaceRoots")
     finally:
         os.rmdir(folder)
 
@@ -624,7 +622,7 @@ def test_commands() -> None:
         reset()
         ctx = {"project_id": None, "conversation_id": appmod.convos.create(None, "t", "m")["id"], "message_id": None, "tainted": False,
                "taint_sources": [], "allowed_urls": set(), "settings": appmod.settings(), "modes": tb.effective({}, None, None), "depth": 0,
-               "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(appmod.settings()), "run": None}
+               "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(), "run": None}
         out = await tb.call("command_run", {"name": "tidy", "arguments": "my desk"}, ctx)
         check(out["instructions"] == "Tidy up my desk" and not ctx["tainted"], "a plain command returns its filled template as instructions")
         out = await tb.call("command_run", {"name": "/summarize-folder", "arguments": "~/notes"}, ctx)

@@ -62,7 +62,6 @@ _CLAIMED = ("consumed", "done", "failed")
 PLAN_BLOCKED = ("not available while planning; put it in a plan step with these exact arguments "
                 "and propose the plan")
 PROPOSE_ONLY = "this desk may only propose external actions"
-STEP_REJECTED = "the user rejected this exact step"
 
 PLAN_DESCRIPTION = (
     "Ask the user to approve several consequential actions at once, instead of one approval modal per call. "
@@ -348,26 +347,6 @@ class Plans:
             p = c.execute("SELECT plan_id, title FROM action_plans WHERE plan_id=?", (step["plan_id"],)).fetchone()
         return {**step, "title": p["title"] if p else ""}
 
-    def covers(self, run_id: str | None, calls: list[tuple[str, dict[str, Any]]], desk_id: str | None = None) -> bool:
-        """Whether every call matches its own approved, unclaimed step, under claim()'s scope. Claims nothing.
-
-        The budget asks this: a round made only of steps the user already approved is work they bought,
-        so running out of budget while drafting the plan must not refuse it. Each step can cover one call.
-        """
-        if not calls or (not run_id and not desk_id):
-            return False
-        scope, key = ("p.desk_id=?", desk_id) if desk_id else ("p.run_id=?", run_id)
-        with self.db.tx() as c:
-            rows = c.execute("SELECT s.tool, s.args_digest FROM plan_steps s JOIN action_plans p ON p.plan_id=s.plan_id "
-                             f"WHERE {scope} AND p.status='approved' AND s.status='approved'", (key,)).fetchall()
-        free = [(r["tool"], r["args_digest"]) for r in rows]
-        for tool, args in calls:
-            want = (tool, args_digest(args))
-            if want not in free:
-                return False
-            free.remove(want)
-        return True
-
     def remaining(self, plan_id: str) -> list[dict[str, Any]]:
         """The approved steps of this plan that nothing has claimed yet.
 
@@ -380,15 +359,6 @@ class Plans:
             rows = c.execute("SELECT * FROM plan_steps WHERE plan_id=? AND status='approved' ORDER BY idx",
                              (plan_id,)).fetchall()
         return [self._step(r) for r in rows]
-
-    def for_conversation(self, conversation_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        """This chat's plans, newest first, so a reloaded chat still shows the card it was on."""
-        if not conversation_id:
-            return []
-        with self.db.tx() as c:
-            rows = c.execute("SELECT * FROM action_plans WHERE conversation_id=? ORDER BY created_at DESC LIMIT ?",
-                             (conversation_id, max(1, min(int(limit), 100)))).fetchall()
-            return [p for p in (self._plan(c, r) for r in rows) if p]
 
     def for_desk(self, desk_id: str) -> dict[str, Any] | None:
         """The desk's current approved plan, newest first. One desk carries one plan at a time."""

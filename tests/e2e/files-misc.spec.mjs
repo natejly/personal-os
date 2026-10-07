@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.mjs'
-import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc } from './helpers/files.mjs'
+import { openFiles, body, titleBox, waitSaved, mkDoc, errorsOf, patient, relaunch, newDoc, editDoc } from './helpers/files.mjs'
 
 test.describe.configure({ timeout: 300_000 })
 test.beforeEach(({ grain }) => patient(grain))
@@ -37,9 +37,10 @@ test('uploads: pick a file, view its text, pin, delete + undo, drop a file, unre
   await expect(card).toBeVisible()
   await expect(card).toContainText('alpha bravo charlie')
   await card.click()
-  await expect(page.locator('.doc-text')).toContainText('alpha bravo charlie')
+  const viewer = page.getByRole('dialog', { name: 'notes.txt' })
+  await expect(viewer).toContainText('alpha bravo charlie')
   await page.keyboard.press('Escape')
-  await expect(page.locator('.doc-text')).toHaveCount(0)
+  await expect(viewer).toHaveCount(0)
   await card.getByRole('button', { name: 'Pin notes.txt' }).click()
   await expect(card.getByRole('button', { name: 'Unpin notes.txt' })).toBeVisible()
   // dropping a file on the page uploads it
@@ -97,6 +98,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
   await mkDoc(g, { title: 'Pics', content: 'before ' })
   await openFiles(page)
   await open(page, 'Pics')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.evaluate((b64) => {
@@ -118,6 +120,7 @@ test('paste or drop an image into a doc stores it and renders it; non-images are
   await expect(body(page)).toHaveValue(/dropped\.png\)/)
   // a text file dropped in the editor does not navigate the window or touch the body
   const url = page.url()
+  await expect(body(page)).not.toHaveValue(/describing image/) // the alt text settles once the image has been described
   const text = await body(page).inputValue()
   await page.evaluate(() => {
     const dt = new DataTransfer()
@@ -144,6 +147,7 @@ test('delete a doc: undo from the toast, then delete again and restore from Sett
   const d = await mkDoc(g, { title: 'Doomed', content: 'precious words' })
   await openFiles(page)
   await open(page, 'Doomed')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.keyboard.insertText(' unsaved tail') // deleting flushes buffered typing first
@@ -154,6 +158,7 @@ test('delete a doc: undo from the toast, then delete again and restore from Sett
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(page.locator('.doc-row', { hasText: 'Doomed' }).last()).toBeVisible()
   await open(page, 'Doomed')
+  await editDoc(page)
   await expect(body(page)).toHaveValue('precious words unsaved tail')
   expect((await g.api(`/docs/${d.id}`)).content).toBe('precious words unsaved tail')
   // again, restore through the Trash panel
@@ -204,6 +209,7 @@ test('a change made elsewhere: draft is kept, conflict toast offers Reload', asy
   const d = await mkDoc(g, { title: 'Shared', content: 'original text' })
   await openFiles(page)
   await open(page, 'Shared')
+  await editDoc(page)
   await g.api(`/docs/${d.id}`, { method: 'PUT', body: { content: 'someone else rewrote everything' } })
   await body(page).click()
   await page.keyboard.press('Meta+End')
@@ -228,6 +234,7 @@ test('a pin made while typing does not lose the typing (metadata patch bumps upd
   const d = await mkDoc(g, { title: 'Pinny', content: 'base' })
   await openFiles(page)
   await open(page, 'Pinny')
+  await editDoc(page)
   await body(page).click()
   await page.keyboard.press('Meta+End')
   await page.keyboard.insertText(' typed')
@@ -249,6 +256,7 @@ test('history tab lists saves and restoring a version brings the text back', asy
   patient(g)
   await openFiles(page)
   await open(page, 'Versions')
+  await editDoc(page)
   await page.getByRole('button', { name: 'Toggle side panel' }).click()
   await page.getByRole('tab', { name: 'History' }).click()
   page.once('dialog', (dlg) => void dlg.accept())

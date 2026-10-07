@@ -1,4 +1,4 @@
-/** Getting a doc out of the app: a .md file, the clipboard, or the system print dialog (which also saves a PDF). */
+/** Getting a doc out of the app: a .md file, the clipboard, or the system print dialog. PDFs go through the main process (`print.exportPdf`). */
 
 /** A filename that is safe on macOS, Windows and in a URL: no separators or reserved characters, bounded length. */
 export function exportFilename(title: string, ext = 'md'): string {
@@ -43,7 +43,7 @@ pre { background: #f4f4f2; padding: 10px 12px; border-radius: 6px; overflow: aut
 blockquote { border-left: 3px solid #bbb; margin-left: 0; padding-left: 12px; color: #444; }
 table { border-collapse: collapse; } td, th { border: 1px solid #ccc; padding: 4px 8px; } img { max-width: 100%; }`
 
-/** Print rendered HTML through a hidden iframe. No dependency: the page's own print dialog does PDF. */
+/** Print rendered HTML through a hidden iframe: the Print… command only; PDF export never comes here. */
 export function printDoc(title: string, html: string): void {
   const frame = document.createElement('iframe')
   frame.setAttribute('aria-hidden', 'true')

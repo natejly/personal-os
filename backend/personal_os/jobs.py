@@ -77,7 +77,7 @@ CAL_POLL_S = 300.0
 CAL_LOOKAHEAD_S = 24 * 3600.0
 CAL_SEEN_KEEP = 200
 # What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
-# target. A scheduled desk may plan first or propose at the end, never 'ask' (cards each change while nobody watches).
+# target. A scheduled desk may plan first or propose at the end, never 'ask' (it works without a plan, and nobody is watching).
 TARGETS = ("run", "desk")
 DESK_JOB_AUTONOMY = ("plan", "propose")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
@@ -238,9 +238,12 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
 
 
 def check_watch_dir(raw: str | None) -> str:
-    """The folder a directory job may watch: the local-file tools' guard (inside home, no dot-folders)."""
+    """The folder a directory job may watch: the local-file tools' guard (anywhere but Grain's own data folder and app),
+    and never a credential store: an unattended job has no one to approve reading one."""
     from . import mac
     p = mac.allowed_path(raw or "")
+    if why := mac.sensitive_reason(raw or "", p):
+        raise mac.LocalPathError(why)
     if not p.is_dir():
         raise mac.LocalPathError(f"{p} is not a folder")
     return str(p)
@@ -375,7 +378,7 @@ class Jobs:
                 d["allowed_tools"] = json.loads(raw) if raw else None
             except ValueError:
                 d["allowed_tools"] = None
-            # NULL = JOB_BUDGET as is; otherwise a JSON object of the caps this job tightens.
+            # Legacy column: older clients stored caps here; nothing reads it any more.
             try:
                 d["budget"] = json.loads(d["budget"]) if d.get("budget") else None
             except ValueError:

@@ -18,8 +18,8 @@ export interface Parsed {
   cut: boolean
 }
 
-const STRING_KEYS = ['output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
-  'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format']
+const STRING_KEYS = ['id', 'output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
+  'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format', 'delivered']
 const NUMBER_KEYS = ['exit_code', 'duration_s', 'bytes', 'width', 'height', 'tab', 'total_pages', 'total_bytes']
 const BOOL_KEYS = ['timed_out', 'still_running', 'background', 'ocr', 'truncated']
 
@@ -64,13 +64,6 @@ export function parseResult(preview: string | null | undefined): Parsed {
 export const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 export const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 export const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
-
-/** The last `max` lines of output, and how many earlier lines are not shown. */
-export function tailLines(text: string, max = 12): { shown: string; hidden: number } {
-  const lines = text.replace(/\s+$/, '').split('\n')
-  if (lines.length <= max) return { shown: lines.join('\n'), hidden: 0 }
-  return { shown: lines.slice(-max).join('\n'), hidden: lines.length - max }
-}
 
 /** "reached pypi.org · blocked example.com", from a shell result's `network` field (an object, or a plain boolean). */
 export function networkLine(net: unknown): string | null {
@@ -156,9 +149,6 @@ export function snapshotLine(snapshot: string, ref: string): string {
 /** A field that holds a secret: typed text must never be echoed into the transcript for these. */
 export const looksSecret = (line: string): boolean => /password|passcode|one-time|cvv|cvc|card number|credit card|\bcc-/i.test(line)
 
-/** The page-state facts every browser result shares. */
-export interface BrowserView { action: string; subject: string; url: string; title: string }
-
 /**
  * One line for a browser_* call. A typed value is shown only when the snapshot proves the field is not a
  * secret; otherwise (password, payment, or the field is not in the cut preview) only its length appears.
@@ -202,6 +192,10 @@ export function gateProblems(error: string | null | undefined): { lead: string; 
 }
 
 /** One file a plain chat's tool saved for the user (backend `Workspace.output_entry`); path is relative to the chat's files. */
+/** The names of the files a send_files result attached to the reply. */
+export const attachedNames = (d: Fields | null | undefined): string[] =>
+  Array.isArray(d?.attached) ? (d.attached as unknown[]).map((a) => str((a as Fields | null)?.name)).filter(Boolean) : []
+
 export interface OutputFile { name: string; size: number; path: string }
 
 const OUTPUT_ENTRY = /\{\s*"name":\s*"((?:[^"\\]|\\.)*)",\s*"size":\s*(\d+),\s*"path":\s*"((?:[^"\\]|\\.)*)"\s*\}/g

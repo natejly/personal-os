@@ -1,7 +1,7 @@
 /** Pure logic of the first-run wizard: which step is next, what a step needs, what a provider changes. */
 
-export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'google' | 'about' | 'done'
-export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'google', 'about', 'done']
+export type StepId = 'welcome' | 'provider' | 'key' | 'test' | 'google' | 'about' | 'permissions' | 'done'
+export const STEPS: StepId[] = ['welcome', 'provider', 'key', 'test', 'google', 'about', 'permissions', 'done']
 
 /** Mirrors GET /setup/providers. */
 export interface ProviderInfo {
@@ -12,6 +12,8 @@ export interface ProviderInfo {
   keyUrl: string | null
   defaultModel: string
   models: string[]
+  /** The provider's default reranker; absent when it has no rerank route. */
+  rerankModel?: string
   note: string | null
 }
 

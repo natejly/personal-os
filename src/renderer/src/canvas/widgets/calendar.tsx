@@ -257,5 +257,3 @@ export const def: WidgetDef = {
   accepts: ACCEPTS,
   Component: CalendarWidget
 }
-
-export default CalendarWidget

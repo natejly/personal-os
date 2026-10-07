@@ -2,7 +2,7 @@
 // E2E_LLM=real), and the built Electron app pointed at them. Never touches ~/Library/Application Support.
 import { _electron as electron } from '@playwright/test'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,8 +31,12 @@ function dotenv() {
   return out
 }
 
-export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry = ['-m', 'personal_os'] }) {
-  const port = await freePort()
+/**
+ * Spawn one backend process on `port` against `dataDir`. Every e2e backend goes through here so they all get the
+ * parent watchdog (the backend exits by itself when the runner dies: a timeout kill, a crash, a closed terminal)
+ * and the same escalating stop(): SIGTERM, then SIGKILL after 5 s for one that hangs in shutdown.
+ */
+export function spawnBackend({ port, dataDir, token, llmUrl, llmKey, extraEnv = {}, entry = ['-m', 'personal_os'] }) {
   const env = {
     ...process.env,
     PYTHONPATH: join(ROOT, 'backend'),
@@ -45,6 +49,9 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
     PERSONAL_OS_DEFAULT_MODEL: process.env.E2E_LLM === 'real' ? (dotenv().PERSONAL_OS_DEFAULT_MODEL || '') : 'mock-chat',
     PERSONAL_OS_EXTRACTION_MODEL: process.env.E2E_LLM === 'real' ? (dotenv().PERSONAL_OS_EXTRACTION_MODEL || '') : 'mock-chat',
     PERSONAL_OS_LOG_DIR: join(dataDir, '..', 'logs'),
+    PERSONAL_OS_PARENT_WATCH: '1',
+    // e2e backends never call the live web provider (the backend's dotenv loader uses setdefault, so an empty value also blocks a key from a .env file).
+    FIRECRAWL_API_KEY: '',
     ...extraEnv
   }
   delete env.ELECTRON_RUN_AS_NODE
@@ -53,21 +60,41 @@ export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = 
   let log = ''
   child.stdout.on('data', (d) => (log += d))
   child.stderr.on('data', (d) => (log += d))
-  const url = `http://127.0.0.1:${port}`
-  const tries = Number(process.env.E2E_BACKEND_WAIT_S || 60) * 4
-  for (let i = 0; i < tries; i++) {
-    if (child.exitCode !== null) throw new Error('backend exited early:\n' + log.slice(-3000))
-    try { if ((await fetch(url + '/health')).ok) break } catch {}
-    await sleep(250)
-    if (i === tries - 1) throw new Error('backend never became healthy:\n' + log.slice(-3000))
+  const gone = () => child.exitCode !== null || child.signalCode !== null
+  const stop = async () => {
+    if (gone()) return
+    const exited = new Promise((r) => child.once('exit', r))
+    try { child.kill('SIGTERM') } catch {}
+    await Promise.race([exited, sleep(5000)])
+    if (!gone()) {
+      try { child.kill('SIGKILL') } catch {}
+      await Promise.race([exited, sleep(2000)])
+    }
   }
-  return { url, port, child, log: () => log, stop: () => { try { child.kill('SIGTERM') } catch {} } }
+  return { url: `http://127.0.0.1:${port}`, port, child, log: () => log, stop }
+}
+
+/** Wait until `backend.url/health` answers; kills the process and throws if it never does. */
+export async function waitHealthy(backend, { tries = Number(process.env.E2E_BACKEND_WAIT_S || 60) * 4, what = 'backend' } = {}) {
+  for (let i = 0; i < tries; i++) {
+    if (backend.child.exitCode !== null) throw new Error(`${what} exited early:\n` + backend.log().slice(-3000))
+    try { if ((await fetch(backend.url + '/health')).ok) return backend } catch {}
+    await sleep(250)
+  }
+  await backend.stop()
+  throw new Error(`${what} never became healthy:\n` + backend.log().slice(-3000))
+}
+
+export async function startBackend({ llmUrl, llmKey, dataDir, token, extraEnv = {}, entry }) {
+  return waitHealthy(spawnBackend({ port: await freePort(), dataDir, token, llmUrl, llmKey, extraEnv, entry }))
 }
 
 /**
  * launchApp(): { app, page, api, backend, llm, dataDir, close }.
  *  - api(path, {method, body}) calls the backend with the bearer token and returns parsed JSON (throws on >= 400).
  *  - llm.calls is every chat-completions request body the mock saw (undefined with E2E_LLM=real).
+ *  - settings are seeded over {autonomousByDefault:false, permissionMode:'manual'} so the classic chat stays testable;
+ *    pass autonomousByDefault:true / permissionMode:'auto' to test the shipped defaults.
  *  - page is the main window; waits until the shell (sidebar) has rendered.
  */
 export async function launchApp({ settings = {}, name = 'grain', beforeApp, backendEnv = {}, backendEntry } = {}) {
@@ -89,7 +116,13 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     llmUrl = llm.url
     llmKey = 'mock-key'
   }
-  const backend = await startBackend({ llmUrl, llmKey, dataDir, token, extraEnv: backendEnv, entry: backendEntry })
+  let backend
+  try {
+    backend = await startBackend({ llmUrl, llmKey, dataDir, token, extraEnv: backendEnv, entry: backendEntry })
+  } catch (e) {
+    llm?.close()
+    throw e
+  }
 
   const api = async (path, { method = 'GET', body, headers = {}, raw = false } = {}) => {
     const r = await fetch(backend.url + path, {
@@ -102,9 +135,19 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     if (!r.ok) throw new Error(`${method} ${path} → ${r.status}: ${text.slice(0, 500)}`)
     try { return text ? JSON.parse(text) : null } catch { return text }
   }
+  // Anything that fails between here and the fixture handing `g` to the test (seeding, Electron launch, the
+  // first window never appearing) would otherwise leave this backend and mock running: g.close is never reached.
+  const abandon = async (e) => {
+    await backend.stop()
+    llm?.close()
+    throw e
+  }
   // Skip the first-run wizard and seed anything the test wants before the renderer loads.
-  await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), ...settings } })
-  if (beforeApp) await beforeApp({ api, backend, dataDir })
+  try {
+    // The suite never runs permissionMode 'auto' (the shipped default): the mock cannot answer the safety reviewer. pytest covers it.
+    await api('/settings', { method: 'PUT', body: { onboardedAt: new Date().toISOString(), autonomousByDefault: false, permissionMode: 'manual', ...settings } })
+    if (beforeApp) await beforeApp({ api, backend, dataDir })
+  } catch (e) { await abandon(e) }
 
   const env = {
     ...process.env,
@@ -118,8 +161,12 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   delete env.ELECTRON_RUN_AS_NODE
   const executablePath = join(ROOT, 'node_modules', 'electron', 'dist', readFileSync(join(ROOT, 'node_modules', 'electron', 'path.txt'), 'utf8').trim())
   const consoleErrors = []
+  // Downloads (the PDF export writes there with no dialog) land in the profile, never in the real Downloads folder.
+  const downloadsDir = join(profile, 'downloads')
+  mkdirSync(downloadsDir, { recursive: true })
   const openApp = async () => {
     const app = await electron.launch({ executablePath, args: [join(ROOT, 'out', 'main', 'index.js')], env, cwd: ROOT, timeout: 60_000 })
+    await app.evaluate(({ app: a }, d) => a.setPath('downloads', d), downloadsDir)
     let page = await app.firstWindow({ timeout: 60_000 })
     // A restored pop-out can open before the main window: the shell is the one that is not a widget surface.
     for (let i = 0; i < 240 && page.url().includes('surface=widget'); i++) {
@@ -134,8 +181,10 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
     if (!process.env.E2E_FOREGROUND) await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && w.isVisible()) w.focus() })
     return { app, page }
   }
-  const g = { api, backend, llm, dataDir, scratch, token, consoleErrors }
-  Object.assign(g, await openApp())
+  const g = { api, backend, llm, dataDir, downloadsDir, scratch, token, consoleErrors }
+  try {
+    Object.assign(g, await openApp())
+  } catch (e) { await abandon(e) }
   /** Quit Electron and start it again on the same backend and data dir (persistence checks). Replaces g.app / g.page. */
   g.relaunch = async () => {
     try { await g.app.close() } catch {}
@@ -144,7 +193,7 @@ export async function launchApp({ settings = {}, name = 'grain', beforeApp, back
   }
   g.close = async () => {
     try { await g.app.close() } catch {}
-    backend.stop()
+    await backend.stop()
     llm?.close()
     if (!process.env.E2E_KEEP) { try { rmSync(scratch, { recursive: true, force: true }) } catch {} }
   }

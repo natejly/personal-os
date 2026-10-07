@@ -33,7 +33,6 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'plan', label: 'Day plan' },
   { key: 'gtasks', label: 'Google Tasks (when sync is off)' },
   { key: 'drive', label: 'Drive' },
-  { key: 'meetings', label: 'Meetings' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
   { key: 'chats', label: 'Recent chats' }
@@ -41,9 +40,8 @@ export const HOME_MODULES: HomeModule[] = [
 
 /**
  * Views that may be hidden or moved between the sidebar and the title bar (shell/nav.tsx). Home, chats
- * and Files are the shell itself and stay. Showing Meetings records nothing: recording needs the
- * consent notice acknowledged on the first Record, and Activity's probes wait for OS permissions the user grants.
+ * and Files are the shell itself and stay.
  */
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = navEntries().map(({ view, label }) => ({ view, label }))
 
-export { homeModuleOn, viewHidden } from './moduleToggles'
+export { homeModuleOn } from './moduleToggles'

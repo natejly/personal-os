@@ -62,11 +62,13 @@ def sh(i: int, command: str) -> dict[str, Any]:
     return {"id": f"c{i}", "name": "gmail_send", "arguments": json.dumps({"to": command})}
 
 
-def setup(rules: dict[str, list[str]] | None = None, mode: str = "ask", **settings: Any) -> str:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "workspaceRoots": [],
-                            "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
+def setup(rules: dict[str, list[str]] | None = None, mode: str | None = "ask", **settings: Any) -> str:
+    """mode=None leaves gmail_send on its default (no explicit choice of the user's)."""
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "stuckDetection": True, "delegationForce": False, "workspaceRoots": [],
+                            "permissionMode": "manual", "unattendedApprovals": "ask", "permissionRules": {"allow": [], "ask": [], "deny": [], **(rules or {})}, **settings})
     cid = appmod.convos.create(None, "t", "m")["id"]
-    appmod.convos.update(cid, {"settings": {"tools": {"gmail_send": mode}}})
+    if mode is not None:
+        appmod.convos.update(cid, {"settings": {"tools": {"gmail_send": mode}}})
     RAN.clear()
     SEEN.clear()
     permrules.SESSION.clear()
@@ -117,14 +119,13 @@ def tool_messages() -> list[str]:
 
 
 def test_deny_survives_skip_permissions() -> None:
-    cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", skipPermissions=True)
+    cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "bad@x.com")], []])
-    check(not RAN and not cards(ev) and results(ev)[0]["error"], "a denied recipient is refused with skip-permissions on")
-    cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", skipPermissions=True)
+    check(not RAN and not cards(ev) and results(ev)[0]["error"], "a denied recipient is refused in allow-all mode")
+    cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", permissionMode="allow_all")
     ev = drive(cid, [[sh(0, "ok@x.com")], []])
-    # An external tool is one of the asks skip-permissions leaves alone: the other recipient still gets a card
-    # (the harness answers it "allow"), and only then runs.
-    check(RAN == ["ok@x.com"] and len(cards(ev)) == 1, "another recipient still asks under skip-permissions, then runs once allowed")
+    # Allow all lifts most external cards, but an email is never sent without the user's own card.
+    check(RAN == ["ok@x.com"] and len(cards(ev)) == 1, "another recipient still gets the email card in allow-all mode")
 
 
 def test_external_card_has_danger_and_no_whole_tool_grant() -> None:

@@ -3,9 +3,9 @@ import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 
 /** Words and clocks for a desk's state, shared by the chat strip, the crew widget and the Agent inbox. */
 export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
-  { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
-  { value: 'ask', label: 'Ask as it goes', hint: 'No plan up front; every consequential tool still shows a card.' },
-  { value: 'propose', label: 'Work and propose', hint: 'Works in its own folder and brings the result back for review.' }
+  { value: 'plan', label: 'Plan first', hint: 'Writes a plan for you to approve, then carries out the approved steps.' },
+  { value: 'ask', label: 'Ask as it goes', hint: 'Acts directly on your files as it works, asking when something needs you.' },
+  { value: 'propose', label: 'Autonomous', hint: 'Works in its own folder and brings back the changes for review before applying them.' }
 ]
 
 export const STATUS_LABEL: Record<DeskStatus, string> = {
@@ -23,6 +23,7 @@ export const STATUS_LABEL: Record<DeskStatus, string> = {
   stopped: 'Stopped',
   queued: 'Queued'
 }
+
 
 export const fmtDur = (seconds: number): string => {
   const s = Math.max(0, seconds)

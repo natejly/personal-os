@@ -50,7 +50,7 @@ def _portal():  # type: ignore[no-untyped-def]
     real = llm.stream_chat
     llm.stream_chat = _scripted
     with client:
-        client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
+        client.put("/settings", json={"autoLearn": False, "baseUrl": "", "delegationForce": False})  # the scripted rounds call tools past round 2
         yield
     llm.stream_chat = real
 

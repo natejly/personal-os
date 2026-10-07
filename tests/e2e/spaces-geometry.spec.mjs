@@ -27,7 +27,7 @@ async function seed(g, windows, canvas = {}) {
   const out = []
   for (const w of windows) {
     const body = { ...w }
-    if (w.kind === 'note') body.ref_id = (await g.api('/notes', { method: 'POST', body: { body: 'n' } })).id
+    if (w.kind === 'doc') body.ref_id = (await g.api('/docs', { method: 'POST', body: { title: 'n', content: 'n' } })).id
     out.push(await g.api(`/canvases/${s.id}/windows`, { method: 'POST', body }))
   }
   await g.page.reload()
@@ -43,33 +43,35 @@ const geo = async (g, sid, id) => {
 
 test('move and resize persist exact geometry (snap off), min size honoured', async ({ grain }) => {
   const { page } = grain
-  const { s, ws } = await seed(grain, [{ kind: 'note', x: 200, y: 150, w: 320, h: 260 }], { snap_mode: 'off' })
+  // The store keeps the rect the drag produced; the pointer can land a float32 hair off a whole pixel.
+  const px = (r) => ({ ...r, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) })
+  const { s, ws } = await seed(grain, [{ kind: 'doc', x: 200, y: 150, w: 320, h: 260 }], { snap_mode: 'off' })
   const id = ws[0].id
   const tr = () => win(page, id).evaluate((e) => e.style.translate)
   expect(await tr()).toBe('200px 150px')
   const p = await gripPoint(page, id)
   await drag(page, p, { x: p.x + 137, y: p.y + 83 })
   await expect.poll(async () => (await geo(grain, s.id, id)).x).toBe(337)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 337, y: 233, w: 320, h: 260 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 337, y: 233, w: 320, h: 260 })
   await expect.poll(tr).toBe('337px 233px')
 
   // resize from the SE corner (grab 3px inside the corner, so the delta is 80 x 44)
   const b = await win(page, id).boundingBox()
   await drag(page, { x: b.x + b.width - 3, y: b.y + b.height - 3 }, { x: b.x + b.width + 77, y: b.y + b.height + 41 })
   await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(400)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 337, y: 233, w: 400, h: 304 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 337, y: 233, w: 400, h: 304 })
 
   // resize from the west edge (grab 2px in, drag 42px left): x moves, right edge stays
   const b2 = await win(page, id).boundingBox()
   await drag(page, { x: b2.x + 2, y: b2.y + b2.height / 2 }, { x: b2.x - 40, y: b2.y + b2.height / 2 })
   await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(442)
-  expect(await geo(grain, s.id, id)).toMatchObject({ x: 295, y: 233, w: 442, h: 304 })
+  expect(px(await geo(grain, s.id, id))).toMatchObject({ x: 295, y: 233, w: 442, h: 304 })
 
-  // shrinking far below the minimum stops at the note's 200x160 floor
+  // shrinking far below the minimum stops at the doc's 280x200 floor
   const b3 = await win(page, id).boundingBox()
   await drag(page, { x: b3.x + b3.width - 3, y: b3.y + b3.height - 3 }, { x: b3.x + 30, y: b3.y + 30 })
-  await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(200)
-  expect((await geo(grain, s.id, id)).h).toBe(160)
+  await expect.poll(async () => (await geo(grain, s.id, id)).w).toBe(280)
+  expect(px(await geo(grain, s.id, id)).h).toBe(200)
 
   // Esc mid-drag puts it back
   const before = await geo(grain, s.id, id)
@@ -91,8 +93,8 @@ test('move and resize persist exact geometry (snap off), min size honoured', asy
 test('grid snapping lands on the pitch; guides snap to a neighbour and draw while dragging', async ({ grain }) => {
   const { page } = grain
   const { s, ws } = await seed(grain, [
-    { kind: 'note', x: 160, y: 96, w: 320, h: 240 },
-    { kind: 'note', x: 640, y: 128, w: 320, h: 240 }
+    { kind: 'doc', x: 160, y: 96, w: 320, h: 240 },
+    { kind: 'doc', x: 640, y: 128, w: 320, h: 240 }
   ], { snap_mode: 'guides' })
   const [a, b] = ws
   // drag B so its left edge ends ~4px right of A's left edge: the guide pulls it onto x = 160
@@ -124,9 +126,9 @@ test('grid snapping lands on the pitch; guides snap to a neighbour and draw whil
 test('focus raises z; close, minimize, zoom and the window menu', async ({ grain }) => {
   const { page } = grain
   const { s, ws } = await seed(grain, [
-    { kind: 'note', x: 100, y: 80, w: 300, h: 240 },
+    { kind: 'doc', x: 100, y: 80, w: 300, h: 240 },
     { kind: 'todos', x: 260, y: 140, w: 300, h: 240 },
-    { kind: 'note', x: 700, y: 80, w: 300, h: 240 }
+    { kind: 'doc', x: 700, y: 80, w: 300, h: 240 }
   ])
   const [a, b, c] = ws
   const z = async (id) => (await geo(grain, s.id, id)).z
@@ -187,7 +189,7 @@ test('expand leaves the canvas for the full view; the window stays', async ({ gr
 
 test('wheel zoom and pan persist, clamp, and reset via the API; a locked space ignores them', async ({ grain }) => {
   const { page } = grain
-  const { s } = await seed(grain, [{ kind: 'note', x: 100, y: 80, w: 300, h: 240 }])
+  const { s } = await seed(grain, [{ kind: 'doc', x: 100, y: 80, w: 300, h: 240 }])
   const canvas = page.locator('.canvas')
   const cb = await canvas.boundingBox()
   const at = { x: cb.x + cb.width - 80, y: cb.y + cb.height - 60 } // bare plane, bottom right
@@ -242,10 +244,10 @@ test('wheel zoom and pan persist, clamp, and reset via the API; a locked space i
 test('Tidy up arranges overlapping windows without overlap', async ({ grain }) => {
   const { page } = grain
   const { s, ws } = await seed(grain, [
-    { kind: 'note', x: 100, y: 80, w: 300, h: 240 },
-    { kind: 'note', x: 120, y: 90, w: 300, h: 240 },
-    { kind: 'note', x: 140, y: 100, w: 300, h: 240 },
-    { kind: 'note', x: 160, y: 110, w: 300, h: 240 }
+    { kind: 'doc', x: 100, y: 80, w: 300, h: 240 },
+    { kind: 'doc', x: 120, y: 90, w: 300, h: 240 },
+    { kind: 'doc', x: 140, y: 100, w: 300, h: 240 },
+    { kind: 'doc', x: 160, y: 110, w: 300, h: 240 }
   ])
   await menuClick(grain.app, 'Tidy Up')
   await expect.poll(async () => (await geo(grain, s.id, ws[1].id)).x, { timeout: 8000 }).not.toBe(120)
@@ -266,13 +268,13 @@ test('60 windows in one space: panning stays above 20 fps and the layout restore
   const { page, api } = grain
   const s = (await spaces(grain))[0]
   await api('/canvases/' + s.id, { method: 'PUT', body: { zoom: 1, pan_x: 0, pan_y: 0 } })
-  const note = (await api('/notes', { method: 'POST', body: { body: 'bulk' } })).id
+  const note = (await api('/docs', { method: 'POST', body: { title: 'bulk', content: 'bulk' } })).id
   const ids = []
   for (let i = 0; i < 60; i++) {
-    const kind = i % 3 === 0 ? 'note' : 'face'
+    const kind = i % 3 === 0 ? 'doc' : 'face'
     const w = await api(`/canvases/${s.id}/windows`, {
       method: 'POST',
-      body: { kind, ref_id: kind === 'note' ? note : undefined, x: 40 + (i % 10) * 330, y: 40 + Math.floor(i / 10) * 300, w: 300, h: 260 }
+      body: { kind, ref_id: kind === 'doc' ? note : undefined, x: 40 + (i % 10) * 330, y: 40 + Math.floor(i / 10) * 300, w: 300, h: 260 }
     })
     ids.push(w.id)
   }
@@ -327,7 +329,7 @@ test('60 windows in one space: panning stays above 20 fps and the layout restore
 test('820x520 window: canvas bar and windows stay usable', async ({ grain }) => {
   const { page } = grain
   await grain.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 520))
-  const { s, ws } = await seed(grain, [{ kind: 'note', x: 40, y: 40, w: 300, h: 240 }], { snap_mode: 'off' })
+  const { s, ws } = await seed(grain, [{ kind: 'doc', x: 40, y: 40, w: 300, h: 240 }], { snap_mode: 'off' })
   await sleep(500)
   // the bar's controls are all inside the window, none clipped sideways
   const r = await page.evaluate(() => {

@@ -35,6 +35,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from . import migrations
+from .kinds import is_internal
 
 log = logging.getLogger("personal_os")
 
@@ -247,9 +248,9 @@ _README = """Grain data export
 grain.db            A complete SQLite snapshot (open with any SQLite tool, or restore it in Grain).
                     API keys are stored outside the database and are not included, but it
                     holds your conversations, memories and documents: keep this file private.
-uploads/            Files you added to the knowledge base, as stored.
+uploads/            Files you added to the knowledge base, as stored: uploads/<sha256>/<original name>,
+                    one file per distinct content.
 doc_assets/         Images pasted into your documents, one folder per document.
-recordings/         Meeting audio you chose to keep, one folder per meeting.
 cowork/             Each desk's outputs/ folder: the deliverables it handed in.
 export/             The same content as plain text:
   conversations.md / conversations.json
@@ -301,6 +302,8 @@ def render_conversation_md(conv: dict[str, Any], msgs: list[dict[str, Any]], pro
     if exported is None:
         out.append(f"{project} · {conv.get('model') or ''} · {_when(conv['created_at'])}\n\n")
     for m in msgs:
+        if is_internal(m):
+            continue
         who = "You" if m["role"] == "user" else "Grain"
         head = f"## {who} · {_when(m['created_at'])}" + (f" · {m['model']}" if m["role"] != "user" and m.get("model") else "")
         out.append(head + "\n\n")
@@ -330,7 +333,7 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
         convs = _rows(c, f"SELECT id, project_id, title, model, created_at, updated_at FROM conversations {trashed}ORDER BY created_at")
         # Regenerated answers are kept as superseded rows; the export reads one answer per turn.
         live = "WHERE superseded_at IS NULL " if "superseded_at" in mcols else ""
-        extra = "".join(f", {k}" for k in ("error", "tool_events", "trace") if k in mcols)
+        extra = "".join(f", {k}" for k in ("error", "tool_events", "trace", "kind") if k in mcols)
         msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at{extra} FROM messages {live}ORDER BY created_at, rowid")
         mems = _rows(c, "SELECT id, project_id, content, kind, source, pinned, created_at FROM memories ORDER BY created_at")
         docs = _rows(c, "SELECT id, project_id, name, mime, size, text, created_at FROM documents ORDER BY created_at")
@@ -342,7 +345,8 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
 
     by_conv: dict[str, list[dict[str, Any]]] = {}
     for m in msgs:
-        by_conv.setdefault(m["conversation_id"], []).append(m)
+        if not is_internal(m):  # a worker's report or a desk's own nudge: not something either side said
+            by_conv.setdefault(m["conversation_id"], []).append(m)
     md: list[str] = []
     for cv in convs:
         cv["project"] = scope(cv["project_id"])
@@ -385,7 +389,7 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-        for sub in ("uploads", "doc_assets", "recordings", "cowork"):
+        for sub in ("uploads", "doc_assets", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:
                 rel = f.relative_to(up).as_posix()

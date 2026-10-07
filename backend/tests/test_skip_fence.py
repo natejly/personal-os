@@ -1,4 +1,4 @@
-"""Skip-permissions lifts a plain ask only: forced, ask-rule, external, schedules, outside-folder and shell cards stay.
+"""Allow-all mode lifts every card except an outside-folder write, a plan and a question; deny rules and the hardline list still refuse.
 
 Reuses the scripted-model harness of test_permrules_loop. Run: python backend/tests/test_skip_fence.py
 """
@@ -40,7 +40,7 @@ def call(i: int, name: str, x: str = "a") -> dict[str, Any]:
 
 def run(calls: list[list[dict[str, Any]]], rules: dict | None = None, tainted: bool = False, mode: str = "ask",
         job: bool = False, **kw: Any) -> list[tuple[str, Any]]:
-    cid = T.setup(rules, skipPermissions=True, **kw)
+    cid = T.setup(rules, permissionMode="allow_all", **kw)
     st: dict[str, Any] = {"tools": {n: mode for n in ("t_write", "t_ext", "t_fs", "t_probe", "shell_run")}}
     if tainted:
         st["tainted"] = True
@@ -49,9 +49,13 @@ def run(calls: list[list[dict[str, Any]]], rules: dict | None = None, tainted: b
     return T.drive(cid, calls, ["deny"] * 5, run=Run(cid, None, kind="job") if job else None)
 
 
-def test_plain_writes_ask_is_lifted() -> None:
+def test_plain_and_external_asks_are_lifted() -> None:
     ev = run([[call(0, "t_write")], []])
-    check(not T.cards(ev) and CALLS == ["a"], "unforced writes ask runs")
+    check(not T.cards(ev) and CALLS == ["a"], "a writes ask runs")
+    ev = run([[call(0, "t_ext")], []])
+    check(not T.cards(ev) and CALLS == ["a"], "an external ask runs")
+    ev = run([[T.sh(0, "make x")], []])
+    check(not T.cards(ev) and T.RAN == ["make x"], "an uncleared shell command runs")
 
 
 def test_deny_rule_still_refuses() -> None:
@@ -59,19 +63,11 @@ def test_deny_rule_still_refuses() -> None:
     check(not T.RAN and not T.cards(ev), "deny refused, tool not called")
 
 
-def test_ask_rule_stays_ask() -> None:
+def test_ask_rule_taint_and_always_ask_are_lifted() -> None:
     ev = run([[T.sh(0, "make x")], []], {"ask": ["Bash(make *)"]}, mode="on")
-    check(len(T.cards(ev)) == 1 and not T.RAN, "ask rule leaves ask")
-
-
-def test_tainted_always_ask_tool_stays_forced_ask() -> None:
+    check(not T.cards(ev) and T.RAN == ["make x"], "an ask rule is lifted")
     ev = run([[call(0, "t_ext")], []], tainted=True, mode="on", alwaysAsk=["t_ext"])
-    c = T.cards(ev)
-    check(len(c) == 1 and c[0]["forced"] and not CALLS, "tainted alwaysAsk tool asks, forced")
-    ev = run([[call(0, "t_ext")], []], alwaysAsk=["t_ext"])
-    check(len(T.cards(ev)) == 1 and not CALLS, "alwaysAsk tool asks even untainted")
-    ev = run([[call(0, "t_ext")], []], tainted=True, mode="on", alwaysAsk=[])
-    check(not T.cards(ev) and CALLS == ["a"], "an external tool not under alwaysAsk runs on, tainted or not")
+    check(not T.cards(ev) and CALLS == ["a"], "a tainted alwaysAsk tool is lifted")
     appmod.db.set_settings({"alwaysAsk": llm.DEFAULT_SETTINGS["alwaysAsk"]})
 
 
@@ -80,26 +76,14 @@ def test_fs_ask_stays() -> None:
     check(len(T.cards(ev)) == 1 and not CALLS, "outside-folder write asks")
 
 
-def test_doom_loop_still_asks() -> None:
-    ev = run([[call(0, "t_write")], [call(1, "t_write")], [call(2, "t_write")], []], mode="on")
-    cs = T.cards(ev)
-    check(len(CALLS) == 2 and len(cs) == 1 and cs[0]["forced"], "third identical call raises a forced doom-loop card")
+def test_allowed_calls_are_logged() -> None:
+    run([[call(0, "t_write")], []])
+    rows = [r for r in appmod.approval_log.history(appmod.db, tool="t_write")["items"] if r["scope"] == "allow-all"]
+    check(rows and rows[0]["decision"] == "auto" and rows[0]["note"] == "allowed (allow-all mode)", "logged as allowed in allow-all mode")
 
 
-def test_predicate() -> None:
-    lift = permrules.lift_permission_ask
-    check(lift("t_write", "ask", skip=True, danger="writes") == "on", "plain ask lifts")
-    check(lift("propose_plan", "ask", skip=True, danger="safe") == "ask", "plan stays")
-    check(lift("desk_ask", "ask", skip=True, danger="safe") == "ask", "desk_ask stays")
-    check(lift("t_write", "ask", skip=True, forced=True, danger="writes") == "ask", "forced stays")
-    check(lift("t_write", "ask", skip=True, fenced=True, danger="writes") == "ask", "fenced stays")
-    check(lift("x", "ask", skip=True, danger="schedules") == "ask", "schedules stays")
-    check(lift("shell_run", "ask", skip=True, danger="executes") == "ask", "uncleared shell stays")
-    check(lift("t_write", "off", skip=True) == "off" and lift("t_write", "ask", skip=False) == "ask", "off and unset")
-
-
-def test_bridge_fenced_call_not_approved() -> None:
-    cid = T.setup(None, skipPermissions=True)
+def test_bridge_only_fenced_call_not_approved() -> None:
+    cid = T.setup(None, permissionMode="allow_all")
     appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
     T.ROUNDS[:] = [[call(0, "t_probe")], []]
 
@@ -113,27 +97,16 @@ def test_bridge_fenced_call_not_approved() -> None:
             llm.stream_chat = prev
         ap = CTX["bridge_approve"]
         return {"plain": await ap("t_write", {"x": "a"}, False), "forced": await ap("t_write", {"x": "a"}, True),
-                "ext": await ap("t_ext", {"x": "a"}, False), "fs": await ap("t_fs", {"x": "a"}, False),
-                "shell": await ap("shell_run", {"command": "ls"}, False)}
+                "ext": await ap("t_ext", {"x": "a"}, False), "fs": await ap("t_fs", {"x": "a"}, False)}
 
     r = asyncio.run(go())
-    check(r["plain"] is True, "plain writes bridge call approved")
-    check(not (r["forced"] or r["ext"] or r["fs"] or r["shell"]), "fenced bridge calls not approved")
+    check(r["plain"] and r["forced"] and r["ext"], "unfenced bridge calls are approved")
+    check(not r["fs"], "a fenced bridge call is not")
 
 
-def test_job_run_clears_skip() -> None:
-    """A job's ctx carries no flag, so its bridge approver does not skip-approve a plain call either."""
-    cid = T.setup(None, skipPermissions=True)
-    appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
-    CTX.clear()
-    T.drive(cid, [[call(0, "t_probe")], []], run=Run(cid, None, kind="job"))
-    check(CTX["skip_permissions"] is False, "job run ctx never carries the flag")
-    check(asyncio.run(CTX["bridge_approve"]("t_write", {"x": "a"}, False)) is False, "job bridge call not skip-approved")
-
-
-def test_bridge_card_unattended_refused_and_wait_off_the_clock() -> None:
-    """A job's bridge card is refused on the spot; a chat's wait is off the budget; bridged calls are journaled."""
-    cid = T.setup(None, unattendedApprovals="deny", skipPermissions=False)
+def test_job_bridge_card_refused_and_wait_off_the_clock() -> None:
+    """In manual mode a job's bridge card is refused on the spot; a chat's wait is off the meter; bridged calls are journaled."""
+    cid = T.setup(None, unattendedApprovals="deny", permissionMode="manual")
     appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
     T.drive(cid, [[call(0, "t_probe")], []], run=Run(cid, appmod.run_store, kind="job"))
     job_ap = CTX["bridge_approve"]
@@ -141,9 +114,9 @@ def test_bridge_card_unattended_refused_and_wait_off_the_clock() -> None:
     check([a["decided_by"] for a in appmod.run_store.approvals(status=None, run_id=CTX["run_id"])] == ["unattended"],
           "refusal recorded as unattended")
 
-    run = Run(cid, appmod.run_store)
-    T.drive(cid, [[call(0, "t_probe")], []], run=run)
-    ap, budget, seen = CTX["bridge_approve"], CTX["budget"], []
+    run_ = Run(cid, appmod.run_store)
+    T.drive(cid, [[call(0, "t_probe")], []], run=run_)
+    ap, budget, seen = CTX["bridge_approve"], CTX["meter"], []
 
     async def go() -> bool:
         before = budget.paused
@@ -151,16 +124,16 @@ def test_bridge_card_unattended_refused_and_wait_off_the_clock() -> None:
         while not (uid := next((u for u in appmod._approvals if ":bridge" in u), None)):
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.3)
-        seen.append(run.status)
+        seen.append(run_.status)
         await appmod.approve_tool_call(uid, appmod.ApprovalIn(decision="allow"))
         ok = await task
         seen.append(budget.paused - before)
         return ok
-    check(asyncio.run(go()) is True and seen[0] == "awaiting_approval" and seen[1] >= 0.3 and run.status == "running",
-          "bridge wait marks the run waiting and is credited back to the budget")
+    check(asyncio.run(go()) is True and seen[0] == "awaiting_approval" and seen[1] >= 0.3 and run_.status == "running",
+          "bridge wait marks the run waiting and is credited back to the meter")
     CALLS.clear()
     asyncio.run(CTX["bridge_call"]("t_write", {"x": "j"}, CTX))
-    check(CALLS == ["j"] and any(r["tool"] == "t_write" for r in appmod.run_store.executed(run.run_id)),
+    check(CALLS == ["j"] and any(r["tool"] == "t_write" for r in appmod.run_store.executed(run_.run_id)),
           "bridged write goes through the journal")
 
 
@@ -168,7 +141,7 @@ def test_plan_stays_ask_in_chat() -> None:
     plan = {"title": "t", "steps": [{"tool": "t_write", "arguments": {"x": "a"}}]}
     ev = run([[{"id": "p0", "name": "propose_plan", "arguments": json.dumps(plan)}], []])
     c = T.cards(ev)
-    check(len(c) == 1 and c[0]["name"] == "propose_plan" and not CALLS, "propose_plan still raises a card under skip")
+    check(len(c) == 1 and c[0]["name"] == "propose_plan" and not CALLS, "propose_plan still raises a card in allow-all")
 
 
 def main() -> int:

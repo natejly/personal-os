@@ -60,7 +60,8 @@ async def fake_stream(settings: Any, model: str, messages: list[dict[str, Any]],
 def stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm, "complete", fake_complete)
     monkeypatch.setattr(llm, "stream_chat", fake_stream)
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "toolDeferAbove": 0, "subagentMaxConcurrent": 6})
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "toolDeferAbove": 0, "subagentMaxConcurrent": 6,
+                            "permissionMode": "manual"})  # the reviewer is not under test here
     COMPLETE.clear()
     PARENT_SEEN.clear()
     CLAIMS.clear()
@@ -72,7 +73,7 @@ def _ctx() -> dict[str, Any]:
     cfg = appmod.settings()
     return {"project_id": None, "conversation_id": conv, "message_id": None, "tainted": False, "taint_sources": [],
             "allowed_urls": set(), "settings": cfg, "modes": appmod.toolbox.effective({}, None, None), "depth": 0,
-            "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(cfg), "run": None,
+            "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(), "run": None,
             "citations": []}
 
 
@@ -148,4 +149,3 @@ def test_slash_research_expands_to_a_deep_research_instruction() -> None:
     out = commands.expand("/research what changed in Python 3.14 packaging", None)
     assert out.startswith("/research what changed in Python 3.14 packaging")
     assert "deep_research" in out
-    assert "research" in commands.BUILTIN

@@ -24,7 +24,6 @@ from typing import Any, Awaitable, Callable
 from . import permrules
 
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
-MAX_CALLS = 50
 MAX_SECONDS = 300
 STDOUT_KEEP = 50_000
 STDOUT_HEAD = 0.4          # share of the kept stdout taken from the start; the rest is the tail, where a failure is
@@ -39,7 +38,7 @@ import socket
 
 
 class ToolError(Exception):
-    """The bridge refused the call (tool not offered, off, declined, call cap). A tool's own error comes back as data."""
+    """The bridge refused the call (tool not offered, off, declined). A tool's own error comes back as data."""
 
 
 def call(tool, **args):
@@ -87,10 +86,9 @@ def offered(tb: Any, ctx: dict[str, Any], wanted: list[str] | None, modes: dict[
 
 class Bridge:
     def __init__(self, tb: Any, ctx: dict[str, Any], names: list[str], modes: dict[str, str] | None = None,
-                 approve: Approve | None = None, max_calls: int = MAX_CALLS):
+                 approve: Approve | None = None):
         self.tb, self.ctx, self.names, self.modes = tb, ctx, set(names), modes
         self.approve = approve
-        self.max_calls = max_calls
         self.calls = 0
         self.log: list[dict[str, Any]] = []
         self.stderr_cap = STDERR_KEEP
@@ -164,8 +162,6 @@ class Bridge:
     async def handle(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name not in self.names:
             return self._refuse(name, f"{name} was not offered to this script. Offered: {', '.join(sorted(self.names)) or 'none'}.")
-        if self.calls >= self.max_calls:
-            return self._refuse(name, f"call cap reached ({self.max_calls} bridged calls per run_python). Do the rest in another run.")
         self.calls += 1
         raw = (self.modes or {}).get(name) if self.modes is not None else None
         spec = self.tb.specs[name]
@@ -175,12 +171,15 @@ class Bridge:
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.
         # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
         mode = self.tb.gate(name, raw, self.ctx, args)
+        fs_ask = self.tb.fs_needs_ask(name, args, self.ctx)  # a credential store, or a write after untrusted content
+        if fs_ask and mode == "on":
+            mode = "ask"
         # Then the user's argument-pattern rules and this chat's session grants: a deny refuses, an ask rule cards.
-        cfg = self.ctx.get("settings") or {}
-        roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+        cfg = self.ctx.get("settings") or self.tb.settings()
+        roots: list[str] = []
         if self.ctx.get("desk_id") and (ws := getattr(self.tb, "workspace", None)) is not None:
             roots.append(str(ws.desk_root(self.ctx["desk_id"])))
-        perm = permrules.resolve(name, args, mode, mode != raw, rules=cfg.get("permissionRules"), roots=roots,
+        perm = permrules.resolve(name, args, mode, mode != raw or fs_ask, rules=cfg.get("permissionRules"), roots=roots,
                                  conv=self.ctx.get("conversation_id"))
         if perm.refusal:
             return self._refuse(name, f"{name} was refused: {perm.refusal}")
@@ -203,7 +202,11 @@ class Bridge:
                 return self._refuse(name, f"the user declined {name}.")
         # The run's own caller when the lane has one (undo snapshot, idempotency journal), else the toolbox directly.
         call = self.ctx.get("bridge_call")
-        result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
+        self.ctx["fs_outside_ok"] = fs_ask  # the user said yes to it above
+        try:
+            result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
+        finally:
+            self.ctx["fs_outside_ok"] = False
         if self.tb.taints(name) and not (isinstance(result, dict) and result.get("error")):
             self.ctx.setdefault("taint_sources", []).append(name)  # appended every time: the fence reads growth
         self.log.append({"tool": name, "ok": not (isinstance(result, dict) and result.get("error"))})

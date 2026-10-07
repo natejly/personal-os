@@ -2,12 +2,43 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-07
+
+### Added
+
+- **Files → Artifacts.** A third Files section lists every file the assistant made in any chat (plain chats' outboxes and autonomous sessions' workspaces: documents, data, images, code, browser downloads), grouped by chat with the newest first and a link back to the chat. It is an index of paths, not copies: saves are recorded as they happen, files a shell or script wrote are picked up by a rescan when the list is requested, and a migration indexes what was already on disk. Files open in the same viewer as uploads, with Open, Reveal in Finder and Save a copy. A chat in the trash keeps its artifacts listed (labelled, no link) until it is erased, which removes the files and their entries; an entry whose file is gone is left out.
+
+### Changed
+
+- **No status chrome for the main agent.** The strip above the composer shows only while background workers are running; the main agent's own progress has no strip, card, checklist row, inline plan checklist, restart or error banner, or streaming status line. The composer's Stop stops it. The checklist and finished workers moved to the chat's side panel (Checklist and Workers tabs, from the Documents button).
+- **Private chats removed.** The Private switch, the sidebar eye icon and the Context panel locks are gone; migration 30 clears the flag, so chats that were private now read memory and learn like any other.
+- **Composer "Mode" button.** The composer control that hands a chat to a desk is now called Mode (accessible name "Mode: how the assistant works in this chat"), and each style has a one-line description: Plan first, Ask as it goes, and Autonomous (renamed from "Work and propose"; same behaviour, same API values).
+- **Read aloud and voice chat removed.** The speaker button on a reply, the hands-free voice chat loop (`/voice`, the waveform button) and their settings (voice, speed, turn cap) are gone; migration 29 deletes the stored keys. Dictation (the mic button and its chord) is the one voice input and still never sends for you.
+- **Projects: Artifacts tab renamed Context.** The project tab that lists a project's chats' files, notes and uploads is now called Context, so "Artifacts" means one thing: the Files section above.
+- **Memory is in Settings.** The Memory sidebar row and page are gone; Settings has a Memory tab (between Texting and Appearance) with the scope filter, a collapsed Learning section (learn from chats, learn how I write) and the panel itself. Split is the default layout again, graph on the left and memories on the right; List, Graph and Voice are one click away. ⌘6, the Go menu, "View all" on Today and every link to Memory open that tab.
+- **Sidebar rows are toggles in Appearance.** Settings → Appearance → Sidebar has one switch per row (Lists, Calendar, Mail, Health, Library), saved at once with no restart; Today cards and the default file font moved there too. The Advanced Layout group is gone. A migration removes `memory` from `hiddenViews`; all rows stay on by default.
+- **Settings is shorter.** Advanced keeps eight groups (Assistant, Approvals, Files and web, Search, Desks and workers, Voice and shortcuts, Data, Developer). The undo-send switch moved to Integrations. An open Settings window follows `openSettings` calls from toasts and links.
+
+## Unreleased — 2026-10-06
+
+### Removed
+
+- **Meetings.** The Meetings view, recorder, transcript/notes pipeline, speaker separation, audio import, doc recordings (the record button, recordings panel and recording chips in Files) and dictation into a file are gone, with their routes, `meeting_*` tools, Settings tab and Home card. A migration drops the meetings tables. Recorded audio on disk is left alone (`<data>/recordings/`); delete it by hand if you no longer want it.
+- **Activity monitor.** The Activity view, background collectors (apps, browser URLs, typing, audio), Input Monitoring use, rollups, habits and automation suggestions, `<data>/context/activity.md`, the `activity_*` tools and the activity canvas widget are gone. A migration drops the activity tables. Agent-run activity, Health activity and calendar events are unaffected.
+- **Daily digest.** It only reported meetings and app time, so it went with them.
+
+### Changed
+
+- **Voice input settings.** Composer dictation keeps working; its transcription settings (backend, model, whisper.cpp paths, hallucination filter, tidy-with-model) moved from the Meetings tab to Settings → Advanced → Voice and shortcuts, stored under `voice` and seeded once from the old meetings settings. The `activity` Python extra is now `mac`, without CoreAudio.
+
 ## Unreleased — 2026-10-03
 
 This section also catches up on work merged between 2026-10-01 and 2026-10-03 that the entries below left out.
 
 ### Changed
 
+- **No todo calendar mirror; one plan card.** Todos no longer copy onto a Google calendar. Google Tasks sync stays, and events the mirror already created stay on the "Grain Todos" calendar (the planner still puts Focus blocks there). The chat and desk plan cards are now one card.
+- **Sticky notes are docs.** The sticky-note widget, its `/notes` routes and table are gone. A migration turns each note into a doc with the same id (titled from its first line, text, project and dates kept) and each note window on a space or in a saved preset into a `doc` window on it. Old exported preset files still import: their embedded notes become docs.
 - **Docs on Spaces.** A doc from the Files tree or a project group drags onto a space (the plane or a space row in the sidebar) and opens as a `doc` window that edits it in place with the same autosave as Files; **Add widget → Doc** lists recent docs or makes a new one.
 - **The Web window is gone.** The in-app browser widget, its sidebar row, the link-drop that opened one and the Electron `<webview>` plumbing were removed; no window enables `webviewTag` any more.
 - **Boards are now todos.** Todos has a board view (columns by status or by list) next to the list view; the Boards page, the `board_*` tools and the board canvas window are gone, and `todo_add`, `todo_update` and `todo_list` take `list_name` and `status`. A migration turns each existing board into a list and each card into a todo (title, notes, due date, priority, labels as tags, project, order and done state kept). The old tables are kept as `legacy_*`. Per-card agent claims and leases were dropped.

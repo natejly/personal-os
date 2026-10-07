@@ -1,16 +1,21 @@
-"""`opencode_run`: hand a coding task to the opencode CLI inside the working folder.
+"""`opencode_run`: hand a coding task to the opencode CLI in any folder on this Mac.
 
-opencode is a terminal coding agent; its headless mode (`opencode run "<prompt>"`) reads and edits files, runs
-commands and reports back. Here it runs the way shell_run does: under the OS sandbox (sandbox.shell_profile), writes
-confined to the working folder, under the same job registry (shell.ShellJobs) so timeouts, background promotion,
-shell_poll and shell_kill all apply. Two things differ from a plain shell command, which is why this is its own tool:
+opencode is a terminal coding agent installed separately on this Mac (`brew install opencode`); its headless mode
+(`opencode run "<prompt>"`) reads and edits files, runs commands and reports back. Grain only links to that
+installation: it does not bundle opencode, configure its provider or relocate its state.
 
-- Model: opencode talks to the model endpoint Grain itself uses (settings baseUrl / apiKey / defaultModel), via an
-  inline config that declares it as an OpenAI-compatible provider. No separate login, no second provider to set up.
-  The sandbox opens the network to that endpoint only (localhost:<port> for a local proxy, else *:443).
-- State: opencode keeps sessions, caches and auth under the XDG dirs. Those point at a folder of our own inside the
-  app data dir (one per desk, or per conversation) so nothing lands in the user's home, and `continue=true` picks up
-  the previous session in that folder.
+It runs the way shell_run does: under the OS sandbox (sandbox.shell_profile: it may write anywhere but Grain's own
+data folder and app, the credential stores and the files that run code later), starting in the desk workspace in a
+desk, else the home folder, under the same job registry (shell.ShellJobs) so timeouts, background promotion,
+shell_poll and shell_kill all apply.
+
+What it keeps from opencode's own install:
+
+- Model and auth: whatever `opencode auth login` and the user's own config (~/.config/opencode) set up. Grain passes
+  `-m` only when the caller names a model, and otherwise lets opencode pick its default. Nothing of Grain's provider
+  setup is injected, so a model id here is opencode's own, not a Grain alias.
+- State: sessions, caches and auth stay in the user's XDG dirs, so `opencode` in a terminal and opencode under Grain
+  share one history and `continue_session=true` resumes the last session for that folder.
 
 Whatever opencode prints came from a model with network access, so the reply is marked tainted like a networked
 shell_run, and a reply that already read untrusted content must ask before it can call this.
@@ -22,13 +27,10 @@ import os
 import shutil
 import tempfile
 import time
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
-from . import providers, sandbox, shell
+from . import mac, sandbox, shell
 
-PROVIDER_ID = "grain"
 # Where the binary usually lands: Homebrew, the official installer (~/.opencode/bin), npm -g, ~/.local/bin.
 BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/bin", "~/.bun/bin")
 INSTALL_HINT = ("opencode is not installed on this Mac. The user can install it with `brew install opencode` "
@@ -44,47 +46,9 @@ def binary() -> str | None:
     return shutil.which("opencode")
 
 
-def endpoint(settings: dict[str, Any]) -> tuple[str, str, str] | None:
-    """(base URL with /v1, api key, model) from Grain's own provider settings, or None when there is no model yet."""
-    base, model = str(settings.get("baseUrl") or "").strip(), str(settings.get("defaultModel") or "").strip()
-    if not base or not model:
-        return None
-    # @ai-sdk/openai-compatible refuses an empty key even when the server never checks one (a local proxy).
-    return providers.endpoint(base, ""), str(settings.get("apiKey") or "").strip() or "none", model
-
-
-def allow_hosts(base_url: str) -> list[str]:
-    """What the sandbox lets opencode connect to besides loopback: https anywhere (a remote model endpoint, and
-    opencode's provider catalog on a cold cache), plus a local endpoint on a non-standard scheme or port."""
-    u = urlparse(base_url)
-    host = (u.hostname or "").lower()
-    if host in ("localhost", "127.0.0.1", "::1"):
-        return [f"localhost:{u.port or (443 if u.scheme == 'https' else 80)}", "*:443"]
-    return ["*:443"]
-
-
-def config(base_url: str, model: str, key_var: str) -> str:
-    """The inline opencode config: one provider pointing at Grain's endpoint, every permission allowed (the OS sandbox is
-    the boundary, there is nobody at opencode's prompt to answer a card), sharing off."""
-    return json.dumps({
-        "$schema": "https://opencode.ai/config.json",
-        "provider": {PROVIDER_ID: {"npm": "@ai-sdk/openai-compatible", "name": "Grain model",
-                                   "options": {"baseURL": base_url, "apiKey": f"{{env:{key_var}}}"},
-                                   "models": {model: {"name": model}}}},
-        "model": f"{PROVIDER_ID}/{model}",
-        "small_model": f"{PROVIDER_ID}/{model}",
-        "permission": {"*": "allow"},
-        "share": "disabled",
-        "autoupdate": False,
-    })
-
-
-def state_dir(data_dir: Path, key: str) -> Path:
-    """One folder of opencode state per desk or conversation, inside the app data dir (the sandbox re-allows it)."""
-    d = Path(data_dir) / "opencode" / "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in key)[:64]
-    for sub in ("data", "config", "cache", "state"):
-        (d / sub).mkdir(parents=True, exist_ok=True)
-    return d
+# opencode reaches its own provider (whatever the user configured) and its catalog, both over https. loopback is
+# granted separately: `opencode run` talks to a private server of its own, and a local proxy is a common endpoint.
+ALLOW_HOSTS = ["*:443"]
 
 
 def summarize(raw: str) -> tuple[str, str | None]:
@@ -119,24 +83,93 @@ def summarize(raw: str) -> tuple[str, str | None]:
     return "\n".join(out).strip(), session
 
 
+class Refused(shell.ShellError):
+    """A launch that cannot start: the message is for the model, `alternative` is what to do instead."""
+
+    def __init__(self, message: str, alternative: str | None = None):
+        super().__init__(message)
+        self.alternative = alternative
+
+
+def _desk_root(tb: Any, ctx: dict[str, Any]) -> Path | None:
+    did = str(ctx.get("desk_id") or "")
+    if did and getattr(tb, "workspace", None) is not None:
+        try:
+            return tb.workspace.ensure(did)
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+def default_timeout(settings: dict[str, Any], timeout_s: Any, background: bool) -> int:
+    default_t = shell.BACKGROUND_TIMEOUT if background else max(int(settings.get("shellTimeoutSec") or shell.DEFAULT_TIMEOUT), 300)
+    try:
+        return max(1, min(int(timeout_s or default_t), shell.MAX_TIMEOUT))
+    except (TypeError, ValueError):
+        return default_t
+
+
+async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, continue_session: bool = False,
+                 model: str | None = None, background: bool = False, timeout: int | None = None,
+                 conversation_id: str | None = None, run_id: str | None = None, notify: bool = True,
+                 on_timeout: str | None = None, pool: str = "shell",
+                 max_background: int | None = None, no_timeout: bool = False) -> tuple[shell.Job, dict[str, Any]]:
+    """Start `opencode run` under the OS sandbox as a tracked job and return (job, {cwd, model, sandboxed}).
+    Raises Refused (a ShellError) when it cannot start. The caller owns waiting for the job and reading its output.
+    `conversation_id` defaults to the chat's; a caller that must outlive the chat's reply passes its own."""
+    s = ctx.get("settings") or tb.settings()
+    exe = binary()
+    if not exe:
+        raise Refused(INSTALL_HINT, "shell_run and fs_edit for the change yourself")
+    if not shell.sandbox_available():
+        raise Refused("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
+                      "was run.", "fs_edit and shell_run for the change yourself")
+    use_model = str(model or "").strip()
+    dr = _desk_root(tb, ctx)
+    where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
+    timeout = None if no_timeout else timeout or default_timeout(s, None, background)
+    tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
+    env = shell.scrubbed_env(tmp)
+    env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
+    # ~/.npm and ~/.cache/pip are outside the sandbox's writable paths, so package installs use the per-launch tmp dir
+    env["npm_config_cache"], env["PIP_CACHE_DIR"] = os.path.join(tmp, "npm-cache"), os.path.join(tmp, "pip-cache")
+    # No XDG overrides and no injected config: opencode reads its own ~/.config/opencode and writes its own state,
+    # so a session started here is the same session the user sees from a terminal.
+    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    argv = [exe, "run", "--standalone", "--format", "json"]  # standalone: no shared daemon outside the sandbox
+    if use_model:  # otherwise opencode's own default model stands
+        argv += ["-m", use_model]
+    if continue_session:
+        argv.append("--continue")
+    argv.append(prompt)
+    writable = [tmp]
+    if dr:
+        writable.append(str(dr))
+    # loopback: `opencode run` spawns a private server on a random local port and talks to it
+    profile = sandbox.shell_profile(writable, network=False, allow_hosts=ALLOW_HOSTS, loopback=True)
+    shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
+    shown_cmd = f"opencode run {prompt[:160]!r}"
+    try:
+        job = await tb.shell.start(["sandbox-exec", "-p", profile, *argv], command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
+                                   conversation_id=conversation_id if conversation_id is not None else ctx.get("conversation_id"),
+                                   run_id=run_id if run_id is not None else ctx.get("run_id"),
+                                   background=bool(background), timeout=timeout, notify=notify,
+                                   max_background=max_background or int(s.get("shellMaxBackground") or 4), pool=pool,
+                                   on_timeout=on_timeout or ("background" if ctx.get("desk_id") else "kill"))
+    except shell.ShellError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    return job, {"cwd": shell._scrub(str(where)), "model": use_model or "opencode default", "sandboxed": True}
+
+
 def register(tb: Any) -> None:
     """Add opencode_run to a Toolbox (group `shell`). shell.register must have run first (it owns tb.shell)."""
     from .tools import ToolSpec, _obj, tool_error
 
     jobs: shell.ShellJobs = tb.shell
-    data_dir = getattr(getattr(getattr(tb, "results", None), "db", None), "data_dir", None)
 
     def cfg(ctx: dict[str, Any]) -> dict[str, Any]:
         return ctx.get("settings") or tb.settings()
-
-    def desk_root(ctx: dict[str, Any]) -> Path | None:
-        did = str(ctx.get("desk_id") or "")
-        if did and getattr(tb, "workspace", None) is not None:
-            try:
-                return tb.workspace.ensure(did)
-            except Exception:  # noqa: BLE001
-                return None
-        return None
 
     async def opencode_run(ctx: dict[str, Any], prompt: str, cwd: str | None = None, timeout_s: int | None = None,
                            background: bool = False, continue_session: bool = False, model: str | None = None) -> Any:
@@ -149,58 +182,12 @@ def register(tb: Any) -> None:
             return tool_error("opencode_run needs a prompt.", field="prompt", example={"prompt": "add a --dry-run flag to cli.py"})
         if len(prompt) > MAX_PROMPT:
             return tool_error(f"The prompt is over {MAX_PROMPT} characters; point opencode at a file instead.", field="prompt")
-        exe = binary()
-        if not exe:
-            return tool_error(INSTALL_HINT, alternative="shell_run and fs_edit for the change yourself")
-        if not shell.sandbox_available():
-            return tool_error("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
-                              "was run.", alternative="fs_edit and shell_run for the change yourself")
-        ep = endpoint(s)
-        if not ep:
-            return tool_error("No model endpoint is set up yet (Settings → Model), so opencode has nothing to talk to.")
-        base_url, api_key, default_model = ep
-        use_model = str(model or "").strip() or default_model
-        roots = shell.granted_roots(s, desk_root(ctx))
+        timeout = default_timeout(s, timeout_s, bool(background))
         try:
-            where, root = shell.resolve_cwd(cwd, roots)
+            job, base = await launch(tb, ctx, prompt, cwd=cwd, continue_session=continue_session, model=model,
+                                     background=bool(background), timeout=timeout)
         except shell.ShellError as e:
-            return tool_error(shell._scrub(str(e)))
-        default_t = shell.BACKGROUND_TIMEOUT if background else max(int(s.get("shellTimeoutSec") or shell.DEFAULT_TIMEOUT), 300)
-        try:
-            timeout = max(1, min(int(timeout_s or default_t), shell.MAX_TIMEOUT))
-        except (TypeError, ValueError):
-            timeout = default_t
-        key = str(ctx.get("desk_id") or ctx.get("conversation_id") or "chat")
-        state = state_dir(Path(data_dir) if data_dir else Path(tempfile.gettempdir()) / "grain-opencode", key)
-        tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-opencode-"))
-        env = shell.scrubbed_env(tmp)
-        env["PATH"] = f"{os.path.dirname(exe)}:{env['PATH']}"
-        env.update({"XDG_DATA_HOME": str(state / "data"), "XDG_CONFIG_HOME": str(state / "config"),
-                    "XDG_CACHE_HOME": str(state / "cache"), "XDG_STATE_HOME": str(state / "state"),
-                    "OPENCODE_CONFIG_CONTENT": config(base_url, use_model, "GRAIN_MODEL_API_KEY"),
-                    "GRAIN_MODEL_API_KEY": api_key, "OPENCODE_DISABLE_AUTOUPDATE": "1"})
-        argv = [exe, "run", "--standalone", "--format", "json", "-m", f"{PROVIDER_ID}/{use_model}"]  # standalone: no shared daemon outside the sandbox
-        if continue_session:
-            argv.append("--continue")
-        argv.append(prompt)
-        writable = [str(root), tmp, str(state)]
-        dr = desk_root(ctx)
-        if dr:
-            writable.append(str(dr))
-        # loopback: `opencode run` spawns a private server on a random local port and talks to it
-        profile = sandbox.shell_profile(writable, network=False, allow_hosts=allow_hosts(base_url), loopback=True)
-        shell.taint(ctx, "opencode_run:network")  # a model with network access wrote whatever comes back
-        shown_cmd = f"opencode run {prompt[:160]!r}"
-        try:
-            job = await jobs.start(["sandbox-exec", "-p", profile, *argv], command=shown_cmd, cwd=str(where), env=env, tmp=tmp,
-                                   conversation_id=ctx.get("conversation_id"), run_id=ctx.get("run_id"),
-                                   background=bool(background), timeout=timeout, notify=True,
-                                   max_background=int(s.get("shellMaxBackground") or 4),
-                                   on_timeout="background" if ctx.get("desk_id") else "kill")
-        except shell.ShellError as e:
-            shutil.rmtree(tmp, ignore_errors=True)
-            return tool_error(shell._scrub(str(e)))
-        base: dict[str, Any] = {"cwd": shell._scrub(str(where)), "model": f"{PROVIDER_ID}/{use_model}", "sandboxed": True}
+            return tool_error(shell._scrub(str(e)), alternative=getattr(e, "alternative", None))
         if background:
             return {"job_id": job.id, "background": True, **base,
                     "note": "opencode is working in the background. shell_poll(job_id) reads its raw event stream; shell_kill(job_id) stops it."}
@@ -234,18 +221,18 @@ def register(tb: Any) -> None:
         return out
 
     spec = ToolSpec("opencode_run",
-                    "Hand a coding task to opencode, a terminal coding agent, inside the working folder (the desk workspace or a "
-                    "workspace root). It reads and edits files there and runs commands, all under the OS sandbox (writes stay "
-                    "inside that folder), using the same model endpoint as this app. Give it a complete, self-contained task "
+                    "Hand a coding task to opencode, a terminal coding agent installed on this Mac, in a folder on this Mac (default: the desk "
+                    "workspace in a desk, else the home folder). It reads and edits files and runs commands, all under the OS sandbox (Grain's own data "
+                    "folder and app, credential stores and the files that run code later are off limits), using opencode's own model and sign-in, not this app's. Give it a complete, self-contained task "
                     "with the files or folder it concerns; it does not see this conversation. continue_session=true carries on "
-                    "its previous session in this desk/chat. The result is its narration and final answer; check the files it "
+                    "its last session in that folder, the same history the opencode CLI shows. The result is its narration and final answer; check the files it "
                     "changed afterwards (fs_grep, desk_read_file, shell_run `git diff`). Default timeout 300s (max 600s), then "
                     "in a desk it carries on as a background job you follow with shell_poll; background=true starts it that way.",
                     _obj({"prompt": {"type": "string", "description": "The task, with the files or folder it concerns"},
-                          "cwd": {"type": "string", "description": "A folder inside the working folder, usually a repo"},
+                          "cwd": {"type": "string", "description": "The folder to work in, usually a repo; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 300}, "background": {"type": "boolean", "default": False},
                           "continue_session": {"type": "boolean", "default": False},
-                          "model": {"type": "string", "description": "Override the model id at the same endpoint"}},
+                          "model": {"type": "string", "description": "An opencode model id (provider/model), overriding its default"}},
                          ["prompt"]),
                     opencode_run, "shell", "executes",
                     examples=[{"prompt": "Add a --dry-run flag to cli.py and cover it in tests/test_cli.py", "cwd": "work/repo"},

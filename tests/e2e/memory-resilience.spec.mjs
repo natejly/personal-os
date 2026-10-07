@@ -1,12 +1,12 @@
 import { test, expect } from './fixtures.mjs'
 import { send, shrink } from './helpers/kb.mjs'
+import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
-const pane = (page) => page.locator('.settings-pane')
+const pane = (page) => page.locator('.knowledge-body')
 const ignorable = /favicon|ResizeObserver|Failed to load resource|ERR_CONNECTION|fetch|NetworkError/i
 
 async function openMemory(page) {
-  await page.locator('.settings-btn').click()
-  await page.getByRole('tab', { name: 'Memory' }).click()
+  await openMemoryTab(page, 'List')
   await expect(page.getByPlaceholder(/Remember something/)).toBeVisible()
 }
 
@@ -40,10 +40,8 @@ test('backend dies while the Memory panel is open: the app stays up and recovers
   await page.waitForTimeout(1500)
   // the panel is still rendered and the old row is still shown
   await expect(pane(page).getByText('survivor memory')).toBeVisible()
-  await expect(page.getByRole('tab', { name: 'Memory' })).toBeVisible()
-  // Escape still closes Settings: the renderer did not wedge
-  await page.keyboard.press('Escape')
-  await expect(page.locator('.settings-pane')).toBeHidden()
+  // the page itself did not wedge or unmount
+  await expect(page.locator('.knowledge-body')).toBeVisible()
 })
 
 test('Settings memory scope filter lists a project memory only under that project', async ({ grain }) => {
@@ -54,7 +52,7 @@ test('Settings memory scope filter lists a project memory only under that projec
   await page.reload()
   await openMemory(page)
   await expect(pane(page).locator('.mem-row')).toHaveCount(2)
-  const scope = pane(page).locator('.knowledge-controls select')
+  const scope = page.getByRole('dialog', { name: 'Settings' }).locator('.knowledge-controls select') // the scope picker sits in the section head, above the panel
   await scope.selectOption({ label: 'Scoped' })
   await expect(pane(page).getByText('project scope fact')).toBeVisible()
   await expect(pane(page).getByText('personal scope fact')).toBeVisible() // shared project: personal memories ride along
@@ -81,8 +79,8 @@ test('everything at 820x520: project modal, project view tabs, memory panel, voi
   expect(create.y + create.height).toBeLessThanOrEqual(520)
   await page.keyboard.press('Escape')
   await page.locator('.sidebar').getByText('Tiny', { exact: true }).click()
-  for (const tab of ['Instructions', 'Uploads', 'Memory']) {
-    await page.getByRole('button', { name: new RegExp(tab) }).click()
+  for (const tab of ['Instructions', 'Context', 'Memory']) {
+    await page.locator('.tabs').getByRole('button', { name: new RegExp(tab) }).click()
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(over).toBeLessThanOrEqual(1)
   }

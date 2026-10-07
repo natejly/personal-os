@@ -65,16 +65,18 @@ export const pickEvictions = (sessions: Record<string, EvictCandidate>, keep: Re
 const longerText = (remote?: string | null, local?: string | null): string | null =>
   (remote?.length ?? 0) >= (local?.length ?? 0) ? (remote ?? null) : (local ?? null)
 
-const mergeMessage = (local: Message, remote: Message): Message => ({
+const mergeMessage = (local: Message, remote: Message, live = false): Message => ({
   ...remote,
   // An error stamped by the run's terminal event is not on the row a stale fetch returns.
   error: remote.error ?? local.error,
   outcome: remote.outcome ?? local.outcome ?? null,
   error_kind: remote.error_kind ?? local.error_kind ?? null,
-  content: remote.content.length >= local.content.length ? remote.content : local.content,
+  // The reply a stream is still filling is the stream's: it appends every later delta to what is held, so taking a longer
+  // stored copy here would let the deltas it has not applied yet land on text that already holds them.
+  content: live || local.content.length > remote.content.length ? local.content : remote.content,
   tool_events: remote.tool_events?.length ? remote.tool_events : local.tool_events,
   trace: remote.trace?.length ? remote.trace : local.trace,
-  reasoning: longerText(remote.reasoning, local.reasoning)
+  reasoning: live ? (local.reasoning ?? null) : longerText(remote.reasoning, local.reasoning)
 })
 
 /**
@@ -82,19 +84,25 @@ const mergeMessage = (local: Message, remote: Message): Message => ({
  * discards what a stream applied, and a fetch can be older than the deltas it lands among — message
  * content only ever grows, so the longer side wins per id.
  *
+ * `liveMessageId` is the reply a watcher is still filling: its text and reasoning stay as streamed, whatever the fetch holds.
+ *
  * `keepUnsent` (the session is streaming) also keeps messages the server has not stored yet. Without
  * it the remote list is authoritative, so a message deleted server-side — `removed_message` from a
  * regenerate — stays deleted instead of being resurrected from the local copy.
  */
-export const mergeConversation = (local: Conversation, remote: Conversation, keepUnsent: boolean): Conversation => {
+export const mergeConversation = (local: Conversation, remote: Conversation, keepUnsent: boolean, liveMessageId?: string | null): Conversation => {
   const unseen = new Map((local.messages ?? []).map((m) => [m.id, m]))
   const messages = (remote.messages ?? []).map((r) => {
     const l = unseen.get(r.id)
     if (!l) return r
     unseen.delete(r.id)
-    return mergeMessage(l, r)
+    return mergeMessage(l, r, r.id === liveMessageId)
   })
-  return { ...remote, messages: keepUnsent ? [...messages, ...unseen.values()] : messages }
+  // The row is only stored as untrusted when the run ends, so a fetch mid-reply must not clear what the stream has seen.
+  const settings = keepUnsent && local.settings.tainted && !remote.settings.tainted
+    ? { ...remote.settings, tainted: true, taint_sources: local.settings.taint_sources }
+    : remote.settings
+  return { ...remote, settings, messages: keepUnsent ? [...messages, ...unseen.values()] : messages }
 }
 
 /**
@@ -136,13 +144,29 @@ export type ChatNoticeKind = 'reply' | 'approval' | 'failed'
 
 /**
  * What an event just did to a chat that is worth a system notification, from the status before and after it.
- * One kind per transition, so a status that did not move rings never. A reply the user stopped is not news to them.
+ * One kind per transition, so a status that did not move rings never. A reply the user stopped, or a silent turn that left no reply, is not news to them.
  */
 export const chatNotice = (prev: SessionStatus, next: SessionStatus, ev: ChatEvent): ChatNoticeKind | null => {
   if (next === 'needs-approval' && prev !== 'needs-approval') return 'approval'
   if (next === 'error' && prev !== 'error') return 'failed'
-  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped) return 'reply'
+  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped && ev.data.id) return 'reply'  // no id: a silent wake, its reply row is gone
   return null
+}
+
+/** A `run_state` frame as the finish rule reads it: `replied` is true once the run published a visible reply (not a silent wake), `stopped` once the user hit Stop. */
+export type FinishInfo = RunInfo
+
+/**
+ * The one finish rule for a run this window did not stream, from the frame before it and the frame now.
+ * Fires on the transition only: the reply becoming whole (`replied`, which a silent wake never sets), or the run
+ * ending with an error. Never for a job or worker run, a stopped run, or a frame that repeats what was already seen;
+ * the caller's per-run key stops the same run ringing twice across the stream and this feed.
+ */
+export const finishNotice = (prev: FinishInfo | undefined, info: FinishInfo): 'reply' | 'failed' | null => {
+  if ((info.kind !== 'chat' && info.kind !== 'desk') || info.stopped) return null
+  if (prev && (prev.replied || !prev.live)) return null
+  if (info.error || info.status === 'error') return info.replied || !info.live ? 'failed' : null
+  return info.replied ? 'reply' : null
 }
 
 /** The sidebar pulse: a session's own status wins, and a conversation with no session falls back to its live run. */

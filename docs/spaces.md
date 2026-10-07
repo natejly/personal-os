@@ -14,11 +14,11 @@ one-line hint. Only the explainer's buttons take clicks, so pan and right-click 
 
 ## Windows
 
-Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
-`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `doc`,
+Each window is a widget of one kind: `chat`, `todos`, `calendar`,
+`memory`, `graph`, `documents`, `recap`, `project`, `usage`, `doc`,
 `face` or `crew` (a `todos` window has a list and a board view; a `face` window is just the assistant's
 creature, thinking while any chat answers and surprised while something waits on you; a `crew` window is a
-desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a doc, a note, a nav row) onto the plane,
+desk or a workflow run with the agents under it, see below). Add one by dragging a row from the sidebar (a chat, a doc, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
 each with a status ring. A chat window can also shrink to a blob: the face button in its head (or
 **Shrink to a face** in the right-click menu) folds the window to just the chat's creature with no
@@ -27,7 +27,7 @@ Settings › Behavior › Spaces › **Compact chats** makes the blob the defaul
 chosen. While a blob's chat is answering, a small speech bubble beside the creature says what it is
 doing: the tool call in flight, the subagents it is waiting on, or the latest line of its thinking
 (the same line the chat's activity row shows). A `doc` window edits one Files doc in place: drag a doc from the Files tree or a project group
-onto the plane or onto a space row in the sidebar. Sticky notes exist only here.
+onto the plane or onto a space row in the sidebar. Sticky notes are gone: a migration turned each one into a doc (titled from its first line) and its window into a `doc` window on the same text.
 
 Windows move, resize, minimize and maximize. The Spaces bar holds the space tabs (drag to reorder),
 the add-widget button, **Tidy up** (⌃⌘T), the snapping picker and the lock. Snapping is per space:
@@ -74,7 +74,7 @@ The assistant can add to a space but never close or delete anything on one.
 | Tool | Does |
 |---|---|
 | `space_list` | Lists the spaces and the windows on each. |
-| `space_add_widget` | Puts a view, or an existing chat, note or project, in the next free grid cell of a space. |
+| `space_add_widget` | Puts a view, or an existing chat, doc or project, in the next free grid cell of a space. |
 | `space_arrange` | Tiles (`grid`) or stacks (`cascade`) a space's open windows. Moves and resizes only. |
 
 `space_*` live in `backend/personal_os/space_tools.py`, `widget_*` in `widget_tools.py`.

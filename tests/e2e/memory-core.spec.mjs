@@ -1,12 +1,12 @@
 import { test, expect } from './fixtures.mjs'
 import { callWith, send, shrink, sleep, sqlite, systemOf } from './helpers/kb.mjs'
+import { openMemory as openMemoryTab } from './helpers/home.mjs'
 
-const pane = (page) => page.locator('.settings-pane')
+const pane = (page) => page.locator('.knowledge-body')
 const clean = (g) => expect(g.consoleErrors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
 
 async function openMemory(page) {
-  await page.locator('.settings-btn').click()
-  await page.getByRole('tab', { name: 'Memory' }).click()
+  await openMemoryTab(page, 'List')
   await expect(page.getByPlaceholder(/Remember something/)).toBeVisible()
 }
 const addBox = (page) => page.getByPlaceholder(/Remember something/)
@@ -72,9 +72,8 @@ test('add, edit, pin, forget a memory from Settings; counts follow', async ({ gr
   expect(trash.groups.memories).toHaveLength(1)
   await api(`/trash/memory/${trash.groups.memories[0].id}/restore`, { method: 'POST' })
   const p2 = await grain.relaunch()
-  await p2.locator('.settings-btn').click()
-  await p2.getByRole('tab', { name: 'Memory' }).click()
-  await expect(p2.locator('.settings-pane').getByText('I live in Porto')).toBeVisible()
+  await openMemoryTab(p2, 'List')
+  await expect(p2.locator('.knowledge-body').getByText('I live in Porto')).toBeVisible()
   clean(grain)
 })
 
@@ -85,7 +84,7 @@ test('blank memory is refused, Enter adds, whitespace-only add is disabled, mark
   await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
   await addBox(page).fill('<img src=x onerror=alert(1)> **not bold**')
   await addBox(page).press('Enter')
-  await expect(page.getByText('<img src=x onerror=alert(1)> **not bold**')).toBeVisible()
+  await expect(pane(page).getByText('<img src=x onerror=alert(1)> **not bold**')).toBeVisible() // the Today card behind the dialog lists it too
   await expect(page.locator('.mem-row img')).toHaveCount(0)
   await expect(api('/memories', { method: 'POST', body: { content: '  ' } })).rejects.toThrow(/400/)
   clean(grain)
@@ -217,7 +216,7 @@ test('300 memories and a 60 KB memory: list renders, search stays quick, window 
   await expect(page.locator('.mem-row')).toHaveCount(100, { timeout: 10_000 }) // search is capped at 100 hits by the backend
   expect(Date.now() - t0).toBeLessThan(5000)
   // the layout does not overflow horizontally at the small size
-  const over = await page.evaluate(() => document.querySelector('.settings-pane')?.scrollWidth - document.querySelector('.settings-pane')?.clientWidth)
+  const over = await page.evaluate(() => document.querySelector('.knowledge-body')?.scrollWidth - document.querySelector('.knowledge-body')?.clientWidth)
   expect(over).toBeLessThanOrEqual(1)
   clean(grain)
 })
@@ -229,10 +228,9 @@ test('memories persist across relaunch; export file round-trips through import',
   const file = await api('/memories/export')
   expect(file.memories).toHaveLength(2)
   const p = await grain.relaunch()
-  await p.locator('.settings-btn').click()
-  await p.getByRole('tab', { name: 'Memory' }).click()
-  await expect(p.locator('.settings-pane').getByText('persist me')).toBeVisible()
-  await expect(p.locator('.settings-pane').getByText('and me', { exact: true })).toBeVisible()
+  await openMemoryTab(p, 'List')
+  await expect(p.locator('.knowledge-body').getByText('persist me')).toBeVisible()
+  await expect(p.locator('.knowledge-body').getByText('and me', { exact: true })).toBeVisible()
   const pr = await api('/projects', { method: 'POST', body: { name: 'Target' } })
   const r = await api('/memories/import', { method: 'POST', body: { file, project_id: pr.id } })
   expect(r).toEqual({ added: 2, skipped: 0 })

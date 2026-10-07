@@ -2,7 +2,9 @@ import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import ApprovalRules from '../ApprovalRules'
 import { ArgList, RawDetails, ResultBlock } from './parts'
-import { useStore } from '../../store'
+import { useStore, useChatTainted } from '../../store'
+import ToolBadges from '../connectors/ToolBadges'
+import { connectorName } from '../connectors/catalog'
 import './toolcards.css'
 
 /**
@@ -33,9 +35,12 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
   onWhy?: () => void
 }): JSX.Element {
   const d = describeCall(event.name, event.arguments)
+  const connector = connectorName(event.name, event.mcp)
   // A doc tool names its doc by id; show the title the user knows it by.
   const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
   const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
+  // `forced` marks a card forced by taint, plan mode or an always-ask tool, so the taint line needs the taint itself.
+  const tainted = useChatTainted(conversationId)
   return (
     <div
       className="approval tc-approval"
@@ -45,10 +50,17 @@ export function GenericApproval({ event, conversationId, decide, onWhy }: {
     >
       <div className="approval-text">
         <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced
-          ? <>This chat has read untrusted content, so this needs your OK each time.
-            {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
+          ? tainted
+            ? <>This chat has read untrusted content, so this needs your OK each time.
+              {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
+            : 'This needs your OK each time.'
           : 'This acts outside the app.'}
       </div>
+      {connector && (
+        <div className="tc-origin small muted">
+          From connector <b>{connector}</b> <ToolBadges readOnly={event.mcp?.read_only} destructive={event.mcp?.destructive} />
+        </div>
+      )}
       <ArgList rows={argRows(args)} />
       <ApprovalRules event={event} conversationId={conversationId} decide={decide} />
     </div>

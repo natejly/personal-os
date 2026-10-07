@@ -39,9 +39,9 @@ mkdir -p "$OUT"
 tar -xzf "$CACHE/$NAME" -C "$OUT"   # -> $OUT/python
 PY="$OUT/python/bin/python3"
 
-# Non-editable install of the backend plus the macOS activity extras. The backend never imports
+# Non-editable install of the backend plus the macOS (mac), whistle and charts extras. The backend never imports
 # LiteLLM; it only talks to a proxy over HTTP, so nothing LiteLLM-shaped is bundled.
-uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[activity,whistle]"
+uv pip install --python "$PY" --reinstall-package grain-backend "$ROOT/backend[mac,whistle,charts]"
 
 # The standalone build's console scripts carry absolute shebangs into this build dir; nothing uses
 # them (the app runs `python -m personal_os`), so drop them.
@@ -72,5 +72,8 @@ SMOKE="$(mktemp -d)"
 (cd / && PYTHONDONTWRITEBYTECODE=1 PERSONAL_OS_DATA_DIR="$SMOKE" "$PY" -c "import personal_os.app, personal_os.__main__; print('bundle ok:', personal_os.__file__)")
 rm -rf "$SMOKE"
 # Precompile now: the app runs with PYTHONDONTWRITEBYTECODE so nothing writes into the signed bundle.
-"$PY" -m compileall -q -j 0 "$OUT/python/lib/python3.12" >/dev/null || true
+# unchecked-hash: packaging resets every source file's mtime, which makes timestamp-checked .pyc files stale in the
+# installed app. Then every launch recompiles in memory, and any child Python started without the flag rewrites
+# them, which breaks the signature. Unchecked-hash .pyc files stay valid whatever the mtimes.
+"$PY" -m compileall -q -f -j 0 --invalidation-mode unchecked-hash "$OUT/python/lib/python3.12" >/dev/null || true
 du -sh "$OUT"

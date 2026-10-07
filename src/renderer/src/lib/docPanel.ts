@@ -1,8 +1,8 @@
 import type { Doc } from '@shared/types'
 import { titleKey } from '../features/notes/wikilinks'
 
-export type PanelTab = 'outline' | 'recordings' | 'links' | 'history'
-export const PANEL_TABS: PanelTab[] = ['outline', 'recordings', 'links', 'history']
+export type PanelTab = 'outline' | 'comments' | 'links' | 'history'
+export const PANEL_TABS: PanelTab[] = ['outline', 'comments', 'links', 'history']
 export interface PanelState { open: boolean; tab: PanelTab }
 
 const DEFAULT: PanelState = { open: false, tab: 'outline' }

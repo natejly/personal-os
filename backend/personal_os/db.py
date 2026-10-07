@@ -17,13 +17,12 @@ from .secrets import SecretStore
 log = logging.getLogger("personal_os.db")
 
 # Settings whose values live in the secret store, not in SQLite (the settings row is left blank).
-SECRET_SETTINGS = ("apiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
+SECRET_SETTINGS = ("apiKey", "firecrawlApiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
 # These settings are dicts; only the listed fields are secret, the rest (email, expiry, scopes) stays in SQLite.
 TOKEN_SECRET_FIELDS = {
     "googleToken": ("token", "refresh_token", "client_secret"),
     "microsoftToken": ("access_token", "refresh_token"),
 }
-GOOGLE_TOKEN_SECRET_FIELDS = TOKEN_SECRET_FIELDS["googleToken"]
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -583,7 +582,9 @@ class Database:
                           "pinned": "INTEGER NOT NULL DEFAULT 0"},
             "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER", "blurb": "TEXT NOT NULL DEFAULT ''"},
             "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
-                         "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
+                         "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''",
+                         # Extractor's own 0..1 rating of the edge (NULL: hand-made or from before ratings); recall weights by it.
+                         "confidence": "REAL"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT", "outcome": "TEXT", "error_kind": "TEXT", "superseded_at": "REAL", "variant_of": "TEXT",
                          # JSON [{id, name, mime, size}]: uploaded files sent with a user turn (the documents rows they point at).
                          "attachments": "TEXT",

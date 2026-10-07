@@ -83,11 +83,6 @@ def fill(body: str, arguments: str = "") -> str:
 
 _SLASH = re.compile(r"^/([a-z0-9][a-z0-9_-]{0,39})(?:\s+([\s\S]*))?$")
 
-# Built-in slash commands the backend fills. They shadow a saved command of the same name; the composer
-# lists them beside the saved ones (lib/slashCommands.ts). /compact, /skills, /commands and /plan act in
-# the UI and never reach a run.
-BUILTIN = ("skill", "schedule", "loop", "research")
-
 _SCHEDULE_NOTE = ("\n\n[The user ran /schedule: they want this done later, unattended. Call schedule_task once — work out the time "
                   "from what they typed (call current_time first if you are unsure of today's date) and write `prompt` as a "
                   "self-contained instruction, since the later run cannot see this chat. Then tell them when it will run.]")
@@ -127,20 +122,22 @@ def expand_skill(text: str, args: str, skills: Any) -> str:
 _MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9_-]{0,39})")
 
 
-def mention_note(text: str, names: Iterable[str] | None) -> str:
+def mention_note(text: str, names: Iterable[str] | None, front: bool = False) -> str:
     """`@name` in a user turn, for an agent that exists, becomes a hint to hand the work to it. The stored row keeps
     what was typed; the model sees this under the turn. Unknown names are ordinary text."""
     known = set(names or ())
     hits = list(dict.fromkeys(m.group(1) for m in _MENTION.finditer(text or "") if m.group(1) in known))
     if not hits:
         return ""
-    return "".join(f"\n\n[The user mentioned @{n}: address this to agent {n}. Hand the task to it with agent_spawn role={n} "
+    via = "delegate agent" if front else "agent_spawn role"
+    return "".join(f"\n\n[The user mentioned @{n}: address this to agent {n}. Hand the task to it with {via}={n} "
                    "and report what it returns.]" for n in hits[:3])
 
 
-def expand(text: str, store: "Commands | None", skills: Any = None, agents: Iterable[str] | None = None) -> str:
+def expand(text: str, store: "Commands | None", skills: Any = None, agents: Iterable[str] | None = None,
+           front: bool = False) -> str:
     """A user turn gains its filled slash command and any @agent hint under it; see _expand_slash and mention_note."""
-    return _expand_slash(text, store, skills) + (mention_note(text, agents) if isinstance(text, str) else "")
+    return _expand_slash(text, store, skills) + (mention_note(text, agents, front) if isinstance(text, str) else "")
 
 
 def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> str:
@@ -170,9 +167,9 @@ def _expand_slash(text: str, store: "Commands | None", skills: Any = None) -> st
 
 
 def expand_history(history: list[dict[str, Any]], store: "Commands | None", skills: Any = None,
-                   agents: Iterable[str] | None = None) -> list[dict[str, Any]]:
+                   agents: Iterable[str] | None = None, front: bool = False) -> list[dict[str, Any]]:
     """Every replayed user turn, so a later turn still carries an earlier command's instructions."""
-    return [{**m, "content": expand(m["content"], store, skills, agents)} if m.get("role") == "user" and isinstance(m.get("content"), str)
+    return [{**m, "content": expand(m["content"], store, skills, agents, front)} if m.get("role") == "user" and isinstance(m.get("content"), str)
             and (m["content"].startswith("/") or "@" in m["content"]) else m for m in history]
 
 

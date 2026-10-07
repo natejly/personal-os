@@ -7,8 +7,8 @@ pdftoppm); each tool is only offered when a binary it can use exists, and a miss
 how to install it.
 
 Everything is path-contained the way the file tools are: inside a desk, paths are relative to the desk workspace and
-resolved through Workspace.resolve_in; outside one, an absolute path must sit under a granted workspace root
-(fsx.grants_for). Output is only ever written inside one of those. The external programs run with no shell, a
+resolved through Workspace.resolve_in; outside one, an absolute path may be anywhere on this Mac except Grain's own
+data folder and app (mac.protected_reason). A credential store is refused for sources. The external programs run with no shell, a
 scrubbed environment, a throwaway LibreOffice profile and a hard timeout that kills the whole process group.
 
 The subprocess runner and the binary lookup are module attributes (RUNNER, which) so the tests can inject both.
@@ -27,14 +27,13 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import fsx, shell
+from . import fsx, mac, shell
 from .workspace import WorkspaceError
 
 TIMEOUT_S = 120
 WHICH_TTL_S = 60.0
 GUIDES_DIR = Path(__file__).parent / "guides"
 GUIDE_FORMATS = ("docx", "xlsx", "pptx", "pdf", "charts", "csv")
-GUIDE_MAX_CHARS = 4500
 
 DEFAULT_PAGES = 3
 MAX_PAGES = 8
@@ -50,7 +49,7 @@ EXT_ALIASES = {"markdown": "md", "htm": "html", "text": "txt"}
 INSTALL = {"pandoc": "brew install pandoc", "soffice": "brew install --cask libreoffice", "pdftotext": "brew install poppler",
            "pdftoppm": "brew install poppler"}
 FILE_HOME = ("Files live in the desk workspace or this chat's files (paths relative to it, e.g. outputs/report.docx) or "
-             "under a workspace root the user granted in Settings.")
+             "anywhere else on this Mac by absolute path (Grain's own data folder and app are off limits).")
 
 
 class ConvertTimeout(Exception):
@@ -129,9 +128,9 @@ def _resolve(tb: Any, ctx: dict[str, Any], raw: Any) -> tuple[Path | None, dict[
     g = fsx.grants_for(tb, ctx)
     p = Path(os.path.realpath(os.path.expanduser(s)))
     if not os.path.isabs(os.path.expanduser(s)):
-        return None, tool_error(f"{s!r} is relative and there is no desk workspace to resolve it against; use an absolute path, or set a folder under Settings (Workspace folders) or the chat's Working folder. " + FILE_HOME, field="path")
-    if not (g.in_desk(p) or g.in_roots(p)):
-        return None, tool_error(f"{s} is outside every folder you may use. " + FILE_HOME, field="path")
+        return None, tool_error(f"{s!r} is relative and there is no desk workspace to resolve it against; use an absolute path. " + FILE_HOME, field="path")
+    if not g.in_desk(p) and (why := mac.protected_reason(s, p)):
+        return None, tool_error(f"{s}: {why}. " + FILE_HOME, field="path")
     return p, None
 
 
@@ -471,11 +470,10 @@ def register(tb: Any) -> None:
         if did:
             outdir = tb.workspace.ensure(did) / "work" / "previews"
         else:
-            # Beside the source, inside the granted folder: view_image reads only under home, and
-            # pages are named by source and number, so a re-render overwrites rather than piles up.
+            # Beside the source, so a re-render overwrites rather than piles up (pages are named by source and number).
             outdir = src.parent / "previews"
-            if not fsx.grants_for(tb, ctx).in_roots(Path(os.path.realpath(outdir))):  # a previews symlink leading out
-                return tool_error(f"{outdir} leads outside the folders you may use.", field="path")
+            if why := mac.protected_reason(os.path.realpath(outdir)):  # a previews symlink leading into Grain's own folder
+                return tool_error(f"{outdir}: {why}.", field="path")
         res = await asyncio.to_thread(_render_sync, src, pages, dpi_n, outdir, src.stem)
         if "error" in res:
             return res

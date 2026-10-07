@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine, Mic } from 'lucide-react'
+import { X, EyeOff, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import ShellJobs from './ShellJobs'
+import CodingSessions from './CodingSessions'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
-import { viewHidden } from '../moduleToggles'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { citeLabel, openCite } from '../lib/remarkCites'
@@ -12,13 +12,13 @@ import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationS
 import { fmtCost, usageLine } from '../lib/chatMeta'
 import { compactNow } from '../lib/compact'
 
-/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. `locked`: a private chat cannot turn it on. */
-function Toggle({ label, hint, value, onChange, icon, disabled, fix, locked = false }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void }; locked?: boolean }): JSX.Element {
+/** `fix` is a link to the Settings tab that turns this source on, shown under the hint. */
+function Toggle({ label, hint, value, onChange, icon, disabled, fix }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element; disabled?: boolean; fix?: { label: string; open: () => void } }): JSX.Element {
   return (
     <label className="toggle-row">
       <span className="toggle-icon">{icon}</span>
       <span className="toggle-text"><b>{label}</b><small>{hint}</small>{fix && <button className="link small" onClick={(e) => { e.preventDefault(); fix.open() }}>{fix.label}</button>}</span>
-      <input type="checkbox" aria-label={label} checked={value} disabled={disabled || locked} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={label} checked={value} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
   )
@@ -88,15 +88,14 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const setView = useStore((s) => s.setView)
   const openMemory = useStore((s) => s.openMemory)
   const openFiles = useStore((s) => s.openFiles)
   const memories = useStore((s) => s.memories)
   const [showPrompt, setShowPrompt] = useState(false)
   const devTools = useStore((s) => s.settings.devTools === true)
   const [viewing, setViewing] = useState<ChunkRef | null>(null)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
+  const has = ctx.memories.length + (ctx.profile?.length ?? 0) + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
+    || Boolean(ctx.page) || Boolean(ctx.style) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -114,12 +113,6 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           <pre className="ctx-prompt">{ctx.page.detail}</pre>
         </section>
       )}
-      {ctx.activity && (
-        <section>
-          <h5><MonitorDot size={12} /> Activity <button className="link" onClick={() => setView('activity')}>manage</button></h5>
-          <pre className="ctx-prompt">{ctx.activity}</pre>
-        </section>
-      )}
       {ctx.style && (
         <section>
           <h5><PenLine size={12} /> Writing style {ctx.style.project_id ? '(project voice)' : '(your voice)'} <button className="link" onClick={() => openMemory('style')}>edit</button></h5>
@@ -127,10 +120,10 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           <ul>{ctx.style.guidelines.map((g) => <li key={g}>{g}</li>)}</ul>
         </section>
       )}
-      {ctx.meetings && (
+      {(ctx.profile?.length ?? 0) > 0 && (
         <section>
-          <h5><Mic size={12} /> Meetings <button className="link" onClick={() => setView('meetings')}>manage</button></h5>
-          <pre className="ctx-prompt">{ctx.meetings}</pre>
+          <h5><Brain size={12} /> Standing preferences ({ctx.profile!.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
+          <ul>{ctx.profile!.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
         </section>
       )}
       {ctx.memories.length > 0 && (
@@ -141,14 +134,14 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.nodes.length > 0 && (
         <section>
-          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entit{ctx.nodes.length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
+          <h5><Share2 size={12} /> Graph ({ctx.nodes.filter((n) => !n.kind).length} entit{ctx.nodes.filter((n) => !n.kind).length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
           <ul>
             {ctx.edges.map((e) => {
-              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label
-              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label
-              return <li key={e.id}>{s} <em>{e.relation}</em> {t}</li>
+              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label ?? 'User'
+              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label ?? 'User'
+              return <li key={e.id}>{s} <em>{e.relation.replace(/_/g, ' ')}</em> {t}</li>
             })}
-            {ctx.nodes.filter((n) => !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
+            {ctx.nodes.filter((n) => !n.kind && !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
           </ul>
         </section>
       )}
@@ -197,11 +190,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
-  const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
-  const fixModules = { label: 'Turn on in Settings → Modules', open: () => openSettings('modules') }
-  const meetingCount = useStore((s) => s.meetings.length)
-  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useStyle: true, autoLearn: true, useTools: true, tools: {}, ...draftChatSettings }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -229,7 +219,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.draftMode, cs.useMeetings])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useStyle, cs.draftMode])
 
   return (
     <aside className="context-drawer">
@@ -250,27 +240,25 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
 
       <ShellJobs />
+      <CodingSessions />
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
-        {cs.private && <p className="private-banner"><EyeOff size={13} /> Private: nothing here is remembered</p>}
-        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} locked={!!cs.private} />
-        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} locked={!!cs.private} />
+        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
+        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
         <Toggle icon={<FileText size={14} />} label="Files" hint="Best matching excerpts from your notes and uploads" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
-        <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} fix={viewHidden(settings, 'activity') ? fixModules : undefined} />
-        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} locked={!!cs.private} />
-        <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} fix={viewHidden(settings, 'meetings') ? fixModules : undefined} />
-        {convo && !cs.private && <>
+        <Toggle icon={<PenLine size={14} />} label="Write in my voice" hint={hasStyle ? 'Put your voice in every turn of this chat. Off, the assistant still fetches it before drafting something you will send; ignored once the chat has read untrusted content' : 'No voice learned yet'} value={cs.draftMode === true && cs.useStyle !== false} onChange={(v) => void setChatSettings(v ? { draftMode: true, useStyle: true } : { draftMode: false }, conversationId)} />
+        {convo && <>
           <Toggle icon={<EyeOff size={14} />} label="Don’t learn from this chat" hint="Stays in history and search; nothing from it becomes a memory, graph relation or draft skill" value={cs.learn === false} onChange={(v) => void setChatSettings({ learn: !v }, conversationId)} />
           {cs.learn === false && <button className="link small" onClick={() => void useStore.getState().forgetLearned(convo.id)}>Forget what was learned here</button>}
         </>}
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} locked={!!cs.private} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, files, memory, graph, todos, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Off for every chat'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} disabled={!settings.autoLearn} fix={settings.autoLearn ? undefined : { label: 'Turn on in Settings → Memory', open: () => openSettings('memory') }} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint={settings.permissionMode === 'allow_all' ? 'Allow everything is on: tools run without asking. Deny rules still apply.' : 'Web, files, memory, graph, todos, Python… Risky actions follow the permission mode in Settings.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>
-            <span className="muted small"> A single reply has the same button. Either way it waits in Library → Skills until you approve it.</span>
+            <span className="muted small"> Waits in Library → Skills until you approve it.</span>
           </div>
         )}
         {cs.useTools && (
@@ -283,8 +271,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
             <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops activity, meeting notes, and document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
-              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useActivity: false, useMeetings: false, useDocuments: false })}>clear</button>
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Until you clear this, auto-learn reads only your own messages, never the replies or what they read. Clear also stops document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
+              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useDocuments: false })}>clear</button>
             </span>
           </div>
         )}

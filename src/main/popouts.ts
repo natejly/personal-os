@@ -8,7 +8,8 @@ import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
 import type { BusMessage, GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
-import { reveal, stealFocus } from './background'
+import { background, reveal, stealFocus } from './background'
+import { attachContextMenu } from './attachContextMenu'
 
 const isMac = process.platform === 'darwin'
 const MAX_POPOUTS = 6
@@ -192,6 +193,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
 
   win.once('ready-to-show', () => reveal(win))
   guardNavigation(win.webContents)
+  attachContextMenu(win)
   const onBounds = (): void => scheduleSave(windowId, entry)
   win.on('move', onBounds)
   win.on('resize', onBounds)
@@ -230,8 +232,8 @@ export const focusPopout = (windowId: string): boolean => {
   if (!e || e.win.isDestroyed()) return false
   quiet(windowId, e)
   if (e.win.isMinimized()) e.win.restore()
-  e.win.show()
-  e.win.focus()
+  reveal(e.win)
+  if (!background) e.win.focus()
   return true
 }
 
@@ -272,11 +274,6 @@ export const syncPopoutOpacity = (windowId: string, opacity: number): boolean =>
   return true
 }
 
-export const popoutOpacity = (windowId: string): number | null => {
-  const e = popouts.get(windowId)
-  return e && !e.win.isDestroyed() ? e.opacity : null
-}
-
 export const setPopoutMinSize = (windowId: string, minWidth: number, minHeight: number): boolean => {
   const e = popouts.get(windowId)
   if (!e || e.win.isDestroyed()) return false
@@ -304,8 +301,8 @@ const raiseMain = (): void => {
   const m = getMain()
   if (m && !m.isDestroyed()) {
     if (m.isMinimized()) m.restore()
-    m.show()
-    m.focus()
+    reveal(m)
+    if (!background) m.focus()
   }
   stealFocus()
 }
@@ -354,8 +351,8 @@ export const gather = (): GatherState => {
     const m = getMain()
     if (m && !m.isDestroyed()) {
       if (m.isMinimized()) m.restore()
-      m.show()
-      m.focus()
+      reveal(m)
+      if (!background) m.focus()
     }
     stealFocus()
     return state()

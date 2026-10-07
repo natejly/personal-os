@@ -6,7 +6,7 @@ const heading = (page, re) => expect(page.locator('main h2, .page h2').filter({ 
 
 test('every sidebar nav item opens its view and is marked current; Today brings you back', async () => {
   await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
-    const rows = [['Files', /Files/], ['Meetings', /Meetings/], ['Library', /Library/], ['Activity', /Activity/]]
+    const rows = [['Files', /Files/], ['Library', /Library/]]
     for (const [name, h] of rows) {
       await sidebarItem(page, name).click()
       await heading(page, h)
@@ -24,31 +24,59 @@ test('every sidebar nav item opens its view and is marked current; Today brings 
   })
 })
 
-test('app switcher icons open Lists, Calendar, Mail and the page agent; one is pressed at a time', async ({ grain }) => {
-  const { page } = grain
-  const sw = page.getByRole('toolbar', { name: 'Apps' })
-  for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/]]) {
-    await sw.getByRole('button', { name }).click()
-    await heading(page, h)
-    await expect(sw.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true')
-    for (const other of ['Lists', 'Calendar', 'Mail'].filter((x) => x !== name)) {
-      await expect(sw.getByRole('button', { name: other })).toHaveAttribute('aria-pressed', 'false')
+test('Lists, Calendar, Mail and Health are sidebar rows in order, each opens its view and is marked current', async () => {
+  await withGrain({ settings: ALL_VIEWS_ON }, async ({ page, consoleErrors }) => {
+    const labels = await page.locator('.sidebar .nav-item:not(.nav-more) > span:first-of-type').allInnerTexts()
+    const order = ['Today', 'Files', 'Lists', 'Calendar', 'Mail', 'Health', 'Library']
+    expect(labels.filter((l) => order.includes(l))).toEqual(order)
+    for (const [name, h] of [['Lists', /Lists/], ['Calendar', /Calendar/], ['Mail', /Mail/], ['Health', /Health/]]) {
+      await sidebarItem(page, name).click()
+      await heading(page, h)
+      await expect(sidebarItem(page, name)).toHaveAttribute('aria-current', 'page')
+      await expect(sidebarItem(page, 'Today')).not.toHaveAttribute('aria-current', 'page')
     }
-  }
-  // the switcher is in every view's title bar, including chat
+    // the title bar no longer carries the app icons: no Apps toolbar, no icon per view
+    await expect(page.getByRole('toolbar', { name: 'Apps' })).toHaveCount(0)
+    await expect(page.locator('.app-switch')).toHaveCount(0)
+    expect(consoleErrors).toEqual([])
+  })
+})
+
+test('the title-bar Quick chat button opens and closes the page agent panel', async ({ grain }) => {
+  const { page } = grain
+  const btn = page.getByRole('button', { name: 'Quick chat (⌘I)' })
+  const panel = page.getByRole('complementary', { name: 'Page agent' })
+  // one button per title bar, and it is the only thing in the switcher slot
+  await expect(page.locator('.app-switcher button')).toHaveCount(1)
+  await expect(btn).toHaveAttribute('aria-pressed', 'false')
+  await expect(panel).toHaveCount(0)
+  await btn.click()
+  await expect(panel).toBeVisible()
+  await expect(page.locator('.app.page-agent-open')).toHaveCount(1)
+  await expect(btn).toHaveAttribute('aria-pressed', 'true')
+  await btn.click()
+  await expect(panel).toHaveCount(0)
+  await expect(page.locator('.app.page-agent-open')).toHaveCount(0)
+  await expect(btn).toHaveAttribute('aria-pressed', 'false')
+  // it is present in a chat's title bar too
   await page.getByRole('button', { name: /New chat/ }).first().click()
-  await expect(page.getByRole('toolbar', { name: 'Apps' })).toBeVisible()
+  await expect(btn).toBeVisible()
   expect(grain.consoleErrors).toEqual([])
 })
 
-test('hidden views are not in the sidebar; More modules opens Settings → Modules', async ({ grain }) => {
-  const { page } = grain
-  // defaults hide Meetings and Activity
-  await expect(sidebarItem(page, 'Meetings')).toHaveCount(0)
-  await expect(sidebarItem(page, 'Activity')).toHaveCount(0)
-  await page.getByRole('button', { name: /More modules/ }).click()
+test('hidden views are not in the sidebar; More rows opens Settings → Appearance', async ({ grain }) => {
+  const { page, api } = grain
+  // Library ships on; hiding it takes it out of the sidebar
+  await expect(sidebarItem(page, 'Library')).toHaveCount(1)
+  await api('/settings', { method: 'PUT', body: { hiddenViews: ['library'] } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
+  await expect(sidebarItem(page, 'Library')).toHaveCount(0)
+  await page.getByRole('button', { name: /More rows/ }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.getByRole('tab', { name: /Modules/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('dialog').locator('h4', { hasText: 'Sidebar' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('checkbox', { name: 'Library', exact: true })).not.toBeChecked()
 })
 
 test('⌘B hides and shows the sidebar from the menu, the button and the title-bar toggle', async ({ grain }) => {
@@ -204,7 +232,7 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   expect(acc['Toggle Context Panel']).toBe('Control+Command+I')
   expect(acc['Toggle Spaces']).toMatch(/Shift\+C$/)
   expect(acc['Command Palette…']).toMatch(/\+K$/)
-  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…', 'Activity']
+  const digits = ['Today', 'Chats', 'Lists', 'Calendar', 'Files', 'Mail', 'Memory…']
   digits.forEach((l, i) => expect(acc[l]).toMatch(new RegExp(`\\+${i}$`)))
   // no two items share an accelerator
   const seen = new Map()
@@ -224,17 +252,19 @@ test('menu shortcuts: every View/File item does what its label says', async ({ g
   await menu(grain, 'Files'); await heading(page, /Files/)
   await menu(grain, 'Mail'); await heading(page, /Mail/)
   await menu(grain, 'Library'); await heading(page, /Library/)
-  // Hidden by default: a toast offers to turn it on instead of silently doing nothing
-  await menu(grain, 'Activity')
-  await expect(page.getByText('Activity is turned off')).toBeVisible()
-  await menu(grain, 'Meetings')
-  await expect(page.getByText('Meetings is turned off')).toBeVisible()
+  // A hidden view: a toast offers to turn it on instead of silently doing nothing
+  await grain.api('/settings', { method: 'PUT', body: { hiddenViews: ['library'] } })
+  await page.reload()
+  await page.waitForSelector('.sidebar')
+  await menu(grain, 'Library')
+  await expect(page.getByText('Library is turned off')).toBeVisible()
   await menu(grain, 'Today'); await heading(page, /Today/)
   await menu(grain, 'Chats'); await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible()
-  // Memory… opens Settings → Memory; Knowledge Graph… on the graph
+  // Memory… opens Settings on the Memory tab, split: graph and list side by side
   await menu(grain, 'Memory…')
-  await expect(page.getByRole('dialog').getByRole('tab', { name: /Memory|Knowledge/ }).first()).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog').getByRole('tab', { name: 'Memory' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.knowledge-body .graph-body')).toBeVisible()
+  await expect(page.locator('.knowledge-body .mem-pane')).toBeVisible()
   await menu(grain, 'Settings…')
   await expect(page.getByRole('dialog').getByRole('tab').first()).toBeVisible()
   await page.keyboard.press('Escape')
@@ -304,12 +334,12 @@ test('nothing overflows horizontally at 820x520 on any view', async () => {
       expect.soft(o.sw, `${label} body scrollWidth`).toBe(o.cw)
       expect.soft(o.dsw, `${label} html scrollWidth`).toBe(o.dcw)
     }
-    for (const n of ['Today', 'Files', 'Meetings', 'Library', 'Activity']) {
+    for (const n of ['Today', 'Files', 'Library']) {
       await sidebarItem(page, n).click()
       await check(n)
     }
     for (const n of ['Lists', 'Calendar', 'Mail']) {
-      await page.getByRole('toolbar', { name: 'Apps' }).getByRole('button', { name: n }).click()
+      await sidebarItem(page, n).click()
       await check(n)
     }
     await page.getByRole('button', { name: /New chat/ }).first().click()

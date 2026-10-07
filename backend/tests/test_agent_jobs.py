@@ -391,17 +391,14 @@ def test_the_toolbox_refuses_an_external_tool_whenever_the_context_says_proposal
     assert "error" not in ok and ok["id"]
 
 
-def test_a_job_run_is_told_it_is_a_job_and_runs_on_a_tighter_budget() -> None:
+def test_a_job_run_is_told_it_is_a_job_and_has_no_caps() -> None:
     ROUNDS.append(["noted"])
-    job = make_job("budget", "0 * * * *", at=T0)
+    job = make_job("nocaps", "0 * * * *", at=T0)
     tick(T0 + HOUR)
     run = job_runs(job["id"])[0]
     b = run["budget"]
-    cfg = appmod.settings()
-    assert b["max_rounds"] == min(cfg["maxToolRounds"], appmod.JOB_BUDGET["maxToolRounds"]) < cfg["maxToolRounds"]
-    assert b["max_tokens"] < cfg["maxRunTokens"] and b["max_seconds"] < cfg["maxRunSeconds"]
-    assert appmod._caps({"maxToolRounds": 3}, appmod.JOB_BUDGET)["maxToolRounds"] == 3, "a stricter setting wins"  # noqa: SLF001
-    assert appmod._caps({"maxRunSeconds": 0}, appmod.JOB_BUDGET)["maxRunSeconds"] == 240, "0 means unlimited: capped"  # noqa: SLF001
+    assert not [k for k in b if k.startswith("max_")], "the stored snapshot is usage only"
+    assert not hasattr(appmod, "JOB_BUDGET") and not hasattr(appmod, "_job_caps")
     system = next(d for _, e, d in store.events(run["run_id"]) if e == "assistant_message")["context_used"]["system_prompt"]
     assert "scheduled background run" in system and "recorded as a proposal" in system
 
@@ -884,7 +881,7 @@ def test_a_scheduled_run_cannot_schedule_more_work_and_proposes_instead() -> Non
     j("POST", f"/proposals/{pending[0]['id']}/accept", expect=409)
 
 
-# ---------------- per-job model and budget ----------------
+# ---------------- per-job model ----------------
 async def _listing(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"id": "cheap-model"}, {"id": "embedder", "mode": "embedding"}]
 
@@ -910,34 +907,15 @@ def test_a_job_runs_on_its_own_model_and_an_unknown_one_is_refused(monkeypatch: 
     assert j("GET", f"/conversations/{row['conversation_id']}")["model"] == (appmod.settings().get("defaultModel") or "")
 
 
-def test_a_job_budget_only_tightens_the_job_caps() -> None:
+def test_old_job_budget_fields_are_accepted_ignored_and_not_stored() -> None:
     base = {"name": "Cheap", "cron": "0 6 * * *", "prompt": "x", "timezone": "UTC"}
-    j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 10**9}}, expect=422)  # above JOB_BUDGET
-    j("POST", "/jobs", {**base, "budget": {"maxToolRounds": 3}}, expect=422)  # the round cap is not the job's to set
-    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0.05}}, expect=422)  # cost is reported, never a limit
-    j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 0}}, expect=422)  # 0 would mean unlimited
-    j("POST", "/jobs", {**base, "budget": {"maxRunSeconds": "60"}}, expect=422)
-    made = j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 5000, "maxRunSeconds": 60}})
-    assert made["budget"] == {"maxRunTokens": 5000, "maxRunSeconds": 60}
+    made = j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 5000, "maxRunSeconds": 60, "maxToolRounds": 3}})
+    assert made["budget"] is None, "nothing new is stored"
+    j("POST", "/jobs", {**base, "budget": {"anything": "goes"}})  # no validation: older clients may send whatever they like
     b = _run_by_hand(made["id"])["budget"]
-    assert b["max_tokens"] == 5000 and b["max_seconds"] == 60 and "max_cost" not in b
-    j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunSeconds": 10_000}}, expect=422)
-    assert j("PATCH", f"/jobs/{made['id']}", {"budget": None})["budget"] is None
-
-    # A row written behind the API's back still cannot loosen the job caps: the runner clamps again, and a cost
-    # cap stored before caps were removed is ignored.
-    with appmod.db.tx() as c:
-        c.execute("UPDATE jobs SET budget=? WHERE id=?",
-                  (json.dumps({"maxRunCost": 50, "maxRunTokens": 0, "maxToolRounds": 99}), made["id"]))
-    b = _run_by_hand(made["id"])["budget"]
-    assert "max_cost" not in b and b["max_rounds"] <= appmod.JOB_BUDGET["maxToolRounds"]
-    assert 0 < b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
-
-
-def test_a_job_budget_never_loosens_the_users_own_stricter_setting() -> None:
-    caps = appmod._job_caps({"maxRunTokens": 1000, "maxRunSeconds": 0}, {"maxRunTokens": 5000, "maxRunSeconds": 0})  # noqa: SLF001
-    assert caps["maxRunTokens"] == 1000, "the user's stricter cap wins"
-    assert caps["maxRunSeconds"] == appmod.JOB_BUDGET["maxRunSeconds"], "a 0 in the job budget is not 'unlimited'"
+    assert not [k for k in b if k.startswith("max_")]
+    patched = j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunSeconds": 10_000}, "name": "Renamed"})
+    assert patched["name"] == "Renamed" and patched["budget"] is None
 
 
 # ---------------- proposal hygiene ----------------
@@ -1036,7 +1014,7 @@ def test_a_desk_job_refuses_ask_autonomy_and_unknown_targets() -> None:
     j("POST", "/jobs", {**base, "desk_autonomy": "ask"}, expect=400)
     j("POST", "/jobs", {**base, "target": "rocket"}, expect=400)
     made = j("POST", "/jobs", {**base, "desk_autonomy": "propose", "desk_budget": {"maxTurns": 3}})
-    assert made["target"] == "desk" and made["desk_autonomy"] == "propose" and made["desk_budget"] == {"maxTurns": 3}
+    assert made["target"] == "desk" and made["desk_autonomy"] == "propose" and made["desk_budget"] is None, "desk_budget is ignored"
     j("PATCH", f"/jobs/{made['id']}", {"desk_autonomy": "ask"}, expect=400)
     plain = j("POST", "/jobs", {**base, "target": "run"})
     assert plain["target"] == "run"

@@ -11,30 +11,37 @@ from urllib.parse import urlparse
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "fireworks", "name": "Fireworks AI", "baseUrl": "https://api.fireworks.ai/inference/v1", "needsKey": True,
-     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/kimi-k3",
-     "models": ["accounts/fireworks/models/kimi-k3", "accounts/fireworks/models/deepseek-v4-pro",
-                "accounts/fireworks/models/deepseek-v4p1-flash", "accounts/fireworks/models/qwen3p8-max",
-                "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/gpt-oss-120b"],
-     "note": None},
+     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/ember-1",
+     "models": ["accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
+                "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
+                "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
+     "note": None,
+     "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b"},
     {"id": "openai", "name": "OpenAI", "baseUrl": "https://api.openai.com/v1", "needsKey": True,
      "keyUrl": "https://platform.openai.com/api-keys", "defaultModel": "gpt-5-mini",
-     "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1"], "note": None},
+     "models": ["gpt-5-mini", "gpt-5", "gpt-5-nano", "gpt-4.1"], "note": None,
+     "rerankModel": ""},
     {"id": "anthropic", "name": "Anthropic", "baseUrl": "https://api.anthropic.com/v1/", "needsKey": True,
      "keyUrl": "https://console.anthropic.com/settings/keys", "defaultModel": "claude-sonnet-5-5",
      "models": ["claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-opus-5-5"],
-     "note": "Uses Anthropic's OpenAI-compatible endpoint."},
+     "note": "Uses Anthropic's OpenAI-compatible endpoint.",
+     "rerankModel": ""},
     {"id": "openrouter", "name": "OpenRouter", "baseUrl": "https://openrouter.ai/api/v1", "needsKey": True,
      "keyUrl": "https://openrouter.ai/keys", "defaultModel": "anthropic/claude-sonnet-5-5",
      "models": ["anthropic/claude-sonnet-5-5", "openai/gpt-5-mini", "google/gemini-2.5-flash"],
-     "note": "One key for many providers."},
+     "note": "One key for many providers.",
+     "rerankModel": ""},
     {"id": "ollama", "name": "Ollama (local)", "baseUrl": "http://localhost:11434/v1", "needsKey": False,
      "keyUrl": None, "defaultModel": "llama3.2", "models": ["llama3.2", "qwen3", "gpt-oss:20b"],
-     "note": "Runs on this Mac; pull the model first (ollama pull llama3.2)."},
+     "note": "Runs on this Mac; pull the model first (ollama pull llama3.2).",
+     "rerankModel": ""},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "kimi-k3", "models": ["kimi-k3", "deepseek-v4-flash"],
-     "note": "Your own proxy; model names are whatever its config defines."},
+     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "kimi-k3", "deepseek-v4-flash"],
+     "note": "Your own proxy; model names are whatever its config defines.",
+     "rerankModel": "qwen3-reranker-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
-     "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API."},
+     "keyUrl": None, "defaultModel": "", "models": [], "note": "Any server that speaks the OpenAI chat API.",
+     "rerankModel": ""},
 ]
 BY_ID = {p["id"]: p for p in PROVIDERS}
 
@@ -43,10 +50,50 @@ def get(provider_id: str | None) -> dict[str, Any] | None:
     return BY_ID.get(provider_id or "")
 
 
+# Grain's default chat model, by base name: each preset spells it its own way (accounts/fireworks/models/ember-1 on Fireworks,
+# ember-1 behind the LiteLLM proxy), and a provider that does not list it keeps its own default.
+DEFAULT_CHAT_MODEL = "ember-1"
+
+
+def default_model(settings: dict[str, Any]) -> str:
+    """The chat model when none is saved: Ember 1 as the active provider names it, else that provider's own default."""
+    p = get(effective(settings))
+    if not p:
+        return ""
+    return next((m for m in p["models"] if m.rsplit("/", 1)[-1] == DEFAULT_CHAT_MODEL), p["defaultModel"])
+
+
+def rerank_model(settings: dict[str, Any]) -> str:
+    """The saved rerank model, else the active provider's default; blank = reranking is skipped."""
+    saved = str(settings.get("retrievalRerankModel") or "").strip()
+    return saved or (get(effective(settings)) or {}).get("rerankModel", "")
+
+
 def _hostport(url: str) -> str:
-    u = urlparse(url if "//" in url else f"//{url}")
-    host = (u.hostname or "").lower()
-    return f"{host}:{u.port}" if u.port else host
+    """host[:port], lowercase. An address that cannot be parsed (a stored typo such as host:11x34) yields its raw
+    text, which matches no preset, so it reads as a custom address instead of raising."""
+    try:
+        u = urlparse(url if "//" in url else f"//{url}")
+        host = (u.hostname or "").lower()
+        return f"{host}:{u.port}" if u.port else host
+    except ValueError:
+        return url.strip().lower()
+
+
+def check_base_url(url: str) -> str:
+    """The trimmed address when it is empty or an http(s) URL with a host and a valid port; else ValueError."""
+    base = url.strip()
+    if not base:
+        return base
+    try:
+        u = urlparse(base)
+        ok = u.scheme in ("http", "https") and bool(u.hostname)
+        u.port  # noqa: B018 - raises ValueError on a non-numeric or out-of-range port
+    except ValueError:
+        ok = False
+    if not ok:
+        raise ValueError("baseUrl must be an http:// or https:// address with a valid host and port")
+    return base
 
 
 def infer(base_url: str | None) -> str | None:

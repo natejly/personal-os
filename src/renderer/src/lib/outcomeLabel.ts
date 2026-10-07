@@ -2,10 +2,11 @@ import type { MessageOutcome } from '@shared/types'
 
 const LABELS: Record<MessageOutcome, string> = {
   stopped: 'Stopped',
-  rounds: 'Stopped at the tool-round limit',
-  tokens: 'Stopped at the token budget',
-  time: 'Stopped at the time limit',
-  cost: 'Stopped at the cost limit',
+  // Older versions stopped replies at a limit; those rows keep their outcome.
+  rounds: 'Stopped early',
+  tokens: 'Stopped early',
+  time: 'Stopped early',
+  cost: 'Stopped early',
   loop: 'Stopped after repeating the same step',
   interrupted: 'Interrupted when the app closed',
   length: 'Cut off at the model’s output limit. Send "continue" to pick up where it stopped.',

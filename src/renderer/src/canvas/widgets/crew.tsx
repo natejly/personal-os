@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ExternalLink, Play, RotateCw, Square, Users } from 'lucide-react'
 import type { CrewAgent, CrewView, WorkflowPlanStep, WorkflowStepRow } from '@shared/types'
 import { api } from '../../lib/api'
-import { useStore } from '../../store'
+import { useChatFaceById, useStore, useWorkerFace } from '../../store'
+import { agentHue, faceSeed, libraryAgent, type FaceLook } from '../../lib/faces'
 import Face from '../../components/Face'
 import CrewRing from '../../components/CrewRing'
 import { STATUS_LABEL as DESK_LABEL, fmtDur } from '../../lib/deskStatus'
@@ -80,12 +81,13 @@ function AgentCard({ a }: { a: CrewAgent }): JSX.Element {
 function AgentRow({ a, depth, open, onToggle }: { a: CrewAgent; depth: number; open: boolean; onToggle: () => void }): JSX.Element {
   const status = agentStatus(a)
   const openSubagent = useStore((s) => s.openSubagent)
+  const face = useWorkerFace({ id: a.id, agent: a.role })
   return (
     <>
       <div className={`crew-row ${open ? 'on' : ''}`} style={{ paddingLeft: 7 + depth * 18 }} role="button" tabIndex={0}
         aria-expanded={open} title={a.task} onClick={onToggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}>
-        <Face name={a.id} status={status} size={20} />
+        <Face {...face} status={status} size={20} />
         <span className="crew-name">{a.role}</span>
         <span className="crew-what">{agentNow(a)}</span>
         <span className={`crew-state ${tone(status)}`}>{AGENT_LABEL[status] ?? status}</span>
@@ -175,6 +177,11 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
 
   const focus = view?.agents.find((a) => a.id === focusId) ?? null
   const ringKids = byParent.get(focus?.id ?? null) ?? []
+  // A desk or chat root wears its chat's face; an agent wears its Library face, else its own id's.
+  const rootConv = useStore((s) => (view?.root.kind === 'desk' ? s.desks.find((d) => d.id === view.root.id)?.conversation_id : view?.root.kind === 'chat' ? view.root.id : undefined))
+  const rootFace = useChatFaceById(rootConv)
+  const defs = useStore((s) => s.agentDefs)
+  const look = (a: CrewAgent): FaceLook => { const agent = libraryAgent(a.role); return faceSeed({ id: a.id, agent, hue: agentHue(defs, agent) }) }
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     try { await fn() } catch (e) { toast((e as Error).message, 'error') }
@@ -258,8 +265,8 @@ function CrewWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
           <div className="crew-ring-box">
             {focus && <button className="crew-up" onClick={() => setFocusId(focus.parent_id && byParent.has(focus.parent_id) ? focus.parent_id : null)}>← {focus.parent_id ? 'Back' : root.title}</button>}
             <CrewRing
-              center={{ name: focus?.id ?? root.id, status: focus ? agentStatus(focus) : root.status, title: focus ? `${focus.role}: ${agentNow(focus)}` : rootLabel(view) }}
-              kids={ringKids.map((a) => ({ id: a.id, status: agentStatus(a), title: `${a.role}: ${agentNow(a)}` }))}
+              center={{ ...(focus ? look(focus) : rootConv ? rootFace : { name: root.id }), status: focus ? agentStatus(focus) : root.status, title: focus ? `${focus.role}: ${agentNow(focus)}` : rootLabel(view) }}
+              kids={ringKids.map((a) => ({ id: a.id, ...look(a), status: agentStatus(a), title: `${a.role}: ${agentNow(a)}` }))}
               onPick={(id) => (byParent.has(id) ? setFocusId(id) : openSubagent(id))}
               onCenter={focus ? () => openSubagent(focus.id) : undefined} />
           </div>
@@ -283,5 +290,3 @@ export const def: WidgetDef = {
   heavy: true,
   Component: CrewWidget
 }
-
-export default CrewWidget

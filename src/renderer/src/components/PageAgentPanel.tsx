@@ -71,7 +71,7 @@ export default function PageAgentPanel(): JSX.Element {
       <div className="page-agent-body" ref={scrollRef} onScroll={onScroll}>
         {msgs.length === 0 ? (
           <div className="page-agent-empty">
-            <p className="muted">Whatever you ask goes out with what is on screen behind this panel.</p>
+            <p className="muted">Sees what is on screen behind this panel.</p>
             {hints.map((h) => (
               <button key={h} className="page-agent-hint" onClick={() => void sendToPageAgent(h)}>{h}</button>
             ))}

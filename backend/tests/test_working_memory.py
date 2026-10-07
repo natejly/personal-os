@@ -36,7 +36,7 @@ def check(cond: Any, label: str) -> None:
     passed += 1
 
 
-appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
+appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "permissionMode": "manual"})  # manual: the stub tool calls must not wait on an Auto review
 
 # ---- a scripted model: one entry per round, recording the context it was handed ----
 SEEN: list[list[dict[str, Any]]] = []
@@ -348,7 +348,7 @@ def system_prompt_for(project_id: str | None = None) -> str:
     system, _ = build_context(
         memories=appmod.memories, graph=appmod.graph, documents=appmod.documents, project=None,
         project_id=project_id, query="how do I do the monthly thing", settings=appmod.settings(),
-        conv_settings={}, global_system_prompt="You are Grain.", activity=None, skills=appmod.skills,
+        conv_settings={}, global_system_prompt="You are Grain.", skills=appmod.skills,
     )
     return system
 

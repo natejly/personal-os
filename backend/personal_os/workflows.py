@@ -37,7 +37,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import permrules
+from . import limits, permrules
 from .db import new_id, now
 from .tools import ASK_LOCKED_DANGER
 
@@ -53,7 +53,7 @@ RESERVED_IDS = frozenset({"item", "index", "params", "result"})
 # the user something mid-run. A workflow expresses delegation with `agent` and `fan_out` steps instead.
 TOOL_BLOCK = frozenset({
     "workflow_run", "workflow_resume", "workflow_list", "command_run", "command_list", "propose_plan", "agent_spawn", "agent_wait",
-    "agent_stop", "desk_start", "desk_ask", "ask_user", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write",
+    "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker", "agent_stop", "desk_start", "desk_ask", "ask_user", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write",
 })
 
 REF = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+|\[\d+\])*)\s*\}\}")
@@ -438,8 +438,8 @@ def expand(defn: dict[str, Any], params: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
-class RunBudget:
-    """What the subagents of one workflow run are charged to: tokens and cost (reported, never a limit)."""
+class RunMeter:
+    """What the subagents of one workflow run add their usage to: tokens and cost, for display only."""
 
     def __init__(self) -> None:
         self.tokens, self.cost, self.paused = 0, 0.0, 0.0
@@ -448,9 +448,6 @@ class RunBudget:
     def add(self, pt: int, ct: int, cost: float | None) -> None:
         self.tokens += pt + ct
         self.cost += cost or 0.0
-
-    def exceeded(self) -> str | None:
-        return None
 
 
 # ---- storage ------------------------------------------------------------------------------------
@@ -651,9 +648,9 @@ class Engine:
     """Runs approved workflow runs, one asyncio task each."""
 
     def __init__(self, store: Workflows, toolbox: Any, subagents: Any, run_store: Any, settings_fn: Callable[[], dict[str, Any]],
-                 projects: Any = None, conv_cfg: Callable[[dict[str, Any], str | None], dict[str, Any]] | None = None) -> None:
+                 projects: Any = None) -> None:
         self.store, self.toolbox, self.subagents, self.runs = store, toolbox, subagents, run_store
-        self.settings, self.projects, self.conv_cfg = settings_fn, projects, conv_cfg
+        self.settings, self.projects = settings_fn, projects
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.stops: dict[str, asyncio.Event] = {}
         self.seq: dict[str, int] = {}
@@ -754,8 +751,6 @@ class Engine:
 
     def _ctx(self, run: dict[str, Any], stop: asyncio.Event) -> dict[str, Any]:
         cfg = self.settings()
-        if self.conv_cfg is not None:  # the chat's working folder reaches its workflow's steps
-            cfg = self.conv_cfg(cfg, run.get("conversation_id"))
         project = None
         if self.projects is not None and run.get("project_id"):
             try:
@@ -765,7 +760,7 @@ class Engine:
         modes = self.toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), None)
         return {"project_id": run.get("project_id"), "conversation_id": run.get("conversation_id"), "message_id": None,
                 "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": cfg, "modes": modes, "depth": 0,
-                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "budget": RunBudget(),
+                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "meter": RunMeter(),
                 "workflow_run_id": run["id"], "proposal_only": False}
 
     # ---- the loop
@@ -802,6 +797,7 @@ class Engine:
                 state[s["id"]] = r["status"]
                 if r["status"] == "done" and self._taints(s):
                     ctx["tainted"] = True
+                    ctx.setdefault("taint_sources", []).append(f"workflow:{s['id']}")
         # Waves: every step whose dependencies are settled runs now, side by side. Validation ruled out cycles
         # and unknown needs, so the frontier only empties once every step has a state.
         while True:
@@ -913,20 +909,19 @@ class Engine:
         if spec is None or raw == "off" or not self.toolbox.available(name):
             raise _StepFailed(f"{name} is not available (the tool is off or not connected)")
         # The chat loop's gates, in its order: untrusted content and calls that may never run unasked force a card,
-        # a write outside the granted folders asks, then the argument-pattern rules (deny and the hardline list
+        # a credential store or a write after untrusted content asks, then the argument-pattern rules (deny and the hardline list
         # refuse, ask cards, allow lifts a plain ask). The plan's approval covers the step it named, never a
         # forced card: those are decided per call.
         mode = self.toolbox.gate(name, raw, ctx, args)
         fs_ask = self.toolbox.fs_needs_ask(name, args, ctx)
         if fs_ask and mode == "on":
             mode = "ask"
-        forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args, ctx))
+        forced = mode != raw or (mode == "ask" and (fs_ask or self.toolbox.forces_ask(name, args, ctx)))
         # Those tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on' into a forced card for
         # them: a tainted run forces it here instead, and no allow rule lifts it.
         forced = forced or (spec.danger in ASK_LOCKED_DANGER and bool(ctx.get("tainted")))
         cfg = ctx.get("settings") or self.settings()
-        roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
-        perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"), roots=roots)
+        perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"))
         if perm.refusal:
             raise _StepFailed(f"{name} was refused: {perm.refusal}")
         mode, forced = perm.mode, perm.forced
@@ -937,7 +932,7 @@ class Engine:
         ctx["_step_idx"] = [s["id"] for s in run["definition"]["steps"]].index(step["id"])
 
         async def go() -> Any:
-            ctx["fs_outside_ok"] = fs_ask  # approved above, or inside a granted folder
+            ctx["fs_outside_ok"] = fs_ask  # approved above: the user said yes to this credential store or write
             try:
                 return await self.toolbox.call(name, args, ctx)
             finally:
@@ -1011,7 +1006,7 @@ class Engine:
         cap = int(self.settings().get("workflowMaxFanOut") or 50)
         if len(over) > cap:
             raise _StepFailed(f"fan_out over {len(over)} items; the limit is {cap} (setting workflowMaxFanOut)")
-        conc = max(1, min(int(f.get("max_parallel") or 4), int(self.settings().get("subagentMaxConcurrent") or 4)))
+        conc = max(1, min(int(f.get("max_parallel") or 4), limits.slots(self.settings(), "subagentMaxConcurrent")))
         prior = (next((s for s in run["steps"] if s["step_id"] == step["id"]), {}).get("items")) or {}
         items: dict[str, Any] = {k: v for k, v in prior.items() if int(k) < len(over)}
         sem = asyncio.Semaphore(conc)
@@ -1077,7 +1072,7 @@ class Engine:
                     break
                 await asyncio.sleep(0.05)
         finally:
-            b = ctx.get("budget")
+            b = ctx.get("meter")
             if b is not None:
                 b.paused += time.time() - t0
             self.store.set_step(run["id"], sid, status="running")

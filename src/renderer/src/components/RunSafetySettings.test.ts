@@ -3,33 +3,35 @@ import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Settings } from '@shared/types'
-import RunSafetySettings from './RunSafetySettings'
+import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
 
 const render = (draft: Partial<Settings>): string =>
   renderToStaticMarkup(createElement(RunSafetySettings, { draft: draft as Settings, patch: () => {} }))
 
-test('defaults: no hosts, unattended runs refuse, snapshots on', () => {
-  const html = render({})
-  assert.ok(html.includes('Allowed hosts after reading untrusted content'))
-  assert.match(html, /aria-pressed="true"[^>]*>Refuse</)
-  assert.match(html, /aria-pressed="false"[^>]*>Ask</)
-  assert.match(html, /<input type="checkbox" checked=""/)
+test('defaults: no hosts listed, snapshots on', () => {
+  assert.ok(render({}).includes('Allowed hosts after reading untrusted content'))
+  assert.match(renderToStaticMarkup(createElement(SnapshotToggle, { draft: {} as Settings, patch: () => {} })), /<input type="checkbox" checked=""/)
 })
 
-test('saved values show: hosts listed, ask selected, snapshots off', () => {
-  const html = render({ fetchAllowlist: ['docs.example.org'], unattendedApprovals: 'ask', snapshotsEnabled: false, snapshotsAvailable: true })
-  assert.ok(html.includes('<code>docs.example.org</code>'))
-  assert.match(html, /aria-pressed="true"[^>]*>Ask</)
+test('saved values show: hosts listed, snapshots off', () => {
+  assert.ok(render({ fetchAllowlist: ['docs.example.org'] }).includes('<code>docs.example.org</code>'))
+  const html = renderToStaticMarkup(createElement(SnapshotToggle, { draft: { snapshotsEnabled: false, snapshotsAvailable: true } as Settings, patch: () => {} }))
   assert.doesNotMatch(html, /type="checkbox"[^>]*checked/)
 })
 
 test('without snapshot support the switch is disabled and says why', () => {
-  const html = render({ snapshotsAvailable: false })
+  const html = renderToStaticMarkup(createElement(SnapshotToggle, { draft: { snapshotsAvailable: false } as Settings, patch: () => {} }))
   assert.match(html, /<input type="checkbox" disabled=""/)
   assert.ok(html.includes('Unavailable on this Mac'))
 })
 
-test('the Permissions tab sections the run-safety block sits beside are exported from one place', async () => {
+test('the retired run-safety controls are gone', () => {
+  const html = render({})
+  assert.ok(!html.includes('Unattended runs'))
+  assert.ok(!html.includes('Review gate'))
+})
+
+test('the Advanced sections the run-safety block sits beside are exported from one place', async () => {
   const cowork = await import('./CoworkSettings')
   for (const name of ['ShellNetwork', 'BrowserAccess', 'DeskGates'] as const) assert.equal(typeof cowork[name], 'function', name)
   const html = renderToStaticMarkup(createElement(cowork.DeskGates, { draft: { deskDoneGate: false } as Settings, patch: () => {} }))

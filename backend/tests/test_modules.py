@@ -81,8 +81,6 @@ class RouteTests(unittest.TestCase):
         for want in [("/todos", "GET"), ("/todos", "POST"), ("/todos/{id}", "PUT"), ("/todos/{id}", "DELETE"),
                      ("/integrations/google/tasks-sync", "GET"), ("/integrations/google/tasks-sync", "PUT"),
                      ("/integrations/google/tasks-sync/run", "POST"),
-                     ("/integrations/google/todo-calendar", "GET"), ("/integrations/google/todo-calendar", "PUT"),
-                     ("/integrations/google/todo-calendar/run", "POST"),
                      ("/integrations/google/tasklists", "GET")]:
             self.assertIn(want, got)
 
@@ -101,21 +99,19 @@ class RouteTests(unittest.TestCase):
 
     def test_sync_routes_report_status(self) -> None:
         self.assertEqual(client.get("/integrations/google/tasks-sync").status_code, 200)
-        self.assertEqual(client.get("/integrations/google/todo-calendar").status_code, 200)
 
     def test_sync_run_maps_errors(self) -> None:
         # Not-connected is a 409 the UI turns into "connect Google"; anything else is a 502.
-        for url, target in [("/integrations/google/tasks-sync/run", todos.tasks_sync),
-                            ("/integrations/google/todo-calendar/run", todos.calendar_mirror)]:
-            orig = target.sync_once
-            try:
-                for exc, code in [(GoogleNotConnected("no"), 409), (RuntimeError("boom"), 502)]:
-                    def fail(exc: Exception = exc) -> None:
-                        raise exc
-                    target.sync_once = fail  # type: ignore[method-assign]
-                    self.assertEqual(client.post(url).status_code, code)
-            finally:
-                target.sync_once = orig  # type: ignore[method-assign]
+        target = todos.tasks_sync
+        orig = target.sync_once
+        try:
+            for exc, code in [(GoogleNotConnected("no"), 409), (RuntimeError("boom"), 502)]:
+                def fail(exc: Exception = exc) -> None:
+                    raise exc
+                target.sync_once = fail  # type: ignore[method-assign]
+                self.assertEqual(client.post("/integrations/google/tasks-sync/run").status_code, code)
+        finally:
+            target.sync_once = orig  # type: ignore[method-assign]
 
 
 class DashboardTests(unittest.TestCase):
@@ -134,18 +130,16 @@ class DashboardTests(unittest.TestCase):
 
 
 class LoopTests(unittest.TestCase):
-    def test_on_change_pokes_both_loops(self) -> None:
+    def test_on_change_pokes_the_sync_loop(self) -> None:
         hits: list[str] = []
-        a, b = todos.tasks_sync.poke, todos.calendar_mirror.poke
+        a = todos.tasks_sync.poke
         todos.tasks_sync.poke = lambda: hits.append("tasks")  # type: ignore[method-assign]
-        todos.calendar_mirror.poke = lambda: hits.append("cal")  # type: ignore[method-assign]
         try:
             t = todos.store.create("poke me")
             todos.store.delete(t["id"])
         finally:
-            todos.tasks_sync.poke, todos.calendar_mirror.poke = a, b
+            todos.tasks_sync.poke = a
         self.assertIn("tasks", hits)
-        self.assertIn("cal", hits)
 
     def test_start_stop_leave_no_running_tasks(self) -> None:
         async def go() -> list[bool]:
@@ -157,9 +151,7 @@ class LoopTests(unittest.TestCase):
             return states + [t.done() for t in started] + [bool(todos._tasks)]
 
         res = asyncio.run(go())
-        self.assertEqual(res[:2], [True, True])  # two loops were running
-        self.assertEqual(res[2:4], [True, True])  # and both are finished after stop
-        self.assertFalse(res[4])
+        self.assertEqual(res, [True, True, False])  # the sync loop ran, is finished after stop, and nothing is tracked
 
     def test_stop_without_start_is_a_noop(self) -> None:
         asyncio.run(todos.stop())
@@ -176,22 +168,6 @@ class ModulesStampTests(unittest.TestCase):
         appmod.db.set_settings({"hiddenViews": ["library"]})  # hidden again by the user after the stamp
         appmod._seed_hidden_modules()
         self.assertEqual(appmod.db.get_settings()["hiddenViews"], ["library"])
-
-    def test_stamp_5_shows_meetings_and_activity_once(self) -> None:
-        from personal_os import app as appmod
-        appmod.db.set_settings({"modulesDefault": 4, "hiddenViews": ["meetings", "activity", "health"],
-                                "homeWidgets": {"meetings": False, "drive": False}})
-        appmod._seed_hidden_modules()
-        s = appmod.db.get_settings()
-        self.assertEqual(s["hiddenViews"], ["health"])
-        self.assertEqual(s["homeWidgets"], {"drive": False})
-        self.assertEqual(s["modulesDefault"], 5)
-        # Hidden again by the user after stamp 5: the next launch leaves it hidden.
-        appmod.db.set_settings({"hiddenViews": ["activity"], "homeWidgets": {"meetings": False}})
-        appmod._seed_hidden_modules()
-        s = appmod.db.get_settings()
-        self.assertEqual(s["hiddenViews"], ["activity"])
-        self.assertEqual(s["homeWidgets"], {"meetings": False})
 
     def test_fresh_install_hides_nothing(self) -> None:
         from personal_os import app as appmod

@@ -7,7 +7,7 @@ one closes, and a promotion is only a promotion once the promoted copy has been 
 
 `llm.stream_chat` is replaced by a scripted generator whose signature tracks the real one, the way
 test_runs.py does it. One scripted entry is one round. The closing tool-free round (`tool_choice`
-"none") deliberately does NOT consume the script, so a budget stop cannot silently eat the next
+"none") deliberately does NOT consume the script, so a breaker stop cannot silently eat the next
 turn's first round.
 
 Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_cowork.py
@@ -67,7 +67,7 @@ async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[
     SCRIPT["messages"].append([dict(m) for m in messages])
     SCRIPT["systems"].append("\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system"))
     if tool_choice == "none":
-        # The closing round of a budget, park or breaker stop. It never calls a tool and never
+        # The closing round of a park or breaker stop. It never calls a tool and never
         # consumes a scripted turn: the next turn's first round is still waiting for its entry.
         yield {"type": "delta", "text": "Wrapping up."}
         yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
@@ -225,9 +225,10 @@ def test_a_desk_is_a_conversation_the_chat_list_hides() -> None:
     check(j("GET", "/cowork/desks/nope", expect=404)["detail"] == "No such desk", "an unknown desk 404s")
 
 
-def test_ask_as_it_goes_cards_each_change_instead_of_planning_first() -> None:
+def test_ask_as_it_goes_reviews_each_change_instead_of_planning_first() -> None:
     """'Ask as it goes' is a mode the UI offers, so it has to be a different thing from 'Plan
-    first': nothing withheld up front, no plan card, and one card per change on its way out."""
+    first': nothing withheld up front, no plan card, and each change follows the permission mode
+    (here the reviewer is unavailable, so the change is carded, but not forced)."""
     script({"calls": [WRITE]},
            {"calls": [call("desk_done", summary="Written.")]},
            {"text": "Done."})
@@ -237,8 +238,7 @@ def test_ask_as_it_goes_cards_each_change_instead_of_planning_first() -> None:
           "an 'ask' desk does not start its reply in planning")
     row = card(did, "desk_write_file")
     check(row["tool"] == "desk_write_file", f"the change itself is the card, got {row['tool']}")
-    check(bool(row["forced"]),
-          "forced, so 'Always allow' cannot quietly turn the mode the user chose back off")
+    check(not row["forced"], "not forced: it follows the permission mode, so a grant or allow rule can lift it")
     j("POST", f"/approvals/{row['call_id']}", {"decision": "allow"})
     quiet(did)
 
@@ -278,9 +278,7 @@ def test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first() -> None:
 def test_seen_clears_the_desks_needs_you_badge() -> None:
     script({"calls": [call("desk_ask", question="Which vendor did you mean?")]}, {"text": "Waiting."})
     did = make_desk("Compare the vendors", autonomy="ask")["desk"]["id"]
-    q = card(did, "desk_ask")
-    j("POST", f"/approvals/{q['call_id']}", {"decision": "allow", "note": "the second one"})
-    quiet(did)
+    card(did, "desk_ask")  # parked on the question: it sits in Needs you until the user looks
 
     before = desk(did)
     check(before["unseen"] > 0, f"the desk is in Needs you, got unseen={before['unseen']}")
@@ -493,17 +491,17 @@ def test_a_watched_card_never_parks() -> None:
 
 
 def test_a_chained_turn_hands_off_before_it_ends() -> None:
-    """Long autonomy is bought by chaining bounded replies, never by raising maxToolRounds."""
+    """A reply that just ends (no desk_done, no desk_ask) is nudged once: a second run, announced before the first closes."""
     # The completion gate is off here: this script finishes without delivering its files, which the gate would
     # (rightly) refuse, and either the refusal and its nudge or the reviewer it would start adds a third run to a test about two.
-    settings_patch(maxToolRounds=2, deskDoneGate=False, deskSelfReview=False)
+    settings_patch(deskDoneGate=False, deskSelfReview=False)
     try:
         second = call("desk_write_file", path="outputs/second.md", content="# Second\n")
         script({"calls": [propose("Two files", step("desk_write_file", WRITE["arguments"]),
                                   step("desk_write_file", second["arguments"]))]},
                {"calls": [WRITE]},
-               {"calls": [second]},                       # round 3: out of rounds, never executed
-               {"calls": [second]},                       # turn 2, round 1: the step picked up again
+               {"calls": [second]},
+               {"text": "Wrote both."},                  # the reply just ends: one nudge turn follows
                {"calls": [call("desk_done", summary="Both files written.")]},
                {"text": "Finished."})
         made = make_desk("Write two files")
@@ -520,60 +518,30 @@ def test_a_chained_turn_hands_off_before_it_ends() -> None:
         check({"plan_card", "plan_decision", "desk_status"} <= set(names),
               f"the four new ChatEvent names all really leave the bus, got {sorted(set(names))}")
         rows = run_store.list(desk_id=did, statuses=None)
-        check(len(rows) == 2, f"two bounded runs, not one long one, got {len(rows)}")
+        check(len(rows) == 2, f"a run and its one nudge turn, got {len(rows)}")
         check({r["turn"] for r in rows} == {0, 1}, f"numbered as consecutive turns, got {[r['turn'] for r in rows]}")
         check(desk(did)["turn"] == 2, f"the desk counted both turns, got {desk(did)['turn']}")
-        check(workspace.resolve_in(did, "outputs/second.md").is_file(), "the second step really ran on the next turn")
+        check(workspace.resolve_in(did, "outputs/second.md").is_file(), "the second step really ran")
         spent = plans.get(desk(did)["plan_id"])
         check([s["status"] for s in spent["steps"]] == ["done", "done"], "both approved steps are spent exactly once")
     finally:
-        settings_patch(maxToolRounds=25, deskDoneGate=True, deskSelfReview=True)
+        settings_patch(deskDoneGate=True, deskSelfReview=True)
 
 
-def test_a_turn_that_consumed_no_step_does_not_chain() -> None:
-    settings_patch(maxToolRounds=2)
-    try:
-        script({"calls": [propose("One file", step("desk_write_file", WRITE["arguments"]))]},
-               {"calls": [call("desk_read_file", path="work/missing.txt")]},         # a round spent on nothing the plan asked for, and it errors: no progress
-               {"calls": [WRITE]},                        # round 3: out of rounds, never executed
-               {"text": "Finished."})
-        did = make_desk("Spin the wheels")["desk"]["id"]
-        j("POST", f"/approvals/{card(did, PLAN_TOOL)['call_id']}", {"decision": "allow"})
-        quiet(did)
-        time.sleep(0.5)      # long enough for a chained turn to have appeared, if one were coming
-
-        check(len(run_store.list(desk_id=did, statuses=None)) == 1, "no second turn was started")
-        state = desk(did)
-        # §9 calls this landing in `failed`; Desks.settle maps a budget-window stop to review/budget
-        # whatever the reason, and review is in NEEDS_YOU, so the user sees it either way.
-        check(state["status"] == "review" and state["status_reason"] == "budget",
-              f"the desk stops and asks the user instead, got {state['status']}/{state['status_reason']}")
-        check(_desk_tasks.get(did) is None, "and the supervisor let go")
-    finally:
-        settings_patch(maxToolRounds=25)
-
-
-def test_the_desk_budget_caps_the_chain_even_with_turns_left() -> None:
-    """_should_chain's five guards, asserted directly: a scripted run never costs real money, so
-    the cost axis cannot be reached through the app."""
-    did = make_desk("Budgeted", start=False)["desk"]["id"]
-    plan = plans.open(f"budget:{did}",
-                      {"title": "t", "steps": [{"tool": "desk_write_file", "arguments": WRITE["arguments"], "why": ""}]},
-                      run_id=None, conversation_id=j("GET", f"/cowork/desks/{did}")["conversation_id"],
-                      message_id="", tainted=False, desk_id=did)
-    plans.decide(f"budget:{did}", "allow")
-    base = {"status": "working", "turn": 0, "cost": 0.0, "plan_id": plan["plan_id"], "budget": None}
+def test_nothing_caps_a_desk_chain_but_the_single_nudge() -> None:
+    """_should_chain asserted directly: neither spend, the turn count nor a stored desk budget stops a desk."""
+    did = make_desk("Uncapped", start=False)["desk"]["id"]
+    base = {"status": "working", "turn": 0, "cost": 0.0, "plan_id": None, "budget": None}
     run = Run("unused")
-    run.partial, run.steps_consumed = "rounds", 1
+    run.partial = None
     try:
         check(_should_chain(base, run) is True, "the baseline turn would chain")
         check(_should_chain({**base, "cost": 99.0}, run) is True, "spend never stops a desk")
-        check(_should_chain({**base, "turn": 99}, run) is False, "so does the turn cap")
-        check(_should_chain({**base, "budget": {"maxTurns": 1}}, run) is False, "a desk's own budget may make the user's settings stricter")
-        run.steps_consumed = 0
-        check(_should_chain(base, run) is False, "a turn that consumed no step is not progress")
-        run.steps_consumed = 1
-        check(_should_chain({**base, "status": "review"}, run) is False, "and a desk that is not working never chains")
+        check(_should_chain({**base, "turn": 99}, run) is True, "there is no turn cap")
+        check(_should_chain({**base, "budget": {"maxTurns": 1}, "turn": 5}, run) is True, "a stored desk budget is ignored")
+        check(_should_chain({**base, "status": "review"}, run) is False, "a desk that is not working never chains")
+        run.partial = "loop"
+        check(_should_chain(base, run) is False, "a stuck loop never chains")
     finally:
         run.end()
 
@@ -607,7 +575,7 @@ def test_leaving_needs_you_clears_the_old_ask() -> None:
 def test_a_steer_does_not_double_charge_the_turn() -> None:
     """A steered reply closes its current segment with its own `done` and carries on in a fresh
     assistant message. _run_desk read every `done` as end-of-turn, so one turn was charged twice
-    and the desk hit its turn budget half a turn early."""
+    and the desk counted turns twice."""
     script({"text": " ".join(["Thinking."] * 40)}, {"text": "Folded in the steer."}, delay=0.02)
     made = make_desk("Steer me")
     did, cid = made["desk"]["id"], made["conversation_id"]
@@ -757,7 +725,7 @@ def test_a_checklist_becomes_one_todo_per_line() -> None:
     made = [todos.get(i) for i in out["ref"].split(",")]
     check([t["title"] for t in made] == ["Book the room", "Send the agenda", "Pick a date"],
           f"one todo per checklist line, headings skipped, got {[t['title'] for t in made]}")
-    check(all(t["source"] == "desk" for t in made), "marked as agent input, like mail and meetings")
+    check(all(t["source"] == "desk" for t in made), "marked as agent input, like mail")
     check(checklist_items("first\n\n  second  \n") == ["first", "second"], "with no list lines, every non-empty line")
     check(len(checklist_items("\n".join(f"{n}. step" for n in range(80)))) == 50, "and never more than 50")
 
@@ -884,10 +852,9 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_wake_that_lost_the_race_with_its_own_run_is_retried,
          test_a_watched_card_never_parks,
          test_a_chained_turn_hands_off_before_it_ends,
-         test_a_turn_that_consumed_no_step_does_not_chain,
-         test_the_desk_budget_caps_the_chain_even_with_turns_left,
+         test_nothing_caps_a_desk_chain_but_the_single_nudge,
          test_desk_ask_moves_the_desk_to_needs_you,
-         test_ask_as_it_goes_cards_each_change_instead_of_planning_first,
+         test_ask_as_it_goes_reviews_each_change_instead_of_planning_first,
          test_seen_clears_the_desks_needs_you_badge,
          test_leaving_needs_you_clears_the_old_ask,
          test_a_steer_does_not_double_charge_the_turn,
@@ -1128,23 +1095,122 @@ def test_a_chat_works_autonomously_in_its_own_conversation() -> None:
     j("POST", "/cowork/desks", {"conversation_id": "nope"}, expect=404)
 
 
-def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
-    script({"text": "I think that is everything."}, {"text": "Still nothing."})
+def test_a_tool_using_reply_that_just_ends_is_the_answer_in_an_ask_desk() -> None:
+    # The front-agent stance answers first and hands longer work to workers, so an ask desk's reply that ended is the answer
+    # whatever tools it used: no nudge turn, the desk settles done.
+    script({"calls": [call("current_time")]}, {"text": "I think that is everything."}, {"text": "Still nothing."})
     did = make_desk("Do it", autonomy="ask")["desk"]["id"]
     quiet(did)
     time.sleep(0.3)
     quiet(did)
     firsts = [m for m in SCRIPT["messages"] if m]
     nudges = [m for m in firsts if "ended your reply without calling" in str(m[-1].get("content") or "")]
-    check(len(nudges) == 1, f"one nudge turn was started, got {len(nudges)} of {len(firsts)} rounds")
-    check(len(run_store.list(desk_id=did, statuses=None)) == 2, "and no third turn")
-    check(desk(did)["status"] in ("review", "blocked"), "a nudged turn that also just ends settles")
+    check(len(nudges) == 0, f"no nudge turn was started, got {len(nudges)} of {len(firsts)} rounds")
+    check(len(run_store.list(desk_id=did, statuses=None)) == 1, "and no second turn")
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", f"it settles done (answered), got {d['status']}/{d['status_reason']}")
+
+
+def test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge() -> None:
+    script({"text": "Paris."})
+    did = make_desk("What is the capital of France?", autonomy="ask")["desk"]["id"]
+    quiet(did)
+    time.sleep(0.3)
+    quiet(did)
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", f"no tool, no plan: done (answered), got {d['status']}/{d['status_reason']}")
+    check(len(run_store.list(desk_id=did, statuses=None)) == 1, "one turn: no nudge")
+    check(not any("ended your reply without calling" in str(m[-1].get("content") or "") for m in SCRIPT["messages"] if m), "and none was sent")
+    # a later message in the same chat relaunches the desk like any other turn
+    script({"text": "Berlin."})
+    j("POST", f"/cowork/desks/{did}/message", {"content": "And Germany?"})
+    quiet(did)
+    check(desk(did)["status"] == "done" and len(run_store.list(desk_id=did, statuses=None)) == 2, "the next question is answered the same way")
+    check([m["content"] for m in j("GET", f"/conversations/{desk(did)['conversation_id']}")["messages"] if m["role"] == "assistant"][-1].strip() == "Berlin.",
+          "and lands in the same transcript")
+
+
+def test_an_answer_that_consumed_a_plan_step_or_has_unfinished_plan_steps_is_not_a_plain_answer() -> None:
+    from personal_os.app import _answered, _chain_kind
+    import types
+
+    def fake(**kw: Any) -> Any:
+        base = dict(error=None, partial=None, tool_calls=0, steps_consumed=0, tool_ok=0, input={"content": "hi"}, stop=asyncio.Event())
+        return types.SimpleNamespace(**{**base, **kw})
+    row = {"autonomy": "ask", "plan_id": None, "status": "working", "turn": 1, "budget": {}}
+    check(_answered(row, fake()) and _chain_kind(row, fake()) is None, "a turn with no tool call at all is a plain answer, and nothing follows it")
+    check(_answered(row, fake(tool_calls=1)) and _chain_kind(row, fake(tool_calls=1)) is None,
+          "a reply that used tools and ended is still the answer: nothing follows it")
+    check(_answered(row, fake(tool_ok=1, tool_calls=1)) and _chain_kind(row, fake(tool_ok=1, tool_calls=1)) is None, "so is one whose calls ran")
+    check(not _answered(row, fake(steps_consumed=1)), "a consumed plan step is not a plain answer")
+    def plan_with(*statuses: str) -> str:
+        cid = j("POST", "/conversations", {"title": "plan"})["id"]
+        p = plans.open(f"c-{time.time_ns()}", {"title": "t", "steps": [{"tool": "gmail_send", "arguments": {"i": i}} for i, _ in enumerate(statuses)]},
+                       conversation_id=cid)
+        with db.tx() as c:
+            for i, st in enumerate(statuses):
+                c.execute("UPDATE plan_steps SET status=? WHERE plan_id=? AND idx=?", (st, p["plan_id"], i))
+            c.execute("UPDATE action_plans SET status='approved' WHERE plan_id=?", (p["plan_id"],))
+        return p["plan_id"]
+    unfinished, finished = plan_with("consumed", "approved"), plan_with("consumed", "consumed")
+    check(not _answered({**row, "plan_id": unfinished}, fake()), "a desk with approved steps nobody claimed is not")
+    check(_chain_kind({**row, "plan_id": unfinished}, fake()) == "nudge", "and still gets its nudge")
+    check(_answered({**row, "plan_id": finished}, fake()) and _chain_kind({**row, "plan_id": finished}, fake()) is None,
+          "a plan carried out earlier in the chat does not turn every later plain reply into a nudge")
+    check(not _answered({**row, "autonomy": "plan"}, fake()) and not _answered({**row, "autonomy": "propose"}, fake()), "only `ask` desks answer plainly")
+    check(not _answered(row, fake(partial="rounds")) and not _answered(row, fake(error="x")), "a budget stop or an error is not an answer")
+    from personal_os.cowork import DESK_NUDGE
+    check(not _answered(row, fake(input={"content": DESK_NUDGE})) and not _answered(
+        {**row, "status": "done"}, fake()), "nor is a continuation turn, or a desk that already settled")
+
+
+def test_a_chats_first_message_can_start_a_desk_through_the_message_route() -> None:
+    """What the composer does on a new chat's first send with Autonomous on: bind a desk to the empty chat without starting
+    it, then send the text through the desk's message route."""
+    cid = j("POST", "/conversations", {"title": "New chat"})["id"]
+    made = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "ask", "brief": "How tall is Everest?", "start": False})
+    did = made["desk"]["id"]
+    check(made["desk"]["status"] == "draft" and made["conversation_id"] == cid and "run_id" not in made, "created as a draft, nothing running")
+    check(made["desk"]["brief"] == "How tall is Everest?" and j("GET", f"/conversations/{cid}")["settings"]["deskId"] == did, "bound to the chat")
+    script({"text": "About 8,849 metres."})
+    out = j("POST", f"/cowork/desks/{did}/message", {"content": "How tall is Everest?"})
+    check(out["ok"] and out.get("run_id") and not out.get("queued"), f"the first message launches the draft: {out}")
+    quiet(did)
+    d = desk(did)
+    check(d["status"] == "done" and d["status_reason"] == "answered", "and the answer settles it")
+    roles = [(m["role"], m["content"].strip()) for m in j("GET", f"/conversations/{cid}")["messages"]]
+    check(roles == [("user", "How tall is Everest?"), ("assistant", "About 8,849 metres.")], f"one user message, one answer: {roles}")
+
+
+def test_a_message_over_the_live_cap_queues_instead_of_starting() -> None:
+    """Reported, not redesigned: a chat's first message goes through the same gate as every desk turn, so over deskMaxLive it waits in
+    line (the message is held with the desk, and the client gets {queued, position}) and is sent when a slot frees."""
+    settings_patch(deskMaxLive=1)
+    try:
+        script({"text": " ".join(["slow"] * 60)}, delay=0.1)
+        busy = make_desk("Work on something long", autonomy="ask")["desk"]["id"]
+        wait_until(lambda: desk(busy)["status"] in LIVE, "the first desk to be live")
+        cid = j("POST", "/conversations", {"title": "second"})["id"]
+        did = j("POST", "/cowork/desks", {"conversation_id": cid, "autonomy": "ask", "brief": "Quick one", "start": False})["desk"]["id"]
+        out = j("POST", f"/cowork/desks/{did}/message", {"content": "Quick one"})
+        check(out.get("queued") is True and out["position"] == 1 and desk(did)["status"] == "queued", f"over deskMaxLive it waits in line: {out}")
+        check(not j("GET", f"/conversations/{cid}")["messages"], "and nothing is in its transcript yet")
+        script({"text": "Done quickly."})
+        j("POST", f"/cowork/desks/{busy}/stop")  # a slot frees: the queue drains
+        wait_until(lambda: desk(did)["status"] == "done", "the queued desk to run and answer")
+        check([m["role"] for m in j("GET", f"/conversations/{cid}")["messages"]] == ["user", "assistant"], "then the question and its answer are there")
+    finally:
+        settings_patch(deskMaxLive=4)
 
 
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_chat_is_offered_desk_start_whatever_views_are_hidden,
          test_a_chat_works_autonomously_in_its_own_conversation,
-         test_a_reply_that_just_ends_gets_exactly_one_nudge,
+         test_a_tool_using_reply_that_just_ends_is_the_answer_in_an_ask_desk,
+         test_a_plain_answer_from_an_ask_desk_settles_done_without_a_nudge,
+         test_an_answer_that_consumed_a_plan_step_or_has_unfinished_plan_steps_is_not_a_plain_answer,
+         test_a_chats_first_message_can_start_a_desk_through_the_message_route,
+         test_a_message_over_the_live_cap_queues_instead_of_starting,
          test_a_desk_is_told_it_is_a_desk,
          test_a_desk_is_told_its_inputs,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,

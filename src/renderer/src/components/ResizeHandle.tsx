@@ -59,7 +59,7 @@ export default function ResizeHandle({ id, defaultSize, min, max, unit = 'px', g
     if (e.button !== 0) return
     e.preventDefault()
     const el = e.currentTarget
-    // Capture keeps the drag ours even when the pointer crosses a <webview> or an iframe, which
+    // Capture keeps the drag ours even when the pointer crosses an iframe, which
     // would otherwise swallow every move event.
     el.setPointerCapture(e.pointerId)
     const startX = e.clientX

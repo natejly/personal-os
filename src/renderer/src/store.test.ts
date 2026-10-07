@@ -41,6 +41,16 @@ test('`done` stops the session answering while the auto-learn tail keeps the str
   assert.ok(after.finishedAt, 'and the green hold starts')
 })
 
+test('`done` keeps the files the reply attached, and a done without any leaves them alone', () => {
+  const files = [{ id: 'd1', name: 'screen.png', mime: 'image/png', size: 10 }]
+  const withFiles = applyEvent(session(), { event: 'done', data: { ...(DONE as { data: object }).data, attachments: files } } as unknown as ChatEvent, true)
+  assert.deepEqual(withFiles.conversation?.messages?.[0].attachments, files)
+  const again = applyEvent(withFiles, { event: 'done', data: { ...(DONE as { data: object }).data, attachments: null } } as unknown as ChatEvent, true)
+  assert.deepEqual(again.conversation?.messages?.[0].attachments, files)
+  const row = applyEvent(session(), { event: 'assistant_message', data: msg({ attachments: files }) } as unknown as ChatEvent, true)
+  assert.deepEqual(row.conversation?.messages?.[0].attachments, files)
+})
+
 test('the tail events that arrive after `done` never make it answering again', () => {
   let s = applyEvent(session(), DONE, true)
   for (const ev of [
@@ -108,18 +118,18 @@ test('a new chat defaults to no project, and only an explicit choice files it in
 })
 
 test('accept/restore: typing during the request survives an append and yields to a replacement', () => {
-  const appended = { id: 'd', content: 'notes\n\n## Recording summary\nbody\n' } as never
+  const appended = { id: 'd', content: 'notes\n\n## Summary\nbody\n' } as never
   // nothing typed since the pre-request flush: the server body wins and the draft clears
   assert.deepEqual(adoptServerDoc(null, appended, null, 'notes\n'), { activeDoc: appended, docDraft: null })
   assert.deepEqual(adoptServerDoc('notes\n', appended, 'notes\n', 'notes\n'), { activeDoc: appended, docDraft: null })
-  // typed (or dictated) while an append was being accepted: both the typing and the section stay,
+  // typed while an append was being accepted: both the typing and the section stay,
   // so the next autosave cannot drop the summary that was just accepted
   const merged = adoptServerDoc('notes\nmore', appended, 'notes\n', 'notes\n')
   assert.equal(merged.activeDoc, appended)
-  assert.equal(merged.docDraft, 'notes\nmore\n\n## Recording summary\nbody\n')
+  assert.equal(merged.docDraft, 'notes\nmore\n\n## Summary\nbody\n')
   // an append onto an empty doc has no separator of its own
-  const first = { id: 'd', content: '## Recording summary\nbody\n' } as never
-  assert.equal(adoptServerDoc('typed', first, null, '').docDraft, 'typed\n\n## Recording summary\nbody\n')
+  const first = { id: 'd', content: '## Summary\nbody\n' } as never
+  assert.equal(adoptServerDoc('typed', first, null, '').docDraft, 'typed\n\n## Summary\nbody\n')
   // the body was replaced outright: nothing to merge the typing into, the server wins
   const replaced = { id: 'd', content: 'a different body' } as never
   assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
@@ -271,24 +281,6 @@ test('opening a doc at a cited line leaves the jump for the editor', async () =>
     assert.equal(useStore.getState().docJump, null, 'a plain open asks for no jump')
   } finally {
     Object.assign(docs, orig)
-  }
-})
-
-test('a meeting whose notes failed to save is not navigated away from', async () => {
-  const { api } = await import('./lib/api')
-  const meetings = api.meetings as unknown as Stubs
-  const orig = { ...meetings }
-  let opened = 0
-  meetings.patch = async () => { throw new Error('offline') }
-  meetings.get = async () => { opened++; return { id: 'm2', notes: '' } }
-  try {
-    useStore.setState({ activeMeeting: { id: 'm1', notes: 'a' } as never, meetingNotesDraft: 'a typed', toasts: [] })
-    await useStore.getState().openMeeting('m2')
-    assert.equal(opened, 0)
-    assert.equal(useStore.getState().activeMeeting?.id, 'm1')
-    assert.equal(useStore.getState().meetingNotesDraft, 'a typed')
-  } finally {
-    Object.assign(meetings, orig)
   }
 })
 
@@ -620,6 +612,22 @@ test('error: once the reply is done nothing is touched; with no reply row it bec
   assert.equal(next.runError, null, 'the next message clears it')
 })
 
+// Regression: ISSUE-012 — taint state is live in the store, so forced cards say why they ask
+// Found by /qa on 2026-10-06
+// Report: .gstack/qa-reports/run-20261006T212932Z/
+test('a taint event marks the chat untrusted at once, and a done frame carries it for a chat tainted earlier', () => {
+  const s0 = session()
+  assert.ok(!s0.conversation.settings.tainted)
+  const s1 = applyEvent(s0, ev({ event: 'taint', data: { message_id: 'm1', source: 'web_fetch' } }), true)
+  assert.equal(s1.conversation.settings.tainted, true)
+  assert.deepEqual(s1.conversation.settings.taint_sources, ['web_fetch'])
+  const again = applyEvent(s1, ev({ event: 'taint', data: { message_id: 'm1', source: 'web_fetch' } }), true)
+  assert.equal(again, s1, 'a source already listed changes nothing')
+  const s2 = applyEvent(session(), ev({ event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, tainted: true, taint_sources: ['gmail_read'] } }), true)
+  assert.deepEqual([s2.conversation.settings.tainted, s2.conversation.settings.taint_sources], [true, ['gmail_read']])
+  assert.ok(!applyEvent(session(), FINAL_DONE, true).conversation.settings.tainted, 'a done that is not tainted leaves the mark alone')
+})
+
 test('editCut counts the rows from the message onward and notices tool runs', () => {
   const t = { id: 't1', name: 'a', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: false }
   const rows = [msg({ id: 'u1', role: 'user' }), msg({ id: 'a1', role: 'assistant', tool_events: [t] as never }), msg({ id: 'u2', role: 'user' }), msg({ id: 'a2', role: 'assistant' })]
@@ -881,6 +889,15 @@ test('a user_message settles the matching pending bubble in the same session', (
   assert.ok(after.conversation.messages?.some((m) => m.id === 'u1'))
 })
 
+test('a user_message carrying an internal kind adds no row', () => {
+  const s = session()
+  const n = s.conversation.messages?.length
+  for (const kind of ['nudge', 'wake', 'xyz']) {
+    const ev = { event: 'user_message', data: msg({ id: `k-${kind}`, role: 'user', content: 'You ended your reply without calling `desk_done`', kind }) } as unknown as ChatEvent
+    assert.equal(applyEvent(s, ev, true).conversation.messages?.length, n)
+  }
+})
+
 test('a user_message with other content leaves the pending bubble alone', () => {
   const after = applyEvent(session({ pendingSends: [{ key: 1, text: 'hello', at: 0 }] }), userEv('u1', 'other'), true)
   assert.equal(after.pendingSends?.length, 1)
@@ -930,6 +947,33 @@ test('a draft parks chat settings instead of writing the global ones, and send a
   assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { planMode: 'always', skipPermissions: true, useMemory: false } })
   assert.equal(calls.some((c) => c.path.includes('/settings')), false)
   assert.deepEqual(useStore.getState().draftChatSettings, {})
+})
+
+test('the first send of a chat armed autonomous makes its desk and sends through it, not as a plain run', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ desk: { id: 'd1', conversation_id: 'c9' }, conversation_id: 'c9' })
+    : m === 'POST' && p.endsWith('/cowork/desks/d1/message') ? json({ ok: true, steered: false })
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks'))?.body, { conversation_id: 'c9', autonomy: 'ask', brief: 'hi', start: false })
+  assert.deepEqual(calls.find((c) => c.path.endsWith('/cowork/desks/d1/message'))?.body, { content: 'hi' })
+  assert.equal(calls.some((c) => c.path.includes('/chat')), false, 'no plain run')
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, 'd1')
+  assert.equal(useStore.getState().focusedConversationId, 'c9')
+})
+
+test('when the desk cannot be made, the first send falls back to a plain chat and says why', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, draftChatSettings: {}, draftAutonomy: null, toasts: [], desks: [] })
+  const { calls } = stubFetch(t, (m, p) => m === 'POST' && p.endsWith('/conversations') ? json(row({ id: 'c9' }))
+    : m === 'POST' && p.endsWith('/cowork/desks') ? json({ detail: 'no desks today' }, 500)
+    : m === 'GET' ? json([]) : json({ detail: 'down' }, 500))
+  await useStore.getState().send('hi', undefined, undefined, 'ask')
+  assert.ok(calls.some((c) => c.path.includes('/chat')), 'the message still goes as a normal run')
+  assert.match(useStore.getState().toasts[0].text, /no desks today/)
+  assert.equal(useStore.getState().sessions.c9?.conversation.settings.deskId, undefined)
 })
 
 test('a failed PATCH of parked chat settings refuses the run and keeps them on the draft', async (t) => {
@@ -1058,20 +1102,6 @@ test('learnedText counts updates and forgets as changes', () => {
   assert.equal(learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never), 'Forgot 1')
 })
 
-test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.getState().newChat()
-  useStore.setState({ toasts: [], uploadTaintTarget: null })
-  await useStore.getState().setChatSettings({ private: true })
-  assert.equal(useStore.getState().draftPrivate, true)
-  const { calls } = stubFetch(t, () => json({ detail: 'down' }, 500))
-  assert.equal(await useStore.getState().send('hi'), false)
-  const create = calls.find((c) => c.method === 'POST' && c.path.endsWith('/conversations'))
-  assert.equal(create?.body.private, true)
-  useStore.getState().newChat()
-  assert.equal(useStore.getState().draftPrivate, false)
-})
-
 test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
@@ -1186,4 +1216,95 @@ test('the side chat parks its model and effort until its thread exists, and a pi
   assert.equal(useStore.getState().pageAgentPin?.id, 'a')
   useStore.getState().unpinPageAgent()
   assert.equal(useStore.getState().pageAgentPin, null)
+})
+
+test('Memory lives in Settings: split by default, and every way in lands on its tab', () => {
+  const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
+  assert.equal(st().memoryMode, 'split')
+  const reset = (): void => { useStore.setState({ settingsOpen: false, settingsTab: 'model', memoryMode: 'list', memoryFocus: ['old'], view: 'home' }) }
+  reset()
+  st().openMemory()
+  assert.equal(st().settingsOpen, true)
+  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().memoryMode, 'split')
+  assert.equal(st().memoryFocus, null)
+  assert.equal(st().view, 'home', 'no page to navigate to')
+  reset()
+  st().openMemory('graph')
+  assert.equal(st().settingsTab, 'memory')
+  assert.equal(st().memoryMode, 'graph')
+  reset()
+  st().showMemories(['x'])
+  assert.deepEqual([st().settingsOpen, st().settingsTab, st().memoryMode, st().memoryFocus], [true, 'memory', 'list', ['x']])
+  reset()
+  st().openSettings('modules')
+  assert.equal(st().settingsTab, 'appearance')
+})
+
+test('a run this window did not stream: finishing off screen leaves a dot and a banner, on screen in focus neither, a silent wake nothing; opening the chat clears it', async () => {
+  const made: Array<{ title: string; body?: string; tag?: string }> = []
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const real = { N: g.Notification, d: g.document, f: globalThis.fetch }
+  let focused = false
+  g.Notification = class { static permission = 'granted'; onclick: (() => void) | null = null; constructor(title: string, o: { body?: string; tag?: string }) { made.push({ title, ...o }) } }
+  g.document = { hasFocus: () => focused }
+  const conv = (id: string): object => ({ id, project_id: null, title: `Chat ${id}`, model: 'm', settings: {}, created_at: 0, updated_at: 0, messages: [] })
+  globalThis.fetch = (async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    return new Response(JSON.stringify(/\/conversations\/n\d$/.test(url) ? conv(url.slice(-2)) : []), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+  const frame = (cid: string, rid: string, o: Record<string, unknown> = {}): void =>
+    useStore.getState().onRunState({ run_id: rid, conversation_id: cid, message_id: null, seq: 1, started_at: 0, live: true, answering: true, status: 'running', kind: 'chat', replied: false, ...o } as never)
+  const finish = (cid: string, rid: string, o: Record<string, unknown> = {}): void => { frame(cid, rid); frame(cid, rid, { answering: false, replied: true, ...o }) }
+  const unread = (id: string): number | undefined => useStore.getState().unreadById[id]
+  try {
+    useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [], sessions: {}, unreadById: {}, conversations: [conv('n1'), conv('n2')], view: 'chat', focusedConversationId: 'n2' } as never)
+
+    finish('n1', 'ra')
+    assert.equal(unread('n1'), 1, 'off screen: a dot')
+    assert.deepEqual(made.map((n) => [n.title, n.body, n.tag]), [['Chat n1', 'Reply ready', 'ra:reply']], 'one banner, fixed body')
+    frame('n1', 'ra', { answering: false, replied: true, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'the run ending after its reply does not count twice')
+
+    made.length = 0
+    focused = true
+    finish('n2', 'rb')
+    assert.equal(unread('n2'), undefined, 'on screen and focused: nothing to flag')
+    assert.equal(made.length, 0, 'and no banner')
+
+    focused = false
+    finish('n2', 'rc')
+    assert.equal(unread('n2'), undefined, 'on screen in an unfocused window: no dot')
+    assert.equal(made.length, 1, 'but a banner')
+
+    made.length = 0
+    frame('n1', 'rd')
+    frame('n1', 'rd', { answering: false, replied: false, live: false, status: 'done' })
+    assert.equal(unread('n1'), 1, 'a silent wake leaves nothing to read')
+    assert.equal(made.length, 0)
+
+    await useStore.getState().selectChat('n1')
+    assert.equal(unread('n1'), undefined, 'opening the chat reads it')
+  } finally {
+    reset()
+    useStore.setState({ unreadById: {}, focusedConversationId: null } as never)
+    g.Notification = real.N
+    g.document = real.d
+    globalThis.fetch = real.f
+  }
+})
+
+test('the composer Stop stops the main agent of a chat working autonomously, with no strip on screen', async () => {
+  const calls: [string, string][] = []
+  const real = api.stopRun
+  api.stopRun = (async (c: string, runId?: string) => { calls.push([c, runId ?? '']); return { ok: true } }) as never
+  try {
+    const conv = { id: 'cd', title: 't', project_id: null, model: null, settings: { deskId: 'd1' }, created_at: 0, updated_at: 0, messages: [msg()] } as never
+    useStore.setState({ sessions: { cd: session({ conversation: conv, streaming: { messageId: 'm1', runId: 'rd', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never, workers: {} } as never)
+    await useStore.getState().stop('cd')
+    assert.deepEqual(calls, [['cd', 'rd']], 'the run itself is stopped: the desk turn is that run')
+    assert.equal(useStore.getState().sessions.cd.streaming?.stopping, true)
+  } finally {
+    api.stopRun = real
+  }
 })

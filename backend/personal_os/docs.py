@@ -1,8 +1,7 @@
 """Docs: long-form markdown notes with a revision history and reviewable assistant edits.
 
-Distinct from two neighbours that sound similar:
+Distinct from a neighbour that sounds similar:
   * `documents` — files the user uploads, chunked for retrieval. Read-only knowledge.
-  * `notes` — canvas mode's sticky notes: a body, a colour, no history.
 
 A doc is something the user writes. Every change lands as a revision, so the editor can show a diff
 and walk backwards. Assistant edits never touch `docs.content`: they land as a *pending* revision the
@@ -13,6 +12,7 @@ from __future__ import annotations
 import datetime
 import difflib
 import hashlib
+import json
 import logging
 import re
 import threading
@@ -27,7 +27,7 @@ from .repos import ALL, _scope_clause, cjk_like, fts_query, is_isolated
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
   id TEXT PRIMARY KEY,
-  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like todos and notes
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,  -- demote to personal, like todos
   title TEXT NOT NULL DEFAULT 'Untitled',
   content TEXT NOT NULL DEFAULT '',
   folder TEXT NOT NULL DEFAULT '',
@@ -113,6 +113,36 @@ DATA_URI = re.compile(r"\(data:[^)\s]*\)")
 ASSET_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 ASSET_MAX_BYTES = 8 * 1024 * 1024
 
+# Per-doc type: a font family name, a size in px and a measure (line width) in ch. Stored as JSON in
+# docs.typography; NULL (or {}) follows the global `docTypography` setting. The same shape is the setting.
+TYPOGRAPHY_FONTS = ("serif", "sans", "mono", "book")
+TYPOGRAPHY_SIZE = (10, 32)
+TYPOGRAPHY_MEASURE = (40, 120)
+COMMENT_CONTEXT = 32  # chars of rendered text kept either side of a comment's quote
+
+
+def clean_typography(raw: Any) -> dict[str, Any] | None:
+    """Keep only the known keys, in range; None when nothing valid is left (= use the default)."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    if raw.get("font") in TYPOGRAPHY_FONTS:
+        out["font"] = raw["font"]
+    for key, (lo, hi) in (("size", TYPOGRAPHY_SIZE), ("measure", TYPOGRAPHY_MEASURE)):
+        v = raw.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi:
+            out[key] = int(v)
+    return out or None
+
+
+def _parse_typography(d: dict[str, Any]) -> dict[str, Any]:
+    raw = d.get("typography")
+    try:
+        d["typography"] = clean_typography(json.loads(raw)) if raw else None
+    except ValueError:
+        d["typography"] = None
+    return d
+
 
 class AssetError(ValueError):
     def __init__(self, status: int, msg: str):
@@ -158,6 +188,19 @@ def doc_hit(r: Any) -> dict[str, Any]:
 # A burst of keystrokes is one edit, not forty. Consecutive user revisions inside this window are
 # folded into the newest one, so the history reads as sessions rather than as a keylogger.
 COALESCE_SECONDS = 180.0
+
+
+_LEAD_MARKS = re.compile(r"^\s*(?:#{1,6}(?:\s+|$)|[-*+](?:\s+|$)(?:\[[ xX]\](?:\s+|$))?|\d+[.)](?:\s+|$)|>\s*)+")
+
+
+def title_from_body(body: str, fallback: str = "Sticky note", limit: int = 60) -> str:
+    """A doc title for text that never had one: its first non-empty line, minus leading heading / list / quote
+    markers, clipped to `limit`. Used when a sticky note became a doc (migration 12, old preset files)."""
+    for line in (body or "").splitlines():
+        t = _LEAD_MARKS.sub("", line).strip()
+        if t:
+            return t[:limit].rstrip()
+    return fallback
 
 
 # The folder daily notes live in (personal tree), and the shape of a wiki link: [[Title]] or [[Title|alias]].
@@ -246,6 +289,13 @@ def scope_key(project_id: str | None) -> str:
     return (project_id or "").strip()
 
 
+def drop_doc_windows(c: Any, ids: list[str]) -> None:
+    """ref_id has no foreign key, so a trashed doc's Space windows are swept here, as for chats and
+    projects. Docs-only databases (unit tests) have no canvas_windows table."""
+    if ids and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='canvas_windows'").fetchone():
+        c.execute(f"DELETE FROM canvas_windows WHERE kind='doc' AND ref_id IN ({','.join('?' * len(ids))})", ids)
+
+
 def word_count(text: str) -> int:
     return len(re.findall(r"\S+", text))
 
@@ -276,12 +326,6 @@ class Docs:
         self.db = db
         # Called with a doc id whenever its chunks were rebuilt (app.py wires background embedding to it).
         self.on_chunks: Any = None
-        # Called with a doc id just before its row is hard-deleted (app.py wires linked recordings to it).
-        self.on_delete: Any = None
-        # Called with (doc id, new project id or None) after a doc changed project (app.py keeps its recordings in step).
-        self.on_move: Any = None
-        # (query, limit) -> recording hits [{doc_id, snippet}]; wired by app.py so spoken words are searchable.
-        self.recording_search: Any = None
         # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
         self._daily_lock = threading.Lock()
         with db.tx() as c:
@@ -289,13 +333,14 @@ class Docs:
             self._migrate_folder_scope(c)
             # Soft delete (trash.py). docs is created here, not in db.py, so its columns are added here too.
             have = {r["name"] for r in c.execute("PRAGMA table_info(docs)").fetchall()}
-            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0"}.items():
+            # typography also lands via migration 10 on a database that already had docs; the loop covers a fresh one.
+            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0", "typography": "TEXT"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
             # doc_chunks.blurb: optional model-written context line (retrieval.contextualize_pending).
             if "blurb" not in {r["name"] for r in c.execute("PRAGMA table_info(doc_chunks)").fetchall()}:
                 c.execute("ALTER TABLE doc_chunks ADD COLUMN blurb TEXT NOT NULL DEFAULT ''")
-            # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
+            # doc_revisions.append arrived after the first release (append proposals), so an existing DB needs it added.
             have_rev = {r["name"] for r in c.execute("PRAGMA table_info(doc_revisions)").fetchall()}
             if "append" not in have_rev:
                 c.execute("ALTER TABLE doc_revisions ADD COLUMN append TEXT")
@@ -412,7 +457,7 @@ class Docs:
             where.append("(d.title LIKE ? OR d.content LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
-            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.created_at, d.updated_at, d.content, "
+            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.typography, d.created_at, d.updated_at, d.content, "
             "  length(d.content) AS size, "
             "  (SELECT group_concat(tag, char(10)) FROM doc_tags t WHERE t.doc_id=d.id) AS tag_list, "
             "  (SELECT COUNT(*) FROM doc_revisions r WHERE r.doc_id=d.id AND r.status='pending') AS pending "
@@ -423,7 +468,7 @@ class Docs:
             rows = c.execute(sql, args).fetchall()
         out = []
         for r in rows:
-            d = dict(r)
+            d = _parse_typography(dict(r))
             tl = d.pop("tag_list")
             d["tags"] = sorted(tl.split("\n")) if tl else []
             body = d.pop("content") or ""  # the list shows a preview; bodies stay out of the payload
@@ -437,6 +482,7 @@ class Docs:
                 return None
             pending = [row_to_dict(r) for r in c.execute(
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='pending' ORDER BY created_at", (id,)).fetchall()]
+        _parse_typography(d)
         d["words"] = word_count(d["content"])
         d["pending"] = [self._rev_view(r, d["content"]) for r in pending]  # type: ignore[arg-type]
         return d
@@ -483,17 +529,6 @@ class Docs:
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break
-            seen = {o["doc_id"] for o in out}
-            for h in (self.recording_search(q, max(1, limit) * 3) if self.recording_search else []):
-                if len(out) >= limit:
-                    break
-                if h["doc_id"] in seen:
-                    continue
-                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (h["doc_id"],)).fetchone()
-                if not d or (project_id != "__all__" and d["project_id"] != project_id):
-                    continue
-                seen.add(d["id"])
-                out.append({"doc_id": d["id"], "title": d["title"], "snippet": h["snippet"], "via": "recording"})
         return out
 
     # ---- writes ----
@@ -545,7 +580,7 @@ class Docs:
 
     def update_meta(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Title/folder/star/project moves that are not content edits, so they skip the history."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id", "typography"}}
         if not fields:
             return self.get(id)
         if "title" in fields:
@@ -555,17 +590,15 @@ class Docs:
                 fields[flag] = 1 if fields[flag] else 0
         if "folder" in fields:
             fields["folder"] = folder_path(fields["folder"])
+        if "typography" in fields:  # {} or anything invalid clears it: the doc follows the global default again
+            t = clean_typography(fields["typography"])
+            fields["typography"] = json.dumps(t) if t else None
         fields["updated_at"] = now()
         with self.db.tx() as c:
             c.execute(f"UPDATE docs SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
             d = c.execute("SELECT title, content FROM docs WHERE id=?", (id,)).fetchone()
             if d:
                 self._reindex(c, id, d["title"], d["content"])
-        if "project_id" in fields and d and self.on_move:
-            try:
-                self.on_move(id, fields["project_id"])
-            except Exception as e:  # noqa: BLE001 - the doc already moved; a stale recording scope is not worth failing it
-                log.warning("docs: could not move recordings of doc %s: %s", id, e)
         return self.get(id)
 
     def move(self, id: str, scope: str | None, folder: str = "") -> dict[str, Any] | None:
@@ -578,13 +611,8 @@ class Docs:
         return self.update_meta(id, {"project_id": sc or None, "folder": folder})
 
     def delete(self, id: str) -> None:
-        if self.on_delete:
-            # Before the row goes: a linked recording's FTS row and audio dir are not covered by any FK cascade.
-            try:
-                self.on_delete(id)
-            except Exception as e:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
-                log.warning("docs: could not purge recordings of doc %s: %s", id, e)
         with self.db.tx() as c:
+            c.execute("DELETE FROM doc_comments WHERE doc_id=?", (id,))  # the FK cascades too; explicit so it needs no PRAGMA
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
             c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (id,))
@@ -746,9 +774,11 @@ class Docs:
         proj_args: tuple[Any, ...] = () if sc == "" else (sc,)
         with self.db.tx() as c:
             if delete_docs:
-                c.execute(
-                    f"UPDATE docs SET deleted_at=?, deleted_with=NULL WHERE deleted_at IS NULL"
-                    f" AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}", (now(), src, len(src) + 1, src + "/", *proj_args))
+                hit = f" WHERE deleted_at IS NULL AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}"
+                hit_args = (src, len(src) + 1, src + "/", *proj_args)
+                ids = [r["id"] for r in c.execute("SELECT id FROM docs" + hit, hit_args).fetchall()]
+                c.execute("UPDATE docs SET deleted_at=?, deleted_with=NULL" + hit, (now(), *hit_args))
+                drop_doc_windows(c, ids)
                 c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
                           (sc, src, len(src) + 1, src + "/"))
                 return self.folders()
@@ -765,13 +795,6 @@ class Docs:
                 c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)",
                           (sc, up + r["path"][len(src) + 1:], r["created_at"]))
         return self.folders()
-
-    def forget_scope(self, project_id: str) -> None:
-        """Drop a deleted project's folder rows. Its docs are demoted to personal by the schema's
-        ON DELETE SET NULL, so the folders they still name resurface in the personal tree — which is
-        the point: the project is gone, the writing is not."""
-        with self.db.tx() as c:
-            c.execute("DELETE FROM doc_folders WHERE scope=?", (scope_key(project_id),))
 
     # ---- revisions ----
     @staticmethod
@@ -887,3 +910,63 @@ class Docs:
             return None
         return self.save(r["doc_id"], content=r["after"], title=r["title_after"],
                          summary=f"Restored revision from {r['created_at']:.0f}", author="user", coalesce=False)
+
+    # ---- comments ----
+    # A thread row (parent_id NULL) anchors to a quoted span of the rendered text; the renderer finds it again by
+    # exact match, then by context (comments.ts), and shows a thread it cannot place as detached rather than
+    # dropping it. Replies carry the thread's id in parent_id and no anchor. Rows come back flat, by creation.
+    def comments(self, doc_id: str, include_resolved: bool = True) -> list[dict[str, Any]] | None:
+        if not self.get(doc_id):
+            return None
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute("SELECT * FROM doc_comments WHERE doc_id=? ORDER BY created_at", (doc_id,)).fetchall()]
+        if include_resolved:
+            return rows
+        resolved = {r["id"] for r in rows if r["parent_id"] is None and r["resolved"]}
+        return [r for r in rows if r["id"] not in resolved and r["parent_id"] not in resolved]
+
+    def comment(self, comment_id: str) -> dict[str, Any] | None:
+        with self.db.tx() as c:
+            return row_to_dict(c.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+
+    def add_comment(self, doc_id: str, body: str, quote: str = "", prefix: str = "", suffix: str = "",
+                    offset_hint: int = 0, author: str = "user", parent_id: str | None = None) -> dict[str, Any] | None:
+        """A new thread on `doc_id`, or with `parent_id` a reply under that thread (a reply to a reply joins its thread)."""
+        if not self.get(doc_id):
+            return None
+        text = (body or "").strip()
+        if not text:
+            return None
+        if parent_id:
+            parent = self.comment(parent_id)
+            if not parent or parent["doc_id"] != doc_id:
+                return None
+            parent_id = parent["parent_id"] or parent["id"]
+            quote = prefix = suffix = ""
+            offset_hint = 0
+        cid, t = new_id(), now()
+        with self.db.tx() as c:
+            c.execute("INSERT INTO doc_comments(id,doc_id,parent_id,author,body,quote,prefix,suffix,offset_hint,resolved,created_at,updated_at)"
+                      " VALUES(?,?,?,?,?,?,?,?,?,0,?,?)",
+                      (cid, doc_id, parent_id, "agent" if author == "agent" else "user", text[:20000], (quote or "")[:2000],
+                       (prefix or "")[-COMMENT_CONTEXT:], (suffix or "")[:COMMENT_CONTEXT], max(0, int(offset_hint or 0)), t, t))
+        return self.comment(cid)
+
+    def update_comment(self, comment_id: str, body: str | None = None, resolved: bool | None = None) -> dict[str, Any] | None:
+        """Edit a comment's text, or resolve / reopen its thread (resolved is a thread-row flag: a reply's id resolves its thread)."""
+        cur = self.comment(comment_id)
+        if not cur:
+            return None
+        t = now()
+        with self.db.tx() as c:
+            if body is not None and body.strip():
+                c.execute("UPDATE doc_comments SET body=?, updated_at=? WHERE id=?", (body.strip()[:20000], t, comment_id))
+            if resolved is not None:
+                c.execute("UPDATE doc_comments SET resolved=?, updated_at=? WHERE id=?", (1 if resolved else 0, t, cur["parent_id"] or cur["id"]))
+        return self.comment(comment_id)
+
+    def delete_comment(self, comment_id: str) -> bool:
+        """A thread goes with its replies; a reply goes alone."""
+        with self.db.tx() as c:
+            n = c.execute("DELETE FROM doc_comments WHERE id=? OR parent_id=?", (comment_id, comment_id)).rowcount
+        return n > 0

@@ -1,26 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Bell, CalendarClock } from 'lucide-react'
+import { ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Bell, CalendarClock } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
-import { ActivityIndicator } from './ActivityView'
-import { MeetingIndicator } from './MeetingsView'
 import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
 import { viewHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
-import { navEntries, navTitle, placeOf } from '../shell/nav'
+import { navEntries, navTitle } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
 import { partitionChats } from '../lib/chatRows'
 import ChatRow from './ChatRow'
 import { AttentionDot } from './ChatPulse'
-import type { Attention, ChatSearchHit, Conversation, Doc, Job, WidgetKind } from '@shared/types'
+import type { Attention, ChatSearchHit, Conversation, Job, WidgetKind } from '@shared/types'
 import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { inboxBadge } from '../lib/inboxBadge'
 import { rowButton } from '../lib/rowButton'
+import { useChatFileCountsSync } from '../lib/useChatFiles'
+import SidebarChatFiles from './SidebarChatFiles'
 
 /** Project groups the user folded shut. Stored as exceptions, so a new project starts open. */
 const COLLAPSED_KEY = 'grain.sidebar.collapsedProjects'
@@ -72,13 +72,7 @@ const PROJECT_ROWS = 4
  */
 type NavEntry = { view?: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind }
 
-/** One line under a project group header: a chat or a doc, sorted together by recency. */
-type ProjectRow =
-  | { kind: 'chat'; id: string; title: string; at: number }
-  | { kind: 'doc'; id: string; title: string; at: number }
-
-// The fixed rows. Every other view (shell/nav.tsx) is slotted between these by Settings → Modules,
-// which also moves it to the title bar (AppSwitcher) or hides it.
+// The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Appearance can hide it.
 const TOP: NavEntry[] = [
   { view: 'home', description: 'Your day at a glance: plan, mail, events and what the agent did', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
@@ -94,10 +88,9 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docsPending = useStore((s) => s.docsPending)
   const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
+  const memoryProposals = useStore((s) => s.memoryProposals)
   /** Chats working autonomously with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
-  const meetingsPending = useStore((s) => s.meetingsPending)
-  const memoryProposals = useStore((s) => s.memoryProposals)
   /** Everything agents left for the user (approvals, proposals, desks, review queues) plus unread job runs: the Agent inbox on Today. */
   const inboxCount = useStore((s) => inboxBadge(s.agentInbox))
   const inCanvas = useStore((s) => s.view === 'canvas')
@@ -110,7 +103,6 @@ export default function Sidebar(): JSX.Element {
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
-  const openDoc = useStore((s) => s.openDoc)
   // Inside a space a chat opens (or focuses) as a window there; from any other view it routes to the chat view.
   const openConversation = (id: string): void => void (inCanvas ? useCanvas.getState().openChat(id) : selectChat(id))
   const [query, setQuery] = useState('')
@@ -137,6 +129,8 @@ export default function Sidebar(): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [chatsOpen, setChatsOpen] = useState(true)
+  const [chatsTab, setChatsTab] = useState<'chats' | 'files'>('chats')
+  useChatFileCountsSync()
   const [jobsOpen, setJobsOpen] = useState(true)
   const [needsOnly, setNeedsOnly] = useState(readNeeds)
   const jobs = useStore((s) => s.jobs)
@@ -162,24 +156,12 @@ export default function Sidebar(): JSX.Element {
   useEffect(() => {
     if (searching) searchRef.current?.focus()
   }, [searching])
-  // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
-  // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
-  // search over there cannot empty the groups over here. Debounced, because `docs` changes per keystroke.
-  const [projectDocs, setProjectDocs] = useState<Doc[]>([])
-  const storeDocs = useStore((s) => s.docs)
-  useEffect(() => {
-    const t = setTimeout(() => { void api.docs.list('all').then(setProjectDocs).catch(() => undefined) }, 300)
-    return () => clearTimeout(t)
-  }, [storeDocs])
-
-  // One row list per project, newest first: its chats and its docs interleaved.
-  const rowsByProject = useMemo(() => {
-    const m: Record<string, ProjectRow[]> = {}
-    for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push({ kind: 'chat', id: c.id, title: c.title, at: c.updated_at })
-    for (const d of projectDocs) if (d.project_id) (m[d.project_id] ??= []).push({ kind: 'doc', id: d.id, title: d.title, at: d.updated_at })
-    for (const rows of Object.values(m)) rows.sort((a, b) => b.at - a.at)
+  // One chat list per project, newest first (the store keeps conversations updated_at-descending).
+  const chatsByProject = useMemo(() => {
+    const m: Record<string, Conversation[]> = {}
+    for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push(c)
     return m
-  }, [conversations, projectDocs])
+  }, [conversations])
   const projectById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
   // The group you are in cannot fold away under you: its header would be the only trace of where you are.
   const activeProjectId = view === 'project' ? projectViewId
@@ -195,7 +177,6 @@ export default function Sidebar(): JSX.Element {
     })
   }
 
-  const convById = useMemo(() => Object.fromEntries(conversations.map((c) => [c.id, c])), [conversations])
   const { pinned, groups } = useMemo(() => partitionChats(conversations, query), [conversations, query])
   const projectDot = (c: Conversation): JSX.Element | null =>
     c.project_id && projectById[c.project_id] ? <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} /> : null
@@ -237,12 +218,10 @@ export default function Sidebar(): JSX.Element {
   // fresh array with the same counts does not re-render.
   const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'activity') return null
+    if (v === 'home') return null
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     if (v === 'library') return skillCandidates || null
-    // Load-bearing, not cosmetic: without it a Meetings row would show no review count.
-    if (v === 'meetings') return meetingsPending || null
     return null
   }
 
@@ -279,13 +258,13 @@ export default function Sidebar(): JSX.Element {
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav">
-        {[...TOP, ...navEntries().filter((e) => placeOf(settings, e) === 'sidebar')]
+        {[...TOP, ...navEntries()]
           .filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
         {navEntries().some((e) => viewHidden(settings, e.view)) && (
-          <button className="nav-item nav-more" title="Turn on hidden views in Settings → Modules"
-            onClick={() => useStore.getState().openSettings('modules')}>
-            <Plus size={15} /><span>More modules…</span>
+          <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Appearance"
+            onClick={() => useStore.getState().openSettings('appearance')}>
+            <Plus size={15} /><span>More rows…</span>
           </button>
         )}
       </nav>
@@ -302,7 +281,7 @@ export default function Sidebar(): JSX.Element {
         <div className="project-list">
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
-            const rows = rowsByProject[p.id] ?? []
+            const rows = chatsByProject[p.id] ?? []
             const pinned = activeProjectId === p.id
             const open = pinned || !collapsed.has(p.id)
             return (
@@ -322,15 +301,8 @@ export default function Sidebar(): JSX.Element {
                 {open && (
                   <div className="project-rows">
                     {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
-                    {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
-                      <div key={`d${r.id}`} className="convo-item sub" {...rowButton(() => void openDoc(r.id))} {...dragProps({ kind: 'doc', id: r.id, label: r.title, projectId: p.id })}>
-                        <span className="convo-title">{r.title}</span>
-                        <FileText size={12} className="row-kind" />
-                      </div>
-                    ) : (
-                      <ChatRow key={`c${r.id}`} conv={convById[r.id]} sub active={r.id === focusedId && view === 'chat'} />
-                    )))}
-                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
+                    {rows.slice(0, PROJECT_ROWS).map((c) => <ChatRow key={c.id} conv={c} sub active={c.id === focusedId && view === 'chat'} />)}
+                    {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id, 'chats')}>View all</button>}
                   </div>
                 )}
               </div>
@@ -340,11 +312,17 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <button className="section-toggle" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
-          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Chats
+        <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
+          {/* The Chats | Documents switch beside it names the section, so the toggle carries no word of its own. */}
+          <ChevronRight size={12} className={chatsOpen ? 'rot90' : ''} /><MessageSquare size={13} />
           {/* Counted off the desk inbox: chats working autonomously that have something unseen for you. */}
           {needsYou > 0 && <span className="count pending" title={`${needsYou} chat${needsYou === 1 ? '' : 's'} working autonomously need${needsYou === 1 ? 's' : ''} you`}>{needsYou}</span>}
         </button>
+        <span className="cf-seg" role="group" aria-label="Chats or documents">
+          <button className={chatsTab === 'chats' ? 'on' : ''} aria-pressed={chatsTab === 'chats'} aria-label="Chat list" onClick={() => { setChatsOpen(true); setChatsTab('chats') }}>Chats</button>
+          <button className={chatsTab === 'files' ? 'on' : ''} aria-pressed={chatsTab === 'files'} aria-label="Documents from personal chats" onClick={() => { setChatsOpen(true); setChatsTab('files') }}>Documents</button>
+        </span>
+        {chatsTab === 'chats' && <>
         <button className={`icon-btn sm${needsOnly ? ' on' : ''}`} aria-label="Show only what needs you" aria-pressed={needsOnly}
           title={needsOnly ? 'Showing only what needs you or is blocked' : 'Show only what needs you'}
           onClick={() => { setChatsOpen(true); setNeedsOnly((on) => { writeNeeds(!on); return !on }) }}>
@@ -365,8 +343,10 @@ export default function Sidebar(): JSX.Element {
         >
           <Search size={13} />
         </button>
+        </>}
       </div>
-      {chatsOpen && (<>
+      {chatsOpen && chatsTab === 'files' && <SidebarChatFiles jump={openConversation} />}
+      {chatsOpen && chatsTab === 'chats' && (<>
       {searching && (
         <label className="search">
           <input
@@ -455,9 +435,6 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
-        {/* Both are mounted in every view: a capture running somewhere must never be invisible. */}
-        <MeetingIndicator />
-        <ActivityIndicator />
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
           {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
           <kbd>⌘,</kbd></button>

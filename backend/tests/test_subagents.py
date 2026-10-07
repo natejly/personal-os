@@ -1,14 +1,14 @@
-"""Subagents: bounded children the main loop fans work out to (subagents.py, agent_spawn / agent_wait / agent_stop).
+"""Subagents: children the main loop fans work out to (subagents.py, agent_spawn / agent_wait / agent_stop).
 
 Everything runs offline against a scripted llm.stream_chat. The claims worth a test:
   - a child's tools are the role's, narrowed, and never more than the parent has; a tool that asks for the
     parent asks for the child; nothing a definition names widens that;
-  - depth, concurrency and budget are caps that hold (the spawn count in a round, the app-wide count, the
-    parent's own budget being charged);
+  - depth and concurrency are caps that hold (the spawn count in a round, the app-wide count); nothing caps a
+    child's rounds, and its usage only rolls up to the parent's meter for display;
   - several read-only spawns in one round run side by side, through the real reply loop;
   - the report comes back wrapped as untrusted data and taints the parent;
   - background spawn then wait, stop cascades and still returns partial output, a stale child is stopped;
-  - at its step limit a child is forced into one tool-free summary;
+  - a child that repeats one call is stopped by the stuck breaker and made to write one tool-free summary;
   - a child's approval card rides the parent's stream and decides the call;
   - writers never share a root; user-authored definitions are inert until approved;
   - desk_start always asks and only ever creates a plan-mode desk.
@@ -30,7 +30,7 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="satest-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import llm  # noqa: E402
+from personal_os import limits, llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
 appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import subagents as sa  # noqa: E402
@@ -47,8 +47,9 @@ def check(cond: Any, label: str) -> None:
 
 
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds",
+DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth",
                                                   "subagentStaleSeconds", "subagentToolSeconds")}
+DEFAULTS["permissionMode"] = "manual"  # the gates below are the manual ones; the mode tests set their own
 
 # ---- a scripted model ----------------------------------------------------------------------------
 SCRIPTS: dict[str, list[dict[str, Any]]] = {}   # a child's task text -> one entry per round
@@ -118,7 +119,7 @@ def mkctx(conv_id: str, modes: dict[str, str] | None = None, **extra: Any) -> di
     cfg = appmod.settings()
     return {"project_id": None, "conversation_id": conv_id, "message_id": None, "tainted": False, "taint_sources": [],
             "allowed_urls": set(), "settings": cfg, "modes": modes if modes is not None else appmod.toolbox.effective({}, None, None),
-            "depth": 0, "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "budget": appmod.Budget(cfg),
+            "depth": 0, "agent_run_id": "", "model": "test-model", "stop": asyncio.Event(), "meter": appmod.RunMeter(),
             "run": None, **extra}
 
 
@@ -249,7 +250,7 @@ def test_identical_spawns_dedupe() -> None:
     check(b.get("duplicate") and b["agent_id"] == a["agent_id"], "the repeat is answered with the first result, marked as such")
 
 
-def test_budget_rollup() -> None:
+def test_usage_rollup() -> None:
     reset()
     prev = appmod.pricing.cost
     appmod.pricing.cost = lambda cfg, model, pt, ct, *a, **k: (pt + ct) / 1000.0
@@ -258,24 +259,22 @@ def test_budget_rollup() -> None:
                             {"text": "done", "usage": {"prompt_tokens": 100, "completion_tokens": 50}}]
         ctx = mkctx(new_conv())
         out = run(appmod.toolbox.call("agent_spawn", {"task": "spend"}, ctx))
-        check(abs(ctx["budget"].cost - 0.3) < 1e-9 and ctx["budget"].tokens == 300, "the child's cost and tokens land on the parent's budget")
+        check(abs(ctx["meter"].cost - 0.3) < 1e-9 and ctx["meter"].tokens == 300, "the child's cost and tokens land on the parent's meter")
         check(out["state"] == "completed", "it ended")
     finally:
         appmod.pricing.cost = prev
 
 
-def test_children_leave_the_parent_headroom() -> None:
-    """Children are charged to the parent, so they stop at 60% of its budget rather than 100%: the parent must still
-    have room to read their reports and finish."""
+def test_a_child_is_not_cut_by_the_parents_usage() -> None:
+    """No share of the parent's tokens or time is reserved: a big child runs to its own end."""
     reset()
     pctx = mkctx(new_conv())
-    pctx["budget"].max_tokens = 1000
+    pctx["meter"].tokens = 10_000_000
     SCRIPTS["hog"] = [{"text": "partial notes", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 700, "completion_tokens": 150}},
-                      {"text": "never", "calls": [call("c2", "current_time", {})]}]
+                      {"text": "all of it", "usage": {"prompt_tokens": 700, "completion_tokens": 150}}]
     out = run(appmod.toolbox.call("agent_spawn", {"task": "hog"}, pctx))
-    check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "a child stops once it has used 60% of the parent's tokens")
-    check(pctx["budget"].exceeded() is None and pctx["budget"].tokens == 850, "the parent is left under its hard cap with room to answer")
-    check("partial notes" in out["report"], "its partial report still comes back")
+    check(out["exit_reason"] == "completed" and out["state"] == "completed", "the child finished however much was already spent")
+    check(pctx["meter"].tokens == 10_000_000 + 1700, "its usage still rolls up for display")
 
 
 # ---- the report ------------------------------------------------------------------------------------
@@ -358,15 +357,16 @@ def test_stale_child_is_stopped() -> None:
     check(time.time() - t0 < 5, "without waiting for the hung call")
 
 
-def test_step_limit_forces_a_summary() -> None:
-    reset(subagentMaxRounds=2)
-    SCRIPTS["loop"] = [{"text": "r1", "calls": [call("a", "current_time", {})]},
-                       {"text": "r2", "calls": [call("b", "current_time", {})]},
-                       {"text": "Done: 2 checks. Remaining: the rest."}]
-    out = run(appmod.toolbox.call("agent_spawn", {"task": "loop"}, mkctx(new_conv())))
+def test_a_repeating_child_is_stopped_and_summarises() -> None:
+    reset()
+    n = limits.REPEAT_LIMIT
+    SCRIPTS["loop"] = [{"text": f"r{i}", "calls": [call(f"a{i}", "current_time", {})]} for i in range(n)] \
+        + [{"text": "Done: 1 check. Remaining: the rest."}]
+    # A third identical call raises a card nobody can answer here: it is refused, and the count still reaches the limit.
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "loop"}, mkctx(new_conv(), proposal_only=True)))
     kid = [s for s in SEEN if s["child"]]
-    check(out["state"] == "partial" and out["exit_reason"] == "max_steps" and out.get("truncated") is True, "at its step limit: partial, max_steps, truncated")
-    check(len(kid) == 3 and kid[-1]["tool_choice"] == "none", "one extra tool-free turn is made")
+    check(out["state"] == "partial" and out["exit_reason"] == "stuck" and out.get("truncated") is True, "the stuck breaker: partial, stuck, truncated")
+    check(len(kid) == n + 1 and kid[-1]["tool_choice"] == "none", "one extra tool-free turn is made")
     check("Remaining" in out["report"], "the summary is the report")
     check('truncated="true"' in out["report"], "the wrapper says so")
 
@@ -589,9 +589,9 @@ def test_child_calls_obey_permission_rules() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
-def test_child_skip_permissions_lifts_plain_ask_only() -> None:
-    """Under the parent's skip flag a child's plain ask runs with no card; an ask rule still raises one."""
-    for rules, mode, expect_ran in (({"allow": [], "ask": [], "deny": []}, "ask", True), ({"allow": [], "ask": ["fetch_url"], "deny": []}, "on", False)):
+def test_child_allow_all_lifts_asks() -> None:
+    """Under the parent's allow-all mode a child's ask runs with no card, an ask rule's included."""
+    for rules, mode, expect_ran in (({"allow": [], "ask": [], "deny": []}, "ask", True), ({"allow": [], "ask": ["fetch_url"], "deny": []}, "on", True)):
         reset(permissionRules=rules)
         spec = appmod.toolbox.specs["fetch_url"]
         real, hits = spec.fn, []
@@ -606,7 +606,7 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
             fr = FakeRun()
             modes = appmod.toolbox.effective({}, None, None)
             modes["fetch_url"] = mode
-            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, skip_permissions=True)
+            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, permission_mode="allow_all")
             ctx["allowed_urls"] = {"https://example.com/a"}
 
             async def go() -> Any:
@@ -625,8 +625,24 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
             spec.fn = real
             appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
         cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
-        check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: skip {'lifted the plain ask' if expect_ran else 'left the ask-rule card, declined'}")
+        check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: allow-all lifted the ask")
         check(out["state"] == "completed", f"{rules}: the child carried on")
+
+
+def test_a_child_never_holds_the_email_tools() -> None:
+    """Workers cannot send mail at all, under any permission mode: only the front chat's gmail_send reaches the user's email card."""
+    check({"gmail_send", "gmail_draft"} <= sa.CHILD_BLOCK, "mail is blocked for every child, whatever its definition names")
+    reset(permissionMode="allow_all")
+    google_ok = appmod.toolbox._google_ok
+    appmod.toolbox._google_ok = lambda: True  # type: ignore[method-assign]  # the mail tools would be offered if a child could hold them
+    try:
+        SCRIPTS["mail"] = [{"text": "done"}]
+        ctx = mkctx(new_conv(), modes={**appmod.toolbox.effective({}, None, None), "gmail_send": "on"}, run=FakeRun(), message_id=None, permission_mode="allow_all")
+        run(appmod.toolbox.call("agent_spawn", {"task": "mail", "role": "general"}, ctx))
+    finally:
+        appmod.toolbox._google_ok = google_ok  # type: ignore[method-assign]
+    offered = SEEN[-1]["tools"]
+    check("gmail_search" in offered and "gmail_send" not in offered and "gmail_draft" not in offered, "a general child is offered mail reads, never a send")
 
 
 def test_tainted_child_external_ask_stays_forced() -> None:
@@ -676,8 +692,10 @@ def test_writers_confined_and_serialized() -> None:
     root_a, root_b = tempfile.mkdtemp(), tempfile.mkdtemp()
     reset(workspaceRoots=[root_a, root_b])
     ctx = mkctx(new_conv())
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "w", "role": "worker", "root": os.environ["PERSONAL_OS_DATA_DIR"]}, ctx))
+    check("error" in out and "off limits" in out["error"], "a worker root inside Grain's own data folder is refused")
     out = run(appmod.toolbox.call("agent_spawn", {"task": "w", "role": "worker", "root": "/etc"}, ctx))
-    check("error" in out and "outside" in out["error"], "a worker root outside the granted folders is refused")
+    check("error" not in out, "a worker root anywhere else on the Mac is fine now")
 
     # a file tool aimed outside the root is denied before it runs
     SCRIPTS["escape"] = [{"text": "", "calls": [call("e", "write_local_file", {"path": "/tmp/elsewhere.txt", "content": "x"})]}, {"text": "done"}]
@@ -686,7 +704,7 @@ def test_writers_confined_and_serialized() -> None:
     ch = next(c for c in mgr.children.values() if c.task == "escape")
     tool_out = next(m["content"] for m in ch.messages if m["role"] == "tool")
     check("outside" in tool_out and not os.path.exists("/tmp/elsewhere.txt"), "a worker's write outside its root is denied")
-    check(ch.roots == (Path(root_a).resolve(),), "the child's writable root is the narrowed one")
+    check(ch.roots == (Path(root_a).resolve(),) and ch.confine, "the child's writable root is the narrowed one, and it is confined to it")
 
     # same root serializes, disjoint roots overlap
     for name in ("one", "two"):
@@ -710,23 +728,26 @@ def test_writers_confined_and_serialized() -> None:
     run(pair(root_a, nested))
     check(LIVE["peak"] == 1, "a root and one nested in it overlap, so they serialize")
 
-    # with no root set, the default workspace folder (~/Grain) is the worker's root, so it still has writers
+    # with no root named the worker is not confined: it keeps its writers and may write anywhere the tools reach
     reset(workspaceRoots=[])
     SCRIPTS["bare"] = [{"text": "nothing to write in"}]
     run(appmod.toolbox.call("agent_spawn", {"task": "bare", "role": "worker"}, mkctx(new_conv())))
     offered = next(s for s in SEEN if s["child"])["tools"]
-    check("write_local_file" in offered, "a worker falls back to the default workspace folder for its writers")
+    check("write_local_file" in offered, "a worker with no root keeps its writers")
+    bare = next(c for c in mgr.children.values() if c.task == "bare")
+    check(bare.roots == () and not bare.confine and mgr._confine(bare, "write_local_file", {"path": "/tmp/anywhere.txt"}) is None,
+          "an unconfined worker may write anywhere")
 
 
 # ---- definitions -----------------------------------------------------------------------------------
 
 def test_worker_can_spawn_a_worker_on_its_own_root() -> None:
     root = tempfile.mkdtemp()
-    reset(workspaceRoots=[root], subagentStaleSeconds=1)
-    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker"})]}, {"text": "outer done"}]
+    reset(subagentStaleSeconds=1)
+    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker", "root": root})]}, {"text": "outer done"}]
     SCRIPTS["inner"] = [{"text": "inner done"}]
     modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "on"}
-    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker"}, mkctx(new_conv(), modes=modes)))
+    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker", "root": root}, mkctx(new_conv(), modes=modes)))
     inner = next(c for c in mgr.children.values() if c.task == "inner")
     check(inner.roots and inner.state == "completed", "a nested worker inherits its ancestor's root lock instead of deadlocking")
 
@@ -735,7 +756,8 @@ def test_definitions_need_approval() -> None:
     reset()
     text = "---\nname: summarizer\ndescription: Short summaries\nsteps: 3\ntools: read_local_file, search_documents, save_memory\n---\nSummarize in three bullets."
     f = sa.parse_def(text)
-    check(f["name"] == "summarizer" and f["steps"] == 3 and f["tools"] == ["read_local_file", "search_documents", "save_memory"], "frontmatter parses")
+    check(f["name"] == "summarizer" and "steps" not in f and f["tools"] == ["read_local_file", "search_documents", "save_memory"], "frontmatter parses")
+    check(sa.parse_def(text.replace("steps: 3", "steps: 999"))["name"] == "summarizer", "an old steps line is ignored, never validated")
     for bad in ("no frontmatter", "---\nname: Bad Name\n---\nx", "---\nname: researcher\n---\nx", "---\nname: ok\n---\n"):
         try:
             sa.parse_def(bad)
@@ -753,7 +775,7 @@ def test_definitions_need_approval() -> None:
     check(out["state"] == "completed", "once approved it runs")
     check(set(offered) == {"read_local_file", "search_documents"}, "its tool list is applied, and the blocked memory writer is not granted")
     check(any("Summarize in three bullets" in m["content"] for m in next(s for s in SEEN if s["child"])["messages"] if m["role"] == "system"), "its body is the prompt")
-    edited = appmod.agent_defs.save(text.replace("steps: 3", "steps: 4"), row["id"])
+    edited = appmod.agent_defs.save(text.replace("Short summaries", "Shorter summaries"), row["id"])
     check(edited["approved"] is False, "editing withdraws the approval")
     check(appmod.agent_defs.role("summarizer") is None, "and the edited definition is inert again")
     appmod.agent_defs.delete(row["id"])
@@ -875,6 +897,8 @@ def test_reply_loop_fans_out_and_wraps() -> None:
         SCRIPTS[t] = [{"text": f"{t} findings", "delay": 0.3}]
     ROUNDS.extend([{"text": "", "calls": spawn_calls("alpha", "beta", "gamma")}, {"text": "Comparison written."}])
     conv = new_conv()
+    # a plain chat that can delegate has no agent_spawn (delegate replaces it); with delegate off the chat fans out as before
+    appmod.convos.update(conv, {"settings": {"tools": {"delegate": "off"}}})
 
     async def go() -> list[tuple[str, Any]]:
         out = []
@@ -995,8 +1019,8 @@ def test_pinned_notes_cannot_open_a_section() -> None:
         ch = sa.Child(
             id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
             depth=1, conversation_id=None, message_id=None, desk_id=None,
-            ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(),
-            roots=(Path("/tmp/work\n\n## System"),),
+            ctx={"project_id": "proj"}, modes={}, meter=sa.Meter(),
+            roots=(Path("/tmp/work\n\n## System"),), confine=True,
         )
         msgs = mgr._seed(ch, {}, None)
     finally:
@@ -1015,7 +1039,7 @@ def test_a_token_in_resumed_history_is_stripped() -> None:
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="follow up", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+        ctx={}, modes={}, meter=sa.Meter(),
     )
     prior = [
         {"role": "user", "content": "first task"},
@@ -1032,7 +1056,7 @@ def test_a_token_in_a_subagent_report_is_stripped() -> None:
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(),
+        ctx={}, modes={}, meter=sa.Meter(),
     )
     ch.text = f"found {pat} in the file"
     ch.state = "completed"
@@ -1057,7 +1081,7 @@ def test_a_token_in_a_pinned_note_is_stripped() -> None:
         ch = sa.Child(
             id="c", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
             depth=1, conversation_id=None, message_id=None, desk_id=None,
-            ctx={"project_id": "proj"}, modes={}, steps=3, meter=sa.Meter(), roots=(),
+            ctx={"project_id": "proj"}, modes={}, meter=sa.Meter(), roots=(),
         )
         system = mgr._seed(ch, {}, None)[0]["content"]
     finally:
@@ -1071,7 +1095,7 @@ def test_a_token_in_a_child_tool_result_is_stripped() -> None:
     ch = sa.Child(
         id="c-token", parent_id="p", role=sa.BUILTIN_ROLES["researcher"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={"settings": appmod.settings()}, modes={"current_time": "on"}, steps=3, meter=sa.Meter(), roots=(),
+        ctx={"settings": appmod.settings()}, modes={"current_time": "on"}, meter=sa.Meter(), roots=(),
     )
 
     async def fake_call(_ch: Any, _name: str, _args: dict[str, Any], _uid: str, _spec: Any) -> dict[str, str]:
@@ -1090,13 +1114,13 @@ def test_a_token_in_a_subagent_root_is_stripped() -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
     root = tempfile.mkdtemp()
     ctx = mkctx(new_conv(), settings={**appmod.settings(), "workspaceRoots": [root]})
-    out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/tmp/{pat}"}, ctx))
-    check(pat not in str(out) and "[github-pat]" in out["error"] and "outside" in out["error"],
+    out = run(appmod.toolbox.call("agent_spawn", {"task": "write", "role": "worker", "root": f"/Applications/Grain.app/{pat}"}, ctx))
+    check(pat not in str(out) and "[github-pat]" in out["error"] and "off limits" in out["error"],
           "a token in a worker root is stripped")
     ch = sa.Child(
         id="c", parent_id="p", role=sa.BUILTIN_ROLES["worker"], task="look", model="m",
         depth=1, conversation_id=None, message_id=None, desk_id=None,
-        ctx={}, modes={}, steps=3, meter=sa.Meter(), roots=(Path(root).resolve(),),
+        ctx={}, modes={}, meter=sa.Meter(), roots=(Path(root).resolve(),), confine=True,
     )
     msg = mgr._confine(ch, "write_local_file", {"path": f"/tmp/{pat}.txt"})
     check(msg is not None and pat not in msg and "[github-pat]" in msg, "a token in a confined path is stripped")
@@ -1117,9 +1141,11 @@ def test_a_token_in_a_subagent_id_is_stripped() -> None:
 
 def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
-        check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
-    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
-          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
+        if k != "permissionMode":  # a permissions key (permissions.DEFAULTS), not an llm setting
+            check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
+    check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 0 and limits.slots(llm.DEFAULT_SETTINGS, "subagentMaxConcurrent") >= 2
+          and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
+          and "subagentMaxRounds" not in llm.DEFAULT_SETTINGS, "the specified defaults")
     reset()
     store = appmod.run_store
     store.create("parent_r", None, "chat")
@@ -1138,7 +1164,7 @@ def test_settings_and_routes() -> None:
 def test_now_change_publishes_a_subagent_event() -> None:
     run = FakeRun()
     ch = sa.Child(id="sa_x", parent_id="", role=sa.BUILTIN_ROLES["researcher"], task="t", model="m", depth=1, conversation_id="c",
-                  message_id="m1", desk_id=None, ctx={"run": run}, modes={}, steps=3, meter=sa.Meter(None))
+                  message_id="m1", desk_id=None, ctx={"run": run}, modes={}, meter=sa.Meter(None))
     mgr._set_now(ch, "thinking")
     check(run.events and run.events[-1][0] == "subagent" and run.events[-1][1]["now"] == "thinking" and run.events[-1][1]["message_id"] == "m1", "a now change is published")
     mgr._set_now(ch, "fetch_url x")

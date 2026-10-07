@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import os
 import sys
@@ -15,11 +16,21 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from PIL import Image  # noqa: E402
+
 from personal_os import mac, tools  # noqa: E402
+from personal_os.db import Database  # noqa: E402
+from personal_os.repos import Documents  # noqa: E402
 from personal_os.tools import Toolbox  # noqa: E402
 from personal_os.workspace import Workspace  # noqa: E402
 
 TOKEN = "t" * 32
+
+
+def png(size: tuple[int, int] = (8, 4)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, (20, 30, 40)).save(buf, "PNG")
+    return buf.getvalue()
 
 
 class Fake:
@@ -67,7 +78,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     settings: dict[str, Any] = {"browserEnabled": True, "browserMaxTabs": 3, "browserIdleSeconds": 120, "browserAllowlist": [],
                                 "fetchAllowlist": [], "workspaceRoots": []}
     ws = Workspace(tmp_path / "data")
-    tb = Toolbox(None, None, None, lambda: settings, workspace=ws)  # type: ignore[arg-type]
+    tb = Toolbox(None, None, Documents(Database(tmp_path / "db")), lambda: settings, workspace=ws)  # type: ignore[arg-type]
     cards: list[dict[str, Any]] = []
     answers: list[bool] = []
 
@@ -283,13 +294,13 @@ def test_tainted_run_asks_before_putting_text_into_a_page(env) -> None:
 def test_upload_containment_and_ask(env, tmp_path: Path) -> None:
     root = env.ws.ensure("d1")
     (root / "outputs" / "r.txt").write_text("x")
-    outside = tmp_path / "secret.txt"
+    outside = tmp_path / ".env"  # a credential file is refused; an ordinary file outside the workspace is not
     outside.write_text("x")
     out = env.run("browser_manage", action="upload", ref="e9", paths=["outputs/r.txt"])
     assert env.cards[-1]["action"] == "upload" and env.cards[-1]["files"] == ["r.txt"]
     assert env.fake.calls[-1][0] == "act" and env.fake.calls[-1][1]["paths"] == [str(root / "outputs" / "r.txt")] and "error" not in out
     n = len(env.fake.calls)
-    for bad in (str(outside), "../../../secret.txt", "outputs/missing.txt"):
+    for bad in (str(outside), "../../../.env", "outputs/missing.txt"):
         assert env.run("browser_manage", action="upload", ref="e9", paths=[bad]).get("error"), bad
     assert len(env.fake.calls) == n
     env.answers.append(False)
@@ -309,28 +320,43 @@ def test_a_token_in_a_browser_upload_path_is_stripped(env) -> None:
 
 def test_a_token_in_a_browser_screenshot_is_stripped(env) -> None:
     pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
-    png = b"\x89PNG\r\n\x1a\nfake"
+    data = png()
     env.fake.replies["manage"] = page(
-        pngBase64=base64.b64encode(png).decode(), width=800, height=600,
+        pngBase64=base64.b64encode(data).decode(), width=800, height=600,
         url=f"https://example.com/watch?v={pat}", title=f"Talk {pat}",
     )
     out = env.run("browser_manage", action="screenshot")
-    assert pat not in str(out)
+    assert pat not in json.dumps({k: v for k, v in out.items() if k != "images"})
     assert "[github-pat]" in out["url"] and "[github-pat]" in out["title"]
-    assert out["bytes"] == len(png) and out["width"] == 800
-    assert (env.ws.desk_root("d1") / out["path"]).read_bytes() == png
+    # The picture itself is never scrubbed: the bytes round-trip intact.
+    assert base64.b64decode(out["images"][0]["data"].split(",", 1)[1]) == data
 
 
-def test_screenshot_saved_not_returned(env) -> None:
-    png = b"\x89PNG\r\n\x1a\nfake"
-    env.fake.replies["manage"] = page(pngBase64=base64.b64encode(png).decode(), width=800, height=600)
+def test_screenshot_is_an_upload_shown_in_the_chat(env) -> None:
+    """A page capture takes the Mac screenshot's shape: an Uploads document, `images` for the card, `attachment` for
+    send_files. Nothing is written to the desk workspace or outside the data dir."""
+    data = png((8, 4))
+    env.fake.replies["manage"] = page(pngBase64=base64.b64encode(data).decode(), width=8, height=4, url="https://shop.example.com/cart?x=1")
     out = env.run("browser_manage", action="screenshot", full_page=True)
     assert env.fake.calls[-1][1] == {"session": "desk:d1", "action": "screenshot", "fullPage": True}
-    rel = out["path"]
-    assert rel.startswith("work/screens/") and rel.endswith(".png") and (env.ws.desk_root("d1") / rel).read_bytes() == png
-    assert "view_image" in out["note"] and base64.b64encode(png).decode() not in json.dumps(out)
-    out = env.run("browser_manage", ctx=env.ctx(desk_id=None), action="screenshot")
-    assert Path(out["path"]).read_bytes() == png
+    att, saved, im = out["attachment"], out["saved"][0], out["images"][0]
+    assert att["name"].startswith("browser-") and att["name"].endswith("-shop.example.com.png") and att["mime"] == "image/png" and att["size"] == len(data)
+    assert saved["doc_id"] == att["id"] and (saved["width"], saved["height"]) == (8, 4)
+    assert im["name"] == att["name"] and im["mime"] == "image/png" and im["data"].startswith("data:image/png;base64,")
+    assert "send_files" in out["note"] and "view_image" in out["note"]
+    doc = env.tb.documents.get(att["id"])
+    assert doc and doc["mime"] == "image/png" and Path(saved["path"]).read_bytes() == data
+    assert Path(saved["path"]).is_relative_to(env.tb.documents.db.data_dir / "uploads")
+    assert not (env.ws.desk_root("d1") / "work" / "screens").exists()
+    # A plain chat saves the same way; the same bytes reuse the stored blob.
+    out2 = env.run("browser_manage", ctx=env.ctx(desk_id=None), action="screenshot")
+    assert out2["saved"][0]["path"] == saved["path"] and out2["attachment"]["id"] != att["id"]
+
+
+def test_screenshot_that_is_not_a_picture_is_an_error(env) -> None:
+    env.fake.replies["manage"] = page(pngBase64=base64.b64encode(b"\x89PNG\r\n\x1a\nfake").decode(), width=800, height=600)
+    out = env.run("browser_manage", action="screenshot")
+    assert "unreadable image" in out["error"] and env.tb.documents.list(None) == []
 
 
 def test_manage_validation(env) -> None:

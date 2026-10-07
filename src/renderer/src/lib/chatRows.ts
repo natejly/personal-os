@@ -2,6 +2,12 @@ import type { Conversation } from '@shared/types'
 
 const DAY = 86_400_000
 
+/** The conversation the Telegram bridge writes into (flagged by the backend). */
+export const isTelegramChat = (c: Pick<Conversation, 'settings'>): boolean => c.settings?.telegram === true
+
+/** What the sidebar and header call a chat: "Telegram" for the bridge's conversation, else its title. */
+export const chatLabel = (c: Pick<Conversation, 'title' | 'settings'>): string => (isTelegramChat(c) ? 'Telegram' : c.title)
+
 export function groupLabel(ts: number, now = Date.now()): string {
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
@@ -14,15 +20,18 @@ export function groupLabel(ts: number, now = Date.now()): string {
 }
 
 /**
- * The sidebar's Recents split. Pinned chats from any scope come first, newest pin first; the date
+ * The sidebar's Recents split. The Telegram chat is always first; other pinned chats from any scope follow, newest pin first; the date
  * groups hold personal chats (or every match while searching) minus the pinned ones. The store's
  * own order stays updated_at-descending, so the date groups stay contiguous.
  */
 export function partitionChats(conversations: Conversation[], query: string, now = Date.now()): { pinned: Conversation[]; groups: { label: string; items: Conversation[] }[] } {
   const q = query.trim().toLowerCase()
-  const match = (c: Conversation): boolean => !q || c.title.toLowerCase().includes(q)
-  const pinned = conversations.filter((c) => c.pinned_at && match(c)).sort((a, b) => (b.pinned_at ?? 0) - (a.pinned_at ?? 0))
-  const rest = conversations.filter((c) => !c.pinned_at && (q ? match(c) : !c.project_id))
+  const match = (c: Conversation): boolean => !q || c.title.toLowerCase().includes(q) || chatLabel(c).toLowerCase().includes(q)
+  const top = (c: Conversation): boolean => isTelegramChat(c) || !!c.pinned_at
+  const pinned = conversations
+    .filter((c) => top(c) && match(c))
+    .sort((a, b) => Number(isTelegramChat(b)) - Number(isTelegramChat(a)) || (b.pinned_at ?? 0) - (a.pinned_at ?? 0))
+  const rest = conversations.filter((c) => !top(c) && (q ? match(c) : !c.project_id))
   const groups: { label: string; items: Conversation[] }[] = []
   for (const c of rest) {
     const label = groupLabel(c.updated_at, now)
@@ -48,16 +57,4 @@ export function adjacentChatId(conversations: { id: string }[], focusedId: strin
   if (i === -1) return dir === 1 ? conversations[0].id : null
   const j = i + dir
   return j < 0 || j >= conversations.length ? null : conversations[j].id
-}
-
-type Item = { id: string; project_id: string | null; title: string; updated_at: number }
-export type ProjectRow = { kind: 'chat' | 'doc'; id: string; title: string; at: number }
-
-/** Each project's chats and notes interleaved, newest first: the sidebar group and the project page list the same rows. */
-export function projectRows(conversations: Item[], docs: Item[]): Record<string, ProjectRow[]> {
-  const m: Record<string, ProjectRow[]> = {}
-  for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push({ kind: 'chat', id: c.id, title: c.title, at: c.updated_at })
-  for (const d of docs) if (d.project_id) (m[d.project_id] ??= []).push({ kind: 'doc', id: d.id, title: d.title, at: d.updated_at })
-  for (const rows of Object.values(m)) rows.sort((a, b) => b.at - a.at)
-  return m
 }

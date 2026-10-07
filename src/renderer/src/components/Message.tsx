@@ -2,25 +2,28 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Attachment, Message, MessageStatus, RunChanges, ToolEvent } from '@shared/types'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
+import { fetchBlobUrl } from '../features/notes/api'
 import ToolEvents, { agentIds } from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { parseChatMessage } from '../lib/chatLink'
+import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { describeCall, staysVisible } from '../lib/toolDisplay'
+import { quietEvents } from '../lib/orchestration'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
 import MemoryChips from './MemoryChips'
-import { nowText, statusText, statusTicks, waitText } from '../lib/runStatus'
+import { nowText, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
-import ReadAloudButton from './ReadAloudButton'
 import ResearchTrail from './ResearchTrail'
 import { trailFromEvents } from '../lib/researchTrail'
 
@@ -49,13 +52,15 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
       type="button"
       className="ctx-chip"
       disabled={busy}
-      title="Turn this run into a skill for you to review. It is not used until you approve it."
+      title="Save as skill: turn this run into a skill for you to review. It is not used until you approve it."
+      aria-label={busy ? 'Saving skill…' : 'Save as skill'}
+      aria-busy={busy || undefined}
       onClick={() => {
         setBusy(true)
         void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
       }}
     >
-      <GraduationCap size={11} /> {busy ? 'Saving…' : 'Save as skill…'}
+      <GraduationCap size={11} />
     </button>
   )
 }
@@ -224,17 +229,6 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 }
 
 /** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
-function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
-  const [now, setNow] = useState(() => Date.now())
-  const ticking = statusTicks(status, now)
-  useEffect(() => {
-    if (!ticking) return
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [ticking])
-  return <div className="run-status" role="status">{statusText(status, now)}</div>
-}
-
 /** The three dots for a reply with nothing to show yet; past 5s they gain the elapsed time, so a slow model does not look hung. */
 export function Thinking(): JSX.Element {
   const [start] = useState(() => Date.now())
@@ -265,13 +259,15 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
  *  `browserSession`: the agent browser this transcript drives, passed only to its latest reply that used the browser. */
 /** The face a reply wears; a chat opened on an agent passes that agent's (see useChatFace), the default is the thread's own. */
-export type ChatFace = { name: string; hue?: number }
+export type ChatFace = { name: string; hue?: number; tone?: number }
 
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
+  const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
-  const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
+  // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
+  const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
   const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeInfo(c)])), [chunks])
@@ -281,20 +277,23 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   // Calls that need the user (or that the user acts on) stay in place; the rest fold into the activity line.
-  const events = message.tool_events
+  // Hand-offs to workers are not cards: the app shows the workers themselves.
+  const events = useMemo(() => quietEvents(message.tool_events), [message.tool_events])
   const [shown, folded] = useMemo(() => [(events ?? []).filter(staysVisible), (events ?? []).filter((t) => !staysVisible(t))], [events])
   const trail = useMemo(() => trailFromEvents(events), [events])
   const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
+  // A reply that only handed work on has nothing to draw (the backend removes it once the turn ends).
+  if (!isUser && !streaming && !message.content && !message.reasoning && !message.error && !message.attachments?.length && !events.length && message.tool_events?.length) return null
   return (
-    <div className={`msg ${message.role}`}>
+    <div className={`msg ${message.role}`} data-message-id={message.id}>
       {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a face, and each thread its own. */}
-      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
+      {!isUser && <div className="avatar face-avatar"><Face name={face?.name ?? message.conversation_id} hue={face?.hue} tone={face?.tone} status={streaming ? 'streaming' : message.error ? 'error' : undefined} /></div>}
       <div className="bubble">
         {isUser ? (
           editing ? (
             <MessageEditor message={message} onClose={() => setEditing(false)} />
           ) : (
-            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && <div className="user-text">{message.content}</div>}</div>
+            <div className="user-bubble"><AttachmentChips files={message.attachments} />{message.content && (chatFrom ? <ChatMessageText content={message.content} from={chatFrom} /> : <UserText content={message.content} />)}</div>
           )
         ) : (
           <div className="msg-body">
@@ -315,9 +314,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <Thinking />
               ) : null}
             </BodyBoundary>
+            <ReplyAttachments files={message.attachments} />
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
             {citing && <ChunkViewer chunk={citing} onClose={() => setCiting(null)} />}
-            {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
@@ -342,25 +341,22 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
             )}
             {showContextChips && ctx && ctxCount > 0 && (
               <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-                {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
-                {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
-                {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
+                <span><Share2 size={11} />{ctx.nodes.filter((n) => !n.kind).length}</span>
               </button>
             )}
             {showContextChips && !isUser && <MemoryChips messageId={message.id} ctx={ctx ?? null} />}
-            {!isUser && (message.tool_events?.length ?? 0) > 0 && (
+            {!isUser && events.length > 0 && (
               <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
             {!isUser && !streaming && message.content.trim() && (
-              <button type="button" className="ctx-chip" title="Repeat this on a schedule. It starts switched off, and you can test-run it first."
-                onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
-                <CalendarClock size={11} /> Schedule as routine…
+              <button type="button" className="ctx-chip" title="Schedule as routine: repeat this on a schedule. It starts switched off, and you can test-run it first."
+                aria-label="Schedule as routine" onClick={() => useStore.getState().scheduleAsRoutine(message.conversation_id, message.id)}>
+                <CalendarClock size={11} />
               </button>
             )}
             {showContextChips && <TraceChip message={message} />}
             {!bare && <CopyButton text={message.content} />}
-            {!bare && !isUser && message.content.trim() && <ReadAloudButton id={message.id} text={message.content} />}
-            {editable && isUser && (
+            {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
                 <Pencil size={11} />
               </button>
@@ -399,11 +395,65 @@ export function AttachmentChips({ files }: { files?: Attachment[] | null }): JSX
   )
 }
 
+/** An image the assistant attached to its reply, as a click-to-open thumbnail. The raw route needs the app token, so it is fetched into a blob. */
+export const isImageAttachment = (a: Attachment): boolean => a.mime.startsWith('image/') && !a.mime.includes('svg')
+
+function ReplyImage({ file }: { file: Attachment }): JSX.Element {
+  const [url, setUrl] = useState<string | undefined>()
+  useEffect(() => {
+    let dead = false
+    let made = ''
+    fetchBlobUrl(`/documents/${encodeURIComponent(file.id)}/raw`).then((u) => { made = u; if (dead) URL.revokeObjectURL(u); else setUrl(u) }).catch(() => undefined)
+    return () => { dead = true; if (made) URL.revokeObjectURL(made) }
+  }, [file.id])
+  return (
+    <button className="reply-image" title={`Open ${file.name}`} onClick={() => void useStore.getState().openDoc(file.id)}>
+      <img src={url} alt={file.name} />
+    </button>
+  )
+}
+
+/** The files the assistant sent with a reply (screenshots, charts, documents): images inline in a grid, the rest as chips. */
+export function ReplyAttachments({ files }: { files?: Attachment[] | null }): JSX.Element | null {
+  if (!files?.length) return null
+  const images = files.filter(isImageAttachment)
+  const rest = files.filter((a) => !isImageAttachment(a))
+  return (
+    <>
+      {images.length > 0 && <div className="reply-images">{images.map((a) => <ReplyImage key={a.id} file={a} />)}</div>}
+      <AttachmentChips files={rest} />
+    </>
+  )
+}
+
+/** A message another chat sent (or answered with): "From <title>" opens that chat, then the body. */
+function ChatMessageText({ content, from }: { content: string; from: NonNullable<ReturnType<typeof parseChatMessage>> }): JSX.Element {
+  return (
+    <>
+      <div className="user-from">From <button type="button" className="link-btn" onClick={() => void useStore.getState().selectChat(from.fromChat)}>{from.title}</button></div>
+      <UserText content={from.body || content} />
+    </>
+  )
+}
+
+/** A user message's text. A quoted block (see `parseQuotedMessage`) shows as a quote rendered as markdown, not as its raw fence. */
+function UserText({ content }: { content: string }): JSX.Element {
+  const q = useMemo(() => parseQuotedMessage(content), [content])
+  if (!q) return <div className="user-text">{content}</div>
+  return (
+    <>
+      {q.before && <div className="user-text">{q.before}</div>}
+      <blockquote className="user-quote"><div className="markdown"><MarkdownPreview source={q.quote} /></div></blockquote>
+      {q.after && <div className="user-text">{q.after}</div>}
+    </>
+  )
+}
+
 export function PendingUserMessage({ text, attachments }: { text: string; attachments?: Attachment[] }): JSX.Element {
   return (
     <div className="msg user pending" aria-busy="true">
       <div className="avatar"><User size={14} /></div>
-      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <div className="user-text">{text}</div>}</div></div>
+      <div className="bubble"><div className="user-bubble"><AttachmentChips files={attachments} />{text && <UserText content={text} />}</div></div>
     </div>
   )
 }

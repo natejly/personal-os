@@ -17,7 +17,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .db import Database, new_id, now, row_to_dict
 
@@ -50,6 +50,8 @@ RESERVED_TOOL_NAMES = frozenset({
     "youtube_video", "youtube_search", "github_search", "github_read", "read_feed",
     "run_python", "current_time", "propose_plan", "ask_user",
     "agent_spawn", "agent_wait", "agent_stop", "desk_start",
+    "delegate", "message_worker", "check_worker", "stop_worker", "resume_worker",
+    "list_chats", "read_chat", "message_chat",
     "workflow_list", "workflow_run", "workflow_resume", "command_list", "command_run",
     "todo_write", "read_tool_result", "search_tool_results", "skill_list", "skill_draft", "skill_revise", "skill_view", "skill_from_run",
     "mcp_tool_search", "tool_search",
@@ -67,16 +69,17 @@ RESERVED_TOOL_NAMES = frozenset({
     "propose_times_draft",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_export_file", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
-    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "show",
-    "activity_recent", "activity_pause", "activity_access", "activity_insights", "activity_report",
+    "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit", "doc_delete", "doc_comments", "doc_comment_reply", "show",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",
     "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
     "writing_style", "save_writing_sample",
-    "meeting_list", "meeting_search", "meeting_read",
     "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
     "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
-    "shell_run", "shell_poll", "shell_kill", "opencode_run",
+    "shell_run", "shell_poll", "shell_kill", "opencode_run", "ship_checklist", "ship_status",
+    "coding_session_start", "coding_session_list", "coding_session_status", "coding_session_send", "coding_session_stop",
+    "coding_session_diff",
+    "screenshot", "send_files",
     "browser_open", "browser_snapshot", "browser_click", "browser_type", "browser_select", "browser_press",
     "browser_scroll", "browser_manage", "browser_handoff",
     "view_image", "convert_document", "render_preview", "doc_guide", "python_install", "desk_fetch_file",
@@ -96,6 +99,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   url TEXT NOT NULL DEFAULT '',                -- remote transports
   headers TEXT NOT NULL DEFAULT '{}',          -- remote transports
   description TEXT NOT NULL DEFAULT '',
+  catalog_id TEXT NOT NULL DEFAULT '',         -- the catalog entry this was installed from ('' = added by hand)
   enabled INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'idle',         -- idle | connecting | ready | error | disabled
   status_detail TEXT NOT NULL DEFAULT '',
@@ -120,6 +124,7 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   missing_since REAL,                          -- gone from the server's list, row kept so the slug holds
   quarantined_at REAL,                         -- a changed shape that added a fail-level finding: withheld until accepted
   reviewed_hash TEXT NOT NULL DEFAULT '',      -- the shape the user last saw or accepted
+  annotations TEXT NOT NULL DEFAULT '{}',      -- the server's self-reported hints; deliberately not part of schema_hash
   UNIQUE(server_id, name)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_tool_slug ON mcp_tools(lower(slug));
@@ -161,9 +166,51 @@ CREATE TABLE IF NOT EXISTS mcp_evals (
 CREATE INDEX IF NOT EXISTS idx_mcp_eval_server ON mcp_evals(server_id, created_at DESC);
 """
 
+# Tool annotations are the server's own claims about itself. They are kept for display and for the confirm-on-grant
+# rule, and they can only make Grain more careful: nothing here lowers a danger level or a mode.
+HINT_KEYS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+MAX_TITLE_CHARS = 200
+_SNAKE_HINTS = {"read_only_hint": "readOnlyHint", "destructive_hint": "destructiveHint",
+                "idempotent_hint": "idempotentHint", "open_world_hint": "openWorldHint"}
+
+
+def clean_annotations(raw: Any) -> dict[str, Any]:
+    """Only the four boolean hints and a short title survive, in the wire's camelCase: a server cannot park arbitrary data here."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in raw.items():
+        k = _SNAKE_HINTS.get(k, k)
+        if k in HINT_KEYS and isinstance(v, bool):
+            out[k] = v
+        elif k == "title" and isinstance(v, str) and v.strip():
+            out[k] = v.strip()[:MAX_TITLE_CHARS]
+    return out
+
+
+def hints(annotations: Any) -> dict[str, bool]:
+    """read_only / destructive for the UI and the grant rule. `destructive` needs destructiveHint true AND no readOnlyHint:
+    a server claiming both is contradicting itself, and the safer reading for a badge is the quiet one - the tool still asks."""
+    a = clean_annotations(annotations)
+    read_only = a.get("readOnlyHint") is True
+    return {"read_only": read_only, "destructive": a.get("destructiveHint") is True and not read_only}
+
+
+REVIEW_DESCRIPTION_CHARS = 600  # autoreview slices the description to this anyway; the hint line must survive the slice
+
+
+def review_text(tool: dict[str, Any]) -> str:
+    """What the auto reviewer is told about an MCP tool: its description, then its own hints marked as unverified.
+    A read-only claim is context for the reviewer, never a reason to skip it."""
+    h = hints(tool.get("annotations"))
+    declared = [w for w, on in (("read-only", h["read_only"]), ("destructive", h["destructive"])) if on]
+    line = "Server-declared hints (self-reported, unverified): " + (" / ".join(declared) if declared else "none declared")
+    return f"{str(tool.get('description') or tool.get('name') or '')[:REVIEW_DESCRIPTION_CHARS - len(line) - 1]}\n{line}"
+
+
 MAX_VERSIONS = 10  # shapes kept per tool; the history is for a human to read, not an audit log
 SERVER_JSON = ("args", "env", "headers")
-TOOL_JSON = ("parameters",)
+TOOL_JSON = ("parameters", "annotations")
 _SERVER_FIELDS = {"name", "transport", "command", "args", "cwd", "env", "url", "headers", "description", "enabled"}
 
 
@@ -223,15 +270,19 @@ def schema_hash(name: str, description: str, parameters: Any) -> str:
 
 
 class McpServers:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, allow_all: Callable[[], bool] = lambda: False):
         self.db = db
+        self.allow_all = allow_all  # allowAllConnections: app.py wires the live setting in
         with db.tx() as c:
             c.executescript(SCHEMA)
             # mcp_* tables are created here, after Database._migrate ran, so their later columns are added here too.
             have = {r["name"] for r in c.execute("PRAGMA table_info(mcp_tools)")}
-            for col, ddl in (("quarantined_at", "REAL"), ("reviewed_hash", "TEXT NOT NULL DEFAULT ''")):
+            for col, ddl in (("quarantined_at", "REAL"), ("reviewed_hash", "TEXT NOT NULL DEFAULT ''"),
+                             ("annotations", "TEXT NOT NULL DEFAULT '{}'")):
                 if col not in have:
                     c.execute(f"ALTER TABLE mcp_tools ADD COLUMN {col} {ddl}")
+            if "catalog_id" not in {r["name"] for r in c.execute("PRAGMA table_info(mcp_servers)")}:
+                c.execute("ALTER TABLE mcp_servers ADD COLUMN catalog_id TEXT NOT NULL DEFAULT ''")  # which catalog entry installed it
         self._migrate_secrets()
 
     # ---------- secrets ----------
@@ -300,7 +351,7 @@ class McpServers:
     def create_server(self, name: str, transport: str = "stdio", command: str = "", args: list[str] | None = None,
                       env: dict[str, str] | None = None, secrets: dict[str, str] | None = None, cwd: str = "",
                       url: str = "", headers: dict[str, str] | None = None, description: str = "",
-                      enabled: bool = True) -> dict[str, Any]:
+                      enabled: bool = True, catalog_id: str = "") -> dict[str, Any]:
         sid = new_id()
         t = now()
         # Every header value is kept as a secret and the row keeps only header names, so a credential in
@@ -311,12 +362,12 @@ class McpServers:
                 with self.db.tx() as c:
                     taken = [r["slug"] for r in c.execute("SELECT slug FROM mcp_servers").fetchall()]
                     c.execute(
-                        "INSERT INTO mcp_servers(id,slug,name,transport,command,args,cwd,env,secrets,url,headers,description,enabled,status,status_detail,created_at,updated_at)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
+                        "INSERT INTO mcp_servers(id,slug,name,transport,command,args,cwd,env,secrets,url,headers,description,enabled,status,status_detail,created_at,updated_at,catalog_id)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?,?)",
                         (sid, slugify(name, taken), name.strip() or "MCP server",
                          transport if transport in TRANSPORTS else "stdio", command.strip(), json.dumps(args or []),
                          cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps({k: "" for k in headers or {}}),
-                         description, 1 if enabled else 0, "idle" if enabled else "disabled", t, t),
+                         description, 1 if enabled else 0, "idle" if enabled else "disabled", t, t, catalog_id),
                     )
                 break
             except sqlite3.IntegrityError:  # two windows adding a server at once: the index decides, then retry
@@ -392,11 +443,18 @@ class McpServers:
             where.append("missing_since IS NULL")
         sql = "SELECT * FROM mcp_tools" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY slug"
         with self.db.tx() as c:
-            return [row_to_dict(r, TOOL_JSON) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
+            return [self._tool_dict(r) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
 
     def tool(self, slug: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM mcp_tools WHERE lower(slug)=lower(?)", (slug,)).fetchone(), TOOL_JSON)
+            return self._tool_dict(c.execute("SELECT * FROM mcp_tools WHERE lower(slug)=lower(?)", (slug,)).fetchone())
+
+    @staticmethod
+    def _tool_dict(r: sqlite3.Row | None) -> dict[str, Any] | None:
+        d = row_to_dict(r, TOOL_JSON)
+        if d is not None:
+            d.update(hints(d.get("annotations")))
+        return d
 
     def sync_tools(self, server_id: str, exported: list[dict[str, Any]]) -> dict[str, list[str]]:
         """Reconcile what a server advertises. Returns slugs by outcome: added / changed / unchanged / missing.
@@ -427,6 +485,7 @@ class McpServers:
                 # Capped before hashing so the hash always describes what is stored and forwarded.
                 desc = str(spec.get("description") or "")[:MAX_DESCRIPTION_CHARS]
                 danger = spec.get("danger") if spec.get("danger") in DANGER_LEVELS else DEFAULT_DANGER
+                notes = json.dumps(clean_annotations(spec.get("annotations")))  # outside schema_hash on purpose: see HINT_KEYS
                 h = schema_hash(name, desc, params)
                 seen.add(name)
                 row = known.get(name)
@@ -434,16 +493,16 @@ class McpServers:
                     slug = derive_tool_slug(srv["slug"], name, taken)
                     taken.append(slug)
                     c.execute(
-                        "INSERT INTO mcp_tools(id,server_id,name,slug,description,parameters,schema_hash,danger,first_seen_at,last_seen_at,schema_changed_at,missing_since,reviewed_hash)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL,?)",
-                        (new_id(), server_id, name, slug, desc, json.dumps(params), h, danger, t, t, h),
+                        "INSERT INTO mcp_tools(id,server_id,name,slug,description,parameters,schema_hash,danger,first_seen_at,last_seen_at,schema_changed_at,missing_since,reviewed_hash,annotations)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?)",
+                        (new_id(), server_id, name, slug, desc, json.dumps(params), h, danger, t, t, h, notes),
                     )
                     self._write_version(c, slug, h, desc, params, t)
                     out["added"].append(slug)
                     continue
                 slug = row["slug"]
                 if row["schema_hash"] == h:
-                    c.execute("UPDATE mcp_tools SET last_seen_at=?, missing_since=NULL, danger=? WHERE id=?", (t, danger, row["id"]))
+                    c.execute("UPDATE mcp_tools SET last_seen_at=?, missing_since=NULL, danger=?, annotations=? WHERE id=?", (t, danger, notes, row["id"]))
                     out["unchanged"].append(slug)
                 else:
                     if not c.execute("SELECT 1 FROM mcp_tool_versions WHERE tool_slug=? LIMIT 1", (slug,)).fetchone():
@@ -452,8 +511,8 @@ class McpServers:
                                             json.loads(row["parameters"] or "{}"), row["first_seen_at"])
                     self._write_version(c, slug, h, desc, params, t)
                     c.execute(
-                        "UPDATE mcp_tools SET description=?, parameters=?, schema_hash=?, danger=?, last_seen_at=?, schema_changed_at=?, missing_since=NULL WHERE id=?",
-                        (desc, json.dumps(params), h, danger, t, t, row["id"]),
+                        "UPDATE mcp_tools SET description=?, parameters=?, schema_hash=?, danger=?, last_seen_at=?, schema_changed_at=?, missing_since=NULL, annotations=? WHERE id=?",
+                        (desc, json.dumps(params), h, danger, t, t, notes, row["id"]),
                     )
                     out["changed"].append(slug)
             for name, row in known.items():
@@ -528,9 +587,12 @@ class McpServers:
 
         `stale` means the approved shape is not the shape on offer, so an 'on' decays to 'ask':
         the user approved a tool, not a name the server can point anywhere.
+
+        allowAllConnections: no grant means "on" (source "allow_all"), an explicit "off" still wins, and nothing decays.
         """
         tool = self.tool(tool_slug)
-        mode, source, grant = DEFAULT_MODE, "default", None
+        allow_all = self.allow_all()
+        mode, source, grant = ("on", "allow_all", None) if allow_all else (DEFAULT_MODE, "default", None)
         by_key = {(g["scope"], g["scope_id"]): g for g in self.grants(tool_slug)}
         for scope, sid in (("global", ""), ("project", project_id or ""), ("chat", conversation_id or "")):
             if scope != "global" and not sid:
@@ -539,7 +601,7 @@ class McpServers:
             if g and g["mode"] in MODES:
                 mode, source, grant = g["mode"], scope, g
         stale = bool(tool and grant and grant["schema_hash"] and grant["schema_hash"] != tool["schema_hash"])
-        if stale and mode == "on":
+        if stale and mode == "on" and not allow_all:
             mode = "ask"
         return {"slug": tool["slug"] if tool else tool_slug, "mode": mode, "source": source, "stale": stale,
                 "approved_hash": (grant or {}).get("schema_hash", ""), "schema_hash": (tool or {}).get("schema_hash", ""),

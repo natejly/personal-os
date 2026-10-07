@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import base64
 import os
-import tempfile
 import urllib.parse
 import time
 from pathlib import Path
 from typing import Any
 
-from . import fsx, mac, permissions, redact, tools
+from . import fsx, mac, permissions, redact, screenshot, tools
 from .tools import ToolSpec, UrlBlocked, _obj, tool_error
 from .workspace import WorkspaceError
 
@@ -137,6 +136,8 @@ def register(tb: Any) -> None:
                     p = chat[0].resolve_in(chat[1], rel)
                     if p.is_file():
                         outputs.append(chat[0].output_entry(chat[1], p))
+                        if chat[0].on_save is not None:  # the desktop app wrote it, so save_bytes never saw it
+                            chat[0].on_save(chat[1], p)
                 except (WorkspaceError, OSError):
                     pass
         if outputs:
@@ -162,6 +163,8 @@ def register(tb: Any) -> None:
 
     # ---------------- navigation ----------------
     def host_allowed(url: str) -> bool:
+        if permissions.get(settings(), "allowAllConnections"):
+            return True
         extra = {h for h in (str(x).strip().lower().lstrip(".") for x in (permissions.get(settings(), "browserAllowlist") or ())) if h}
         host = (urllib.parse.urlsplit(url).hostname or "").lower()
         return any(host == e or host.endswith("." + e) for e in extra)
@@ -325,8 +328,6 @@ def register(tb: Any) -> None:
                 p = fsx.resolve_path(raw, g)
                 if why := fsx.sensitive_reason(raw, p):
                     raise fsx.FsError(why)
-                if not (g.in_desk(p) or g.in_roots(p)):
-                    raise fsx.FsError("it is outside the desk workspace and every granted folder")
                 if not p.is_file():
                     raise fsx.FsError("it is not a file")
             except fsx.FsError as e:
@@ -335,25 +336,21 @@ def register(tb: Any) -> None:
             out.append(p)
         return out
 
-    def save_screenshot(ctx: dict[str, Any], res: dict[str, Any]) -> dict[str, Any]:
+    async def save_screenshot(ctx: dict[str, Any], res: dict[str, Any]) -> dict[str, Any]:
+        """The page capture goes to Uploads like a Mac screenshot (screenshot.save_capture): the chat shows it, send_files
+        puts it on the reply and the phone. The desk workspace gets no copy; view_image(document_id=) reads it."""
         try:
             raw = base64.b64decode(str(res.get("pngBase64") or ""), validate=False)
         except ValueError:
             raw = b""
         if not raw:
             return tool_error("browser_manage(screenshot): the browser returned no image", alternative="browser_snapshot to read the page as text")
-        root = desk_root(ctx)
-        if root is not None:
-            d = root / "work" / "screens"
-        else:
-            d = Path(tempfile.gettempdir()) / "personal-os-screens" / (str(ctx.get("conversation_id") or "none").replace("/", "_"))
-        d.mkdir(parents=True, exist_ok=True)
-        f = d / f"{int(time.time() * 1000)}.png"
-        f.write_bytes(raw)
-        shown = os.path.relpath(f, root) if root is not None else str(f)
-        return _shown({"path": shown, "bytes": len(raw), "width": res.get("width"), "height": res.get("height"),
-                       "url": res.get("url") or "", "title": res.get("title") or "",
-                       "note": "view_image can look at this file; the image itself is not returned here"})
+        host = (urllib.parse.urlsplit(str(res.get("url") or "")).hostname or "")[:40]
+        saved = await screenshot.save_capture(tb, ctx, f"browser-{time.strftime('%Y%m%d-%H%M%S')}{'-' + host if host else ''}.png", raw)
+        if saved is None:
+            return tool_error("browser_manage(screenshot): the browser returned an unreadable image", alternative="browser_snapshot to read the page as text")
+        images = saved.pop("images")  # the picture is for the chat, not text to scrub
+        return {**_shown({**saved, "url": res.get("url") or "", "title": res.get("title") or ""}), "images": images}
 
     async def browser_manage(ctx: dict[str, Any], action: str, tab: int | None = None, ms: int = 1000, text: str = "", accept: bool = True,
                              prompt_text: str = "", full_page: bool = False, ref: str = "", paths: list[str] | None = None,
@@ -382,7 +379,16 @@ def register(tb: Any) -> None:
             return await call("browser_manage", "manage", {"action": "dialog", "accept": bool(accept), "promptText": prompt_text}, ctx, 20)
         if action == "screenshot":
             res = await mac.page_bridge.browser("manage", {"session": sess, "action": "screenshot", "fullPage": bool(full_page)}, 30)
-            return save_screenshot(ctx, res) if res.get("ok") else _fail("browser_manage", res)
+            if not res.get("ok"):
+                return _fail("browser_manage", res)
+            out = await save_screenshot(ctx, res)
+            hook = getattr(tb, "user_update", None)
+            if ctx.get("auto_attach") and hook is not None and isinstance(out.get("attachment"), dict):  # a Telegram chat turn: on the phone now; the bridge dedups the final reply
+                try:
+                    await hook(ctx, "", [out["attachment"]])
+                except Exception:  # noqa: BLE001 - a failed live send must not fail the tool; the picture still rides on the reply
+                    pass
+            return out
         if action == "upload":
             if not ref:
                 return tool_error("browser_manage(upload): ref of the file input is required", field="ref",
@@ -433,7 +439,9 @@ def register(tb: Any) -> None:
 
     R("browser_manage", ToolSpec("browser_manage",
         "Everything around the page itself. action: back | forward | reload | tabs (list tabs) | switch_tab(tab) | close_tab(tab) | wait(ms or text) | "
-        "screenshot (saved as a file in the workspace; look at it with view_image) | dialog(accept, prompt_text) to answer an alert/confirm/prompt | "
+        "screenshot (a picture of the page, saved in Uploads and shown in the chat; you get attachment.id: send_files puts it on your reply and the "
+        "user's phone, view_image(document_id=) reads it. Take one when the page shows more than its text does, not on every step) | "
+        "dialog(accept, prompt_text) to answer an alert/confirm/prompt | "
         "upload(ref, paths) to attach workspace files to a file input (asks the user) | "
         "handoff(reason) (same as browser_handoff, which you should prefer over bypassing a login or CAPTCHA) to get past a sign-in, CAPTCHA, two-factor prompt or anything you must not do yourself: it shows the browser window to the user "
         "and waits until they have finished. You never type passwords you were not given in this conversation; hand off instead. | close (end the browser session).",

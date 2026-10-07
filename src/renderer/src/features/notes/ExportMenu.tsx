@@ -10,7 +10,7 @@ import { useStore } from '../../store'
 import { copyMarkdown, downloadMarkdown, printDoc, stripAiFences } from './exportDoc'
 import '../../styles/notes.css'
 
-/** Download the doc as .md, copy its markdown, export a typeset PDF (saved anywhere, or into Uploads), or print it. */
+/** Download the doc as .md, copy its markdown, download a typeset PDF (into Downloads, or into Uploads), or print it. */
 export default function ExportMenu({ title, content, projectId = null }: { title: string; content: string; projectId?: string | null }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -32,8 +32,11 @@ export default function ExportMenu({ title, content, projectId = null }: { title
     const name = printFilename(title)
     try {
       const r = await window.os.print.exportPdf(title || 'Untitled', stripAiFences(content), name, mode)
-      if (!r) return
-      if (typeof r === 'string') toast(`Saved ${name}`)
+      if (!r) return // null: the save sheet was cancelled
+      if (typeof r === 'string') {
+        const saved = r.split(/[/\\]/).pop() ?? name
+        toast(`Saved ${saved}`, 'info', { label: 'Show in Finder', run: () => void window.os.data.fileAction(r, 'reveal') })
+      }
       else await uploadDocuments([new File([new Uint8Array(r)], name, { type: 'application/pdf' })], projectId)
     } catch (e) {
       toast(`PDF export failed: ${(e as Error).message}`, 'error')
@@ -71,7 +74,7 @@ export default function ExportMenu({ title, content, projectId = null }: { title
             setOpen(false)
             void copyMarkdown(content).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })
           }}>Copy Markdown</button>
-          <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('save')}>Export as PDF…</button>
+          <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('save')}>Download PDF</button>
           <button role="menuitem" className="notes-menu-row" onClick={() => void exportPdf('bytes')}>Export PDF to Uploads</button>
           <button role="menuitem" className="notes-menu-row" onClick={print}>Print…</button>
           {googleOn && <button role="menuitem" className="notes-menu-row" onClick={() => void toGoogleDoc()}>Send to Google Docs</button>}

@@ -1,4 +1,4 @@
-// Shared helpers for the meetings / activity / health specs: module switches, direct SQLite seeding,
+// Shared helpers for the health and small-window specs: module switches, direct SQLite seeding,
 // window sizing. Seeding goes through the backend's own venv python so nothing new is installed.
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -19,9 +19,9 @@ export function sql(dataDir, stmts) {
   execFileSync(PY, ['-c', prog, join(dataDir, 'personal-os.db')], { input: JSON.stringify(stmts), encoding: 'utf8' })
 }
 
-/** Turn on the modules that ship hidden. Reload the page afterwards so the renderer sees it. */
+/** Show every module (and any install that hid some). Reload the page afterwards so the renderer sees it. */
 export async function enableModules(api) {
-  await api('/settings', { method: 'PUT', body: { hiddenViews: [], homeWidgets: { meetings: true, health: true } } })
+  await api('/settings', { method: 'PUT', body: { hiddenViews: [], homeWidgets: { health: true } } })
 }
 
 export async function small(app) {
@@ -36,18 +36,6 @@ export async function reload(page) {
 
 const BENIGN = [/Failed to load resource/]
 export const realErrors = (errs) => errs.filter((e) => !BENIGN.some((b) => b.test(e)))
-
-/** Segment rows for a meeting: [{id,channel,t,text,speaker,state}] */
-export function seedSegments(dataDir, meetingId, segs) {
-  const t0 = Date.now() / 1000
-  // A diarized clip carries its speaker both on the row and in the detail's utterances, which is where the backend reads ids from.
-  sql(dataDir, segs.map((s, i) => [
-    'INSERT INTO meeting_segments(id,meeting_id,channel,seq,t_start,t_end,started_at,duration_ms,text,speaker,state,detail,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [s.id ?? `seg${i}`, meetingId, s.channel ?? 'mic', i, s.t ?? i * 10, (s.t ?? i * 10) + 8, t0, 8000, s.text, s.speaker ?? '', s.state ?? 'done',
-      JSON.stringify(s.speaker ? { utterances: [{ speaker: s.speaker, start: 0, end: 8, text: s.text }] } : {}), t0]
-  ]))
-  sql(dataDir, [['UPDATE meetings SET transcript=? WHERE id=?', [segs.map((s) => s.text).join('\n'), meetingId]]])
-}
 
 /**
  * Electron raises no Playwright 'download' event for blob links, so record them instead: every

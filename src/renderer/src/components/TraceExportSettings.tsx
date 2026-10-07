@@ -29,7 +29,7 @@ export default function TraceExportSettings({ value, onChange }: { value?: OtelE
         <>
           <label><span className="toggle-text"><b>Endpoint</b></span><input value={cfg.endpoint} onChange={(e) => set({ endpoint: e.target.value })} placeholder="http://localhost:6006" spellCheck={false} /></label>
           <label className="toggle-row plain">
-            <span className="toggle-text"><b>Include message content</b><small>Tool arguments and the reply text. Never the system prompt or memories, and never for a reply that used activity or meetings.</small></span>
+            <span className="toggle-text"><b>Include message content</b><small>Tool arguments and the reply text. Never the system prompt or memories.</small></span>
             <input type="checkbox" checked={cfg.includeContent} onChange={(e) => set({ includeContent: e.target.checked })} /><span className="switch" />
           </label>
           <label className="toggle-row plain">

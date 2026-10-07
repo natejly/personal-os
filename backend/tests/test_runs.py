@@ -236,7 +236,7 @@ def test_event_names_are_the_chatevent_union() -> None:
     check(by["assistant_message"]["id"] and "context_used" in by["assistant_message"], "assistant_message shape")
     check(set(by["delta"]) == {"id", "text"}, f"delta shape is {{id, text}}, got {set(by['delta'])}")
     check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped",
-                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind", "notice"}, f"done shape, got {set(by['done'])}")
+                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind", "notice", "attachments"}, f"done shape, got {set(by['done'])}")
     check(by["done"]["segment"] is False, "the last done ends the run; a steered segment's says True")
     check(by["done"]["stopped"] is False, "an uninterrupted run reports stopped false")
     check(set(by["span"]) == {"message_id", "span"}, "span shape")
@@ -628,6 +628,18 @@ def test_run_state_is_published_on_the_app_topic() -> None:
     check(len(flips) == 4 and r.replied and not r.answering, f"assistant_message and a final done each fire, got {len(flips)}")
 
 
+def test_run_info_replied_and_stopped() -> None:
+    r = Run("c-replied")
+    check(r.info()["replied"] is False and r.info()["stopped"] is False, "a run that has only begun")
+    r.publish("assistant_message", {"id": "m"})
+    r.publish("done", {"id": "m"})
+    check(r.info()["replied"] is True, "a published final done is a reply")
+    r.silent = True  # type: ignore[attr-defined]
+    check(r.info()["replied"] is False, "a silent wake never counts as a reply")
+    r.stop.set()
+    check(r.info()["stopped"] is True, "Stop is carried on the frame")
+
+
 def test_sse_survives_non_finite_numbers() -> None:
     from personal_os.runs import sse
     block = sse("tool_result", {"v": float("nan"), "xs": [float("inf"), 1.5]}, 3)
@@ -687,7 +699,7 @@ TESTS = [test_retry_events_become_status_events, test_post_starts_a_background_r
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text,
          test_run_info_carries_message_seq, test_message_seq_advances_with_a_steer_segment,
-         test_run_state_is_published_on_the_app_topic, test_sse_survives_non_finite_numbers,
+         test_run_state_is_published_on_the_app_topic, test_run_info_replied_and_stopped, test_sse_survives_non_finite_numbers,
          test_an_oversized_message_is_refused_before_it_is_stored]
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import Face from './Face'
 
-export interface RingNode { id: string; name?: string; status?: string; title: string }
+export interface RingNode { id: string; name?: string; hue?: number; tone?: number; status?: string; title: string }
 
 /** Where child i of n sits, in % of the frame: evenly round a ring, the first straight up. */
 export const ringPoints = (n: number, radius = 38): { x: number; y: number }[] =>
@@ -14,12 +14,12 @@ export const ringPoints = (n: number, radius = 38): { x: number; y: number }[] =
  * its frame. With no children it is just the centre face.
  */
 export default function CrewRing({ center, kids, onPick, onCenter }: {
-  center: { name: string; hue?: number; status?: string; title: string }
+  center: { name: string; hue?: number; tone?: number; status?: string; title: string }
   kids: RingNode[]
   onPick: (id: string) => void
   onCenter?: () => void
 }): JSX.Element {
-  const face = <Face name={center.name} hue={center.hue} status={center.status} size="fill" title={center.title} />
+  const face = <Face name={center.name} hue={center.hue} tone={center.tone} status={center.status} size="fill" title={center.title} />
   if (kids.length === 0) return face
   const pts = ringPoints(kids.length)
   const stop = (e: { stopPropagation: () => void }): void => e.stopPropagation()
@@ -34,7 +34,7 @@ export default function CrewRing({ center, kids, onPick, onCenter }: {
       {kids.map((k, i) => (
         <button key={k.id} className="crew-sat" style={{ left: `${pts[i].x}%`, top: `${pts[i].y}%` }} title={k.title}
           onPointerDown={stop} onClick={(e) => { stop(e); onPick(k.id) }}>
-          <Face name={k.name ?? k.id} status={k.status} size="fill" />
+          <Face name={k.name ?? k.id} hue={k.hue} tone={k.tone} status={k.status} size="fill" />
         </button>
       ))}
     </span>

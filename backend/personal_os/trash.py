@@ -19,13 +19,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from . import blobs
 from .db import Database, now
-from .docs import Docs
+from .docs import Docs, drop_doc_windows
+from .migrations import sync_memories_fts
 from .todos import Todos
 from .workspace import Workspace, WorkspaceError
 
@@ -68,10 +69,15 @@ class Trash:
         t = now()
         with self.db.tx() as c:
             hit = c.execute(f"UPDATE {table} SET deleted_at=? WHERE id=? AND deleted_at IS NULL", (t, id)).rowcount
+            if kind == "doc" and hit:
+                drop_doc_windows(c, [id])
+            if kind == "memory" and hit:
+                sync_memories_fts(c, [id])  # a trashed memory leaves search until it is restored
             if kind != "project" or not hit:
                 return bool(hit)
             for ct in CHILD_TABLES:
                 c.execute(f"UPDATE {ct} SET deleted_at=?, deleted_with=? WHERE project_id=? AND deleted_at IS NULL", (t, id, id))
+            sync_memories_fts(c, [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (id,)).fetchall()])
             self._demote(c, id)
             c.execute("DELETE FROM doc_folders WHERE scope=?", (id,))  # the tree is gone; the docs' own folder paths are not
         return True
@@ -79,7 +85,7 @@ class Trash:
     @staticmethod
     def _demote(c: Any, project_id: str) -> None:
         """What the FK's ON DELETE SET NULL used to do when a project row was erased: docs, todos, notes,
-        boards, canvases, presets, meetings, jobs... drop to personal. The row now stays, so do it by hand,
+        boards, canvases, presets, jobs... drop to personal. The row now stays, so do it by hand,
         for every table that declares it rather than a list that goes stale."""
         tables = [r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()]
         for t in tables:
@@ -104,10 +110,14 @@ class Trash:
                     moved = True
             if kind == "project":
                 c.execute("UPDATE projects SET deleted_at=NULL WHERE id=?", (id,))
+                mem_ids = [r["id"] for r in c.execute("SELECT id FROM memories WHERE deleted_with=?", (id,)).fetchall()]  # before deleted_with is cleared
                 for ct in CHILD_TABLES:
                     c.execute(f"UPDATE {ct} SET deleted_at=NULL, deleted_with=NULL WHERE deleted_with=?", (id,))
+                sync_memories_fts(c, mem_ids)
             elif kind != "todo":
                 c.execute(f"UPDATE {table} SET deleted_at=NULL, deleted_with=NULL WHERE id=?", (id,))
+                if kind == "memory":
+                    sync_memories_fts(c, [id])
         if kind == "todo":
             self.todos.restore(id)
         return {"ok": True, "type": kind, "id": id, "moved_to_personal": moved}
@@ -137,11 +147,15 @@ class Trash:
         return True
 
     def _purge_chat_files(self, ids: list[str]) -> None:
-        """A chat's saved outputs (<data>/chats/<id>/) go when the chat itself is erased, never at trash time."""
+        """A chat's saved outputs (<data>/chats/<id>/) go when the chat itself is erased, never at trash time; so do
+        its chat_files rows, which until then keep its outputs in Files → Artifacts. A desk's workspace is purged
+        by its own lifecycle; its rows go here and the list skips any whose file is gone."""
         chats = Workspace(self.db.data_dir, sub="chats")
         for cid in ids:
             with contextlib.suppress(WorkspaceError):
                 chats.purge(cid)
+        with self.db.tx() as c:
+            c.executemany("DELETE FROM chat_files WHERE conversation_id=?", [(cid,) for cid in ids])
 
     def _purge_documents(self, ids: list[str]) -> None:
         paths: list[str] = []
@@ -152,9 +166,8 @@ class Trash:
                     paths.append(r["path"])
                 c.execute("DELETE FROM chunks_fts WHERE document_id=?", (did,))
                 c.execute("DELETE FROM documents WHERE id=?", (did,))
-        for p in paths:
-            with contextlib.suppress(OSError):
-                Path(p).unlink()
+        for p in paths:  # after the commit: a blob shared with a surviving row (live or trashed) stays
+            blobs.release(self.db, p)
 
     def _purge_project(self, id: str) -> None:
         with self.db.tx() as c:

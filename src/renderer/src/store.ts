@@ -230,7 +230,7 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
-  /** Every other per-chat setting picked on a draft (plan mode, skip permissions, context toggles). `send` applies it. */
+  /** Every other per-chat setting picked on a draft (skip permissions, context toggles). `send` applies it. */
   draftChatSettings: Partial<ConversationSettings>
   /** Autonomy picked on a draft. Null follows `settings.autonomousByDefault`; `send` starts the new chat's desk with it. */
   draftAutonomy: DraftAutonomy
@@ -264,8 +264,8 @@ export interface State {
    */
   pageAgentOpen: boolean
   pageAgentId: string | null
-  /** Plan mode and skip permissions picked in the ⌘I panel before its thread exists. */
-  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'planMode' | 'skipPermissions' | 'effort' | 'fast'>>
+  /** Skip permissions picked in the ⌘I panel before its thread exists. */
+  pageAgentChatSettings: Partial<Pick<ConversationSettings, 'skipPermissions' | 'effort' | 'fast'>>
   /** Model picked in the ⌘I panel before its thread exists. */
   pageAgentModel: string | null
   /** While set, the panel keeps this view's thread whatever view or doc is on screen. */
@@ -507,7 +507,6 @@ export interface State {
   decidePlan: (callId: string, decision: PlanDecision, edits?: PlanEdit[], note?: string) => Promise<void>
   /** Allow or deny one card a desk is waiting on (live or parked), from the desk pane. */
   answerDeskCard: (callId: string, allow: boolean, note?: string) => Promise<void>
-  setPlanMode: (convId: string, mode: 'off' | 'auto' | 'always') => Promise<void>
   markDeskEventSeen: (eventId: string) => Promise<void>
   /** Every unseen needs-you row of ONE desk at once — opening the desk is the acknowledgement. */
   markDeskSeen: (deskId: string) => Promise<void>
@@ -922,8 +921,7 @@ export { adjacentChatId }
 export const PAGE_AGENT_DRAFT = '\u0000page-agent'
 
 /** The per-chat switches a row-less chat parks until `send` creates its row. */
-const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'planMode' | 'skipPermissions'> => ({
-  ...(p.planMode !== undefined ? { planMode: p.planMode } : {}),
+const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'skipPermissions'> => ({
   ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
 })
 
@@ -2273,7 +2271,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     // Picker and toggle callers fire and forget, so a failure has to surface here. The two callers that
-    // act on the outcome (a taint mark, plan mode) use `patchChatSettings` and handle the rejection.
+    // act on the outcome (a taint mark) use `patchChatSettings` and handle the rejection.
     setChatSettings: async (patch, conversationId) => {
       try {
         await patchChatSettings(patch, conversationId)
@@ -2399,7 +2397,7 @@ export const useStore = create<State>((set, get) => {
       }
       if (Object.keys(settings).length) {
         const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
-        // Parked guards (plan mode, skip permissions, context toggles) must not quietly fall back to
+        // Parked guards (skip permissions, context toggles) must not quietly fall back to
         // defaults, so a failed write refuses the run and keeps them on the draft for the retry.
         const refused = fromUpload && !patched?.settings?.tainted ? 'Could not mark this chat untrusted after the upload'
           : !patched && Object.keys(draftChatSettings).length ? "Could not apply this chat's settings" : ''
@@ -3128,7 +3126,6 @@ export const useStore = create<State>((set, get) => {
         set({ deskBusy: false })
       }
     },
-    setPlanMode: (convId, mode) => get().setChatSettings({ planMode: mode }, convId),
     markDeskEventSeen: async (eventId) => {
       // Optimistic: the badge is the whole point, so it must not wait on a round trip.
       set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.id !== eventId) }))

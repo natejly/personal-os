@@ -44,7 +44,7 @@ test('skillSlug matches the backend slug', () => {
 test('clientCommand: only the UI built-ins, with their arguments', () => {
   assert.deepEqual(clientCommand('/compact the budget'), { name: 'compact', args: 'the budget' })
   assert.deepEqual(clientCommand('  /skills '), { name: 'skills', args: '' })
-  assert.deepEqual(clientCommand('/plan always'), { name: 'plan', args: 'always' })
+  assert.equal(clientCommand('/plan always'), null)
   assert.equal(clientCommand('/skill weekly-review do it'), null)
   assert.equal(clientCommand('/schedule tomorrow 9am, check mail'), null)
   assert.equal(clientCommand('/compaction'), null)

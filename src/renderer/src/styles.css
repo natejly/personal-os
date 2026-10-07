@@ -442,7 +442,7 @@ kbd {
 .model-picker select:hover { border-color: var(--border-strong); }
 .model-picker svg { position: absolute; right: 8px; pointer-events: none; }
 
-/* The controls under the text box (model, reasoning, plan mode) share one quiet look: 24px tall,
+/* The controls under the text box (model, reasoning, mode) share one quiet look: 24px tall,
    borderless, 12px, tinted only on hover. */
 .composer-ctl {
   display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;

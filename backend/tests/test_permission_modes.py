@@ -197,7 +197,7 @@ def stored(c: sqlite3.Connection) -> dict[str, Any]:
 def test_migration_sets_auto_and_keeps_everything_else() -> None:
     c = settings_db()
     row = {"version": 1, "skipPermissions": True, "autoReview": "risky", "workspaceRoots": ["/Users/x/Proj"],
-           "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"], "planMode": "auto"}
+           "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"], "docEditMode": "apply"}
     c.execute("INSERT INTO settings VALUES ('permissions', ?)", (json.dumps(row),))
     permissions.migrate_mode(c)
     got = stored(c)

@@ -96,13 +96,13 @@ def test_fork_errors() -> None:
 def test_taint_carries_and_grants_do_not() -> None:
     cid = three_turns()
     app_mod.convos.update(cid, {"settings": {"tainted": True, "taint_sources": ["fetch_url"], "skipPermissions": True,
-                                             "planMode": "always", "effort": "high",
+                                             "effort": "high",
                                              "tools": {"gmail_send": "on", "web_search": "off"}}})
     f = fork(cid, msgs(cid)[1]["id"]).json()
     s = f["settings"]
     check(s["tainted"] is True and s["taint_sources"] == ["fetch_url"], f"taint carries over, got {s}")
     check("skipPermissions" not in s, "skipPermissions is reset to the default")
-    check(s["planMode"] == "always" and s["effort"] == "high", "chat settings carry over")
+    check(s["effort"] == "high", "chat settings carry over")
     check(s["tools"] == {"web_search": "off"}, f"an always-this-chat grant does not apply in the fork, got {s['tools']}")
     with app_mod.db.tx() as c:
         n = c.execute("SELECT COUNT(*) AS n FROM approvals WHERE conversation_id=?", (f["id"],)).fetchone()["n"]

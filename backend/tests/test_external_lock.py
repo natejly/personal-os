@@ -180,7 +180,7 @@ def fake_send():  # type: ignore[no-untyped-def]
     SENT.clear()
     ROUNDS.clear()
     # A desk here runs its plan and stops: no completion gate, no reviewer turn, no parked card.
-    j("PUT", "/settings", {"deskDoneGate": False, "deskSelfReview": False, "parkAfterSeconds": 0, "planMode": "off"})
+    j("PUT", "/settings", {"deskDoneGate": False, "deskSelfReview": False, "parkAfterSeconds": 0})
     yield
     tb.specs["gmail_send"] = real
     ROUNDS.clear()

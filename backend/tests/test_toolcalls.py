@@ -262,10 +262,11 @@ def test_signature_mismatch_is_refused_before_a_card() -> None:
     assert RAN == []
 
 
-def test_plan_mode_refuses_a_consequential_call_before_its_signature_is_checked() -> None:
+def test_a_planning_desk_refuses_a_consequential_call_before_its_signature_is_checked() -> None:
     ROUNDS.append({"tool_calls": [call("todo_add", '{"nope": 1}')]})
     cid = j("POST", "/conversations", {})["id"]
-    j("PATCH", f"/conversations/{cid}", {"settings": {"planMode": "always", "tools": {"todo_add": "on"}}})
+    did = appmod.desks.create(conversation_id=cid, brief="go", autonomy="plan")["id"]
+    appmod.convos.update(cid, {"settings": {"deskId": did, "tools": {"todo_add": "on"}}})  # deskId is not client-settable
     rid = j("POST", f"/conversations/{cid}/chat", {"content": "go"})["run_id"]
     wait_until(lambda: (r := store.get(rid)) and r["status"] not in ("running", "awaiting_approval") and r, "the run to finish")
     res = tool_msgs(SEEN[1])["c1"]

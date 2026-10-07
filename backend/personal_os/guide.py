@@ -49,7 +49,7 @@ Type / in the composer:
 - /schedule: book a run for later. /loop: repeat something on an interval.
 - /research <question>: plan, search in parallel, and answer with sources and a visible trail.
 - /compact: summarize the chat so far to free room.
-- /skills and /commands: list what you have. /plan: plan mode (Cmd+Shift+P cycles it).
+- /skills and /commands: list what you have.
 - Your own saved commands (Library -> Automations) appear in the same menu.
 
 ## Files
@@ -85,11 +85,11 @@ Type / in the composer:
 
 ## Autonomy: working on its own
 - A chat can do several steps by itself. It stops for you at approval cards, plans and questions.
-- Plan mode: the assistant writes a plan first, you approve it once, and its steps run without a card each. Changing the plan needs approval again.
+- Plan first (Mode button): the assistant writes a plan first, you approve it once, and its steps run without a card each. Changing the plan needs approval again.
 - Approvals: an inline Approve/Deny card. A card nobody answers waits; answering later resumes the run.
 - Needs you: anything waiting on you shows in the Agent inbox on Today, with a count on the sidebar Today row.
 - Scheduled and background runs can only propose anything that leaves the app (mail, calendar, Docs). Proposals land in the Agent inbox; accepting sends them once.
-- Work autonomously (beside plan mode in any chat): the chat keeps working on its task in its own folder until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (no plan up front; risky actions follow the permission mode) or Work and propose (it only proposes anything external).
+- Work autonomously (Mode button in any chat): the chat keeps working on its task in its own folder until it is done or needs you. Pick Plan first (you approve a plan once), Ask as it goes (no plan up front; risky actions follow the permission mode) or Work and propose (it only proposes anything external).
 - A strip above the composer shows the state, turns used and what needs you, with Start, Pause, Resume and Stop; it opens a side panel with Files, Changes and Review. Questions, parked cards and the plan appear at the end of the transcript. Output reaches the app only when you accept it in Review. Files you attach land in its inputs folder.
 - Autonomous chats list with other chats, with a status dot; the Chats header counts what needs you. Turn the control off to stop; the chat answers normally again. Caps live in Settings -> Autonomy.
 
@@ -111,7 +111,7 @@ Cmd+/ (or ? outside a text field) shows them all, searchable; Help -> Keyboard S
 - General: Cmd+, settings, Cmd+K command palette, Cmd+/ shortcuts, Cmd+B sidebar, Cmd+I Page agent, Ctrl+Cmd+I Context panel. Cmd+= and Cmd+- zoom, Alt+Cmd+0 actual size.
 - Create: Cmd+N new chat, Cmd+Shift+N new file, Cmd+Shift+D today's file, Cmd+U upload.
 - Go to: Cmd+0 Today, 1 Chats, 2 Lists, 3 Calendar, 4 Files, 5 Mail, 6 Memory.
-- Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply, Cmd+Shift+P cycles plan mode. The mic button dictates into the message; the dictation chord (hold to talk, tap to latch) and the transcription backend are in Settings -> Behavior -> Voice input.
+- Chat: Cmd+Shift+[ and ] previous and next chat, Cmd+Shift+F search chats, Cmd+F find (Cmd+G / Shift+Cmd+G next and previous). Enter sends (queues while a reply runs), Cmd+Enter steers the running reply, Shift+Enter new line, Esc stops the reply. The mic button dictates into the message; the dictation chord (hold to talk, tap to latch) and the transcription backend are in Settings -> Behavior -> Voice input.
 - Files (note editor): Cmd+S save, Cmd+Shift+B bold, Cmd+Shift+I italic, Cmd+K link, Ctrl+Cmd+M maths, Cmd+Shift+E code, Tab indent.
 - Spaces: Cmd+Shift+C toggle Spaces, Ctrl+Cmd+N new Space, Alt+Cmd+Left/Right previous and next, Alt+Cmd+Up overview, Ctrl+1..9 jump, Ctrl+Cmd+T tidy up, Ctrl+Cmd+L lock. Esc deselects, Delete closes the selected windows, Cmd+scroll zooms, Cmd+drag moves a window from anywhere in it.
 - Windows: Cmd+W close, Cmd+M minimize, Ctrl+Cmd+O pop out, Ctrl+Cmd+Shift+O return to Space, Ctrl+Cmd+P pin on top, Ctrl+Cmd+[ and ] transparency, Alt+Cmd+G gather widgets, Alt+Cmd+F bring pop-outs to front.

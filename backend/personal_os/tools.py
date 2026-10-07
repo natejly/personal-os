@@ -1123,8 +1123,8 @@ class Toolbox:
             q = query.strip()
             if q and self.memory_index is not None:
                 cfg = self.settings()  # a None vector still ranks lexically and through the graph
-                found = self.memory_index.search(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
-                                                 limit=SEARCH_HITS, settings=cfg)
+                found = await self.memory_index.search_reranked(ctx["project_id"], query, await self.memory_index.query_vec(cfg, query),
+                                                                limit=SEARCH_HITS, settings=cfg)
             elif q:
                 found = self.memories.list(ctx["project_id"], query)
             else:  # a filter-only listing, newest first

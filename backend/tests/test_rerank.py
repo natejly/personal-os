@@ -51,6 +51,12 @@ full = [h["chunk_id"] for h in run(retriever.search(None, "gadget", S, limit=10)
 got = [h["chunk_id"] for h in run(retriever.search(None, "gadget", on, limit=4))]
 check(calls and got == list(reversed(full))[:4], "reversed candidates trimmed to limit")
 check(len(run(retriever.search(None, "gadget", {**on, "retrievalPerDocCap": 1}, limit=10))) == 5, "cap still applies after rerank")
+n_calls = len(calls)
+blank = {**on, "retrievalRerankModel": "", "provider": "openai", "baseUrl": ""}  # a provider with no rerank route
+run(retriever.search(None, "gadget", blank, limit=4))
+check(len(calls) == n_calls, "a blank resolved model skips the document rerank")
+run(retriever.search(None, "gadget", {**blank, "provider": "fireworks"}, limit=4))
+check(len(calls) == n_calls + 1, "blank model on a provider with a default still reranks")
 
 # The real function over a stubbed HTTP layer and completion.
 import httpx  # noqa: E402
@@ -95,6 +101,25 @@ reply.update(status=200, json={"results": [{"index": 1, "relevance_score": 0.9},
 check(keys() == ["files:b", "files:a", "files:c"], "route order applied")
 check(posts[-1][0] == "http://rr.test/v1/rerank" and not completions, "posts to {base}/v1/rerank, no completion")
 check(any(k.lower() == "authorization" for k in posts[-1][1]["headers"]), "auth header sent")
+
+check(posts[-1][1]["json"]["return_documents"] is False and "top_n" not in posts[-1][1]["json"], "return_documents false, no top_n by default")
+
+# `data` shape (sorted or not), plus top_n through the raw call.
+reply.update(status=200, json={"object": "list", "data": [{"index": 0, "relevance_score": 0.2, "document": None},
+                                                          {"index": 2, "relevance_score": 0.8, "document": None}]})
+check(keys() == ["files:c", "files:a", "files:b"], "data shape applied")
+got_scores = run(retrieval_rerank.rerank_scores(rs, "rr", "q", ["a", "b", "c"], top_n=2))
+check(got_scores == [(2, 0.8), (0, 0.2)] and posts[-1][1]["json"]["top_n"] == 2, "rerank_scores sorts desc and sends top_n")
+reply.update(status=200, json={"results": [{"index": 1, "relevance_score": 0.3}, {"index": 2, "relevance_score": 0.7}]})
+check(run(retrieval_rerank.rerank_scores(rs, "rr", "q", ["a", "b", "c"])) == [(2, 0.7), (1, 0.3)], "results shape applied")
+reply.update(status=404, json={})
+check(run(retrieval_rerank.rerank_scores(rs, "rr", "q", ["a"])) is None, "absent route returns None")
+reply.update(status=500, json={})
+try:
+    run(retrieval_rerank.rerank_scores(rs, "rr", "q", ["a"]))
+    check(False, "500 raises")
+except RuntimeError:
+    check(True, "500 raises")
 
 reply.update(status=404, json={})
 check(keys() == ["files:c", "files:a", "files:b"] and completions, "404 falls back to completion indices")

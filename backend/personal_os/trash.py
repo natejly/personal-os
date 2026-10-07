@@ -147,11 +147,15 @@ class Trash:
         return True
 
     def _purge_chat_files(self, ids: list[str]) -> None:
-        """A chat's saved outputs (<data>/chats/<id>/) go when the chat itself is erased, never at trash time."""
+        """A chat's saved outputs (<data>/chats/<id>/) go when the chat itself is erased, never at trash time; so do
+        its chat_files rows, which until then keep its outputs in Files → Artifacts. A desk's workspace is purged
+        by its own lifecycle; its rows go here and the list skips any whose file is gone."""
         chats = Workspace(self.db.data_dir, sub="chats")
         for cid in ids:
             with contextlib.suppress(WorkspaceError):
                 chats.purge(cid)
+        with self.db.tx() as c:
+            c.executemany("DELETE FROM chat_files WHERE conversation_id=?", [(cid,) for cid in ids])
 
     def _purge_documents(self, ids: list[str]) -> None:
         paths: list[str] = []

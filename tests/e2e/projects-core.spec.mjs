@@ -121,7 +121,7 @@ test('delete project: chats and memories go to the trash, docs fall back to pers
   clean(grain)
 })
 
-test('sidebar group lists only the newest 4 chats (no switch), View all opens Chats, notes sit under Artifacts', async ({ grain }) => {
+test('sidebar group lists only the newest 4 chats (no switch), View all opens Chats, notes sit under Context', async ({ grain }) => {
   const { page, api } = grain
   const p = await api('/projects', { method: 'POST', body: { name: 'Mixed' } })
   for (let i = 1; i <= 5; i++) {
@@ -142,8 +142,8 @@ test('sidebar group lists only the newest 4 chats (no switch), View all opens Ch
   await expect(page.getByRole('heading', { name: 'Mixed' })).toBeVisible()
   await expect(page.locator('.tabs button.active')).toContainText('Chats')
   await expect(page.locator('.chat-row')).toHaveCount(5)
-  await page.locator('.tabs').getByRole('button', { name: /^Artifacts/ }).click()
-  await expect(page.locator('.tabs button.active')).toContainText('Artifacts')
+  await page.locator('.tabs').getByRole('button', { name: /^Context/ }).click()
+  await expect(page.locator('.tabs button.active')).toContainText('Context')
   await expect(page.locator('.pf .cf-name', { hasText: 'note 2' })).toBeVisible()
   // collapse via the folder twist and the choice survives a relaunch
   await group.getByRole('button', { name: /Collapse Mixed|Expand Mixed/ }).first().click().catch(() => {})
@@ -162,8 +162,8 @@ test('project view: tabs, counts, new chat button, empty state, memory add insid
   await expect(page.getByText('tabs memory one')).toBeVisible()
   const mems = await api('/memories?project_id=' + p.id + '&include_global=false')
   expect(mems.map((m) => m.content)).toContain('tabs memory one')
-  await page.locator('.tabs').getByRole('button', { name: /^Artifacts/ }).click()
-  await expect(page.getByText('No artifacts yet')).toBeVisible()
+  await page.locator('.tabs').getByRole('button', { name: /^Context/ }).click()
+  await expect(page.getByText('No context yet')).toBeVisible()
   await page.locator('.tabs').getByRole('button', { name: /^Chats/ }).click()
   await page.locator('.page-header').getByRole('button', { name: /New chat/ }).click()
   await expect(page.getByText('New chat in Tabs')).toBeVisible()

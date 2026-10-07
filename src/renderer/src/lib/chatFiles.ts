@@ -4,6 +4,8 @@
  * the fetches and the store calls live in useChatFiles.ts.
  */
 
+import type { ShowItem } from '@shared/types'
+
 export type ChatFileKind = 'upload' | 'note' | 'output' | 'local' | 'coding'
 export type ChatFileAction = 'attached' | 'created' | 'edited' | 'saved' | 'uploaded'
 
@@ -27,9 +29,21 @@ export interface ChatFile {
   created_at: number
   /** The path is no longer on disk. */
   missing: boolean
-  /** Outputs only: the path inside the chat's outbox, e.g. "outputs/report.csv". */
+  /** Outputs only: the path inside the chat's outbox or desk workspace, e.g. "outputs/report.csv". */
   rel: string | null
+  /** Artifacts list only: the chat is in the trash, so the row is labelled with its title and does not link to it. */
+  chat_deleted?: boolean
+  /** Artifacts list only: bytes on disk. */
+  size?: number
 }
+
+/** Files → Artifacts: every chat's outputs, newest first; the backend leaves out files no longer on disk. */
+export const artifactsQuery = (cursor?: string | null, limit = 50): string =>
+  `/chat-files/artifacts?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+
+/** A chat's output as the viewer shows it: bytes from its own route, since the app's data folder is off limits to /local/raw. */
+export const artifactShowItem = (f: Pick<ChatFile, 'id' | 'name' | 'size'>): ShowItem =>
+  ({ kind: 'file', title: f.name, name: f.name, size: f.size, rawPath: `/chat-files/${f.id}/raw` })
 
 /** The personal (no-project) chats, or one project's files: its chats', its notes and its uploads. */
 export type FilesScope = 'personal' | { projectId: string }
@@ -57,16 +71,18 @@ export function groupByKind(files: ChatFile[]): { kind: ChatFileKind; label: str
   return KIND_ORDER.map((kind) => ({ kind, label: KIND_LABEL[kind], files: files.filter((f) => f.kind === kind) })).filter((g) => g.files.length > 0)
 }
 
+export interface ChatGroup { conversationId: string; title: string; /** The chat is in the trash: no live link. */ deleted: boolean; files: ChatFile[] }
+
 /** One group per chat, the chat with the newest file first; files keep the order they came in. Files no chat touched share one group with the id ''. */
-export function groupByChat(files: ChatFile[]): { conversationId: string; title: string; files: ChatFile[] }[] {
-  const by = new Map<string, { conversationId: string; title: string; files: ChatFile[] }>()
+export function groupByChat(files: ChatFile[]): ChatGroup[] {
+  const by = new Map<string, ChatGroup>()
   for (const f of files) {
     const id = f.conversation_id ?? ''
     const g = by.get(id)
     if (g) g.files.push(f)
-    else by.set(id, { conversationId: id, title: id ? f.conversation_title || 'Untitled chat' : 'Not from a chat', files: [f] })
+    else by.set(id, { conversationId: id, title: id ? f.conversation_title || 'Untitled chat' : 'Not from a chat', deleted: !!f.chat_deleted, files: [f] })
   }
-  const newest = (g: { files: ChatFile[] }): number => Math.max(...g.files.map((f) => f.created_at))
+  const newest = (g: ChatGroup): number => Math.max(...g.files.map((f) => f.created_at))
   return [...by.values()].sort((a, b) => newest(b) - newest(a))
 }
 

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  attachmentKind, attachmentLabel, attachmentRefs, attachmentsOverLimit, forwardCompose, MAIL_ATTACH_LIMIT_BYTES,
   clock, composeArgs, composeProblem, editedFields, isValidEmail, looksMarkdown, markdownToPlain, parseAddressList,
   parseMailMessage, parseMailRows, readPreview, recipientsToArg, senderInitial, senderName
 } from './mailCompose'
@@ -22,7 +23,7 @@ test('parseAddressList splits, keeps names, reports the bad', () => {
 })
 
 const orig = { to: 'Ana <ana@x.co>', subject: 'Hi', body: 'Line 1\n\nLine 2', reply_to_message_id: 'abc123' }
-const draft = (over = {}) => ({ to: parseAddressList(orig.to).ok, subject: orig.subject, body: orig.body, ...over })
+const draft = (over = {}) => ({ to: parseAddressList(orig.to).ok, cc: [], bcc: [], subject: orig.subject, body: orig.body, attachments: [] as string[], ...over })
 
 test('editedFields ignores trailing whitespace and domain case, sees real edits', () => {
   assert.deepEqual(editedFields(orig, draft()), [])
@@ -85,4 +86,51 @@ test('names and clock', () => {
   assert.equal(senderInitial('"ana" <a@x.co>'), 'A')
   assert.equal(clock(87), '1:27')
   assert.equal(clock(-3), '0:00')
+})
+
+test('attachmentsOverLimit counts what is already attached', () => {
+  const MB = 1024 * 1024
+  assert.equal(attachmentsOverLimit([10 * MB], [15 * MB]), null)
+  assert.equal(MAIL_ATTACH_LIMIT_BYTES, 25 * MB)
+  assert.equal(attachmentsOverLimit([20 * MB], [11 * MB]), 'Attachments total 31 MB; Gmail allows 25 MB.')
+})
+
+test('attachmentKind falls back to the extension', () => {
+  assert.equal(attachmentKind('image/png', 'a.png'), 'image')
+  assert.equal(attachmentKind('application/octet-stream', 'Report.PDF'), 'pdf')
+  assert.equal(attachmentKind('text/csv', 'x.csv'), 'sheet')
+  assert.equal(attachmentKind('application/zip', 'x.zip'), 'archive')
+  assert.equal(attachmentKind('text/plain', 'n.txt'), 'text')
+  assert.equal(attachmentKind('application/x-foo', 'x.bin'), 'file')
+})
+
+test('attachmentLabel shows a path as its file name and leaves ids alone', () => {
+  assert.equal(attachmentLabel('/Users/a/Desktop/plan.pdf'), 'plan.pdf')
+  assert.equal(attachmentLabel('a1b2c3'), 'a1b2c3')
+})
+
+test('forwardCompose prefixes once and carries the original', () => {
+  const m = { id: '1', thread_id: 't', from: 'Ana <a@x.co>', subject: 'Plan', date: 'Mon', snippet: 'snip', unread: false, labels: [] }
+  const f = forwardCompose(m, { id: '1', thread_id: 't', from: m.from, to: 'me@x.co', subject: 'Plan', date: 'Mon', body: 'Hello' })
+  assert.equal(f.subject, 'Fwd: Plan')
+  assert.match(f.body, /^\n\n-+ Forwarded message -+\nFrom: Ana <a@x.co>\nDate: Mon\nSubject: Plan\nTo: me@x.co\n\nHello$/)
+  assert.equal(forwardCompose({ ...m, subject: 'Fwd: Plan' }, null).subject, 'Fwd: Plan')
+  assert.match(forwardCompose(m, null).body, /snip$/)
+})
+
+test('cc, bcc and attachments count as edits and ride in the arguments', () => {
+  const withAll = { ...orig, cc: 'Cy <cy@x.co>', attachments: ['doc1', { name: 'b.pdf' }] }
+  const same = draft({ cc: parseAddressList('Cy <CY@x.co>').ok, attachments: ['doc1', 'b.pdf'] })
+  assert.deepEqual(editedFields(withAll, same), [])
+  assert.deepEqual(editedFields(orig, draft({ bcc: parseAddressList('z@x.co').ok })), ['bcc'])
+  assert.deepEqual(editedFields(withAll, { ...same, cc: [] }), ['cc'])
+  assert.deepEqual(editedFields(withAll, { ...same, attachments: ['doc1'] }), ['attachments'])
+  const a = composeArgs(withAll, draft({ cc: parseAddressList('cy@x.co, d@y.io').ok, bcc: parseAddressList('z@x.co').ok, attachments: ['doc9'] }))
+  assert.equal(a.cc, 'cy@x.co, d@y.io')
+  assert.equal(a.bcc, 'z@x.co')
+  assert.deepEqual(a.attachments, ['doc9'])
+  const b = composeArgs(withAll, draft())
+  assert.ok(!('cc' in b) && !('bcc' in b) && !('attachments' in b))
+  assert.deepEqual(attachmentRefs(undefined), [])
+  assert.deepEqual(attachmentRefs(['a', { name: 'n' }]), ['a', 'n'])
 })

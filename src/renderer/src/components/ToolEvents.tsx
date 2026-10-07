@@ -309,8 +309,8 @@ function ToolEvents({ events, conversationId, streaming = false, browserSession 
   const deskPlanShown = useStore((s) => inMainChat && (s.activeDesk?.conversation_id === conversationId
     ? !!s.activeDesk.plan
     : !!s.sessions[conversationId]?.conversation.settings.deskId))
-  const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
-    approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
+  const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>, note?: string): Promise<void> =>
+    approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited || note ? { ...(edited ? { arguments: edited } : {}), ...(note ? { note } : {}) } : undefined)
 
   /** The generic row: a header, then whatever the call produced. Used for every tool without a dedicated card. */
   function genericRow(t: ToolEvent): JSX.Element {

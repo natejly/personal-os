@@ -57,7 +57,7 @@ _real_call = appmod.toolbox.call
 
 
 async def _counting_call(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
-    if name == "gmail_send":
+    if name == "gmail_draft":
         CALLS.append(name)
         return {"ok": True, "sent": True}
     return await _real_call(name, args, ctx)
@@ -99,7 +99,7 @@ def dead_run(*, taint: bool = False, journal: str | None = None, status: str = "
                     raise asyncio.CancelledError()
                 return {"ok": True, "sent": True, "n": "first"}
             try:
-                await store.call_once(rid, 1000, "gmail_send", SEND, fn)
+                await store.call_once(rid, 1000, "gmail_draft", SEND, fn)
             except asyncio.CancelledError:
                 pass
         asyncio.run(go())
@@ -124,9 +124,9 @@ def resume_it(rid: str) -> Any:
 
 
 def setup() -> None:
-    # gmail_send always asks (Toolbox.effective caps it); a patterned allow rule is the one way past the card.
+    # an external tool (gmail_draft stands in; gmail_send can never be allowed past its card) asks unless a patterned allow rule covers it.
     client.put("/settings", json={"autoLearn": False, "baseUrl": "",
-                                  "permissionRules": {"allow": [f"gmail_send({SEND['to']})"], "ask": [], "deny": []}})
+                                  "permissionRules": {"allow": [f"gmail_draft({SEND['to']})"], "ask": [], "deny": []}})
     llm.stream_chat = _scripted_stream
     appmod.toolbox.call = _counting_call  # type: ignore[method-assign]
 
@@ -155,7 +155,7 @@ def test_note_and_resume() -> None:
 def test_done_call_replays() -> None:
     cid, rid = dead_run(journal="done")
     CALLS.clear()
-    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_send", SEND)]}, {"text": "sent", "calls": []}]
+    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_draft", SEND)]}, {"text": "sent", "calls": []}]
     SEEN.clear()
     check(resume_it(rid).status_code == 200, "resume ok")
     new = wait(cid)
@@ -168,7 +168,7 @@ def test_done_call_replays() -> None:
 def test_started_call_is_unknown() -> None:
     cid, rid = dead_run(journal="started")
     CALLS.clear()
-    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_send", SEND)]}, {"text": "ok", "calls": []}]
+    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_draft", SEND)]}, {"text": "ok", "calls": []}]
     SEEN.clear()
     check(resume_it(rid).status_code == 200, "resume ok")
     wait(cid)
@@ -182,7 +182,7 @@ def test_started_call_is_unknown() -> None:
 def test_taint_carries_over() -> None:
     cid, rid = dead_run(taint=True)
     CALLS.clear()
-    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_send", {**SEND, "subject": "other"})]}, {"text": "x", "calls": []}]
+    ROUNDS[:] = [{"text": "", "calls": [call("c1", "gmail_draft", {**SEND, "subject": "other"})]}, {"text": "x", "calls": []}]
     check(resume_it(rid).status_code == 200, "resume ok")
     new = wait(cid, ("awaiting_approval", "done", "error"))
     check(new["status"] == "awaiting_approval", f"tainted resume parks the external call, got {new['status']}")
@@ -219,11 +219,11 @@ def test_note_unit() -> None:
     run = {"message_id": "m1", "run_id": "r"}
     ev = [(1, "delta", {"id": "m1", "text": "x" * 5000}),
           (2, "tool_result", {"name": "t", "arguments": {"q": "y" * 1000}, "result_preview": "p" * 1000, "error": "boom"})]
-    a = resume_mod.build_resume_note(run, ev, [{"status": "started", "tool": "gmail_send"}], [])
-    b = resume_mod.build_resume_note(run, ev, [{"status": "started", "tool": "gmail_send"}], [])
+    a = resume_mod.build_resume_note(run, ev, [{"status": "started", "tool": "gmail_draft"}], [])
+    b = resume_mod.build_resume_note(run, ev, [{"status": "started", "tool": "gmail_draft"}], [])
     check(a == b, "deterministic")
     check("x" * 1501 not in a and "y" * 301 not in a and "p" * 301 not in a, "truncated")
-    check("(error)" in a and "gmail_send" in a, "errors and started calls listed")
+    check("(error)" in a and "gmail_draft" in a, "errors and started calls listed")
     check(resume_mod.taint_from_tape([(1, "taint", {"source": "fetch_url"}), (2, "delta", {})]) == ["fetch_url"], "taint sources read from the tape")
     ok, why = resume_mod.resumable({"status": "interrupted", "kind": "chat", "desk_id": None, "run_id": "r"}, {"run_id": "r"}, False)
     check(ok and why == "interrupted", "resumable happy path returns the tag")

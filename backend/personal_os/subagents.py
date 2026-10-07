@@ -35,7 +35,7 @@ from . import approval_log, autoreview, compaction, limits, llm, mac, permission
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
-from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
+from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 from .working import escape_tags
 
 log = logging.getLogger(__name__)
@@ -1062,7 +1062,7 @@ class Subagents:
             elif mode == "ask":
                 decision = await self._ask(ch, uid, name, args, forced, spec.danger)
                 if decision != "allow":
-                    result = denied(name, "declined by the user")
+                    result = denied(name, DISCARDED if name == "gmail_send" else "declined by the user")
             if result is None:
                 ch.touch(in_tool=True)
                 ch.ctx["fs_outside_ok"] = fs_ask  # approved above: the user said yes to this credential store or write

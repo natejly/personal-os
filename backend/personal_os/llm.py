@@ -119,6 +119,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     "homeWidgets": {},
     "hiddenViews": [],
+    # Rows hidden from the sidebar only (home, docs, spaces, projects, jobs); they stay reachable everywhere else.
+    "sidebarHidden": [],
     # {view: "sidebar" | "apps"}; missing = the module's own default placement.
     # Bump when the default-off set changes so existing DBs pick up the change once.
     "modulesDefault": 5,

@@ -9,3 +9,5 @@ import type { Settings } from '@shared/types'
 export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false
 export const viewHidden = (s: Settings, view: string): boolean =>
   (s.hiddenViews ?? []).includes(view)
+/** A sidebar row that is not shown: its view is turned off, or only the row is hidden (`sidebarHidden`). */
+export const rowHidden = (s: Settings, key: string): boolean => viewHidden(s, key) || (s.sidebarHidden ?? []).includes(key)

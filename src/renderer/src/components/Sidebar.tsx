@@ -5,7 +5,7 @@ import GrainLogo from './GrainLogo'
 import { chatAttentionOf, useStore, type View } from '../store'
 import SidebarSpaces from './SidebarSpaces'
 import ResizeHandle from './ResizeHandle'
-import { viewHidden } from '../moduleToggles'
+import { rowHidden } from '../moduleToggles'
 import { MODULES } from '../shell/registry'
 import { navEntries, navTitle } from '../shell/nav'
 import { dragProps } from '../canvas/dnd'
@@ -72,7 +72,7 @@ const PROJECT_ROWS = 4
  */
 type NavEntry = { view?: View; label: string; description?: string; icon: JSX.Element; kind?: WidgetKind }
 
-// The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Appearance can hide it.
+// The fixed rows. Every other view (shell/nav.tsx) follows them; Settings → Sidebar can hide any of them.
 const TOP: NavEntry[] = [
   { view: 'home', description: 'Your day at a glance: plan, mail, events and what the agent did', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'docs', description: 'Your documents, in folders, with the assistant editing alongside you', label: 'Files', icon: <Files size={15} /> }
@@ -259,18 +259,19 @@ export default function Sidebar(): JSX.Element {
       <div className="sidebar-scroll">
       <nav className="nav">
         {[...TOP, ...navEntries()]
-          .filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
+          .filter((n) => (n.view ? !rowHidden(settings, n.view) : inCanvas)).map(navItem)}
         {/* Hidden views leave no trace otherwise; this is the way back to them. */}
-        {navEntries().some((e) => viewHidden(settings, e.view)) && (
-          <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Appearance"
-            onClick={() => useStore.getState().openSettings('appearance')}>
+        {[...TOP, ...navEntries(), { view: 'spaces' }, { view: 'projects' }, { view: 'jobs' }].some((e) => rowHidden(settings, e.view as string)) && (
+          <button className="nav-item nav-more" title="Turn on hidden rows in Settings → Sidebar"
+            onClick={() => useStore.getState().openSettings('sidebar')}>
             <Plus size={15} /><span>More rows…</span>
           </button>
         )}
       </nav>
 
-      <SidebarSpaces />
+      {!rowHidden(settings, 'spaces') && <SidebarSpaces />}
 
+      {!rowHidden(settings, 'projects') && <>
       <div className="section-row">
         <button className="section-toggle" aria-expanded={projectsOpen} onClick={() => setProjectsOpen((o) => !o)}>
           <ChevronRight size={12} className={projectsOpen ? 'rot90' : ''} /><FolderKanban size={13} /> Projects
@@ -310,6 +311,7 @@ export default function Sidebar(): JSX.Element {
           })}
         </div>
       )}
+      </>}
 
       <div className="section-row">
         <button className="section-toggle" aria-label="Chats" aria-expanded={chatsOpen} onClick={() => setChatsOpen((o) => !o)}>
@@ -424,7 +426,7 @@ export default function Sidebar(): JSX.Element {
       </div>
       </>)}
 
-      {shownJobs.length > 0 && (<>
+      {shownJobs.length > 0 && !rowHidden(settings, 'jobs') && (<>
         <div className="section-row">
           <button className="section-toggle" aria-expanded={jobsOpen} onClick={() => setJobsOpen((o) => !o)}>
             <ChevronRight size={12} className={jobsOpen ? 'rot90' : ''} /><CalendarClock size={13} /> Jobs

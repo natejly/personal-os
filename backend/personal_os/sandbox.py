@@ -28,6 +28,8 @@ from typing import Any
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 MAX_IMAGE_BYTES = 3_000_000
 MAX_IMAGES = 6
+# Seatbelt matches the resolved path, and /var is a symlink to /private/var, so the literal has to be the real one.
+MDNS_SOCKET = os.path.realpath("/var/run/mDNSResponder")
 
 # matplotlib builds a font cache on first import. It is kept between runs so plots don't pay ~3s each time, but the
 # sandbox never writes here: the parent warms it from app-authored code, then copies it into each run's work dir.
@@ -136,9 +138,16 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     net = "(allow network*)" if network else "(deny network*)"
     if proxy_port and not network:
         net += f'\n(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))'
+    remote = False
     for h in allow_hosts or []:  # "localhost:4000" or "*:443": Seatbelt matches ports and localhost, never other names
         if not network and re.fullmatch(r"(localhost|\*):\d{1,5}", h):
             net += f'\n(allow network-outbound (remote tcp "{h}"))'
+            remote = remote or h.startswith("*:")
+    if remote:
+        # getaddrinfo talks to mDNSResponder over its unix socket, which `(deny network*)` also covers: without this
+        # every hostname fails ENOTFOUND and the tcp allow above can only be used with a literal IP. No new reach -
+        # `*:port` already permits any host; open network (`allow network*`) covers the socket by itself.
+        net += f'\n(allow network-outbound (remote unix-socket (path-literal {_q(MDNS_SOCKET)})))'
     if loopback and not network:  # a program that talks to itself over a local port (opencode's private server)
         net += '\n(allow network-bind network-inbound (local ip "localhost:*"))\n(allow network-outbound (remote ip "localhost:*"))'
     # The shared work venv lives under the app data dir, which is denied above; the shell has its bin first on PATH, so it must

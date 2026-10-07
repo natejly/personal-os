@@ -206,3 +206,19 @@ def test_the_tool_ctx_flag_is_on_only_in_the_telegram_chat(monkeypatch: pytest.M
             SCRIPT.append("tool")
             _drive(cid)
     assert SEEN_FLAGS == [True, False]
+
+
+def test_an_absolute_or_escaping_output_path_is_not_followed_and_the_cap_is_per_reply(box, tmp_path) -> None:
+    tb, ws = box
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not for the phone")
+    ctx: dict[str, Any] = {"conversation_id": "c1", "project_id": None, "auto_attach": True}
+    asyncio.run(sendfiles.attach_made(tb, ctx, "run_python", {"outputs": [{"path": str(secret)}, {"path": "../../" + secret.name}, {"path": "/etc/hosts"}]}))
+    assert "reply_attachments" not in ctx
+    # a bad inline picture does not cost the good one, and the reply never carries more than MAX_FILES however many calls made files
+    good = {"name": "plot.png", "mime": "image/png", "data": "data:image/png;base64," + base64.b64encode(PNG).decode()}
+    asyncio.run(sendfiles.attach_made(tb, ctx, "run_python", {"images": [{"name": "bad.png", "mime": "image/png", "data": "data:image/png;base64,%%%"}, good]}))
+    assert [a["name"] for a in ctx["reply_attachments"]] == ["plot.png"]
+    for i in range(sendfiles.MAX_FILES + 5):
+        sendfiles.attach_to_reply(ctx, {"id": f"d{i}", "name": f"f{i}", "mime": "text/plain", "size": 1})
+    assert len(ctx["reply_attachments"]) == sendfiles.MAX_FILES

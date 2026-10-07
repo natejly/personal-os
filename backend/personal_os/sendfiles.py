@@ -24,7 +24,7 @@ ATTACH_KEYS = ("id", "name", "mime", "size")
 def attach_to_reply(ctx: dict[str, Any], doc: dict[str, Any]) -> None:
     """Put an Uploads document ({id, name, mime, size}) on this run's final reply, once per id, in the order added."""
     seen = ctx.setdefault("reply_attachments", [])
-    if all(s["id"] != doc["id"] for s in seen):
+    if len(seen) < MAX_FILES and all(s["id"] != doc["id"] for s in seen):  # the cap is per reply, however many tool calls made files
         seen.append({k: doc[k] for k in ATTACH_KEYS})
 
 
@@ -60,14 +60,15 @@ def made_files(tb: Any, ctx: dict[str, Any], tool: str, out: dict[str, Any]) -> 
     files: list[tuple[str, str, bytes]] = []
     paths: list[Path] = []
     box = tb.files_for(ctx) if hasattr(tb, "files_for") else None
-    rels = [o["path"] for o in out.get("outputs") or [] if isinstance(o, dict) and isinstance(o.get("path"), str)]
-    if tool == "convert_document" and isinstance(out.get("output"), str):
-        rels.append(out["output"])
-    for rel in rels:
+    outs = out.get("outputs") if isinstance(out.get("outputs"), list) else []
+    for rel in (o["path"] for o in outs if isinstance(o, dict) and isinstance(o.get("path"), str)):
         try:
-            paths.append(Path(rel) if os.path.isabs(rel) else box[0].resolve_in(box[1], rel))
-        except Exception:  # noqa: BLE001 - a WorkspaceError, or no files box for this run: skip the file
+            paths.append(box[0].resolve_in(box[1], rel))  # only inside this chat's files: an absolute path in a result is not followed
+        except Exception:  # noqa: BLE001 - a WorkspaceError, an absolute path, or no files box for this run: skip the file
             continue
+    # The two tools whose result legitimately names a file elsewhere on the Mac: the path is the one they just wrote.
+    if tool == "convert_document" and isinstance(out.get("output"), str):
+        paths.append(Path(out["output"]))
     if tool == "write_local_file" and out.get("mode") in ("create", "overwrite") and isinstance(out.get("path"), str):
         paths.append(Path(out["path"]))
     files += [f for f in map(_read_file, paths[:MAX_FILES]) if f]
@@ -76,11 +77,20 @@ def made_files(tb: Any, ctx: dict[str, Any], tool: str, out: dict[str, Any]) -> 
         if d:
             files.append((safe_upload_name(f"{d['title'] or 'note'}.md"), "text/markdown", str(d["content"]).encode()))
     if tool == "run_python":
-        for img in out.get("images") or []:
+        for img in out.get("images") if isinstance(out.get("images"), list) else []:
             head, _, b64 = str(img.get("data") if isinstance(img, dict) else "").partition(",")
             if head.startswith("data:") and b64:
-                files.append((safe_upload_name(os.path.basename(str(img.get("name") or "chart.png"))), str(img.get("mime") or "image/png"), base64.b64decode(b64)))
-    found += [store_file(tb, ctx, *f) for f in files[:MAX_FILES]]
+                try:
+                    data = base64.b64decode(b64, validate=True)
+                except (ValueError, TypeError):  # one unreadable picture does not cost the others
+                    continue
+                if data:
+                    files.append((safe_upload_name(os.path.basename(str(img.get("name") or "chart.png"))), str(img.get("mime") or "image/png"), data))
+    for f in files[:MAX_FILES]:
+        try:
+            found.append(store_file(tb, ctx, *f))
+        except Exception:  # noqa: BLE001 - one file that cannot be stored does not drop the rest
+            continue
     return found[:MAX_FILES]
 
 

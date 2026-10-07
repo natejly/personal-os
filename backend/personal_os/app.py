@@ -4044,9 +4044,9 @@ def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None,
         return
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
-    if texts and texts != conv_id:
-        source = _telegram_conversation_title(conv_id) if conv_id else None
-        _tell_chat(texts, f"Update from “{source or 'a chat'}”:\n\n{text}", attachments or None)
+    src = convos.get(conv_id, with_messages=False) if conv_id else None
+    if texts and texts != conv_id and not (src or {}).get("settings", {}).get("private"):  # a private chat's work stays out of other chats
+        _tell_chat(texts, f"Update from “{(src or {}).get('title') or 'a chat'}”:\n\n{text}", attachments or None)
 
 
 def _worker_parent_ctx(conv_id: str) -> dict[str, Any]:

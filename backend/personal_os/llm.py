@@ -895,7 +895,7 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, ba
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
-    new chats start at low (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as low.
+    new chats start at medium (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as high.
     """
     if not effort or effort == "default":
         return None

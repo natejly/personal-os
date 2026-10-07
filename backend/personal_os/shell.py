@@ -147,11 +147,10 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     return any(_inside(where, r) for r in real)
 
 
-def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str] | None:
-    """(card kind, reason) when Allow everything still cards this shell_run (permrules.allow_all_floor), judged from the folder it will run in.
-    Relative paths resolve against cwd, else where the last command ended, else the desk workspace, else home; a desk's
-    work/ folder counts as scratch beside the temp folders."""
-    from . import permrules
+def perm_where(tb: Any, ctx: dict[str, Any]) -> tuple[list[str], str]:
+    """(roots, cwd) for permrules on a shell_run: the desk workspace, whose own folder a command may name without it counting
+    as Grain's data, and where the command starts before its own `cwd` argument: where the last command in this
+    conversation ended, else the desk workspace, else home."""
     desk: Path | None = None
     did = str(ctx.get("desk_id") or "")
     if did and getattr(tb, "workspace", None) is not None:
@@ -160,9 +159,19 @@ def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str]
         except Exception:  # noqa: BLE001 - no desk folder: judge from home
             desk = None
     base = str(desk) if desk else str(mac.home())
-    raw = os.path.expanduser(str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or "")
-    cwd = (raw if os.path.isabs(raw) else os.path.join(base, raw)) if raw else base
-    return permrules.allow_all_floor("shell_run", args, cwd, [str(desk / "work")] if desk else [])
+    last = os.path.expanduser(remembered_cwd(ctx.get("conversation_id")) or "")
+    return ([str(desk)] if desk else []), (os.path.join(base, last) if last else base)
+
+
+def floor(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> tuple[str, str] | None:
+    """(card kind, reason) when Allow everything still cards this shell_run (permrules.allow_all_floor), judged from the folder it will run in.
+    Relative paths resolve against cwd, else where the last command ended, else the desk workspace, else home; a desk's
+    work/ folder counts as scratch beside the temp folders."""
+    from . import permrules
+    roots, start = perm_where(tb, ctx)
+    raw = os.path.expanduser(str(args.get("cwd") or "").strip())
+    cwd = os.path.join(roots[0] if roots else str(mac.home()), raw) if raw else start  # an explicit cwd starts from the desk, as run() does
+    return permrules.allow_all_floor("shell_run", args, cwd, [os.path.join(r, "work") for r in roots])
 
 
 # ---- environment and output shaping ----

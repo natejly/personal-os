@@ -8,7 +8,7 @@ Settings tab.
 `backend/personal_os/permissions.py` owns a single settings row, `permissions`:
 
 ```json
-{"version": 1, "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"], "planMode": "auto"}
+{"version": 1, "tools": {"web_search": "off"}, "alwaysAsk": ["gmail_send"]}
 ```
 
 It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on read. The keys:
@@ -26,7 +26,6 @@ It holds only what the user changed; `permissions.DEFAULTS` fills in the rest on
 | `shellAllowedDomains` | Hosts the shell's and sandbox's egress proxy let through, beside package registries |
 | `docEditMode` | `review` (diff to accept) or `apply` |
 | `workspaceRoots` | Folders file tools write in without asking |
-| `planMode` | Default plan mode for chats with no setting of their own |
 | `sandboxNetwork`, `sandboxImage`, `sandboxRuntime` | The Linux sandbox containers |
 | `shellNetwork`, `shellRegistryAccess` | Network for shell commands |
 | `deskShellAuto`, `deskDoneGate`, `deskSelfReview` | What a desk may do unasked, and what it must pass to finish |
@@ -52,7 +51,7 @@ and deletes it. A fresh database gets `{"version": 1}`. Gates read the same valu
 
 Narrower scopes stay where they are, because they are scopes, not copies:
 
-- `conversations.settings`: `tools`, `skipPermissions`, `planMode`, `workingFolder`
+- `conversations.settings`: `tools`, `skipPermissions`, `workingFolder`
 - `agent_defs.tool_modes`, `projects.tools`
 - `mcp_grants` (connector grants, bound to the schema they approved)
 - the in-memory session grants (`permrules.SESSION`, "allow for this chat session")
@@ -88,10 +87,10 @@ commands get that protection from the OS sandbox. The floor card has no session 
 
 Settings > Permissions, in order: tool access, Always ask, rules and the rule tester, grants (global modes, allow
 rules, connector, session, chat, agent and project grants, chats that skip permissions, each with a revoke), run
-safety, folders, shell and sandbox network, browser, desks, skip permissions, file edit mode, plan mode default.
+safety, folders, shell and sandbox network, browser, desks, skip permissions, file edit mode.
 
 Approval cards write into the same store: "Always" (`always_global`) adds to `tools`, "Always allow this pattern"
 (`always_rule`) adds to `permissionRules.allow`, "Allow this host" (`allow_host`) adds to `fetchAllowlist`.
 
-The composer's skip-permissions and plan-mode switches set the chat's own value and say when they follow the default.
+The composer's skip-permissions switch sets the chat's own value and say when they follow the default.
 Settings > Autonomy keeps the desk limits that are not permissions (turns, parking, vision, work environment).

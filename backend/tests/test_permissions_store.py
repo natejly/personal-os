@@ -80,12 +80,12 @@ class Migration(unittest.TestCase):
         """Run on its own over a store that already holds a value, a stray legacy row is folded over it."""
         c = sqlite3.connect(":memory:")
         c.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        c.execute("INSERT INTO settings VALUES ('permissions', ?)", (json.dumps({"version": 1, "planMode": "auto"}),))
+        c.execute("INSERT INTO settings VALUES ('permissions', ?)", (json.dumps({"version": 1, "docEditMode": "apply"}),))
         c.execute("INSERT INTO settings VALUES ('shellNetwork', 'true')")
         permissions.migrate(c)
         got = dict(c.execute("SELECT key, value FROM settings").fetchall())
         self.assertEqual(set(got), {"permissions"})
-        self.assertEqual(json.loads(got["permissions"]), {"version": permissions.VERSION, "planMode": "auto", "shellNetwork": True})
+        self.assertEqual(json.loads(got["permissions"]), {"version": permissions.VERSION, "docEditMode": "apply", "shellNetwork": True})
 
 
 class GatesReadTheSameValues(unittest.TestCase):
@@ -126,30 +126,30 @@ class GatesReadTheSameValues(unittest.TestCase):
 
 class Writes(unittest.TestCase):
     def tearDown(self) -> None:
-        client.put("/settings", json={"planMode": "off", "unattendedApprovals": "deny"})
+        client.put("/settings", json={"docEditMode": "apply", "unattendedApprovals": "deny"})
 
     def test_legacy_put_lands_in_the_store_and_reads_back_flat(self) -> None:
-        r = client.put("/settings", json={"planMode": "auto"})
+        r = client.put("/settings", json={"docEditMode": "apply"})
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual(r.json()["planMode"], "auto")
-        self.assertEqual(r.json()[permissions.KEY]["planMode"], "auto")
+        self.assertEqual(r.json()["docEditMode"], "apply")
+        self.assertEqual(r.json()[permissions.KEY]["docEditMode"], "apply")
         rows = _rows(app_mod.db.path)
-        self.assertNotIn("planMode", rows)
-        self.assertEqual(rows[permissions.KEY]["planMode"], "auto")
+        self.assertNotIn("docEditMode", rows)
+        self.assertEqual(rows[permissions.KEY]["docEditMode"], "apply")
 
     def test_nested_put_and_validation(self) -> None:
         r = client.put("/settings", json={permissions.KEY: {"unattendedApprovals": "ask"}})
         self.assertEqual(r.json()["unattendedApprovals"], "ask")
-        self.assertEqual(client.put("/settings", json={permissions.KEY: {"planMode": "sometimes"}}).status_code, 422)
+        self.assertEqual(client.put("/settings", json={permissions.KEY: {"docEditMode": "sometimes"}}).status_code, 422)
         self.assertEqual(client.put("/settings", json={"tools": "x"}).status_code, 422)
         # A top-level key wins over the nested copy a client read and sent back unchanged.
-        r = client.put("/settings", json={"planMode": "always", permissions.KEY: {"planMode": "off"}})
-        self.assertEqual(r.json()["planMode"], "always")
+        r = client.put("/settings", json={"docEditMode": "apply", permissions.KEY: {"docEditMode": "review"}})
+        self.assertEqual(r.json()["docEditMode"], "apply")
 
     def test_a_stray_legacy_row_is_newest_and_the_next_save_folds_it(self) -> None:
         app_mod.db.set_settings({"unattendedApprovals": "ask"})  # an old code path writing top-level
         self.assertEqual(app_mod.settings()["unattendedApprovals"], "ask")
-        permissions.save(app_mod.db, {"planMode": "auto"})
+        permissions.save(app_mod.db, {"docEditMode": "apply"})
         rows = _rows(app_mod.db.path)
         self.assertNotIn("unattendedApprovals", rows)
         self.assertEqual(rows[permissions.KEY]["unattendedApprovals"], "ask")

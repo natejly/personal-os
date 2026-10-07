@@ -46,7 +46,7 @@ def call(name: str, args: dict[str, Any], i: int = 0) -> dict[str, Any]:
 
 
 def reply(cid: str, rounds: list[list[dict[str, Any]]], **settings: Any) -> list[dict[str, Any]]:
-    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "toolDeferAbove": 40, "planMode": "off",
+    appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "toolDeferAbove": 40,
                             **settings})
     ROUNDS[:] = rounds
     OFFERED.clear()
@@ -120,10 +120,12 @@ def test_history_reseeds_after_restart() -> None:
     assert "graph_search" in OFFERED[0]
 
 
-def test_plan_mode_still_drops_loaded_writers() -> None:
+def test_a_planning_desk_still_drops_loaded_writers() -> None:
     cid = new_conv()
+    did = appmod.desks.create(conversation_id=cid, brief="t", autonomy="plan")["id"]
+    appmod.convos.update(cid, {"settings": {"deskId": did}})
     appmod._tool_loaded[cid] = {"graph_add", "graph_search"}
-    reply(cid, [], planMode="always")
+    reply(cid, [])
     names = OFFERED[0]
     assert "graph_add" not in names and "graph_search" in names
     for n in names:

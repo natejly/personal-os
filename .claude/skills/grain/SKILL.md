@@ -19,7 +19,7 @@ Mental model:
 - **Lists** (todos), **Calendar**, **Mail** and **Health** are sidebar rows under Today and Files (`src/renderer/src/shell/nav.tsx`); Settings → Modules hides any view. The top-right title-bar button opens the ⌘I panel.
 - **Spaces** (⌘⇧C): a desktop of live windows (chat, lists, calendar, note, memory, graph, uploads, recap, project, usage, doc, face, crew). See [docs/spaces.md](../../../docs/spaces.md).
 - **Library**: Agents, Automations (workflows and saved commands), Skills, Connectors (MCP), and what Grain made.
-- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). The composer's **Mode** button in any chat (beside plan mode; Plan first / Ask as it goes / Autonomous, with a turn limit) turns it into a longer session with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Autonomy. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
+- **Autonomy**: a reply can hand work to subagents (`agent_spawn`). The composer's **Mode** button in any chat (Plan first / Ask as it goes / Autonomous, with a turn limit) turns it into a longer session with its own plan and workspace: a strip above the composer only while background workers run (the main agent has no status chrome; the composer's Stop is its control). Every chat's header "Documents in this chat" button opens a side panel with Files / Changes, plus Checklist, Workers and (for a desk) Review when they apply; settings are under Settings → Autonomy. Workflows are approved once and run in waves ([docs/workflows.md](../../../docs/workflows.md), [docs/cowork-design.md](../../../docs/cowork-design.md), which is the original desk spec, partly out of date; the standalone Cowork view was folded into chats on 2026-10-05). Scheduled runs only propose; results land in the Agent inbox on Today.
 - **Settings** (⌘,) tabs: Provider & cost, Tools, Memory, Behavior, Modules, Integrations, Data.
 
 ## Using it
@@ -37,12 +37,12 @@ First run, as a user:
 
 Shortcuts that matter (full list in reference.md): ⌘N new chat, ⌘K command palette, ⌘I page agent, ⌘⇧C
 Spaces, ⌘0 to ⌘6 views (Today, Chats, Lists, Calendar, Files, Mail, Memory), ⌘, settings,
-⌘⇧P cycle plan mode, ⌘⇧F search chats.
+⌘⇧F search chats.
 
 Composer features:
 
-- **Slash commands**: `/skill`, `/schedule`, `/loop`, `/compact`, `/skills`, `/commands`, `/plan` (table in reference.md).
-- **Plan mode** cycles off, auto, always. The assistant then proposes a plan (`propose_plan`); you approve it once and each step runs bound to its approved arguments.
+- **Slash commands**: `/skill`, `/schedule`, `/loop`, `/compact`, `/skills`, `/commands` (table in reference.md).
+- **Plan first** (Mode button) makes the assistant propose a plan (`propose_plan`); you approve it once and each step runs bound to its approved arguments.
 - **Approval card**: a tool in `ask` mode stops the reply until you approve or deny. The card offers allow once, always for this chat or globally, or a pattern rule.
 - **Always-ask list** (`alwaysAsk` in `llm.py` `DEFAULT_SETTINGS`): `gmail_send`, `calendar_delete`, `trash_local_file`, `move_local_file`, `run_shortcut`, `python_install`, `schedule_task`. No setting or card turns these fully on.
 - **Allow-host card**: when a reply that read the web wants to fetch another page, approve it or pick **Allow <host> from now on** (Settings → Tools → Allowed hosts, `fetchAllowlist`).

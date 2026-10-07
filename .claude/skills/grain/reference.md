@@ -297,7 +297,6 @@ From the app menu (`src/main/index.ts`); ⌘ is Cmd, ⌃ Control, ⌥ Option.
 | ⌘⇧F | Search chats |
 | ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F, ⌘G, ⌘⇧G | Find in chat, next, previous |
-| ⌘⇧P | Cycle plan mode (handled in the composer) |
 | ⌘B | Toggle sidebar |
 | ⌘I | Page agent panel |
 | ⌃⌘I | Toggle context panel |
@@ -328,4 +327,3 @@ From `src/renderer/src/lib/slashCommands.ts`:
 | `/compact [focus]` | summarize the earlier messages |
 | `/skills` | open Library → Skills |
 | `/commands` | open Library → Automations |
-| `/plan` | cycle plan mode: off, auto, always |

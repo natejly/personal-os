@@ -846,8 +846,6 @@ export interface ConversationSettings {
   /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
   responseStyle?: string
   responseStyleText?: string
-  /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
-  planMode?: 'off' | 'auto' | 'always'
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
   skipPermissions?: boolean
   autoLearn: boolean
@@ -1651,8 +1649,6 @@ export interface Settings {
   uiZoom?: number
   /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
   notifyJobs?: boolean
-  /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
-  planMode?: 'off' | 'auto' | 'always'
   /** How a new chat's replies are shaped: default, concise, formal, tutor, thorough or custom (then `responseStyleText`). */
   responseStyle?: string
   responseStyleText?: string

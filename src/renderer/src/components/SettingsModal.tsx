@@ -544,13 +544,6 @@ export default function SettingsModal(): JSX.Element {
                     <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
                   </div>
                 </div>
-                <label className="setting-row"><span className="toggle-text"><b>Plan first</b><small>Off, only before changes, or always. A chat can override it with ⌘⇧P.</small></span>
-                  <select value={draft.planMode ?? 'off'} onChange={(e) => patch({ planMode: e.target.value as Settings['planMode'] })}>
-                    <option value="off">Off: act straight away</option>
-                    <option value="auto">Auto: plan the first time it wants to change something</option>
-                    <option value="always">Always: every turn drafts a plan you approve first</option>
-                  </select>
-                </label>
               </AdvGroup>
 
               <AdvGroup id="files" title="Files and web" {...gp}>

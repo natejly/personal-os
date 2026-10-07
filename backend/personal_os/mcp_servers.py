@@ -78,6 +78,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "shell_run", "shell_poll", "shell_kill", "opencode_run", "ship_checklist", "ship_status",
     "coding_session_start", "coding_session_list", "coding_session_status", "coding_session_send", "coding_session_stop",
     "coding_session_diff",
+    "screenshot", "send_files",
     "browser_open", "browser_snapshot", "browser_click", "browser_type", "browser_select", "browser_press",
     "browser_scroll", "browser_manage", "browser_handoff",
     "view_image", "convert_document", "render_preview", "doc_guide", "python_install", "desk_fetch_file",

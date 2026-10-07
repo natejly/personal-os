@@ -921,9 +921,14 @@ def test_bridge_push_sends_plain_text_to_the_owner(tmp_path: Path) -> None:
         await until(lambda: env.sent())
         first = env.of("sendMessage")[0]
         assert first["chat_id"] == OWNER and "**" not in first["text"] and "Done" in first["text"] and "https://example.com/d" in first["text"]
-        env.bridge.push("x" * 9000)
-        await until(lambda: len(env.sent()) >= 4)
-        assert all(len(t) <= 4096 for t in env.sent()), "long text is split"
+        env.bridge.push("x" * 5000)
+        await until(lambda: len(env.sent()) >= 3)
+        assert all(len(t) <= 4096 for t in env.sent()), "text past one message is split"
+        env.bridge.push("y" * 9000)
+        await until(lambda: env.of("sendDocument"))
+        name, data, _mime = env.files[-1][1]["document"]
+        assert (name, data) == ("reply.md", b"y" * 9000), "a long reply travels whole as reply.md"
+        assert env.sent()[-1].endswith("Full reply attached.") and len(env.sent()[-1]) <= 4096, "under a short summary"
         n = len(env.sent())
         env.bridge.push("   ")
         await asyncio.sleep(0.05)

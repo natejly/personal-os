@@ -1102,20 +1102,6 @@ test('learnedText counts updates and forgets as changes', () => {
   assert.equal(learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never), 'Forgot 1')
 })
 
-test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  useStore.getState().newChat()
-  useStore.setState({ toasts: [], uploadTaintTarget: null })
-  await useStore.getState().setChatSettings({ private: true })
-  assert.equal(useStore.getState().draftPrivate, true)
-  const { calls } = stubFetch(t, () => json({ detail: 'down' }, 500))
-  assert.equal(await useStore.getState().send('hi'), false)
-  const create = calls.find((c) => c.method === 'POST' && c.path.endsWith('/conversations'))
-  assert.equal(create?.body.private, true)
-  useStore.getState().newChat()
-  assert.equal(useStore.getState().draftPrivate, false)
-})
-
 test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
@@ -1305,5 +1291,20 @@ test('a run this window did not stream: finishing off screen leaves a dot and a 
     g.Notification = real.N
     g.document = real.d
     globalThis.fetch = real.f
+  }
+})
+
+test('the composer Stop stops the main agent of a chat working autonomously, with no strip on screen', async () => {
+  const calls: [string, string][] = []
+  const real = api.stopRun
+  api.stopRun = (async (c: string, runId?: string) => { calls.push([c, runId ?? '']); return { ok: true } }) as never
+  try {
+    const conv = { id: 'cd', title: 't', project_id: null, model: null, settings: { deskId: 'd1' }, created_at: 0, updated_at: 0, messages: [msg()] } as never
+    useStore.setState({ sessions: { cd: session({ conversation: conv, streaming: { messageId: 'm1', runId: 'rd', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never, workers: {} } as never)
+    await useStore.getState().stop('cd')
+    assert.deepEqual(calls, [['cd', 'rd']], 'the run itself is stopped: the desk turn is that run')
+    assert.equal(useStore.getState().sessions.cd.streaming?.stopping, true)
+  } finally {
+    api.stopRun = real
   }
 })

@@ -109,3 +109,14 @@ def test_rerank_scores_get_the_same_window_nudge() -> None:
         assert plain[-1]["id"] == inside  # lowest model score, no window: the reranker order stands
         assert dated[0]["id"] == inside and dated[0]["rerank_score"] == 0.8  # window nudge beats a 0.1 gap; raw score kept
         assert {m["id"] for m in dated} == {*far, inside}
+
+
+def test_graph_list_ranks_seed_memories_above_neighbour_memories(env) -> None:
+    db, memories, idx = env
+    seed = add(db, memories, "Priya joined the platform team", "2026-08-01")
+    neighbour = add(db, memories, "Initech moved offices again", "2026-10-05")  # newer, but only names the neighbour
+    a = idx.graph.upsert_node(None, "Priya", "person", {})
+    b = idx.graph.upsert_node(None, "Initech", "org", {})
+    idx.graph.upsert_edge(None, a["id"], b["id"], "works_at", valid_at=at("2026-08-01"))
+    with db.tx() as c:
+        assert idx._graph_seeded(c, "project_id IS NULL", [], None, "what is Priya up to") == [seed, neighbour]

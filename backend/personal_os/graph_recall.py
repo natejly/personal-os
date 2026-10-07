@@ -213,7 +213,7 @@ class GraphRecall:
         with self.db.tx() as c:
             return c.execute(
                 f"""SELECT n.*, v.vec, v.dim FROM kg_node_vectors v JOIN kg_nodes n ON n.id=v.node_id
-                    WHERE v.model=? AND {where.replace('project_id', 'n.project_id')} LIMIT ?""",
+                    WHERE v.model=? AND {where.replace('project_id', 'n.project_id')} ORDER BY n.updated_at DESC LIMIT ?""",
                 (model, *args, GRAPH_NODE_VECTOR_CAP)).fetchall()
 
     def similar(self, project_id: str | None, qvec: np.ndarray | None, model: str) -> dict[str, float]:

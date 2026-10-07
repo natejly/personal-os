@@ -578,6 +578,8 @@ export interface McpCatalogEntry {
   fields: McpCatalogField[]
   /** Ids of the servers already installed from this entry. */
   installed: string[]
+  /** Local program detection (e.g. a coding CLI on this Mac); null when the entry has none. */
+  detected?: { found: boolean; path: string; hint: string } | null
 }
 
 /** Whether the program a local connector is launched with is on the PATH. */
@@ -623,10 +625,14 @@ export interface McpImportServer {
   /** Env keys whose values will go to the secret store. */
   secret_keys: string[]
   installed: boolean
+  /** Label of another source that already lists this same server. */
+  duplicate_of?: string
+  /** False when the server is switched off in the app it came from. */
+  enabled?: boolean
 }
 
 export interface McpImportSource {
-  id: 'claude_desktop' | 'claude_code' | 'cursor'
+  id: 'claude_desktop' | 'claude_code' | 'cursor' | 'vscode' | 'windsurf' | 'codex' | 'opencode'
   label: string
   path: string
   found: boolean
@@ -1518,6 +1524,8 @@ export interface Settings {
   skipPermissions?: boolean
   /** auto: a second model checks risky actions; manual: ask before each; allow_all: no checks, no cards. Default auto. */
   permissionMode?: 'auto' | 'manual' | 'allow_all'
+  /** Lifts the host allow-lists (fetch, browse, shell network) and the per-tool approval for connector tools. Independent of permissionMode. */
+  allowAllConnections?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */

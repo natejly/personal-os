@@ -1597,6 +1597,87 @@
         "version": "remote",
         "on": "2026-10-06"
       }
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "description": "Claude Code's own tools (read, edit, search, run) as a connector, served by `claude mcp serve`.",
+      "category": "Developer",
+      "icon": "terminal",
+      "publisher": "Anthropic",
+      "official": false,
+      "docs": "https://docs.anthropic.com/en/docs/claude-code/mcp",
+      "transport": "stdio",
+      "runtime": "binary",
+      "detect": {
+        "binary": "claude",
+        "dirs": [
+          "~/.local/bin",
+          "/opt/homebrew/bin",
+          "/usr/local/bin",
+          "~/.claude/local"
+        ],
+        "hint": "Install Claude Code: npm install -g @anthropic-ai/claude-code (or see docs.anthropic.com/en/docs/claude-code)"
+      },
+      "install": {
+        "command": "{bin}",
+        "args": [
+          "mcp",
+          "serve"
+        ],
+        "env": {},
+        "url": "",
+        "headers": {}
+      },
+      "auth": "none",
+      "fields": [],
+      "verified": {
+        "source": "vendor",
+        "ref": "https://docs.anthropic.com/en/docs/claude-code/mcp",
+        "version": "2.1.292",
+        "on": "2026-10-06"
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "description": "Hand coding tasks to a local OpenCode: run a prompt, list sessions, read a session's messages.",
+      "category": "Developer",
+      "icon": "code",
+      "publisher": "Grain",
+      "official": false,
+      "docs": "https://opencode.ai/docs/",
+      "transport": "stdio",
+      "runtime": "binary",
+      "detect": {
+        "binary": "opencode",
+        "dirs": [
+          "/opt/homebrew/bin",
+          "/usr/local/bin",
+          "~/.opencode/bin",
+          "~/.local/bin",
+          "~/.bun/bin"
+        ],
+        "hint": "Install OpenCode: brew install opencode"
+      },
+      "install": {
+        "command": "{grain_python}",
+        "args": [
+          "-m",
+          "personal_os.opencode_mcp"
+        ],
+        "env": {},
+        "url": "",
+        "headers": {}
+      },
+      "auth": "none",
+      "fields": [],
+      "verified": {
+        "source": "vendor",
+        "ref": "https://opencode.ai/docs/",
+        "version": "2.0.20",
+        "on": "2026-10-06"
+      }
     }
   ]
 }

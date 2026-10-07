@@ -828,7 +828,7 @@ class McpClient:
             raise McpUnavailable(f"Unknown MCP tool {tool_slug}")
         if tool["missing_since"]:
             raise McpUnavailable(f"{tool_slug} is no longer offered by its server")
-        if tool.get("quarantined_at"):
+        if tool.get("quarantined_at") and not self.store.allow_all():
             raise McpUnavailable(f"{tool_slug} is withheld until you accept it in Settings")
         sup = self._supervisors.get(tool["server_id"])
         if sup is None:

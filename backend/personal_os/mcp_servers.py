@@ -17,7 +17,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from .db import Database, new_id, now, row_to_dict
 
@@ -268,8 +268,9 @@ def schema_hash(name: str, description: str, parameters: Any) -> str:
 
 
 class McpServers:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, allow_all: Callable[[], bool] = lambda: False):
         self.db = db
+        self.allow_all = allow_all  # allowAllConnections: app.py wires the live setting in
         with db.tx() as c:
             c.executescript(SCHEMA)
             # mcp_* tables are created here, after Database._migrate ran, so their later columns are added here too.
@@ -584,9 +585,12 @@ class McpServers:
 
         `stale` means the approved shape is not the shape on offer, so an 'on' decays to 'ask':
         the user approved a tool, not a name the server can point anywhere.
+
+        allowAllConnections: no grant means "on" (source "allow_all"), an explicit "off" still wins, and nothing decays.
         """
         tool = self.tool(tool_slug)
-        mode, source, grant = DEFAULT_MODE, "default", None
+        allow_all = self.allow_all()
+        mode, source, grant = ("on", "allow_all", None) if allow_all else (DEFAULT_MODE, "default", None)
         by_key = {(g["scope"], g["scope_id"]): g for g in self.grants(tool_slug)}
         for scope, sid in (("global", ""), ("project", project_id or ""), ("chat", conversation_id or "")):
             if scope != "global" and not sid:
@@ -595,7 +599,7 @@ class McpServers:
             if g and g["mode"] in MODES:
                 mode, source, grant = g["mode"], scope, g
         stale = bool(tool and grant and grant["schema_hash"] and grant["schema_hash"] != tool["schema_hash"])
-        if stale and mode == "on":
+        if stale and mode == "on" and not allow_all:
             mode = "ask"
         return {"slug": tool["slug"] if tool else tool_slug, "mode": mode, "source": source, "stale": stale,
                 "approved_hash": (grant or {}).get("schema_hash", ""), "schema_hash": (tool or {}).get("schema_hash", ""),

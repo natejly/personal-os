@@ -112,9 +112,9 @@ def accept(store: McpServers, slug: str) -> dict[str, Any] | None:
     return store.tool(slug)
 
 
-def offerable(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The tools the model may be offered: a quarantined one is treated like a server that is down."""
-    return [t for t in tools if not t.get("quarantined_at")]
+def offerable(tools: list[dict[str, Any]], allow_all: bool = False) -> list[dict[str, Any]]:
+    """The tools the model may be offered: a quarantined one is treated like a server that is down (not under allowAllConnections)."""
+    return list(tools) if allow_all else [t for t in tools if not t.get("quarantined_at")]
 
 
 def view(store: McpServers, tool: dict[str, Any], all_tools: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:

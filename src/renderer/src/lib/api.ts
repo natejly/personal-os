@@ -380,6 +380,9 @@ export const api = {
     importSources: () => req<{ sources: McpImportSource[] }>('/mcp/import/sources'),
     importServers: (refs: string[]) =>
       req<{ created: McpServer[]; skipped: { ref: string; reason: string }[] }>('/mcp/import', { method: 'POST', body: json({ refs }) }, NO_TIMEOUT),
+    /** Pasted config text: `{"mcpServers": {...}}`, a bare name-to-server map, or one server object. */
+    importJson: (text: string) =>
+      req<{ created: McpServer[]; skipped: { name: string; reason: string }[] }>('/mcp/import/json', { method: 'POST', body: json({ text }) }, NO_TIMEOUT),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
     acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
     clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>

@@ -25,7 +25,7 @@ const text = (n: unknown): string => flat(n).map((e) => [e.props.children].flat(
 
 test('toggling Search my Docs patches useDocsInContext', () => {
   const patches: Partial<Settings>[] = []
-  const tree = AdvancedRetrieval({ draft: {} as Settings, patch: (p) => patches.push(p), models: [] })
+  const tree = AdvancedRetrieval({ draft: {} as Settings, patch: (p) => patches.push(p) })
   const row = flat(tree).find((e) => e.type === 'label' && text(e.props.children).includes('Search my Docs'))
   const box = flat(row?.props.children).find((e) => e.type === 'input')
   assert.equal(box?.props.checked, true)

@@ -21,7 +21,7 @@ import numpy as np
 
 from . import memory_limits as ml
 from .db import Database
-from . import graph_recall
+from . import graph_recall, providers, retrieval_rerank
 from .embed import Embedder, pack, rrf, unpack
 from .repos import Graph, Memories, _scope_clause, live_mem
 
@@ -49,6 +49,8 @@ class MemoryIndex:
         self.embedder = embedder or Embedder()
         self._tasks: set[asyncio.Task[Any]] = set()
         self.recall: Any = None  # GraphRecall, set by app: node vectors for graph-seeded ranking
+        self.rerank_fn: Any = None  # tests/eval stub this; None = retrieval_rerank.rerank_scores
+        self._rerank_down_until = 0.0
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -187,6 +189,41 @@ class MemoryIndex:
             return []
         rows = {m["id"]: m for m in (self.memories.get(i) for i in ids) if m}
         return [rows[i] for i in ids if i in rows]
+
+    async def search_reranked(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,
+                              settings: dict[str, Any] | None = None, include_global: bool = True) -> list[dict[str, Any]]:
+        """`search`, with the head of the fused list reordered by the rerank model. Same rows as `search` unless
+        RERANK_MIN_SCORE drops some; the fused order stands when reranking is off, has no model, is not worth a
+        call, is backed off, times out or fails. Scored rows carry `rerank_score`. Never raises."""
+        fused = self.search(project_id, query, query_vec, limit=max(limit, ml.RERANK_CANDIDATES), settings=settings,
+                            include_global=include_global)
+        model = providers.rerank_model(settings) if settings else ""
+        if (not model or not settings.get("memoryRerank", True) or len(fused) < ml.RERANK_MIN_CANDIDATES
+                or time.monotonic() < self._rerank_down_until):
+            return fused[:limit]
+        head, tail = fused[:ml.RERANK_CANDIDATES], fused[ml.RERANK_CANDIDATES:]
+        try:
+            scored = await asyncio.wait_for((self.rerank_fn or retrieval_rerank.rerank_scores)(
+                settings, model, query, [m["content"] for m in head], timeout=ml.RERANK_TIMEOUT, top_n=len(head)),
+                ml.RERANK_TIMEOUT)
+            if scored is None:
+                raise RuntimeError("no rerank route")
+            order = [(i, s) for i, s in scored if 0 <= i < len(head)]
+        except Exception as e:  # noqa: BLE001 - timeouts, odd payloads, no route: the fused order is the answer
+            self._rerank_down_until = time.monotonic() + ml.RERANK_BACKOFF
+            log.warning("memory rerank unavailable, keeping fused order for %ds: %s", int(ml.RERANK_BACKOFF), e)
+            return fused[:limit]
+        out: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for i, s in order:
+            if i in seen:
+                continue
+            seen.add(i)
+            if ml.RERANK_MIN_SCORE > 0 and s < ml.RERANK_MIN_SCORE:
+                continue
+            out.append({**head[i], "rerank_score": s})
+        out += [m for i, m in enumerate(head) if i not in seen]  # rows the model skipped keep their place, after
+        return (out + tail)[:limit]
 
     def candidates(self, project_id: str | None, query: str, query_vec: np.ndarray | None, settings: dict[str, Any],
                    limit: int = ml.CANDIDATES, top: int = ml.CANDIDATES_TOP) -> list[dict[str, Any]]:

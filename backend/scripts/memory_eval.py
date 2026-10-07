@@ -1,7 +1,7 @@
 """Score memory retrieval (MemoryIndex.search) on a synthetic persona against tests/fixtures/memory_eval/.
 
     cd backend && uv run --with pytest python scripts/memory_eval.py [--live] [--record] [--case ID] [--json]
-                  [--config KEY=VALUE ...] [--label TEXT] [--verbose]
+                  [--config KEY=VALUE ...] [--limit KEY=VALUE ...] [--label TEXT] [--verbose]
 
 Default: offline. A temp database is filled from store.json; embeddings come from vectors.npz (recorded vectors keyed by
 sha1(text), float16) with a hashed bag-of-words fallback for any text that has no recording. No network.
@@ -9,6 +9,12 @@ sha1(text), float16) with a hashed bag-of-words fallback for any text that has n
 --record (with --live): save vectors.npz for every memory, node label and query text. Texts already recorded are kept
 as they are, so re-recording is idempotent; delete the file to re-embed everything.
 --config KEY=VALUE (repeatable): extra settings for the run, values parsed as JSON ("memoryRerank=true").
+--limit KEY=VALUE (repeatable): override a personal_os.memory_limits constant for the run ("RERANK_MIN_SCORE=0.05").
+
+Rerank scores: offline reads tests/fixtures/memory_eval/rerank_scores.json (recorded per (query text, memory content) pair,
+a missing pair scores 0.0 and is counted); --live calls the real reranker and times each call. --record (with --live)
+scores every query text against every memory content, so the fixture stays complete when candidate sets change; pairs
+already recorded are kept.
 """
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,7 +36,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from personal_os import graph_recall, llm, memory_limits  # noqa: E402
+from personal_os import graph_recall, llm, memory_limits, providers, retrieval_rerank  # noqa: E402
 from personal_os.context import retrieval_query  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.embed import Embedder, embed_texts, normalize  # noqa: E402
@@ -40,7 +47,11 @@ from graph_eval import DEFAULT_DATA_DIR, read_settings  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "memory_eval"
 VECTORS = FIXTURES / "vectors.npz"
+RERANK_SCORES = FIXTURES / "rerank_scores.json"
 OFFLINE_MODEL = "eval-embed"
+# A provider so providers.rerank_model resolves; no key, and the network is never reached (rerank_fn is injected).
+OFFLINE_SETTINGS = {**llm.DEFAULT_SETTINGS, "embeddingModel": OFFLINE_MODEL, "hybridRetrieval": True,
+                    "provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
 FALLBACK_DIM = 512
 
 
@@ -104,6 +115,87 @@ class Vectors:
         return [self.rec[_key(t)].tolist() if _key(t) in self.rec else hashed_bow(t, self.dim) for t in texts]
 
 
+# ---- rerank scores: recorded per (query text, memory content) pair, or the live route ----
+
+def pair_key(query: str, doc: str) -> str:
+    return hashlib.sha1((query + "\u0000" + doc).encode("utf-8")).hexdigest()
+
+
+def load_rerank() -> dict[str, Any]:
+    return json.loads(RERANK_SCORES.read_text()) if RERANK_SCORES.exists() else {"model": "", "scores": {}}
+
+
+def save_rerank(model: str, scores: dict[str, float]) -> None:
+    RERANK_SCORES.write_text(json.dumps({"model": model, "scores": {k: round(v, 6) for k, v in sorted(scores.items())}},
+                                        indent=0, sort_keys=True) + "\n")
+
+
+class Rerank:
+    """MemoryIndex.rerank_fn for the harness. Offline: recorded scores, a missing pair scores 0.0 and is counted.
+    Live: the real call, timed."""
+
+    def __init__(self, scores: dict[str, float], live: bool):
+        self.scores, self.live, self.misses, self.ms, self.fails = scores, live, set(), [], 0
+
+    async def __call__(self, settings: dict[str, Any], model: str, query: str, docs: list[str], *,
+                       timeout: float, top_n: int | None) -> list[tuple[int, float]] | None:
+        if self.live:
+            t = time.perf_counter()
+            try:
+                return await retrieval_rerank.rerank_scores(settings, model, query, docs, timeout=timeout, top_n=top_n)
+            except Exception:
+                self.fails += 1
+                raise
+            finally:
+                self.ms.append((time.perf_counter() - t) * 1000)
+        keys = [pair_key(query, d) for d in docs]
+        self.misses.update(k for k in keys if k not in self.scores)
+        return sorted(((i, self.scores.get(k, 0.0)) for i, k in enumerate(keys)), key=lambda x: (-x[1], x[0]))
+
+    def timing(self) -> dict[str, float]:
+        xs = sorted(self.ms)
+        pct = lambda p: xs[min(len(xs) - 1, int(p * len(xs)))]  # noqa: E731 - nearest rank
+        return {"calls": len(xs), "fails": self.fails, "p50_ms": pct(0.5), "p95_ms": pct(0.95)} if xs else {}
+
+
+async def record_rerank(settings: dict[str, Any], store: dict[str, Any], cases: list[dict[str, Any]]) -> tuple[str, int]:
+    """Score every query text against every memory content, one call per query (two halves when a call fails).
+    Keeps the pairs already recorded. Returns (model, number of pairs added)."""
+    model = providers.rerank_model(settings)
+    if not model:
+        raise SystemExit("no rerank model for this provider: set retrievalRerankModel")
+    old = load_rerank()
+    if old["model"] and old["model"] != model and old["scores"]:
+        raise SystemExit(f"rerank_scores.json holds {old['model']} scores; delete it to record with {model}")
+    scores = dict(old["scores"])
+    docs = list(dict.fromkeys(m["content"] for m in store["memories"]))
+    added = 0
+
+    async def call(q: str, ds: list[str], split: bool = True) -> None:
+        nonlocal added
+        try:
+            res = await retrieval_rerank.rerank_scores(settings, model, q, ds, timeout=60.0, top_n=len(ds))
+        except Exception as e:  # noqa: BLE001 - the key is never in this text
+            if split and len(ds) > 1:
+                h = len(ds) // 2
+                await call(q, ds[:h], False)
+                await call(q, ds[h:], False)
+                return
+            raise SystemExit(f"rerank failed: {type(e).__name__}: {str(e)[:200]}")
+        if res is None:
+            raise SystemExit("no /rerank route on this provider")
+        for i, sc in res:
+            scores[pair_key(q, ds[i])] = sc
+            added += 1
+
+    for q in dict.fromkeys(query_text(c) for c in cases):
+        todo = [d for d in docs if pair_key(q, d) not in old["scores"]]
+        if todo:
+            await call(q, todo)
+    save_rerank(model, scores)
+    return model, added
+
+
 # ---- the store as a Grain database ----
 
 async def build(tmp: str, store: dict[str, Any], vectors: Vectors, settings: dict[str, Any]) -> MemoryIndex:
@@ -159,7 +251,7 @@ async def run_case(idx: MemoryIndex, settings: dict[str, Any], case: dict[str, A
     """Memory ids for one case, best first. `now` is the fixed eval clock (unused until retrieval reads a date window)."""
     q = query_text(case)
     qvec = await idx.query_vec(settings, q)
-    hits = idx.search(case.get("project_id"), q, qvec, limit=memory_limits.CONTEXT_HITS, settings=settings)
+    hits = await idx.search_reranked(case.get("project_id"), q, qvec, limit=memory_limits.CONTEXT_HITS, settings=settings)
     return [m["id"] for m in hits]
 
 
@@ -237,6 +329,16 @@ def parse_config(items: list[str]) -> dict[str, Any]:
     return out
 
 
+def apply_limits(items: list[str]) -> dict[str, Any]:
+    """--limit KEY=VALUE: override memory_limits constants for this process."""
+    out = parse_config(items)
+    for k, v in out.items():
+        if not hasattr(memory_limits, k):
+            raise SystemExit(f"--limit: no memory_limits.{k}")
+        setattr(memory_limits, k, v)
+    return out
+
+
 async def evaluate(settings: dict[str, Any], live: bool = False, record: bool = False, only: str | None = None) -> dict[str, Any]:
     """Build the persona database and rank every case. Returns the scores plus the rankings and embedding provenance."""
     store, spec = load_store(), load_cases()
@@ -246,15 +348,22 @@ async def evaluate(settings: dict[str, Any], live: bool = False, record: bool = 
     now = datetime.fromisoformat(spec["now"])
     vectors = Vectors(load_recording() if (record or not live) else {}, live)
     texts = all_texts(store, cases)
+    rerank_model = ""
+    if record:
+        rerank_model, added = await record_rerank(settings, store, cases)
+        print(f"recorded {added} rerank pairs ({rerank_model}) to {RERANK_SCORES}")
+    rerank = Rerank(load_rerank()["scores"], live)
     with tempfile.TemporaryDirectory() as tmp:
         await vectors(settings, texts, settings["embeddingModel"])  # warm: live calls happen here, once
         idx = await build(tmp, store, vectors, settings)
+        idx.rerank_fn = rerank
         ranked = {c["id"]: await run_case(idx, settings, c, now) for c in cases}
         contents = {m["id"]: m["content"] for m in store["memories"]}
     if record:
         save_recording(vectors.rec, {_key(t) for t in texts}, settings["embeddingModel"])
     return {"cases": cases, "ranked": ranked, "contents": contents, "scores": score(cases, ranked),
-            "recorded": len(vectors.rec), "fallbacks": len(vectors.fallbacks)}
+            "recorded": len(vectors.rec), "fallbacks": len(vectors.fallbacks),
+            "rerank_misses": len(rerank.misses), "rerank_timing": rerank.timing()}
 
 
 def main() -> None:
@@ -265,6 +374,7 @@ def main() -> None:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--verbose", action="store_true", help="print every case's ranking, not just the table")
     ap.add_argument("--config", action="append", default=[], metavar="KEY=VALUE")
+    ap.add_argument("--limit", action="append", default=[], metavar="KEY=VALUE")
     ap.add_argument("--label", default="memory retrieval")
     ap.add_argument("--data-dir", default=os.environ.get("PERSONAL_OS_DATA_DIR") or DEFAULT_DATA_DIR)
     a = ap.parse_args()
@@ -274,14 +384,20 @@ def main() -> None:
         ap.error("--record needs every case, not --case")
     if a.live:
         settings = read_settings(Path(a.data_dir).expanduser())
+        if not settings.get("apiKey"):  # the active key may live only in the per-provider map; read-only, never printed
+            from personal_os import provider_keys
+            from personal_os.secrets import SecretStore
+            settings["apiKey"] = provider_keys.load(SecretStore(Path(a.data_dir).expanduser())).get(providers.effective(settings), "")
         if not settings.get("embeddingModel"):
             raise SystemExit("no embeddingModel in the settings")
     else:
-        settings = {**llm.DEFAULT_SETTINGS, "embeddingModel": OFFLINE_MODEL}
+        settings = dict(OFFLINE_SETTINGS)
     settings = {**settings, "hybridRetrieval": True, **parse_config(a.config)}
+    limits = apply_limits(a.limit)
     res = asyncio.run(evaluate(settings, a.live, a.record, a.case))
     if a.json:
-        print(json.dumps({"label": a.label, "config": parse_config(a.config), **res["scores"], "fallbacks": res["fallbacks"],
+        print(json.dumps({"label": a.label, "config": parse_config(a.config), "limits": limits, **res["scores"],
+                          "fallbacks": res["fallbacks"], "rerank_misses": res["rerank_misses"], "rerank_timing": res["rerank_timing"],
                           "ranked": res["ranked"]}, indent=1))
         return
     note = (f"(live, model {settings['embeddingModel']})" if a.live
@@ -289,6 +405,13 @@ def main() -> None:
     print_table(a.label, res["scores"], note)
     if a.record:
         print(f"recorded {res['recorded']} vectors to {VECTORS}")
+    if limits:
+        print(f"limits {limits}")
+    t = res["rerank_timing"]
+    if a.live:
+        print("rerank calls: " + (f"{t['calls']} ({t['fails']} failed), p50 {t['p50_ms']:.0f} ms, p95 {t['p95_ms']:.0f} ms" if t else "none"))
+    else:
+        print(f"rerank: recorded scores ({load_rerank()['model']}), {res['rerank_misses']} pairs missing from rerank_scores.json")
     if a.verbose or a.case:
         for c in res["cases"]:
             print_case(c, res["ranked"][c["id"]], res["contents"])

@@ -12,6 +12,7 @@ const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
   fastModel: { help: 'Used for short, simple messages. Leave empty to always use the chat model.', placeholder: 'None' },
   extractionModel: { help: 'Writes titles, memories and suggestions. Empty uses the chat model.', placeholder: 'Same as the chat model' },
   embeddingModel: { help: 'Turns notes and files into vectors for search. After changing it, Save, then press Rebuild search index under Advanced.', placeholder: 'qwen3-embedding-8b' },
+  retrievalRerankModel: { help: "Reorders memory and document search results by relevance. Empty uses the provider's default reranker.", placeholder: 'Not available on this provider' },
   visionModel: { help: 'Reads pictures. Empty uses the chat model when it can read images; otherwise pictures are read with OCR only.', placeholder: 'Same as the chat model' },
   imageModel: { help: 'Used when the assistant makes an image. The provider must offer an OpenAI-compatible images endpoint.', placeholder: 'Not set' }
 }
@@ -23,7 +24,7 @@ function inferProvider(providers: ProviderInfo[], baseUrl: string): string {
   return (h && providers.find((p) => p.baseUrl && host(p.baseUrl) === h)?.id) || 'custom'
 }
 
-/** The Model tab: provider, address, key, a connection test and the six model pickers. Edits go to the modal's draft. */
+/** The Model tab: provider, address, key, a connection test and the seven model pickers. Edits go to the modal's draft. */
 export default function ProviderSettings({ draft, settings, patch, models }: { draft: Settings; settings: Settings; patch: (p: Partial<Settings>) => void; models: ModelInfo[] }): JSX.Element {
   const saveSettings = useStore((s) => s.saveSettings)
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -126,7 +127,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
         const value = draft[f.key] ?? ''
         return (
           <label key={f.key}><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={HELP[f.key].placeholder} spellCheck={false} />
+            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
         )

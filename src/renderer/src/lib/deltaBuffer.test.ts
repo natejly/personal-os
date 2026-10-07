@@ -26,7 +26,6 @@ const rig = (intervalMs = 50) => {
 }
 
 const d = (id: string, text: string): { event: 'delta'; data: { id: string; text: string } } => ({ event: 'delta', data: { id, text } })
-const r = (id: string, text: string): { event: 'reasoning'; data: { id: string; text: string } } => ({ event: 'reasoning', data: { id, text } })
 const texts = (a: ChatEvent[]): string[] => a.map((e) => (e as { data: { text: string } }).data.text)
 
 test('the first event after a quiet spell applies on the leading edge', () => {
@@ -50,14 +49,14 @@ test('events inside the interval coalesce into one trailing apply', () => {
   assert.equal(h.armed(), false)
 })
 
-test('a different kind or id flushes what is pending first', () => {
+test('a different id flushes what is pending first', () => {
   const h = rig()
   h.buf.push(d('m', 'a'))
   h.buf.push(d('m', 'b'))
-  h.buf.push(r('m', 'x'))
+  h.buf.push(d('n', 'x'))
   assert.deepEqual(h.applied.map((e) => e.event), ['delta', 'delta'])
   assert.deepEqual(texts(h.applied), ['a', 'b'])
-  h.buf.push(r('n', 'y'))
+  h.buf.push(d('o', 'y'))
   assert.deepEqual(texts(h.applied), ['a', 'b', 'x'])
   h.buf.flush()
   assert.deepEqual(texts(h.applied), ['a', 'b', 'x', 'y'])

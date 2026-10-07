@@ -576,6 +576,7 @@ class Run:
         # Set when the reply's `done` goes out. The task lives on past that — auto-learn is the last
         # thing it does — so `live` alone cannot tell a working run from one that is only tidying up.
         self.replied = False
+        self.silent = False  # a reply the loop removed (NO_REPLY): nothing to show or forward
         self.seq = 0
         self.status = "running"
         self.error: str | None = None
@@ -631,6 +632,8 @@ class Run:
                 "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
                 "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
                 "turn": self.turn, "ended_at": self.ended_at, "error": self.error,
+                # A visible reply was published: a silent wake (its reply row is deleted) did not, and a stopped one is not news.
+                "replied": self.replied and not getattr(self, "silent", False), "stopped": self.stop.is_set(),
                 "attention": for_run({"status": self.status})}
 
     def set_status(self, status: str) -> None:

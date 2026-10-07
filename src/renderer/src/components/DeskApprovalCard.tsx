@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { CircleHelp, Globe } from 'lucide-react'
+import { ArrowUp, Globe } from 'lucide-react'
 import type { PendingApproval, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { browserAllowLabel, browserSentence } from '../lib/browserApproval'
 import { describeCall, QUESTION_TOOLS } from '../lib/toolDisplay'
+import { parseResult } from '../lib/toolResult'
 import ApprovalRules from './ApprovalRules'
 import { GenericApproval } from './toolcards/GenericCard'
 import { ArgListOf } from './toolcards/parts'
@@ -47,10 +48,14 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   )
 }
 
+/** What was answered, kept by call id: the answer a click sent shows on the collapsed line before the result lands. */
+const sentAnswers = new Map<string, string>()
+
 /**
- * A pending question from the agent (desk_ask, ask_user), in a desk pane or inline in a chat: one button per suggested
- * option and a free-text answer. The run is waiting on the call's approval, so the answer is the DECISION: it rides back
- * as the approval's note. The store is read in the handler, never subscribed to: inline, this mounts inside a streaming
+ * A question from the agent (desk_ask, ask_user), in a desk pane or inline in a chat: the question once, one button per
+ * suggested option, and a one-line box for a typed answer. The run is waiting on the call's approval, so the answer is
+ * the DECISION: it rides back as the approval's note. Once answered (no longer pending) it is one muted line,
+ * "question · answer". The store is read in the handler, never subscribed to: inline, this mounts inside a streaming
  * message.
  */
 export function AskQuestion({ event, conversationId, note = null }: { event: ToolEvent; conversationId: string; note?: JSX.Element | null }): JSX.Element {
@@ -59,37 +64,42 @@ export function AskQuestion({ event, conversationId, note = null }: { event: Too
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const send = async (answer: string): Promise<void> => {
-    if (!answer.trim() || sending) return
+    const t = answer.trim()
+    if (!t || sending) return
     setSending(true)
+    sentAnswers.set(event.id, t)
     try {
       // 'allow' only: a question is never a standing grant.
-      await useStore.getState().approveTool(event.id, 'allow', conversationId, { note: answer.trim() })
+      await useStore.getState().approveTool(event.id, 'allow', conversationId, { note: t })
     } finally {
       setSending(false)
     }
   }
+  if (!(event.pending && event.needs_approval)) {
+    const given = event.pending ? '' : String((parseResult(event.result_preview).data as { answer?: unknown } | null)?.answer ?? '')
+    const answer = given || sentAnswers.get(event.id) || ''
+    return <p className="ask-done" title={`${String(a.question ?? '')}${answer ? ` · ${answer}` : ''}`}>{String(a.question ?? '')}{answer ? <> · <span>{answer}</span></> : null}</p>
+  }
   return (
-    <div className="desk-approval desk-ask">
-      <header className="desk-approval-head"><CircleHelp size={14} /><b>The agent has a question</b></header>
+    <div className="desk-ask">
       {note}
-      <p className="desk-approval-sentence">{String(a.question ?? '')}</p>
+      <p className="ask-question">{String(a.question ?? '')}</p>
       {a.context ? <p className="muted small">{String(a.context)}</p> : null}
       {options.length > 0 && (
         <div className="approval-actions" role="group" aria-label="Suggested answers">
-          {options.map((o) => <button key={o} type="button" className="ghost-btn" disabled={sending} onClick={() => void send(o)}>{o}</button>)}
+          {options.map((o) => <button key={o} type="button" className="ghost-btn ask-option" disabled={sending} onClick={() => void send(o)}>{o}</button>)}
         </div>
       )}
-      <textarea
-        className="aplan-answer"
-        rows={2}
-        aria-label="Your answer"
-        placeholder={options.length ? 'Or type your own answer… (⌘↵ to send)' : 'Answer… (⌘↵ to send)'}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(text) } }}
-      />
-      <div className="approval-actions">
-        <button type="button" className="primary-btn" disabled={!text.trim() || sending} onClick={() => void send(text)}>Answer</button>
+      <div className="ask-own">
+        <textarea
+          rows={1}
+          aria-label="Your answer"
+          placeholder={options.length ? 'Type your own answer' : 'Type your answer'}
+          value={text}
+          onChange={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = `${Math.min(e.target.scrollHeight, 110)}px` }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(text) } }}
+        />
+        {text.trim() && <button type="button" className="icon-btn" aria-label="Send answer" disabled={sending} onClick={() => void send(text)}><ArrowUp size={15} /></button>}
       </div>
     </div>
   )

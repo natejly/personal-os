@@ -20,6 +20,7 @@ import type {
 import type { CodingSession, CodingSessionDiff, ShipChecklist } from '@shared/types'
 import type { BackendAccess, ShellCheck } from '@shared/systemAccess'
 import { ApiError } from './apiError'
+import type { ChatRunChanges } from './deskFiles'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; /** May be '' when only the connection is being checked. */ model: string }
@@ -621,6 +622,7 @@ export const api = {
   undoExternal: (id: string) => req<{ ok: boolean; kind: string }>(`/external-undo/${encodeURIComponent(id)}`, { method: 'POST' }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
+  conversationChanges: (id: string) => req<{ available: boolean; runs: ChatRunChanges[] }>(`/conversations/${id}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),

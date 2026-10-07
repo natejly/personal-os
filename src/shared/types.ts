@@ -813,6 +813,12 @@ export interface WorkerInfo {
   /** An ended worker with a stored transcript can continue with its history. */
   resumable: boolean
   pending_approvals: { call_id: string; tool: string; args: Record<string, unknown> }[]
+  /** The role or Library agent it runs as ('general' for the chat's own tools). */
+  agent?: string
+  /** The id of the worker this one continues (through any chain of resumes), else its own: the face's seed. */
+  origin?: string
+  /** An ended worker's final report, else ''. */
+  report?: string
   depth: number
   /** Info only. */
   cost: number | null
@@ -1498,12 +1504,6 @@ export interface Settings {
   quickCaptureShortcut?: string
   /** Electron accelerator for the global quick-ask bar (a one-line prompt that starts a new chat). */
   quickAskShortcut?: string
-  /** Read-aloud voice (a speechSynthesis voice URI); empty is the system default. */
-  ttsVoice?: string
-  /** Read-aloud speaking rate, 0.8 to 1.5. */
-  ttsRate?: number
-  /** Voice chat ends itself after this many replies. */
-  voiceLoopMaxTurns?: number
   /** Hold-to-talk dictation chord for the chat composer mic, e.g. 'Control+Alt+D'. */
   dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork defaults off. */
@@ -1965,6 +1965,8 @@ export interface GrainApi {
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
+  /** Bring the main window forward (a notification was clicked while it was hidden). */
+  showMain: () => void
   /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
   micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
   /** Opens Terminal on `claude attach <id>` for a coding session waiting on the user; false when the id is invalid or it failed. */
@@ -2457,6 +2459,10 @@ export interface RunInfo {
   ended_at?: number | null
   error?: string | null
   attention?: Attention
+  /** True once the run published a visible assistant reply; a silent control turn never sets it. */
+  replied?: boolean
+  /** The user stopped it. */
+  stopped?: boolean
 }
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------

@@ -14,7 +14,7 @@ test('a chat turned autonomous works, delivers, reaches review in the chat, and 
   await expect(page.locator('.msg.assistant').last()).toContainText('Shall I go ahead', { timeout: 60_000 })
   const [chat] = await grain.api('/conversations?include_desks=true')
   llm.push({ calls: [WRITE] }, { calls: [DELIVER] }, { calls: [DONE] }, { text: 'Finished.' })
-  await turnOn(page, 'Work and propose')
+  await turnOn(page, 'Autonomous')
   await expect.poll(() => deskOf(grain, chat.id)).toBeTruthy()
   const id = await deskOf(grain, chat.id)
   expect(id).toBeTruthy()

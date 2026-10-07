@@ -15,12 +15,9 @@ const LABEL: Record<WorkerStatus, string> = {
   queued: 'Queued', running: 'Working', awaiting_approval: 'Needs approval', done: 'Done', error: 'Failed', interrupted: 'Interrupted', stopped: 'Stopped'
 }
 
-/** One line under a worker's title: its position while queued, the current action while running. */
-export function workerLine(w: Pick<WorkerInfo, 'status' | 'now' | 'queue_position'>): string {
-  if (w.status === 'queued') return w.queue_position ? `Queued, number ${w.queue_position}` : 'Queued'
-  if (w.status === 'running' && w.now) return w.now
-  return LABEL[w.status]
-}
+/** The short word beside a worker's title: its place in line while queued, else its status. */
+export const workerWord = (w: Pick<WorkerInfo, 'status' | 'queue_position'>): string =>
+  w.status === 'queued' && w.queue_position ? `Queued #${w.queue_position}` : LABEL[w.status]
 
 /** Live workers first (oldest first within them, so the order does not jump), then ended ones newest first. */
 export function sortWorkers(ws: WorkerInfo[]): WorkerInfo[] {

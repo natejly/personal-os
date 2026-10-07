@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentInbox as AgentInboxData, AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
-import { useStore, useChatTainted } from '../store'
+import { useStore, useChatTainted, useChatFaceById } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
@@ -207,6 +207,7 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const chatFace = useChatFaceById(r.conversation_id)
   // An unread problem opens itself; reading it (Mark all read included) collapses it.
   const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
@@ -220,7 +221,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   return (
     <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-row">
-        <Face name={r.job} status={r.status} size={18} />
+        <Face {...(r.conversation_id ? chatFace : { name: r.job })} status={r.status} size={18} />
         <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
         <span className="inbox-line" title={line}>{line}</span>

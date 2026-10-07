@@ -95,17 +95,16 @@ test('every chat has a side panel: Files and Changes, and no Review without a de
   await expect(panel).toHaveCount(0)
 })
 
-test('the checklist is one collapsed pill above the composer; click opens the steps, click again folds it', async ({ grain }) => {
+test('the checklist is never above the composer; it is the Checklist tab of the side panel', async ({ grain }) => {
   const { page } = grain
   await newChat(page)
   const plan = { steps: [{ text: 'first step', status: 'in_progress' }, { text: 'second step', status: 'pending' }] }
   await say(page, '!!tool todo_write ' + JSON.stringify(plan))
-  const pill = page.getByRole('region', { name: 'Checklist' })
-  await expect(pill).toContainText('0/2', { timeout: 60_000 })
-  await expect(pill).toContainText('first step')
-  await expect(pill.locator('.plan-steps')).toHaveCount(0)
-  await pill.locator('.plan-head').click()
-  await expect(pill.locator('.plan-steps .plan-step')).toHaveCount(2)
-  await pill.locator('.plan-head').click()
-  await expect(pill.locator('.plan-steps')).toHaveCount(0)
+  await expect(page.locator('.msg.assistant').last()).toContainText('MOCK: tool done', { timeout: 60_000 })
+  await expect(page.getByRole('region', { name: 'Checklist' })).toHaveCount(0) // no status card for the main agent
+  await page.getByRole('button', { name: 'Documents in this chat' }).click()
+  await page.locator('.desk-panel .desk-tabs').getByRole('button', { name: 'Checklist' }).click()
+  const list = page.locator('.desk-panel').getByRole('region', { name: 'Checklist' })
+  await expect(list).toContainText('0/2 done')
+  await expect(list.locator('.plan-steps .plan-step')).toHaveCount(2)
 })

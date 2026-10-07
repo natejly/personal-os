@@ -9,7 +9,7 @@ a later fact supersedes an earlier one the way it did live. Never starts by itse
 The CLI opens the database directly, so it must NOT run against a data dir the app has open (two writers means two
 schedulers on one file). It prints counts only, never message text, and resolves names without embeddings.
 
-A message is eligible when its chat is the sort that learns live: not trashed, not private, not tainted, not a
+A message is eligible when its chat is the sort that learns live: not trashed, not tainted, not a
 scheduled run or desk chat, not marked "don't learn from this chat", and autoLearn, useMemory and useGraph are not switched off. kg_backfill_done records
 each message once its extraction returned (an extraction that found nothing counts); an error leaves it unmarked,
 so the next run retries it, and a finished run is a no-op.
@@ -37,7 +37,7 @@ SCHEMA = "CREATE TABLE IF NOT EXISTS kg_backfill_done (message_id TEXT PRIMARY K
 _ELIGIBLE = """FROM messages m JOIN conversations c ON c.id = m.conversation_id
   WHERE m.role = 'user' AND m.kind IS NULL AND TRIM(m.content) <> '' AND m.superseded_at IS NULL AND c.deleted_at IS NULL
     AND COALESCE(json_extract(c.settings,'$.deskId'),'') = '' AND COALESCE(json_extract(c.settings,'$.job_id'),'') = ''
-    AND COALESCE(json_extract(c.settings,'$.private'),0) = 0 AND COALESCE(json_extract(c.settings,'$.tainted'),0) = 0
+    AND COALESCE(json_extract(c.settings,'$.tainted'),0) = 0
     AND COALESCE(json_extract(c.settings,'$.autoLearn'),1) != 0 AND COALESCE(json_extract(c.settings,'$.useMemory'),1) != 0
     AND COALESCE(json_extract(c.settings,'$.useGraph'),1) != 0 AND COALESCE(json_extract(c.settings,'$.learn'),1) != 0
     AND NOT EXISTS (SELECT 1 FROM kg_backfill_done d WHERE d.message_id = m.id)"""

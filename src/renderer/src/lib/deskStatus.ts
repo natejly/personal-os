@@ -24,12 +24,6 @@ export const STATUS_LABEL: Record<DeskStatus, string> = {
   queued: 'Queued'
 }
 
-/**
- * Whether the strip above the composer stays out of the way. While one agent plans or works, the composer's Stop
- * already covers it, so the strip only earns its space when it has something the composer does not: a live
- * background worker, a Start / Resume, an approval, a review.
- */
-export const stripHidden = (status: DeskStatus, liveWorkers: number): boolean => (status === 'planning' || status === 'working') && liveWorkers === 0
 
 export const fmtDur = (seconds: number): string => {
   const s = Math.max(0, seconds)

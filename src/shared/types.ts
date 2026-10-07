@@ -326,7 +326,7 @@ export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global
 
 /** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
 export interface PermissionCard {
-  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | null
+  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | 'destructive' | null
   /** The subject the card is about, e.g. `Bash(git push origin)` or `doom_loop(fs_grep)`. */
   subject: string | null
   rule: string | null

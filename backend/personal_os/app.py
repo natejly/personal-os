@@ -2027,6 +2027,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
+            # Allow everything's floor: a shell command that deletes for good, wipes a disk or force-pushes still asks.
+            if pmode == "allow_all" and name == "shell_run" and shell_tool.floor(toolbox, args, tool_ctx):
+                fenced = forced = True
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
             if pmode == "allow_all" and not fenced:
                 if danger != "safe":
@@ -2961,6 +2964,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     hints = _mcp_event(c["name"]) or {}
                     # A connector call forced by untrusted content stays a card in every mode, allow-all included.
                     mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
+                    # Allow everything's floor (permrules.destructive): a delete that skips the Trash, a disk wipe or a force-push.
+                    floor = shell_tool.floor(toolbox, args, tool_ctx) if pmode == "allow_all" and c["name"] == "shell_run" else None
                     rt = autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
@@ -2970,8 +2975,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
                         # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted or bool(floor),
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
+                    if floor and rt == "card":
+                        # One card, no rule or session grant behind it: the user reads what will be lost.
+                        mode, forced = "ask", True
+                        perm.mode, perm.forced, perm.kind, perm.display = "ask", True, floor[0], floor[1]
                     if rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False

@@ -110,7 +110,7 @@ function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?:
   if (lang === 'chart') return <ChartBlockM source={code} streaming={!!streaming} />
   if (lang === 'interactive') return <InteractiveBlockM source={code} streaming={!!streaming} />
   if (lang === 'mermaid') return <MermaidBlockM source={code} streaming={!!streaming} />
-  // Model HTML/SVG never runs in the app's origin: both render in a sandboxed srcdoc iframe (HtmlBlock).
+  // Model HTML/SVG never runs in the app's origin: html previews load from the grain-preview: scheme and svg from srcdoc, both in a sandboxed iframe (HtmlBlock).
   if (fenceKind(lang) === 'html') return <HtmlBlockM source={code} streaming={!!streaming} />
   if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
   return (

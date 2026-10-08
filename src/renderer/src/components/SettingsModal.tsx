@@ -603,6 +603,14 @@ export default function SettingsModal(): JSX.Element {
                   <input type="number" min={1} max={16} value={draft.workerMaxConcurrent ?? 4} onChange={(e) => patch({ workerMaxConcurrent: Math.min(16, Math.max(1, Math.round(Number(e.target.value)) || 4)) })} />
                 </label>
                 <h4>Coding sessions</h4>
+                <Switch title="Route coding to OpenCode / Claude Code" help="Grain's own agents plan, hand code changes to a coding session and check the result. They can't edit files or run file-changing commands inside a git repository themselves." checked={draft.codingRoute !== false} onChange={(codingRoute) => patch({ codingRoute })} />
+                <label className="setting-row"><span className="toggle-text"><b>Preferred coding agent</b><small>Which one the agents start for a coding task.</small></span>
+                  <select value={draft.codingAgent ?? 'any'} onChange={(e) => patch({ codingAgent: e.target.value as Settings['codingAgent'] })}>
+                    <option value="any">Let the agent choose</option>
+                    <option value="opencode">OpenCode</option>
+                    <option value="claude">Claude Code</option>
+                  </select>
+                </label>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
                   <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
                 </label>

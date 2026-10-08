@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -27,6 +27,9 @@ usage_context: ContextVar[dict[str, Any]] = ContextVar("usage_context", default=
 # Absolute time.monotonic() by which the current stream must be over; set only around a closing-answer call (a hang
 # bound, not a reply cap). A context var rather than a parameter so every caller of stream_chat keeps its signature.
 stream_deadline: ContextVar[float | None] = ContextVar("stream_deadline", default=None)
+# Requests that share a prompt prefix (one chat's turns, sibling workers of one kind) carry the same id, so Fireworks
+# routes them to the replica that holds that prefix in its cache. Set by the chat loop and the worker loop.
+session_affinity: ContextVar[str | None] = ContextVar("session_affinity", default=None)
 
 
 def on_usage(fn: UsageListener) -> None:
@@ -139,6 +142,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "autoCompact": True,
     "compactAt": COMPACT_AT,
     "compactKeepRecent": COMPACT_KEEP_RECENT,
+    "compactAtTokens": COMPACT_AT_TOKENS,  # absolute trigger on history alone, for windows too large for the fraction to ever fire
+    "compactKeepTokens": COMPACT_KEEP_TOKENS,
+    "microAtTokens": MICRO_AT_TOKENS,
     "microKeep": MICRO_KEEP,
     "microAt": MICRO_AT,  # old tool results stub out past a quarter of the window: past ~30k tokens a round, time to first token dominates
     # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
@@ -674,6 +680,8 @@ def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | No
         return "reasoning_effort"
     if "service_tier" in body and (param == "service_tier" or "service_tier" in msg or "service tier" in msg):
         return "service_tier"
+    if "user" in body and param == "user":  # the affinity id is an optimisation, never worth a failed reply
+        return "user"
     return None
 
 
@@ -781,7 +789,21 @@ def _headers(settings: dict[str, Any]) -> dict[str, str]:
     h = {"Content-Type": "application/json"}
     if settings.get("apiKey"):
         h["Authorization"] = f"Bearer {settings['apiKey']}"
+    if (sid := session_affinity.get()) and _affinity_ok(settings):
+        h["x-session-affinity"] = sid
     return h
+
+
+def _affinity_ok(settings: dict[str, Any]) -> bool:
+    """Fireworks reads the header; a LiteLLM proxy ignores it and forwards the `user` field instead (see _with_affinity)."""
+    return providers.effective(settings) in ("fireworks", "litellm")
+
+
+def _with_affinity(settings: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """`user` carries the same id in the body: the proxy passes it to Fireworks, which also routes on it."""
+    if (sid := session_affinity.get()) and _affinity_ok(settings):
+        body["user"] = sid
+    return body
 
 
 # Ids that name a non-chat model when the proxy reports no `mode` for them: a conservative
@@ -863,6 +885,14 @@ def _prompt_chars(messages: list[dict[str, Any]]) -> int:
 # Kimi K3 always thinks and accepts only low, high, and max. Omitting the field is max, and
 # medium / xhigh are rejected. High is the middle of that scale, so the app's Medium lands there.
 _KIMI_K3_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}
+# DeepSeek V4 takes none/low/medium/high/xhigh/max, but runs low and medium as high and xhigh as max. Name the level it runs.
+_DEEPSEEK_V4_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max", "off": "none", "none": "none"}
+# Without max_tokens Fireworks stops DeepSeek V4 at 2048 tokens, which thinking alone can use up. A per-response
+# ceiling, not a budget: a turn still runs as many rounds as it needs.
+DEEPSEEK_V4_MAX_TOKENS = 32_768
+# Families that want their own reasoning_content back on an assistant tool-call message (interleaved thinking).
+# Anything else gets the field stripped: a model that does not know it may reject the request.
+_REASONING_ECHO = ("deepseek", "kimi", "glm")
 
 
 def _model_slug(model: str) -> str:
@@ -879,9 +909,18 @@ def requires_max_tokens(settings: dict[str, Any]) -> bool:
 
 
 def output_cap(settings: dict[str, Any], model: str) -> int | None:
-    """The max_tokens to send: the model's own output maximum for a provider that requires the field, else None.
-    Never a number of ours; a model whose maximum is unknown goes without."""
-    return int(caps_lookup(model).get("max_output_tokens") or 0) or None if requires_max_tokens(settings) else None
+    """The max_tokens to send: the model's own output maximum for a provider that requires the field, DeepSeek V4's
+    ceiling (its provider default truncates thinking replies), else None."""
+    if requires_max_tokens(settings):
+        return int(caps_lookup(model).get("max_output_tokens") or 0) or None
+    return DEEPSEEK_V4_MAX_TOKENS if _model_slug(model).startswith("deepseek-v4") else None
+
+
+def wire_messages(model: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`messages` as sent: reasoning_content kept for a family that reads it back, dropped for any other."""
+    if _model_slug(model).startswith(_REASONING_ECHO) or not any("reasoning_content" in m for m in messages):
+        return messages
+    return [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
 
 
 def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
@@ -895,7 +934,7 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, ba
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
-    new chats start at medium (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as high.
+    new chats start at high (`repos.DEFAULT_EFFORT`).
     """
     if not effort or effort == "default":
         return None
@@ -905,6 +944,8 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, ba
         return None
     if slug.startswith("kimi-k3"):
         return _KIMI_K3_EFFORT.get(effort, "high")
+    if slug.startswith("deepseek-v4"):
+        return _DEEPSEEK_V4_EFFORT.get(effort, "high")
     if (caps or {}).get("reasoning") is False:
         return None
     # What this provider already rejected for this model (see _send_with_retry), so a tool loop does not pay a failed request per round.
@@ -1062,7 +1103,7 @@ async def stream_chat(
     under the one `llmRetries` cap) until the first content, reasoning or tool-call fragment; never after. `end` carries
     `effort_dropped` (the value) when the provider rejected reasoning_effort and the request went without it.
     """
-    body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
+    body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
@@ -1075,6 +1116,7 @@ async def stream_chat(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
+    _with_affinity(settings, body)
     calls: dict[int, dict[str, Any]] = {}
     by_index: dict[int, int] = {}  # provider `index` -> slot, re-pointed when an index is reused for a new call
     last_idx = 0
@@ -1083,6 +1125,7 @@ async def stream_chat(
     t0 = time.time()
     out_chars = 0
     reason_chars = 0
+    reason_buf: list[str] = []  # the whole reasoning, handed back on `end` for the next tool round
     cancelled = timed_out = saw_done = False
     splitter = ThinkSplitter()
     known = {t.get("function", {}).get("name") for t in tools or []}
@@ -1166,11 +1209,13 @@ async def stream_chat(
                         if reason:
                             emitted = True
                             reason_chars += len(reason)
+                            reason_buf.append(reason)
                             yield {"type": "reasoning", "text": reason}
                         for kind_p, piece in splitter.feed(_content_text(delta)):
                             emitted = emitted or bool(piece)
                             if kind_p == "reasoning":
                                 reason_chars += len(piece)
+                                reason_buf.append(piece)
                             else:
                                 out_chars += len(piece)
                             yield {"type": kind_p, "text": piece}
@@ -1218,6 +1263,7 @@ async def stream_chat(
     for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
         if kind_p == "reasoning":
             reason_chars += len(piece)
+            reason_buf.append(piece)
         else:
             out_chars += len(piece)
         yield {"type": kind_p, "text": piece}
@@ -1242,6 +1288,8 @@ async def stream_chat(
                            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
     if dropped:
         end["effort_dropped"] = dropped
+    if reason_buf:
+        end["reasoning"] = "".join(reason_buf)
     yield end
 
 
@@ -1328,12 +1376,13 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     'timeout'; neither is read from a context var, so a call made after a run's deadline has passed is unaffected.
     """
     t0 = time.time()
-    body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": False}
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
     if wired:
         body["reasoning_effort"] = wired
     if cap := output_cap(settings, model):
         body["max_tokens"] = cap
+    _with_affinity(settings, body)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         try:
             r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)

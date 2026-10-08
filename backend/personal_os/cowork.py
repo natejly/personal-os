@@ -247,6 +247,18 @@ def continue_message(kind: str, notes: str = "") -> str:
             f"from the user) ---\n{quoted}\n--- end of notes ---")
 
 
+def inputs_line(inputs: list[dict[str, Any]]) -> str:
+    """The files the user handed this desk. It changes as files are added or edited, so the chat sends it with the
+    turn's context rather than in the cached system prompt."""
+    if not inputs:
+        return ""
+    names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
+                      for e in inputs[:40])
+    more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
+    return (f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
+            f"{names}{more}. Read them first; write your own copies under `work/`.")
+
+
 def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
     """What this desk can do, as short lines each gated on the tools it names actually being offered
     this turn — a model told about a tool it does not have wastes rounds calling it."""
@@ -254,18 +266,13 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         return any(n in offered for n in names)
 
     out = ["## What you can do here"]
-    inputs = facts.get("inputs") or []
-    if inputs:
-        names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
-                          for e in inputs[:40])
-        more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
-        out.append(f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
-                   f"{names}{more}. Read them first; write your own copies under `work/`.")
+    if line := inputs_line(facts.get("inputs") or []):
+        out.append(line)
     if has("desk_list_files", "desk_read_file", "desk_write_file"):
         out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
                    "`desk_write_file` handle whole text files.")
     if has("fs_edit"):
-        out.append("- `fs_edit` makes surgical edits (read the file first).")
+        out.append("- `fs_edit` makes surgical edits (read the file first); code in a git repo goes to a coding agent instead.")
     if has("fs_glob", "fs_grep"):
         out.append("- `fs_glob` / `fs_grep` search files.")
     if has("shell_run"):
@@ -273,9 +280,12 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
             str(facts.get("shell_network")), "network reaches only package registries and hosts the user allowed")
         out.append(f"- `shell_run` runs in the workspace under the OS sandbox and can write only inside it; {net}. Long commands: "
                    "`background=true`, then `shell_poll`.")
+    if has("coding_session_start"):
+        out.append("- `coding_session_start` hands a coding task (a feature, a fix, a refactor in a git repo) to OpenCode or Claude "
+                   "Code in its own worktree; give it a self-contained brief, then check `coding_session_diff` and run the tests.")
     if has("opencode_run"):
-        out.append("- `opencode_run` hands a whole coding task (a feature, a fix, a refactor in a repo under the workspace) to a "
-                   "coding agent that edits files and runs commands there; give it a self-contained brief and check its diff after.")
+        out.append("- `opencode_run` runs OpenCode in the foreground for a small coding change (in a repo's checkout it works in a "
+                   "fresh git worktree); give it a self-contained brief with the repo path and check the diff it reports after.")
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")

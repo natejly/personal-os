@@ -312,7 +312,7 @@ def settings() -> dict[str, Any]:
     perms = permissions.load(stored)
     out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
-    if not out.get("defaultModel"):  # nothing saved: the high tier as the active provider names it (a saved model always wins)
+    if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
     # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
     if not out.get("extractionModel"):
@@ -4676,7 +4676,7 @@ async def draft_agent_def(body: AgentIntentIn) -> dict[str, Any]:
     from .subagents import draft_def
     cfg = settings()
     try:
-        return await draft_def(cfg, cfg["defaultModel"], body.intent, set(toolbox.specs),
+        return await draft_def(cfg, providers.tier_model(cfg, "high"), body.intent, set(toolbox.specs),
                                [s["name"] for s in skills.list(status="approved")])
     except ValueError as e:
         return {"text": None, "reason": str(e)}
@@ -8282,7 +8282,7 @@ async def draft_skill_from_intent(body: SkillIntentIn) -> dict[str, Any]:
         msgs = [m for m in ((conv or {}).get("messages") or [])
                 if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()]
         context = "\n\n".join(f"{m['role']}: {m['content']}" for m in msgs[-12:])
-    return await skillbuild.draft_skill(settings=cfg, model=cfg["defaultModel"], intent=body.intent,
+    return await skillbuild.draft_skill(settings=cfg, model=providers.tier_model(cfg, "high"), intent=body.intent,
                                         context=context, known_tools=_known_tools(), existing=skills.list())
 
 

@@ -503,9 +503,9 @@ _EMBER_TO_DEEPSEEK = {"accounts/fireworks/models/ember-1": "accounts/fireworks/m
 
 
 def _deepseek_default(c: sqlite3.Connection) -> None:
-    """DeepSeek V4.1 Flash became the model of every tier and high the default effort, and the user asked to switch
-    existing installs too. On Fireworks or the proxy the saved chat-model keys are deleted, so they resolve to the new
-    tier defaults (and keep following them). A chat on the old default model moves to DeepSeek, and a chat's saved
+    """DeepSeek V4.1 Flash became the chat default and the medium and low tier (Ember 1 keeps the high tier), high the
+    default effort, and the user asked to switch existing installs too. On Fireworks or the proxy the saved chat-model
+    keys are deleted, so they resolve to the new defaults (and keep following them). A chat on the old default model moves to DeepSeek, and a chat's saved
     medium effort becomes high. Any other per-chat model or effort is the user's pick and stays."""
     from . import permissions, providers
     stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings WHERE key IN ('provider', 'baseUrl')")}

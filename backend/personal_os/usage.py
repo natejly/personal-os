@@ -28,9 +28,15 @@ FIREWORKS_PRICES: dict[str, dict[str, float]] = {
     "glm-5p3": {"input": 1.40, "cache_read": 0.26, "output": 4.40},
     "glm-5p3-flash": {"input": 0.15, "cache_read": 0.03, "output": 0.50},
     "kimi-k3": {"input": 3.00, "cache_read": 0.30, "output": 15.00},
+    "kimi-k3-fast": {"input": 4.50, "cache_read": 0.45, "output": 22.50},
     "deepseek-v4p1-flash": {"input": 0.30, "cache_read": 0.006, "output": 1.20},
     "qwen3-embedding-8b": {"input": 0.10},
 }
+
+
+# Proxy model names (litellm.yaml) that bill as a differently named Fireworks model. A '.' in a name is Fireworks'
+# 'p' ('glm-5.3' -> 'glm-5p3'), which price_key() handles without a row here.
+FIREWORKS_ALIASES: dict[str, str] = {"deepseek-v4-flash": "deepseek-v4p1-flash"}
 
 
 def short_model(model: str) -> str:
@@ -40,6 +46,14 @@ def short_model(model: str) -> str:
     breakdown match on this short name when the exact id has no row.
     """
     return (model or "").rstrip("/").rsplit("/", 1)[-1]
+
+
+def price_key(model: str) -> str:
+    """The name a model is priced under: its short name, with a proxy alias resolved to the Fireworks model it routes
+    to ('glm-5.3' -> 'glm-5p3', 'deepseek-v4-flash' -> 'deepseek-v4p1-flash') even while the proxy is down."""
+    s = short_model(model)
+    s = FIREWORKS_ALIASES.get(s, s)
+    return s.replace(".", "p") if s not in FIREWORKS_PRICES and s.replace(".", "p") in FIREWORKS_PRICES else s
 
 
 class Pricing:
@@ -132,9 +146,9 @@ class Pricing:
         """Reasoning tokens are already inside completion_tokens, so they cost nothing extra here."""
         # Any row naming this model, by full id or short name; an override beats a list price beats the proxy's,
         # and an exact id beats a short-name match within the same source.
-        short, rank = short_model(model), {"override": 0, "fireworks": 1, "proxy": 2}
+        short, rank = price_key(model), {"override": 0, "fireworks": 1, "proxy": 2}
         rows = [(rank[v["source"]], k != model, v) for k, v in self.table(settings).items()
-                if model and (k == model or short_model(k) == short)]
+                if model and (k == model or price_key(k) == short)]
         p = min(rows, key=lambda r: r[:2])[2] if rows else None
         if not p or p.get("input") is None or (completion_tokens and p.get("output") is None):
             return None  # unknown, never $0
@@ -144,6 +158,10 @@ class Pricing:
         uncached = prompt_tokens - cached - written
         return (uncached * p["input"] + cached * p.get("cache_read", p["input"]) + written * p.get("cache_write", p["input"])
                 + completion_tokens * p.get("output", 0.0)) / 1e6
+
+
+# Where a usage_log row came from (its source column). Order is the display order.
+SOURCES: dict[str, str] = {"grain": "Grain", "opencode": "OpenCode"}
 
 
 # What a call was for, from its kind and tag. Order is the display order.
@@ -156,6 +174,7 @@ FEATURES: dict[str, str] = {
     "helpers": "Titles, suggestions and reviews",
     "vision": "Vision and images",
     "voice": "Voice",
+    "opencode": "OpenCode",
     "other": "Other",
 }
 _MEMORY_KINDS = {"learn", "style", "recall_index", "graph"}
@@ -185,6 +204,8 @@ def feature(kind: str, tag: str, model: str = "") -> str:
         return "vision"
     if kind in _VOICE_KINDS:
         return "voice"
+    if kind == "opencode":
+        return "opencode"
     return "other"
 
 
@@ -238,7 +259,9 @@ class Usage:
 
         A row whose model has no price now keeps its old cost, so switching away from the proxy never erases history."""
         with self.db.tx() as c:
-            rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens FROM usage_log").fetchall()
+            # A cost OpenCode reported is what it billed; only our own pricing is recomputed.
+            rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens FROM usage_log "
+                             "WHERE cost_source IS NOT 'opencode'").fetchall()
             n = 0
             for r in rows:
                 cost = pricing.cost(settings, r["model"], r["prompt_tokens"], r["completion_tokens"], r["cached_tokens"], r["cache_write_tokens"])
@@ -289,6 +312,7 @@ class Usage:
         by_project: dict[str, dict[str, Any]] = {}
         by_tag: dict[str, dict[str, Any]] = {}
         by_feature: dict[str, dict[str, Any]] = {}
+        by_source: dict[str, dict[str, Any]] = {k: _bucket() for k in SOURCES}
         model_ids: dict[str, set[str]] = {}
         total = _bucket()
         for r in rows:
@@ -306,6 +330,7 @@ class Usage:
             model_ids.setdefault(name, set()).add(r["model"])
             _add(by_feature.setdefault(feature(r["kind"], r.get("tag") or "", r["model"]), _bucket()), r)
             _add(by_kind.setdefault(r["kind"], _bucket()), r)
+            _add(by_source.setdefault(r.get("source") or "grain", _bucket()), r)
             _add(by_tag.setdefault(r.get("tag") or "untagged", _bucket()), r)
             _add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", _bucket()), r)
 
@@ -319,6 +344,7 @@ class Usage:
             "by_model": sorted(({"model": m, "ids": sorted(model_ids[m]), **_finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
             "by_feature": [{"feature": k, "label": FEATURES[k], **_finish(by_feature[k])} for k in FEATURES if k in by_feature],
             "by_kind": [{"kind": k, **_finish(b)} for k, b in by_kind.items()],
+            "by_source": [{"source": k, "label": SOURCES.get(k, k), **_finish(b)} for k, b in by_source.items()],
             "by_tag": sorted(({"tag": t, **_finish(b)} for t, b in by_tag.items()), key=lambda x: -x["cost"]),
             "by_project": sorted(({"project": p, **_finish(b)} for p, b in by_project.items()), key=lambda x: -x["tokens"]),
         }

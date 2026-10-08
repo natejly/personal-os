@@ -121,7 +121,7 @@ test('delete project: chats and memories go to the trash, docs fall back to pers
   clean(grain)
 })
 
-test('sidebar group lists only the newest 4 chats (no switch), View all opens Chats, notes sit under Context', async ({ grain }) => {
+test('sidebar group lists only the newest 4 chats (no switch), the group name opens Chats, notes sit under Context', async ({ grain }) => {
   const { page, api } = grain
   const p = await api('/projects', { method: 'POST', body: { name: 'Mixed' } })
   for (let i = 1; i <= 5; i++) {
@@ -138,7 +138,7 @@ test('sidebar group lists only the newest 4 chats (no switch), View all opens Ch
   // the project group has no Chats | Documents switch and no files view of its own
   await expect(group.locator('.cf-seg')).toHaveCount(0)
   await expect(group.locator('.cf-row')).toHaveCount(0)
-  await group.getByRole('button', { name: 'View all' }).click()
+  await group.locator('.project-name').click()
   await expect(page.getByRole('heading', { name: 'Mixed' })).toBeVisible()
   await expect(page.locator('.chat-row')).toHaveCount(5)
   await expect(page.locator('.pf .cf-name', { hasText: 'note 2' })).toBeVisible()

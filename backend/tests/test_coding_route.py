@@ -214,3 +214,40 @@ def test_allow_all_floor_still_decides_its_own_cases(home: Path, tmp_path: Path)
     assert coding_route.check(tb, "shell_run", rm, ctx) is None
     assert (shell.floor(tb, rm, ctx) or ("",))[0] == "destructive"
     assert permrules.resolve("shell_run", {"command": "rm -rf /"}, "on", False, rules={}).refusal
+
+
+@pytest.mark.parametrize("mode", ["auto", "manual"])
+def test_run_python_bridge_and_workflow_steps_refuse_before_any_card(home: Path, tmp_path: Path, mode: str) -> None:
+    """A repo edit through run_python's tool bridge or a workflow tool step is refused before an approval card, the
+    same as the model's own calls (Toolbox.precheck), rather than carded and then refused by Toolbox.call."""
+    from types import SimpleNamespace
+
+    from personal_os import toolbridge, workflows
+
+    tb, cfg = make(tmp_path, permissionMode=mode)
+    edit = {"path": str(home / "repo/src/a.py"), "old": "x = 1", "new": "x = 2"}
+    cards: list[str] = []
+
+    async def approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        cards.append(name)
+        return True
+
+    b = toolbridge.Bridge(tb, {**CHAT, "settings": cfg}, ["fs_edit"], {"fs_edit": "ask"}, approve)
+    out = asyncio.run(b.handle("fs_edit", dict(edit)))
+    assert refused(out["result"]) and cards == [] and b.log[-1]["ok"] is False, out
+
+    eng = workflows.Engine(SimpleNamespace(set_step=lambda *a, **k: None), tb, None, None, lambda: cfg)
+
+    async def ask(*_a: Any, **_k: Any) -> bool:
+        cards.append("workflow")
+        return True
+
+    eng._ask = ask  # type: ignore[method-assign]
+    run = {"id": "r1", "definition": {"steps": [{"id": "s", "tool": "fs_edit"}]}}
+    ctx = {**CHAT, "settings": cfg, "modes": {"fs_edit": "ask"}}
+    step = {"id": "s", "tool": "fs_edit", "args": edit, "approval": "required"}
+    for coro in (eng._approve_step(run, ctx, step, {}, {}, asyncio.Event()),
+                 eng._tool_step(run, ctx, step, dict(edit), asyncio.Event())):
+        with pytest.raises(workflows._StepFailed, match="coding_session_start"):
+            asyncio.run(coro)
+    assert cards == [] and (home / "repo/src/a.py").read_text() == "x = 1\n"

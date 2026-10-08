@@ -137,8 +137,8 @@ function CodingSessionCard(props: ToolCardProps): JSX.Element {
   const repo = str(a.repo_path)
   const branch = str(a.branch)
   const mode = str(a.permission_mode)
-  // OpenCode on a repo's main checkout gets its own worktree unless new_worktree is false (codingagents.start)
-  const worktree = a.new_worktree === true || (a.new_worktree === undefined && agent === 'opencode')
+  // On a repo's main checkout either agent gets its own worktree unless new_worktree is false (codingagents.start)
+  const worktree = a.new_worktree !== false
   const where = worktree ? `a new worktree of ${repo}${branch ? ` on branch ${branch}` : ''}` : repo
   const listed = Array.isArray(p.data?.sessions) ? (p.data?.sessions as CodingSession[]) : null
   const subject = tool === 'coding_session_list' ? undefined : live?.name || str(a.name) || id || undefined

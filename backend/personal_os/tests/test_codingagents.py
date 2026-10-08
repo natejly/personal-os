@@ -106,7 +106,7 @@ class Validation(CodingTestCase):
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", new_worktree=True, branch="taken")
 
-    async def test_opencode_gets_a_worktree_on_a_main_checkout_unless_told_otherwise(self) -> None:
+    async def test_either_agent_gets_a_worktree_on_a_main_checkout_unless_told_otherwise(self) -> None:
         launched: list[str] = []
 
         async def launch(row: dict[str, Any], *_a: Any) -> None:
@@ -129,8 +129,14 @@ class Validation(CodingTestCase):
             self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
         self.job_files("deadbeef", "working")
         with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True)):
-            row = await self.cs.start("claude", str(self.repo), "x")  # Claude Code's default is unchanged
-            self.assertEqual(row["branch"], None)
+            row = await self.cs.start("claude", str(self.repo), "Fix it")  # Claude Code too
+            wt = str(self.repo / ".claude" / "worktrees" / row["branch"].rsplit("/", 1)[-1])
+            self.assertRegex(row["branch"], r"^grain/fix-it-[0-9a-f]{4}$")
+            self.assertEqual((row["worktree"], self.fake.calls[-2][-5:-1]), (wt, ["worktree", "add", "-b", row["branch"]]))
+            n = len(self.fake.calls)
+            row = await self.cs.start("claude", str(self.repo), "in place", new_worktree=False)
+            self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
+            self.assertFalse(any("worktree" in c for c in self.fake.calls[n:]))
 
     async def test_permission_mode_and_agent_rules(self) -> None:
         with self.assertRaises(ca.CodingError):

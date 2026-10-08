@@ -5,27 +5,22 @@ import { openLibrary, PY, STUB } from './helpers/library.mjs'
 
 const quoted = (p) => `"${p}"`
 
-test('Allow all domains and MCP servers: toggle saves at once and shows a red composer pill', async ({ grain }) => {
+test('Allow all domains and MCP servers: lives in Settings > Permissions with the domain list, no composer pill', async ({ grain }) => {
   const { page, api } = grain
-  const pill = page.locator('[data-allow-all-connections]')
   await newChat(page)
   await expect(msgBox(page)).toBeVisible()
-  await expect(pill).toHaveCount(0)
   await openSettings(page, 'Permissions')
+  await expect(dialog(page).getByText('Allowed hosts after reading untrusted content')).toBeVisible()
   const toggle = dialog(page).getByLabel('Allow all domains and MCP servers')
   await expect(toggle).not.toBeChecked()
   await toggle.evaluate((el) => el.click()) // the real input is visually hidden behind the switch
   await expect.poll(async () => (await api('/settings')).allowAllConnections).toBe(true)
   await closeSettings(page)
-  await expect(pill).toBeVisible()
-  await expect(pill).toContainText('All domains + MCP')
-  // the pill opens Settings on Permissions
-  await pill.click()
-  await expect(dialog(page).getByLabel('Allow all domains and MCP servers')).toBeChecked()
+  await expect(page.locator('.composer-footer')).not.toContainText('All domains')
+  await openSettings(page, 'Permissions')
   await dialog(page).getByLabel('Allow all domains and MCP servers').evaluate((el) => el.click())
   await expect.poll(async () => (await api('/settings')).allowAllConnections).toBe(false)
   await closeSettings(page)
-  await expect(pill).toHaveCount(0)
   expect(grain.consoleErrors).toEqual([])
 })
 

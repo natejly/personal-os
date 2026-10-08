@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Settings } from '@shared/types'
-import RunSafetySettings, { SnapshotToggle } from './RunSafetySettings'
+import RunSafetySettings, { SnapshotToggle, TrustExternalToggle } from './RunSafetySettings'
 
 const render = (draft: Partial<Settings>): string =>
   renderToStaticMarkup(createElement(RunSafetySettings, { draft: draft as Settings, patch: () => {} }))
@@ -29,6 +29,16 @@ test('the retired run-safety controls are gone', () => {
   const html = render({})
   assert.ok(!html.includes('Unattended runs'))
   assert.ok(!html.includes('Review gate'))
+})
+
+test('trust external content is off by default and says it reduces protection', () => {
+  const off = renderToStaticMarkup(createElement(TrustExternalToggle, { draft: {} as Settings, patch: () => {} }))
+  assert.ok(off.includes('Trust content from outside Grain'))
+  assert.ok(off.includes('Off by default'))
+  assert.doesNotMatch(off, /type="checkbox"[^>]*checked/)
+  const on = renderToStaticMarkup(createElement(TrustExternalToggle, { draft: { trustExternalContent: true } as Settings, patch: () => {} }))
+  assert.match(on, /type="checkbox"[^>]*checked/)
+  assert.ok(render({ trustExternalContent: true }).includes('Trust content from outside Grain'), 'the Permissions block carries it')
 })
 
 test('the Advanced sections the run-safety block sits beside are exported from one place', async () => {

@@ -558,10 +558,10 @@ export default function SettingsModal(): JSX.Element {
                 <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
                 <GrantsPanel draft={draft} patch={patch} />
                 <div className="setting-row">
-                  <span className="toggle-text"><b>File edits</b><small>Ask: review each diff. Accept all: write it and still show the diff. You can undo either from the file's history.</small></span>
+                  <span className="toggle-text"><b>File edits</b><small>Diff review: each edit lands as a diff and waits for you to accept or reject it. Full agentic editing: edits are written without waiting; the diff is still shown and you can undo it from the file&rsquo;s history. Full agentic editing reduces protection.</small></span>
                   <div className="seg" role="group" aria-label="File edits">
-                    <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} aria-pressed={(draft.docEditMode ?? 'review') === 'review'} onClick={() => patch({ docEditMode: 'review' })}>Ask</button>
-                    <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
+                    <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} aria-pressed={(draft.docEditMode ?? 'review') === 'review'} onClick={() => patch({ docEditMode: 'review' })}>Diff review</button>
+                    <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} aria-pressed={draft.docEditMode === 'apply'} onClick={() => patch({ docEditMode: 'apply' })}>Full agentic editing</button>
                   </div>
                 </div>
               </AdvGroup>

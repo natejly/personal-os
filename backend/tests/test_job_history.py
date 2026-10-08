@@ -220,3 +220,52 @@ def test_runs_listing_interleaves_skips_and_stats_leave_them_out() -> None:
     st = client.get(f"/jobs/{j['id']}/stats").json()
     assert st["runs"] == 2 and st["success_rate"] == 0.5 and st["skipped"] == 1
     assert "skipped" not in client.get(f"/jobs/{j['id']}/runs.csv").text, "the CSV stays one row per run"
+
+
+# ---- the Agent Inbox's own delete: the journal row goes, the chat stays ---------------------------
+
+def test_delete_one_inbox_run_removes_the_journal_and_keeps_the_chat() -> None:
+    conv = client.post("/conversations", json={"title": "kept chat"}).json()
+    j = mkjob("del")
+    rid = "del-run-1"
+    store.create(rid, conv["id"], "job", {"job_id": j["id"], "job": j["name"]})
+    store.update(rid, status="done", ended_at=time.time())
+    store.append(rid, 1, "tool_result", {"n": 1})
+    store.mark_seen([rid])
+    store.open_approval("call-del-1", rid, "shell_run", {"command": "ls"})
+    appmod.proposals.create(run_id=rid, tool="gmail_send", args={"to": "a@b.com", "body": "hi"})
+    assert store.get(rid) is not None and store.events(rid) and rid in store.seen([rid])
+    assert store.approvals(run_id=rid) and appmod.proposals.list(run_id=rid)
+    assert any(r["run_id"] == rid for r in client.get("/inbox").json()["while_you_were_away"])
+
+    r = client.delete(f"/inbox/runs/{rid}")
+    assert r.status_code == 200 and r.json()["deleted"] == 1
+    assert store.get(rid) is None, "the agent_runs row is gone from the DB"
+    assert store.events(rid) == [], "its run_events cascaded"
+    assert rid not in store.seen([rid]), "its inbox_seen row is gone"
+    assert store.approvals(run_id=rid) == [], "its inbox approval rows cascaded"
+    assert appmod.proposals.list(run_id=rid) == [], "its inbox proposal rows cascaded"
+    assert not any(x["run_id"] == rid for x in client.get("/inbox").json()["while_you_were_away"])
+
+    kept = client.get(f"/conversations/{conv['id']}")
+    assert kept.status_code == 200 and kept.json()["title"] == "kept chat", "chat history is untouched"
+
+
+def test_deleting_a_running_run_is_refused() -> None:
+    j = mkjob("busy")
+    rid = add_run(j["id"], "running", start=NOW - 10, dur=None)
+    assert client.delete(f"/inbox/runs/{rid}").status_code == 409
+    assert store.get(rid) is not None
+
+
+def test_clear_inbox_deletes_the_window_and_leaves_running_runs() -> None:
+    j = mkjob("clear")
+    done = add_run(j["id"], "done", start=NOW - 50)
+    running = add_run(j["id"], "running", start=NOW - 40, dur=None)
+    r = client.delete("/inbox?hours=1&limit=200")
+    assert r.status_code == 200
+    body = r.json()
+    assert store.get(done) is None, "a finished run in the window is gone"
+    assert store.get(running) is not None, "a run still going is left alone"
+    assert body["deleted"] >= 1 and body["skipped"] >= 1
+    assert client.delete(f"/inbox/runs/{done}").status_code == 404, "already gone"

@@ -87,6 +87,17 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)
 
 
+def test_trust_external_content_lifts_only_the_tainted_shell_card(box: Box) -> None:
+    trusted = {"tainted": True, "settings": {**box.settings, "shellNetwork": True, "trustExternalContent": True}}
+    assert not box.tb.forces_ask("shell_run", {"command": "ls"}, trusted)
+    assert box.tb.gate("shell_run", "on", trusted, {"command": "ls"}) == "on", "the taint-forced card is gone"
+    assert box.tb.forces_ask("shell_run", {"command": "ls", "unsandboxed": True}, trusted), "unsandboxed still asks"
+    # The destructive floor is not taint-driven, so the setting never touches it.
+    from personal_os import permrules
+    assert permrules.destructive("rm -rf build", cwd="/Users/someone/proj")
+    assert permrules.allow_all_floor("shell_run", {"command": "rm -rf build"}, cwd="/Users/someone/proj")
+
+
 def test_cwd_is_any_folder_except_the_protected_ones(tmp_path: Path, box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     other = tmp_path / "elsewhere"
     other.mkdir()

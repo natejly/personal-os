@@ -2747,10 +2747,10 @@ def _register_docs(self: Toolbox) -> None:
                 "note": "Not applied yet. The user sees the diff in the chat and accepts or rejects it. "
                         "Tell them what you changed and that it is waiting. Do not paste the file back."})
     R("doc_edit", ToolSpec("doc_edit", (
-        "Revise one of the user's editor files. The change is always shown to them as a diff. When file edits are set "
-        "to ask, it stays pending until they accept or reject it. When they are set to accept all, it is written "
-        "immediately. The result's status says which happened — do not claim the file was updated unless status is "
-        "'applied'.\n"
+        "Revise one of the user's editor files. The change is always shown to them as a diff. Under Diff review (the "
+        "default) it stays pending until they accept or reject it. Under Full agentic editing it is written "
+        "immediately, and they can still undo it from the file's history. The result's status says which happened: "
+        "'pending_review' or 'applied'. Do not claim the file was updated unless status is 'applied'.\n"
         "Pick one form. 'edits' — targeted find/replace, preferred: each 'find' must be copied exactly from doc_read "
         "and must occur exactly once. 'append' — add markdown at the end. 'content' — replace the whole body (use "
         "sparingly; it makes a large diff). 'title' — rename. Always pass a short 'summary' naming what you changed: "

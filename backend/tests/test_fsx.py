@@ -321,6 +321,23 @@ def test_writes_need_approval_only_for_credential_stores_and_after_untrusted_con
     assert "unattended" in bg["error"]
 
 
+def test_trust_external_content_lifts_only_the_taint_write_card(home: Path, tmp_path: Path) -> None:
+    tb, _ = make(home, tmp_path)
+    inside = home / "proj" / "ok.txt"
+    inside.write_text("a")
+    trusted = {"conversation_id": "c1", "tainted": True, "taint_sources": ["fetch_url"], "settings": {"trustExternalContent": True}}
+    assert not tb.fs_needs_ask("fs_edit", {"path": str(inside), "old": "a", "new": "b"}, trusted)
+    assert not tb.fs_needs_ask("fs_mkdir", {"path": str(tmp_path / "elsewhere")}, trusted)
+    # a credential store still asks, for a read and a write
+    ssh = home / ".ssh"
+    ssh.mkdir()
+    assert tb.fs_needs_ask("fs_grep", {"pattern": "PRIVATE", "root": str(ssh)}, trusted)
+    assert tb.fs_needs_ask("fs_mkdir", {"path": str(ssh / "d")}, trusted)
+    # the hard refusal of an unattended run's outside write is untouched by the setting
+    bg = call(tb, "fs_mkdir", {**trusted, "proposal_only": True, "fs_outside_ok": True}, path=str(home / "proj" / "x"))
+    assert "unattended" in bg["error"]
+
+
 def test_the_protected_places_are_refused_whatever_the_approval(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Grain's own data folder (its database and secrets) and the Grain app: no read, write, move or trash, in any mode, with
     or without the user's yes; the active desk's own workspace inside that folder is the one way in."""

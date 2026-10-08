@@ -164,6 +164,7 @@ def test_here_documents_work_inside_the_sandbox(box: Box) -> None:
 
 @needs_seatbelt
 def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
+    box.settings["codingRoute"] = False  # the OS sandbox is under test here, not the coding route that refuses repo writes first
     (box.root / ".git" / "hooks").mkdir(parents=True)
     (box.root / ".git" / "config").write_text("[core]\n")
     r = box.run("shell_run", command="echo x > .git/hooks/pre-commit; echo y >> .git/config; echo z > .git/HEAD; echo done")
@@ -179,6 +180,7 @@ PROTECTED = (".zshrc", ".bash_profile", ".envrc", ".gitconfig", ".mcp.json", ".g
 
 @needs_seatbelt
 def test_rc_files_and_tool_config_are_not_writable_inside_a_root(box: Box) -> None:
+    box.settings["codingRoute"] = False  # .git/info/exclude makes the root a repo; the sandbox is what is under test
     for rel in PROTECTED:
         (box.root / rel).parent.mkdir(parents=True, exist_ok=True)
         (box.root / rel).write_text("orig\n")
@@ -489,6 +491,44 @@ def test_jobs_belong_to_their_conversation_and_die_with_its_run(box: Box) -> Non
         assert "No shell job" in (await box.tb.call("shell_poll", {"job_id": a["job_id"]}, other))["error"]
         assert await box.tb.shell.kill_conversation("c1") == 1
         assert box.tb.shell.jobs[a["job_id"]].status == "killed"
+    asyncio.run(go())
+
+
+@needs_seatbelt
+def test_a_workers_jobs_outlive_the_reply_and_end_with_the_worker(box: Box) -> None:
+    async def go() -> None:
+        reply = await box.tb.call("shell_run", box._args("shell_run", {"command": "sleep 30", "background": True}),
+                                  dict(box.ctx, run_id="run_reply"))
+        mine = await box.tb.call("shell_run", box._args("shell_run", {"command": "sleep 30", "background": True}),
+                                 dict(box.ctx, run_id="sa_worker"))
+        jobs = box.tb.shell.jobs
+        assert jobs[mine["job_id"]].run_id == "sa_worker"
+        # the reply's teardown ends its own jobs, not the worker's
+        assert await box.tb.shell.kill_conversation("c1", run_id="run_reply") == 1
+        assert jobs[reply["job_id"]].status == "killed" and jobs[mine["job_id"]].live()
+        # the worker ending ends its jobs
+        assert await box.tb.shell.kill_run("sa_worker") == 1
+        assert jobs[mine["job_id"]].status == "killed"
+        assert await box.tb.shell.kill_run("") == 0
+    asyncio.run(go())
+
+
+@needs_seatbelt
+def test_shell_poll_wait_s_returns_on_new_output_not_after_the_whole_wait(box: Box) -> None:
+    async def go() -> None:
+        a = await box.arun("shell_run", command="sleep 1; echo tick; sleep 30", background=True)
+        t0 = time.monotonic()
+        out = await box.arun("shell_poll", job_id=a["job_id"], wait_s=20)
+        assert "tick" in out["output"] and out["status"] == "running" and time.monotonic() - t0 < 10
+        t0 = time.monotonic()
+        quiet = await box.arun("shell_poll", job_id=a["job_id"], wait_s=0.6)  # nothing new: it waits, then says so
+        assert quiet["output"] == "" and 0.5 <= time.monotonic() - t0 < 5
+        job = box.tb.shell.jobs[a["job_id"]]
+        assert job.out_at > job.started
+        await box.tb.shell.kill(job)
+        done = await box.arun("shell_poll", job_id=a["job_id"], wait_s=20)  # an ended job never waits
+        assert done["status"] == "killed"
+        assert "wait_s" in (await box.arun("shell_poll", job_id=a["job_id"], wait_s="soon"))["error"]
     asyncio.run(go())
 
 

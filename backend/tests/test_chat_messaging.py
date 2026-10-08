@@ -293,6 +293,25 @@ def test_identical_messages_are_deduped() -> None:
     assert "already sent" in again["error"]
 
 
+def test_an_echo_back_the_other_way_is_deduped_too() -> None:
+    a, b, c = chat("Echo A"), chat("Echo B"), chat("Echo C")
+    link = appmod.chat_links.send(a, b, "Please check the build", 1)
+    assert "already sent" in (appmod.chat_links.refusal(b, a, "please check  the build", 2) or "")  # the same text bounced back
+    appmod.chat_links._set(link["id"], status="replied", reply="The build is green")
+    assert "already sent" in (appmod.chat_links.refusal(a, b, "the build is green", 2) or "")   # its reply forwarded back
+    assert appmod.chat_links.refusal(a, c, "Please check the build", 1) is None                 # another pair is not affected
+
+
+def test_a_reply_turn_carries_its_depth_so_the_cap_holds_on_the_way_back() -> None:
+    a, b = chat("Back A"), chat("Back B")
+    link = appmod.chat_links.send(a, b, "deep question", chatlink.MAX_DEPTH)
+    appmod.chat_links._set(link["id"], status="replied", reply="deep answer")
+    _text, rec = appmod.chat_links.turn("chat_reply", appmod.chat_links.get(link["id"]))  # type: ignore[misc]
+    assert rec["depth"] == chatlink.MAX_DEPTH
+    over = call("message_chat", ctx_of(a, chat_link=rec), chat_id=b, text="and another thing")
+    assert "chain" in over["error"]
+
+
 def test_ping_pong_between_a_pair_is_capped() -> None:
     a, b = chat("Ping"), chat("Pong")
     for i in range(chatlink.PAIR_MAX):

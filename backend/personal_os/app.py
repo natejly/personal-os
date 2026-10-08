@@ -2506,6 +2506,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             steer check and `done`, so a steer is either folded in or already answered with a 409."""
             if not desk_id:  # a worker's jobs are its own (keyed to its run): they outlive this reply and end with the worker
                 await toolbox.shell.kill_conversation(conv_id, run_id=run.run_id if run else None)
+            if stop.is_set() and run is not None:  # a Stopped reply stops its coding sessions; a finished one leaves them running
+                with contextlib.suppress(Exception):
+                    await coding.stop_owned(run.run_id, f"the {'desk run' if desk_id else 'reply'} that started it was stopped")
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a breaker stop: one tool-free call, abandoned if it hangs past FINAL_ROUND_SECONDS."""
@@ -6842,6 +6845,12 @@ async def _shutdown() -> None:
     for c in live:
         subagent_mgr.halt(c, "shutdown")  # each writes its transcript and ends interrupted (saying why), so it can be resumed
     await asyncio.gather(*(asyncio.wait_for(c.finished.wait(), 5) for c in live), return_exceptions=True)
+    # Sessions whose owner (a reply or subagent) is still running stop with it; ones whose owner already finished were
+    # left working on purpose and outlive the app.
+    owners = bus.live_ids() | {c.id for c in subagent_mgr.running()}
+    await asyncio.gather(*(asyncio.wait_for(coding.stop_owned(r, "Grain was shut down while it was running"), 10) for r in owners),
+                         return_exceptions=True)
+    coding.closing = True  # past this point a run's teardown leaves its sessions alone (stop_owned)
     await telegram_bridge.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there

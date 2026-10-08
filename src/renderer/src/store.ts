@@ -33,7 +33,7 @@ import * as panes from './lib/panelPanes'
 import type { PanelState, Pane } from './lib/panelPanes'
 import { uploadToast, uploadTooBig, type UploadOutcome } from './lib/uploadNote'
 import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
-import { stepZoom } from './lib/zoom'
+import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
 import { inputChip } from './lib/deskFiles'
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
 
@@ -964,8 +964,8 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'daily-note') { s.openFiles('notes'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action.startsWith('zoom:')) {
-        const cur = s.settings.uiZoom ?? 100
-        void s.saveSettings({ uiZoom: action === 'zoom:reset' ? 100 : stepZoom(cur, action === 'zoom:in' ? 1 : -1) })
+        const cur = s.settings.uiZoom ?? DEFAULT_ZOOM
+        void s.saveSettings({ uiZoom: action === 'zoom:reset' ? DEFAULT_ZOOM : stepZoom(cur, action === 'zoom:in' ? 1 : -1) })
       }
       else if (action === 'chat:next') s.stepChat(1)
       else if (action === 'chat:prev') s.stepChat(-1)

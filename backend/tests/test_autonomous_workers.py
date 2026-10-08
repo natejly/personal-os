@@ -232,6 +232,7 @@ def test_forced_delegation_narrows_an_ask_desk_after_the_threshold() -> None:
     assert {"search_memory", "delegate"} <= set(front[0]["tools"])
     narrowed = set(front[1]["tools"])
     assert "delegate" in narrowed and "search_memory" not in narrowed and narrowed <= W.FORCED_ALLOW, narrowed
+    assert "deep_research" in W.FORCED_ALLOW
     assert {"desk_done", "desk_ask"} & narrowed, "a desk can still finish or ask"
     refused = [m for m in front[2]["messages"] if m["role"] == "tool" and "not available in this reply any more" in str(m["content"])]
     assert len(refused) == 1

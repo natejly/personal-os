@@ -3547,6 +3547,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # to show, its row goes like a silent wake's — the marker is never a message the user can see.
     silent = silent or (bool(text) and not error and not stop.is_set() and workers_mod.is_silent(text)
                         and not tool_events and not tool_ctx.get("reply_attachments"))
+    # From here on the reply is what the user sees: the stored row, follow-up chips, learning and pushes never get the marker.
+    text = workers_mod.strip_no_reply(text)
     if silent:
         if run is not None:
             run.silent = True  # the Telegram bridge reads this: a removed reply is not "Stopped."
@@ -3555,8 +3557,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         convos.touch(conv_id)
         yield "removed_message", {"id": am["id"]}
     else:
-        if text and workers_mod.is_silent(text):
-            text = ""  # the row stays for its tool cards; the sentinel itself is never stored
         convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning,
                               outcome=outcome, error_kind=error_kind, attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)

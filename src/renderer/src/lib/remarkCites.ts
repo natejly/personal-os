@@ -59,7 +59,7 @@ export default function remarkCites(opts: { known: ReadonlySet<number> }): (tree
 }
 
 /** What a chip knows about excerpt n: its source label and, once the reply is saved, the quote it was checked against. */
-export interface CiteInfo { label: string; quote?: string; weak?: boolean }
+export interface CiteInfo { label: string; quote?: string; weak?: boolean; /** The number the chip shows: its place in first-citation order (the sources footer uses the same). */ shown?: number }
 
 export const citeInfo = (c: Citation): CiteInfo => ({ label: citeLabel(c), quote: c.quote || undefined, weak: c.support === 'weak' })
 

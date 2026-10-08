@@ -3,19 +3,19 @@
 /* Hangs off the caret inside .md-surface (position: relative). Placement is computed in JS so it can flip. */
 .caret-menu {
   position: absolute; z-index: 20;
-  min-width: 190px; max-width: min(320px, 90%); max-height: 240px; overflow-y: auto;
+  min-width: 190px; max-width: min(320px, 90%); max-height: 280px; overflow-y: auto; overflow-x: hidden;
   padding: 4px;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   font-family: var(--font); font-size: 12.5px;
 }
 .caret-menu-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: baseline; justify-content: flex-start; gap: 10px; min-width: 0; text-align: left;
   padding: 5px 8px; border-radius: 5px; cursor: pointer; color: var(--text);
 }
 .caret-menu-row.on { background: var(--active); }
-.caret-menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.caret-menu-hint { color: var(--text-faint); font-family: var(--mono); font-size: 11px; flex: none; }
+.caret-menu-label { flex: none; font-weight: 600; white-space: nowrap; }
+.caret-menu-hint { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-family: var(--font); font-size: 11.5px; text-align: left; }
 
 /* Colour only: the mirror's metrics must not change. */
 .tk-tag { color: color-mix(in srgb, var(--accent) 65%, var(--text-muted)); }

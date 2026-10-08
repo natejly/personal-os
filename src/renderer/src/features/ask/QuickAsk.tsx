@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { isClear } from '../../lib/workers'
 import { Check, Clipboard, Copy, ExternalLink, Plus } from 'lucide-react'
 import MessageView, { PendingUserMessage } from '../../components/Message'
 import { quickAskMessage, quickAskTitle } from '../../lib/quickAsk'
+import { stripNoReply } from '../../lib/noReply'
 import { useChatFace, useConversation, useIsStreaming, usePendingSends, useStore, useStreamingMessageId } from '../../store'
 
 /**
@@ -85,7 +87,7 @@ export default function QuickAsk(): JSX.Element {
     input.current?.focus()
   }
 
-  const lastReply = [...msgs].reverse().find((m) => m.role === 'assistant')?.content ?? ''
+  const lastReply = stripNoReply([...msgs].reverse().find((m) => m.role === 'assistant')?.content)
   const copy = (): void => {
     void navigator.clipboard.writeText(lastReply)
     setCopied(true)
@@ -120,7 +122,7 @@ export default function QuickAsk(): JSX.Element {
           <div ref={scroll} className="messages" style={{ flex: 'none', maxHeight: 460, overflowY: 'auto' }}>
             <div className="widget" style={{ height: 'auto' }}>
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
+                {msgs.map((m) => isClear(m) ? <div key={m.id} className="day-divider" role="separator">Context cleared</div> : <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}
               </div>
             </div>

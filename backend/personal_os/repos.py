@@ -85,6 +85,10 @@ def cjk_like(col: str, text: str) -> tuple[str, list[str]]:
 
 
 # ---------------- Projects ----------------
+# The model's replay of a chat starts after its latest live `/clear` marker (Conversations.clear_context). Binds conv_id.
+AFTER_CLEAR = ("AND rowid > (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE conversation_id=? AND kind='clear' "
+               "AND superseded_at IS NULL)\n")
+
 class Projects:
     def __init__(self, db: Database):
         self.db = db
@@ -145,9 +149,9 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-# New chats start at medium. The stored value "default" is a separate choice: it omits
+# New chats start at high. The stored value "default" is a separate choice: it omits
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
-DEFAULT_EFFORT = "medium"
+DEFAULT_EFFORT = "high"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True,
                          "useStyle": True, "draftMode": False, "autoLearn": True, "useTools": True, "tools": {},
                          "responseStyle": "default", "responseStyleText": ""}
@@ -229,8 +233,11 @@ class Conversations:
         # (a dotted capital I becomes two characters) and shift every offset.
         needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
         out: dict[str, dict[str, Any]] = {}
+        from .workers import is_silent  # here, not at the top: workers imports half the app
         for r in rows:
             snip = r["snip"]
+            if is_silent(snip.replace("\x02", "").replace("\x03", "")):
+                continue  # a stored NO_REPLY is not something the user was told
             if not fts_ok:
                 m = needle.search(snip)
                 if m is None:  # LIKE's own folding found it where Python's does not: head of the row, unmarked
@@ -549,14 +556,18 @@ class Conversations:
                   r["created_at"], r["outcome"], r["error_kind"], r["kind"]) for r in rows])
         return self.get(cid)  # type: ignore[return-value]
 
+    def clear_context(self, conv_id: str) -> dict[str, Any]:
+        """`/clear`: a visible marker row; the model's replay starts after the latest one (AFTER_CLEAR). History stays on screen."""
+        return self.add_message(conv_id, "system", "", kind="clear")
+
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT role, content, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL))\n"  # an assistant row's attachments are files it sent, not text to read
-                "AND superseded_at IS NULL\n"
+                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
-                (conv_id,),
+                (conv_id, conv_id),
             ).fetchall()
             return [{"role": r["role"], "content": self.model_content(c, r["content"], r["attachments"] if r["role"] == "user" else None)} for r in rows]
 
@@ -567,9 +578,9 @@ class Conversations:
             rows = c.execute(
                 "SELECT id, role, content, created_at, tool_events, attachments FROM messages WHERE conversation_id=?\n"
                 "AND (content != '' OR (role = 'user' AND attachments IS NOT NULL) OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
-                "AND superseded_at IS NULL\n"
+                "AND superseded_at IS NULL\n" + AFTER_CLEAR +
                 "ORDER BY created_at, rowid",
-                (conv_id,),
+                (conv_id, conv_id),
             ).fetchall()
             out = []
             for r in rows:

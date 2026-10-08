@@ -50,9 +50,10 @@ check(n > 0 and len(used["memories"]) + n == 200, "omitted count recorded")
 check([m["id"] for m in used["memories"]] == [str(i) for i in range(len(used["memories"]))], "order preserved, tail dropped")
 check(f"({n} more omitted)" in sys_, "omitted line shown")
 
-# the share scales with the window: a big window keeps every note, a small one fewer
+# the share shrinks with a small window, but a window past the fallback buys nothing: a 1M window trims like 128K
 big_w, used_big = build(memory_hits=mems, window=1_000_000)
-check(len(used_big["memories"]) == 200 and "memories" not in used_big["trimmed"], "a 1M window keeps everything")
+check([m["id"] for m in used_big["memories"]] == [m["id"] for m in used["memories"]] and used_big["trimmed"] == used["trimmed"],
+      "a 1M window is capped at the fallback's share")
 small, used_small = build(memory_hits=mems, window=8000)
 check(estimate_tokens("## What you remember about the user" + mem_block(small)) <= limits.context_shares(8000)["memories"], "small window share honoured")
 check(len(used_small["memories"]) < len(used["memories"]), "a small window keeps fewer notes than the default")

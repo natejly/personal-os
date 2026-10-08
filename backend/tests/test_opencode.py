@@ -103,7 +103,7 @@ def test_opencodes_own_config_and_state_are_left_alone(box: Box, monkeypatch: py
               "XDG_CACHE_HOME", "XDG_STATE_HOME"):
         assert k not in env, k
     assert env["HOME"] == os.path.expanduser("~")  # so it finds ~/.config/opencode and its own sessions
-    assert "-m" not in got["argv"]  # no model named: opencode's own default stands
+    assert got["argv"][got["argv"].index("-m") + 1] == opencode.DEFAULT_MODEL  # no model named: the Grain default
     assert not any(a.startswith("grain/") for a in got["argv"])
 
 
@@ -171,7 +171,7 @@ def test_runs_the_agent_sandboxed_in_the_working_folder_with_its_own_state(box: 
     r = box.run("opencode_run", prompt="write hello", cwd=str(box.root))
     assert r.get("exit_code") == 0, r
     assert (box.root / "hello.txt").read_text() == "hello from fake opencode\n"
-    assert r["session_id"] == "ses_fake" and r["model"] == "opencode default" and r["sandboxed"] is True
+    assert r["session_id"] == "ses_fake" and r["model"] == opencode.DEFAULT_MODEL and r["sandboxed"] is True
     assert "[write] hello.txt" in r["output"] and f"Wrote hello.txt in {box.root}" in r["output"]
     assert "write failed" not in r["output"]
     # the reply is tainted: a model with network access wrote the output
@@ -273,3 +273,118 @@ def test_patch_ignores_the_retired_working_folder(fake_home: Path) -> None:
         for value in (str(repo), str(fake_home), str(repo / "nope"), ""):  # nothing to validate any more: no 422
             r = client.patch(f"/conversations/{cid}", json={"settings": {"workingFolder": value}})
             assert r.status_code == 200 and "workingFolder" not in r.json()["settings"]
+
+
+# ---- a repo's main checkout gets its own worktree; the result says what changed ----
+FAKE_EDIT = """#!/bin/sh
+# Writes hello.txt unless the prompt says "nothing"; prints where it ran.
+case "$*" in *nothing*) ;; *) printf 'hi\\n' > hello.txt ;; esac
+echo "{\\"type\\":\\"text\\",\\"sessionID\\":\\"ses_g\\",\\"part\\":{\\"type\\":\\"text\\",\\"text\\":\\"ran in $(pwd)\\"}}"
+"""
+
+
+def _repo(root: Path) -> Path:
+    repo = root / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "a.txt").write_text("a\n")
+    g = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "init"]):
+        subprocess.run([*g, *args], cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+@pytest.fixture
+def fake_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = tmp_path / "bin" / "opencode"
+    fake.parent.mkdir()
+    fake.write_text(FAKE_EDIT)
+    fake.chmod(0o755)
+    monkeypatch.setattr(opencode, "binary", lambda: str(fake))
+    opencode._WORKTREES.clear()
+
+
+def _branches(repo: Path) -> list[str]:
+    return subprocess.run(["git", "branch", "--format=%(refname:short)"], cwd=repo, capture_output=True, text=True).stdout.split()
+
+
+@needs_seatbelt
+def test_main_checkout_runs_in_a_fresh_worktree_and_reports_the_change(box: Box, fake_edit: None) -> None:
+    repo = _repo(box.root)
+    r = box.run("opencode_run", prompt="write hello", cwd=str(repo / "src"))
+    assert r.get("exit_code") == 0, r
+    wt = Path(r["worktree"])
+    assert wt.parent == repo / ".claude" / "worktrees" and r["branch"].startswith("grain/opencode-write-hello-")
+    assert not (repo / "src" / "hello.txt").exists()                  # the checkout is untouched
+    assert (wt / "src" / "hello.txt").read_text() == "hi\n"           # it ran in the same subfolder of the worktree
+    assert f"ran in {wt / 'src'}" in r["output"]
+    assert r["git"]["status"] == "?? src/hello.txt" and r["git"]["branch"] == r["branch"] and "removed" not in r["git"]
+    assert r["git"]["base"] == subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+    # a follow-up goes back to the same worktree
+    r2 = box.run("opencode_run", prompt="write again", cwd=str(repo), continue_session=True)
+    assert r2["worktree"] == str(wt) and f"ran in {wt}" in r2["output"]
+    # a run started in the worktree itself stays there
+    r3 = box.run("opencode_run", prompt="write more", cwd=str(wt))
+    assert "worktree" not in r3 and r3["cwd"] == str(wt) and r3["git"]["status"] == "?? hello.txt\n?? src/hello.txt"
+
+
+@needs_seatbelt
+def test_a_worktree_left_without_changes_is_removed(box: Box, fake_edit: None) -> None:
+    repo = _repo(box.root)
+    r = box.run("opencode_run", prompt="change nothing", cwd=str(repo))
+    assert r.get("exit_code") == 0, r
+    assert r["git"]["removed"] is True and r["git"]["status"] == "clean" and "isolation" not in r
+    assert not Path(r["worktree"]).exists() and _branches(repo) == ["main"]
+
+
+@needs_seatbelt
+def test_in_place_edits_the_checkout_and_still_reports(box: Box, fake_edit: None) -> None:
+    repo = _repo(box.root)
+    r = box.run("opencode_run", prompt="write hello", cwd=str(repo), in_place=True)
+    assert r.get("exit_code") == 0, r
+    assert (repo / "hello.txt").exists() and "worktree" not in r and r["git"]["status"] == "?? hello.txt"
+    assert _branches(repo) == ["main"]
+
+
+@needs_seatbelt
+def test_outside_a_repo_there_is_no_worktree_and_no_git_report(box: Box, fake_edit: None) -> None:
+    r = box.run("opencode_run", prompt="write hello", cwd=str(box.root))
+    assert r.get("exit_code") == 0 and "worktree" not in r and "git" not in r
+
+
+@needs_seatbelt
+def test_a_background_run_points_at_a_blocking_poll_not_a_sleep(box: Box, fake_edit: None) -> None:
+    r = box.run("opencode_run", prompt="write hello", cwd=str(box.root), background=True)
+    assert r["background"] is True and f"shell_poll(job_id='{r['job_id']}', wait_s=300)" in r["note"], r
+    assert "do not sleep" in r["note"]
+
+
+@needs_seatbelt
+@pytest.mark.skipif(not shutil.which("opencode"), reason="needs the real opencode")
+def test_killing_the_job_ends_opencodes_private_server_too(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`opencode run` starts `opencode serve --stdio` in a process group of its own, so the job's group kill does not
+    reach it directly; it must still go when its parent does. No network: nothing reaches a provider."""
+    monkeypatch.setattr(opencode, "binary", lambda: shutil.which("opencode"))
+    monkeypatch.setattr(opencode, "ALLOW_HOSTS", [])
+
+    def children(pid: int) -> list[int]:
+        out = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True).stdout
+        return [int(l.split()[0]) for l in out.splitlines() if l.split()[1:2] == [str(pid)] and "serve" in l]
+
+    async def go() -> list[int]:
+        job, _ = await opencode.launch(box.tb, box.ctx, "say hi", cwd=str(box.root), background=True, timeout=120)
+        kids: list[int] = []
+        for _ in range(200):
+            await asyncio.sleep(0.05)
+            if kids := children(job.pid or 0):
+                break
+        await box.tb.shell.kill(job)
+        await asyncio.sleep(3)
+        return kids
+
+    kids = asyncio.run(go())
+    if not kids:
+        pytest.skip("opencode did not start a private server in time")
+    alive = [k for k in kids if subprocess.run(["ps", "-p", str(k)], capture_output=True).returncode == 0]
+    for k in alive:
+        os.kill(k, 9)
+    assert not alive

@@ -7,7 +7,18 @@ installation: it does not bundle opencode, configure its provider or relocate it
 It runs the way shell_run does: under the OS sandbox (sandbox.shell_profile: it may write anywhere but Grain's own
 data folder and app, the credential stores and the files that run code later), starting in the desk workspace in a
 desk, else the home folder, under the same job registry (shell.ShellJobs) so timeouts, background promotion,
-shell_poll and shell_kill all apply.
+shell_poll and shell_kill all apply. A kill or timeout signals the job's whole process group; `opencode run` puts its
+private `opencode serve --stdio` in a group of its own, but that server exits as soon as its parent's pipe closes.
+
+Isolation: a folder inside a git repository's main checkout (where the user, or another agent, may be working) is not
+edited in place. The run gets a fresh worktree on a new branch off the checkout's HEAD, at
+<repo>/.claude/worktrees/opencode-<task>-<hex> (the coding sessions' layout), and starts in the same subfolder there.
+Uncommitted changes in the checkout are not in it. in_place=true opts out; a folder that already is a linked worktree
+runs in place. continue_session=true reuses the worktree this chat's last run in that repo used. When a run ends in a
+repo the result carries a git report (worktree, branch, base, `git status --short`, diff stat and commits against the
+base, each capped); a worktree it created that ended with no change and no commit is removed again, never one with
+changes. The worktree is created and inspected by Grain itself with fixed git argv (no hooks, no fsmonitor); the
+sandbox profile is unchanged (the worktree and the repo's .git are already writable, .git/hooks and .git/config not).
 
 What it keeps from opencode's own install:
 
@@ -22,11 +33,15 @@ shell_run, and a reply that already read untrusted content must ask before it ca
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import secrets
 import shutil
+import subprocess
 import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 from . import mac, sandbox, shell
@@ -36,6 +51,11 @@ BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/
 INSTALL_HINT = ("opencode is not installed on this Mac. The user can install it with `brew install opencode` "
                 "(or `npm i -g opencode-ai`), then try again.")
 MAX_PROMPT = 20_000
+DEFAULT_MODEL = "fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash"  # opencode provider/model spelling; a caller model wins
+GIT_TIMEOUT, REPORT_CAP = 60, 4_000
+# (conversation id, repo top folder) -> the worktree its last run used: continue_session goes back to it. In memory: after
+# a restart the caller passes the worktree as cwd (the result named it).
+_WORKTREES: dict[tuple[str, str], dict[str, str]] = {}
 
 
 def binary() -> str | None:
@@ -83,6 +103,81 @@ def summarize(raw: str) -> tuple[str, str | None]:
     return "\n".join(out).strip(), session
 
 
+def _git(cwd: str | Path, *args: str) -> tuple[bool, str]:
+    """A fixed git command run by Grain itself (not the agent): (exit 0, stdout + stderr)."""
+    from .codingagents import GIT
+    try:
+        r = subprocess.run([*GIT, "-c", "core.hooksPath=/dev/null", *args], cwd=str(cwd), capture_output=True, text=True,
+                           timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, type(e).__name__
+    return r.returncode == 0, (r.stdout + r.stderr).strip()
+
+
+def repo_of(path: Path) -> tuple[Path, bool] | None:
+    """(the repo's top folder, whether `path` is in its main checkout rather than a linked worktree), or None outside a
+    repository's working tree."""
+    ok, out = _git(path, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
+    lines = out.splitlines()
+    if not ok or len(lines) != 3:
+        return None
+    top, gdir, common = lines
+    return Path(os.path.realpath(top)), os.path.realpath(gdir) == os.path.realpath(os.path.join(path, common))
+
+
+def isolate(where: Path, conversation_id: str | None, prompt: str, continue_session: bool) -> dict[str, Any] | None:
+    """The worktree a run in `where` should use ({worktree, branch, base, repo, cwd}), or None when `where` is not in a
+    repo's main checkout. Raises Refused when git cannot make one."""
+    from .codingagents import _slug, check_branch, worktree_path
+    found = repo_of(where)
+    if not found or not found[1]:
+        return None
+    top = found[0]
+    key = (conversation_id or "", str(top))
+    wt = _WORKTREES.get(key) if continue_session else None
+    if not (wt and os.path.isdir(wt["worktree"])):
+        ok, base = _git(top, "rev-parse", "HEAD")
+        if not ok:
+            raise Refused(f"{top} has no commit yet to branch a worktree from, so nothing was run.",
+                          "in_place=true to let opencode work in the checkout itself")
+        branch = f"grain/opencode-{_slug(prompt)[:24].strip('-')}-{secrets.token_hex(2)}"
+        check_branch(branch)
+        path = worktree_path(top, branch)
+        ok, out = _git(top, "worktree", "add", "-b", branch, str(path), base)
+        if not ok:
+            raise Refused(shell._scrub(f"git could not create a worktree for this run: {out[-300:]}"),
+                          "in_place=true to let opencode work in the checkout itself")
+        wt = _WORKTREES[key] = {"worktree": str(path), "branch": branch, "base": base, "repo": str(top)}
+    try:
+        sub = Path(wt["worktree"]) / where.relative_to(top)
+    except ValueError:
+        sub = Path(wt["worktree"])
+    return {**wt, "cwd": str(sub if sub.is_dir() else wt["worktree"])}
+
+
+def git_report(where: str, base: str | None, owned: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What a finished run left in its repo: status, diff stat and commits against `base`, each capped. A worktree this
+    module created (`owned`) that has neither a change nor a commit is removed with its branch (git refuses either if
+    anything is there)."""
+    def cap(text: str) -> str:
+        text = shell._scrub(text)
+        return text if len(text) <= REPORT_CAP else text[:REPORT_CAP] + "\n[cut]"
+
+    _, status = _git(where, "status", "--short")
+    _, stat = _git(where, "diff", base or "HEAD", "--stat", "--no-ext-diff", "--no-textconv")
+    commits = _git(where, "log", "--oneline", f"{base}..HEAD")[1] if base else ""
+    out: dict[str, Any] = {"status": cap(status) or "clean", "diff_stat": cap(stat), "commits": cap(commits)}
+    if owned:
+        out = {k: owned[k] for k in ("worktree", "branch", "base", "repo")} | out
+        if not status and not commits and _git(owned["repo"], "worktree", "remove", owned["worktree"])[0]:
+            _git(owned["repo"], "branch", "-d", owned["branch"])
+            for k, v in list(_WORKTREES.items()):
+                if v["worktree"] == owned["worktree"]:
+                    _WORKTREES.pop(k, None)
+            out["removed"] = True
+    return out
+
+
 class Refused(shell.ShellError):
     """A launch that cannot start: the message is for the model, `alternative` is what to do instead."""
 
@@ -124,7 +219,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     if not shell.sandbox_available():
         raise Refused("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
                       "was run.", "fs_edit and shell_run for the change yourself")
-    use_model = str(model or "").strip()
+    use_model = str(model or "").strip() or DEFAULT_MODEL
     dr = _desk_root(tb, ctx)
     where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
     timeout = None if no_timeout else timeout or default_timeout(s, None, background)
@@ -172,7 +267,8 @@ def register(tb: Any) -> None:
         return ctx.get("settings") or tb.settings()
 
     async def opencode_run(ctx: dict[str, Any], prompt: str, cwd: str | None = None, timeout_s: int | None = None,
-                           background: bool = False, continue_session: bool = False, model: str | None = None) -> Any:
+                           background: bool = False, continue_session: bool = False, model: str | None = None,
+                           in_place: bool = False) -> Any:
         s = cfg(ctx)
         prompt = str(prompt or "").strip()
         if ctx.get("proposal_only"):
@@ -183,14 +279,37 @@ def register(tb: Any) -> None:
         if len(prompt) > MAX_PROMPT:
             return tool_error(f"The prompt is over {MAX_PROMPT} characters; point opencode at a file instead.", field="prompt")
         timeout = default_timeout(s, timeout_s, bool(background))
+        wt: dict[str, Any] | None = None
+        base: str | None = None
+        if binary() and shell.sandbox_available():  # launch() names what is missing otherwise
+            dr = _desk_root(tb, ctx)
+            try:
+                where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
+                wt = None if in_place else await asyncio.to_thread(isolate, where, ctx.get("conversation_id"), prompt,
+                                                                   bool(continue_session))
+            except shell.ShellError as e:
+                return tool_error(shell._scrub(str(e)), alternative=getattr(e, "alternative", None))
+            if wt:
+                cwd = wt["cwd"]
+            elif await asyncio.to_thread(repo_of, where):  # in place in a repo: report against where HEAD is now
+                base = (await asyncio.to_thread(_git, where, "rev-parse", "HEAD"))[1] or None
         try:
-            job, base = await launch(tb, ctx, prompt, cwd=cwd, continue_session=continue_session, model=model,
+            job, info = await launch(tb, ctx, prompt, cwd=cwd, continue_session=continue_session, model=model,
                                      background=bool(background), timeout=timeout)
         except shell.ShellError as e:
+            if wt:  # nothing ran in it: do not leave an empty worktree behind
+                await asyncio.to_thread(git_report, wt["worktree"], wt["base"], wt)
             return tool_error(shell._scrub(str(e)), alternative=getattr(e, "alternative", None))
+        if wt:
+            info.update(worktree=wt["worktree"], branch=wt["branch"], base=wt["base"],
+                        isolation=f"Working in its own git worktree on branch {wt['branch']}, off {wt['base'][:12]} of "
+                                  f"{wt['repo']}; the checkout itself is untouched. Follow up with continue_session=true "
+                                  f"(or cwd={wt['worktree']}).")
+        poll = (f"shell_poll(job_id='{job.id}', wait_s=300) blocks until it has new raw JSON events or ends (do not sleep "
+                f"in a shell to wait) and shell_kill(job_id) stops it; you are told when it finishes" + (f", then review it with shell_run `git status` / `git diff {wt['base'][:12]}` in "
+                                        f"{wt['worktree']}." if wt else "."))
         if background:
-            return {"job_id": job.id, "background": True, **base,
-                    "note": "opencode is working in the background. shell_poll(job_id) reads its raw event stream; shell_kill(job_id) stops it."}
+            return {"job_id": job.id, "background": True, **info, "note": f"opencode is working in the background. {poll}"}
         t0 = time.time()
         try:
             await jobs.wait(job)
@@ -203,15 +322,19 @@ def register(tb: Any) -> None:
             text, session = summarize(raw)
             shown, cut = shell.truncate(text)
             return {"output": shown, "truncated": cut, "still_running": True, "job_id": job.id, "session_id": session,
-                    "duration_s": round(time.time() - t0, 2), **base,
-                    "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). "
-                            "shell_poll(job_id) reads new output, shell_kill(job_id) stops it; you are told when it finishes."}
+                    "duration_s": round(time.time() - t0, 2), **info,
+                    "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). {poll}"}
         if job.exit_code in (65, 71) and raw.lstrip().startswith("sandbox-exec:"):
             return tool_error(shell._scrub("The OS sandbox refused to start (" + raw.strip()[:200] + "), so nothing was run."))
         text, session = summarize(raw)
         shown, cut = shell.truncate(text)
         out: dict[str, Any] = {"exit_code": job.exit_code, "output": shown, "truncated": cut, "session_id": session,
-                               "timed_out": job.status == "timed_out", "duration_s": round(time.time() - t0, 2), **base}
+                               "timed_out": job.status == "timed_out", "duration_s": round(time.time() - t0, 2), **info}
+        if wt or base:
+            out["git"] = await asyncio.to_thread(git_report, wt["worktree"] if wt else str(job.cwd), wt["base"] if wt else base, wt)
+            if out["git"].get("removed"):
+                out.pop("isolation", None)
+                out["git"]["note"] = "opencode changed nothing and committed nothing, so its worktree and branch were removed."
         if job.status == "timed_out":
             out["note"] = f"Killed after {timeout}s. Use background=true for a long task."
         if cut and getattr(tb, "results", None) is not None and ctx.get("conversation_id"):
@@ -225,13 +348,18 @@ def register(tb: Any) -> None:
                     "workspace in a desk, else the home folder). It reads and edits files and runs commands, all under the OS sandbox (Grain's own data "
                     "folder and app, credential stores and the files that run code later are off limits), using opencode's own model and sign-in, not this app's. Give it a complete, self-contained task "
                     "with the files or folder it concerns; it does not see this conversation. continue_session=true carries on "
-                    "its last session in that folder, the same history the opencode CLI shows. The result is its narration and final answer; check the files it "
-                    "changed afterwards (fs_grep, desk_read_file, shell_run `git diff`). Default timeout 300s (max 600s), then "
-                    "in a desk it carries on as a background job you follow with shell_poll; background=true starts it that way.",
+                    "its last session in that folder, the same history the opencode CLI shows. In a git repo's main checkout it works in a fresh "
+                    "worktree on a new branch off HEAD (<repo>/.claude/worktrees/opencode-...), so the checkout and anyone working in it are "
+                    "untouched; in_place=true edits the checkout itself (only when the user asked for that). The result is its narration and "
+                    "final answer plus a git report (worktree, branch, status, diff stat, commits); verify the change yourself (shell_run "
+                    "`git diff <base>` in the worktree) before reporting it done. Default timeout 300s (max 600s), then in a desk it carries "
+                    "on as a background job you follow with shell_poll(job_id, wait_s=...); background=true starts it that way.",
                     _obj({"prompt": {"type": "string", "description": "The task, with the files or folder it concerns"},
                           "cwd": {"type": "string", "description": "The folder to work in, usually a repo; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 300}, "background": {"type": "boolean", "default": False},
                           "continue_session": {"type": "boolean", "default": False},
+                          "in_place": {"type": "boolean", "default": False,
+                                       "description": "Edit a repo's checkout directly instead of a fresh worktree"},
                           "model": {"type": "string", "description": "An opencode model id (provider/model), overriding its default"}},
                          ["prompt"]),
                     opencode_run, "shell", "executes",

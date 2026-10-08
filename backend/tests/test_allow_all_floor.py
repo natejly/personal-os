@@ -201,3 +201,128 @@ def test_auto_and_manual_still_card_a_bypass_session(pmode: str) -> None:
 def test_floor_still_cards_in_a_tainted_reply() -> None:
     c = go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True)
     assert len(c) == 1 and not T.RAN and c[0]["permission"]["kind"] == "destructive"
+
+
+# ---- the same floor handed to Claude Code sessions (codingagents.floor_settings), which run outside the sandbox
+
+def _claude_rules() -> dict[str, list[str]]:
+    return permrules.claude_code_floor()["permissions"]
+
+
+def _bash_hit(rules: list[str], cmd: str) -> bool:
+    """Claude Code's Bash(pattern) match, approximated: `*` matches any text, the pattern covers the whole command."""
+    import fnmatch
+    return any(r.startswith("Bash(") and fnmatch.fnmatchcase(cmd, r[5:-1]) for r in rules)
+
+
+@pytest.mark.parametrize("cmd", ["git push --force", "git push -f origin main", "git push origin main --force-with-lease",
+                                 "git push origin +main", "git push --delete origin x",
+                                 "security find-generic-password -s x -w"])
+def test_claude_floor_asks_for_what_the_shell_floor_cards(cmd: str) -> None:
+    assert permrules.destructive(cmd, cwd=HOME_PROJ) or permrules.touches_protected(cmd, HOME_PROJ), cmd
+    assert _bash_hit(_claude_rules()["ask"], cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", ["diskutil eraseDisk JHFS+ x disk2", "diskutil zeroDisk disk2", "diskutil apfs deleteVolume disk3s1",
+                                 "dd if=/dev/zero of=/dev/disk3", "mkfs.ext4 /dev/sda1"])
+def test_claude_floor_refuses_disk_wipes(cmd: str) -> None:
+    assert permrules.destructive(cmd, cwd=HOME_PROJ), cmd
+    assert _bash_hit(_claude_rules()["deny"], cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", ["ls -la", "git push origin main", "git push --follow-tags", "git push --dry-run origin x",
+                                 "git status", "diskutil list", "npm test", "dd if=a of=b"])
+def test_claude_floor_leaves_routine_commands_alone(cmd: str) -> None:
+    rules = _claude_rules()
+    assert not _bash_hit(rules["ask"] + rules["deny"], cmd), cmd
+
+
+def test_claude_floor_paths_come_from_the_sandbox_lists() -> None:
+    from personal_os import mac
+    rules = _claude_rules()
+    for root in mac.protected_paths():
+        pat = "//" + str(root).lstrip("/") + "/**"
+        assert f"Edit({pat})" in rules["deny"], root
+        assert (f"Read({pat})" in rules["deny"]) is (root.suffix.lower() != ".app"), root
+    for d in mac.CRED_HOME_DIRS:
+        assert {f"Read(~/{d}/**)", f"Edit(~/{d}/**)"} <= set(rules["ask"]), d
+    for f in mac.CRED_HOME_FILES:
+        assert f"Read(~/{f})" in rules["ask"], f
+    assert {"Read(.env)", "Read(.env.*)", "Read(id_ed25519)", *permrules.CLAUDE_MAIL_SENDS} <= set(rules["ask"])
+    assert not set(rules["ask"]) & set(rules["deny"])
+    assert not [r for r in rules["ask"] + rules["deny"] if r.endswith(":*)")], "`:*` at the end is the CLI's prefix syntax"
+
+
+# ---- the Claude Code Bash hook (claude_hook): the shell floor's parser on what a session's command runs
+
+def _hook(cmd: str, cwd: str = HOME_PROJ, worktree: str | None = None) -> str | None:
+    from personal_os import claude_hook
+    v = claude_hook.decide({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd}, worktree)
+    return v[0] if v else None
+
+
+def test_claude_floor_leaves_deletes_to_the_hook() -> None:
+    rules = _claude_rules()
+    assert not _bash_hit(rules["ask"], "rm -rf /tmp/build"), "a static rm rule would ask before the hook could exempt temp"
+
+
+@pytest.mark.parametrize("cmd", ["rm -rf ~/Documents/x", "rm a.txt", "unlink ~/x", "find . -name '*.o' -delete",
+                                 "sh -c 'rm -rf ~/x'", "bash -c \"rm -rf ~/x\"", "zsh -c 'rm -rf ~/x'", "bash -lc 'rm ~/x'",
+                                 "eval 'rm -rf ~/x'", "bash -c \"sh -c 'eval rm -rf ~/x'\"", "sudo rm -rf ~/x",
+                                 "ls | xargs rm", "echo $(rm ~/a)", "git push --force",
+                                 "rm -rf /tmp/../Users/x", "rm -rf /tmp"])
+def test_hook_asks_for_deletes_through_wrappers(cmd: str) -> None:
+    assert _hook(cmd) == "ask", cmd
+
+
+@pytest.mark.parametrize("cmd", ["rm -rf /tmp/build", "rm -rf /private/tmp/x", "rm -rf /tmp/a/*", "bash -c 'rm -rf /tmp/x'",
+                                 "rm -rf $TMPDIR/x", "rm -rf /private/var/folders/ab/T/x", "cd /tmp && rm -rf out",
+                                 "ls -la", "git status", "npm test"])
+def test_hook_lets_temp_deletes_and_routine_work_through(cmd: str) -> None:
+    assert _hook(cmd) is None, cmd
+
+
+def test_hook_exempts_the_sessions_own_worktree_only() -> None:
+    w, other = os.path.join(HOME_PROJ, ".claude", "worktrees", "s1"), HOME_PROJ  # outside every temp folder
+    assert _hook("rm -rf build node_modules", w, w) is None
+    assert _hook(f"rm -rf {w}/build", HOME_PROJ, w) is None
+    assert _hook("bash -c 'rm -rf build'", w, w) is None
+    assert _hook("rm -rf build", w, None) == "ask"  # a checkout the session was only pointed at
+    assert _hook(f"rm -rf {other}/src", w, w) == "ask"  # repo files outside the session's worktree
+    assert _hook("rm -rf ../s2", w, w) == "ask"
+    assert _hook(f"rm -rf {w}", w, w) == "ask"
+    assert _hook("rm -rf .git", w, w) == "ask"
+
+
+def test_hook_does_not_follow_a_link_out_of_temp() -> None:
+    import tempfile
+    tmp = Path(tempfile.mkdtemp(prefix="hooklink-"))
+    try:
+        (tmp / "out").symlink_to("/usr")
+        assert _hook(f"rm -rf {tmp}/out/x") == "ask"
+        assert _hook(f"rm -rf {tmp}/plain") is None
+    finally:
+        (tmp / "out").unlink()
+        tmp.rmdir()
+
+
+def test_hook_refuses_grain_data_and_wipes_and_reads_credentials() -> None:
+    data = os.environ["PERSONAL_OS_DATA_DIR"]
+    assert _hook(f"bash -c 'rm -rf {data}'") == "deny"
+    assert _hook("sh -c 'diskutil zeroDisk disk2'") == "deny"
+    assert _hook("bash -c 'cat ~/.ssh/id_rsa'") == "ask"
+    assert _hook("cat ~/.aws/credentials") == "ask"
+
+
+def test_hook_main_prints_a_decision_and_fails_safe(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import io
+    from personal_os import claude_hook
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf ~/x"}})))
+    claude_hook.main([])
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "ask"
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json rm -rf"))
+    claude_hook.main([])
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "ask"
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    claude_hook.main([])
+    assert capsys.readouterr().out == ""

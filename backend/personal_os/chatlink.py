@@ -6,8 +6,8 @@ worker's wake). When that turn ends its reply goes back to A, into a message_cha
 'chat_reply' turn that wakes A. Both kinds are backend text (kinds.is_internal) the renderer still shows, as "From <chat>".
 
 What keeps two agents from talking forever: a chain of messages is at most MAX_DEPTH hops deep (a reply carries the depth
-of the message it answers), the same text to the same chat is refused for DEDUPE_SECONDS, and a pair of chats gets at most
-PAIR_MAX messages, either way, per PAIR_SECONDS.
+of the message it answers), the same text between the same two chats, either way (a repeat, an echo of a message or of a
+reply straight back), is refused for DEDUPE_SECONDS, and a pair of chats gets at most PAIR_MAX messages, either way, per PAIR_SECONDS.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from .tools import ToolSpec, _obj, tool_error
 from .working import escape_tags, fence_untrusted
+from .workers import strip_no_reply
 
 KINDS = ("chat_in", "chat_reply")
 MAX_DEPTH = 3
@@ -137,12 +138,13 @@ class ChatLinks:
             return f"This is already a chain of {MAX_DEPTH} messages between chats; it stops here. Tell the user instead."
         now = time.time()
         with self.db.tx() as c:
-            dup = c.execute("SELECT 1 FROM chat_links WHERE from_conv=? AND to_conv=? AND digest=? AND created_at>?",
-                            (from_id, to_id, digest(text), now - DEDUPE_SECONDS)).fetchone()
+            recent = c.execute("SELECT digest, reply FROM chat_links WHERE ((from_conv=? AND to_conv=?) OR (from_conv=? AND to_conv=?)) "
+                               "AND created_at>?", (from_id, to_id, to_id, from_id, now - DEDUPE_SECONDS)).fetchall()
             n = c.execute("SELECT COUNT(*) FROM chat_links WHERE ((from_conv=? AND to_conv=?) OR (from_conv=? AND to_conv=?)) AND created_at>?",
                           (from_id, to_id, to_id, from_id, now - PAIR_SECONDS)).fetchone()[0]
-        if dup:
-            return "That chat was already sent this message; its reply comes back by itself."
+        d = digest(text)
+        if any(r["digest"] == d or (r["reply"] and digest(r["reply"]) == d) for r in recent):
+            return "This text was already sent between these two chats; its reply comes back by itself. Do not send it again."
         if n >= PAIR_MAX:
             return "These two chats have exchanged too many messages in the last few minutes; stop and tell the user."
         return None
@@ -192,8 +194,9 @@ class ChatLinks:
         if chat_link.get("kind") != "chat_in":
             self._set(link["id"], status="done")
             return
+        text = strip_no_reply(text)  # the marker is never relayed, alone or trailing a real answer
         reply = ("(That chat stopped before replying.)" if stopped else f"(That chat's reply failed: {error})" if error
-                 else "(That chat had nothing to send back.)" if silent or not text.strip() else text)[:TEXT_CHARS]
+                 else "(That chat had nothing to send back.)" if silent or not text else text)[:TEXT_CHARS]
         fut = self.waiters.get(link["id"])
         if fut is not None and not fut.done():
             fut.set_result(reply)

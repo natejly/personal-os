@@ -6,6 +6,7 @@ socket is the only thing the Seatbelt profile lets the script connect to; the ne
 
 Every call goes through the same gate the model's own calls do, never around it:
   * only names on ALLOWED, that the script asked for, that exist, and whose mode for this chat is on or ask
+  * `Toolbox.precheck` (bad arguments, a repo edit coding_route sends to a coding agent) refuses before any card
   * `Toolbox.gate` (taint upgrades on -> ask), then an `ask` parks the script on a real approval card (`approve`)
     and the script's clock stops while it waits; no card to answer (a background run) means refused, not run
   * `Toolbox.call` with the run's own ctx, so taint, the ledger and every tool-side check apply
@@ -168,6 +169,9 @@ class Bridge:
         raw = raw or self.tb.default_mode(spec)
         if raw == "off":
             return self._refuse(name, f"{name} is turned off for this chat.")
+        if (bad := self.tb.precheck(name, args, self.ctx)) is not None:  # refused (e.g. a routed repo edit) before any card
+            self.log.append({"tool": name, "ok": False})
+            return {"ok": True, "result": bad}
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.
         # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
         mode = self.tb.gate(name, raw, self.ctx, args)

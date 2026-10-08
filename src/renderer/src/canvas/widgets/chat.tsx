@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { isClear } from '../../lib/workers'
 import { Check, MessageSquare, MessagesSquare, Pencil, Smile } from 'lucide-react'
 import type { Attachment, CanvasWindow, DragKind, DragPayload, Rect } from '@shared/types'
 import MessageView from '../../components/Message'
@@ -339,7 +340,7 @@ function ChatWidget({ window: win, live, onConfig, onTitle, onMove }: WidgetProp
       <ChatTitle convId={convId} title={convo?.title ?? ''} actions={actions} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
-          {msgs.map((m) => <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
+          {msgs.map((m) => isClear(m) ? <div key={m.id} className="day-divider" role="separator">Context cleared</div> : <MessageView key={m.id} message={m} face={face} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
             browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />)}
           <RegenRow conversationId={convId} last={last} streaming={streaming} />
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}

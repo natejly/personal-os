@@ -4,6 +4,10 @@ OpenCode has no MCP-server mode of its own, but its background service speaks an
 starts or finds that service (`opencode service status|start` prints its URL), signs in with the service password
 (HTTP basic, user "opencode", read from ~/.config/opencode/service.json; never printed or logged) and offers four tools:
 run a prompt in a new or existing session, list sessions, read a session's messages, and report status.
+
+The service is the user's own: this shim starts it when it is down but never stops it. A call that cannot connect (the
+service crashed or was restarted on a new port) looks the service up again, starting it if needed, and retries once;
+only a connection that never opened is retried, so a prompt is never sent twice.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -149,41 +153,61 @@ class OpenCodeClient:
         return out
 
 
+class Service:
+    """The connection to the service, made on first use and made again once when a call cannot connect."""
+
+    def __init__(self, connect: Callable[[], Awaitable[tuple[OpenCodeClient, str]]] | None = None) -> None:
+        self._connect = connect or self._find
+        self.client: OpenCodeClient | None = None
+        self.url: str | None = None
+
+    @staticmethod
+    async def _find() -> tuple[OpenCodeClient, str]:
+        url = await asyncio.to_thread(server_url)
+        return OpenCodeClient(httpx.AsyncClient(base_url=url, headers=auth_headers(service_password()), timeout=30)), url
+
+    async def call(self, fn: Callable[[OpenCodeClient], Awaitable[Any]]) -> Any:
+        for retry in (False, True):
+            if self.client is None:
+                self.client, self.url = await self._connect()
+            try:
+                return await fn(self.client)
+            except httpx.ConnectError:
+                stale, self.client = self.client, None
+                await stale.http.aclose()
+                if retry:
+                    raise RuntimeError("the OpenCode service is not answering; try `opencode service start` in a terminal") from None
+        raise AssertionError("unreachable")
+
+
 def build_server() -> Any:
     from mcp.server.mcpserver import MCPServer
     from mcp_types import ToolAnnotations
 
     server = MCPServer("opencode", instructions="Drives a local OpenCode coding agent: give it a self-contained task and a folder.")
-    state: dict[str, Any] = {}
-
-    async def client() -> OpenCodeClient:
-        if "c" not in state:  # the service URL is stable while it runs; a restart means restarting this connector
-            url = await asyncio.to_thread(server_url)
-            state["c"] = OpenCodeClient(httpx.AsyncClient(base_url=url, headers=auth_headers(service_password()), timeout=30))
-            state["url"] = url
-        return state["c"]
+    svc = Service()
 
     @server.tool(description="Run a prompt in OpenCode, in a new session (optionally in `directory`) or an existing `session_id`. "
                              "Returns the reply text, the session id and the tools it used.")
     async def opencode_prompt(prompt: str, directory: str | None = None, session_id: str | None = None,
                               timeout_seconds: int = 900) -> dict[str, Any]:
-        return await (await client()).prompt(prompt, directory, session_id, float(max(5, min(timeout_seconds, 3600))))
+        return await svc.call(lambda c: c.prompt(prompt, directory, session_id, float(max(5, min(timeout_seconds, 3600)))))
 
     @server.tool(description="List recent OpenCode sessions, newest first.", annotations=ToolAnnotations(read_only_hint=True))
     async def opencode_sessions(limit: int = 20) -> list[dict[str, Any]]:
-        return await (await client()).sessions(max(1, min(limit, 100)))
+        return await svc.call(lambda c: c.sessions(max(1, min(limit, 100))))
 
     @server.tool(description="Read the latest messages of an OpenCode session, oldest first.", annotations=ToolAnnotations(read_only_hint=True))
     async def opencode_session_messages(session_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        return [shape_message(m) for m in await (await client()).messages(session_id, max(1, min(limit, 200)))]
+        return [shape_message(m) for m in await svc.call(lambda c: c.messages(session_id, max(1, min(limit, 200))))]
 
     @server.tool(description="OpenCode's version, server address and whether it answers.", annotations=ToolAnnotations(read_only_hint=True))
     async def opencode_status() -> dict[str, Any]:
         try:
-            info = await (await client()).info()
+            info = await svc.call(lambda c: c.info())
         except Exception as e:  # noqa: BLE001 - status reports, never raises
             return {"reachable": False, "error": str(e)[:300]}
-        return {"reachable": True, "version": info.get("version"), "url": state.get("url")}
+        return {"reachable": True, "version": info.get("version"), "url": svc.url}
 
     return server
 

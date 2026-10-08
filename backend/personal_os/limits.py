@@ -22,6 +22,9 @@ from typing import Any
 CONTEXT_WINDOW_FALLBACK = 128_000  # used only when neither the proxy nor an overflow told us the real window
 CONTEXT_WINDOW_FLOOR = 4096        # a learned or stored window never goes below this
 COMPACT_AT = 0.7                   # summarize history past this share of the window (token counts are len//4 estimates)
+COMPACT_AT_TOKENS = 30_000         # summarize once the replayed history (not the cached system prompt) passes this many estimated tokens
+COMPACT_KEEP_TOKENS = 10_000       # newest history kept verbatim after a compaction
+MICRO_AT_TOKENS = 64_000           # stub old tool results in a run once the whole request passes this
 COMPACT_KEEP_RECENT = 8            # newest messages never summarized
 MICRO_AT = 0.25                    # stub old tool results past this share of the window (time to first token dominates past ~30k)
 MICRO_KEEP = 3                     # newest tool results left intact
@@ -63,6 +66,8 @@ DELEGATION_AFTER_ROUNDS = 2        # rounds of tool calls a chat reply makes its
 WORKER_MAX_CONCURRENT = 4          # workers running at once; the rest wait in a queue and start in order
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
+RUN_HEARTBEAT_SECONDS = 20.0       # a working child's agent_runs.updated_at is bumped at most this often (liveness, never a limit)
+WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line (nothing is stopped)
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt
@@ -110,6 +115,9 @@ RANGES: dict[str, tuple[float, float]] = {
     "compactAt": (0.1, 0.95),
     "microAt": (0.05, 0.95),
     "compactKeepRecent": (2, 200),
+    "compactAtTokens": (4_000, 4_000_000),
+    "compactKeepTokens": (1_000, 1_000_000),
+    "microAtTokens": (8_000, 4_000_000),
     "microKeep": (0, 50),
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
@@ -167,5 +175,6 @@ def slots(settings: dict[str, Any], key: str) -> int:
 
 
 def context_shares(window: int) -> dict[str, int]:
-    """Tokens each injected context block may take in a `window`-token context."""
-    return {k: int(window * r) for k, r in CONTEXT_SHARES.items()}
+    """Tokens each injected context block may take in a `window`-token context. A window past CONTEXT_WINDOW_FALLBACK
+    does not buy bigger blocks: they are re-sent (mostly uncached) every turn."""
+    return {k: int(min(window, CONTEXT_WINDOW_FALLBACK) * r) for k, r in CONTEXT_SHARES.items()}

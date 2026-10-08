@@ -11,9 +11,11 @@ If the sandbox is unavailable (no sandbox-exec, another OS, or the profile fails
 only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off
 (Allow everything runs it without one; `floor` is what that mode still cards).
 
-Background commands return a job id; shell_poll reads new output, shell_kill stops one. Jobs belong to the
-conversation that started them, die with its run and with the app, and are never adopted after a restart: the
-registry persists pid/pgid so a survivor shows up as `orphaned` with a kill, nothing more.
+Background commands return a job id; shell_poll reads new output (wait_s blocks until there is some, so an agent never
+sleeps in a shell to wait), shell_kill stops one. Jobs belong to the conversation and the run that started them (a
+worker's own run id, so a worker's jobs outlive the reply that started it and die when the worker ends), die with that
+run and with the app, and are never adopted after a restart: the registry persists pid/pgid so a survivor shows up as
+`orphaned` with a kill, nothing more (a worker's survivors are killed at startup: no one can ever poll them).
 """
 from __future__ import annotations
 
@@ -45,6 +47,7 @@ TRUNC_LINES, TRUNC_BYTES = 2000, 50_000
 CWD_FILE = "end-cwd"                   # in the run's private tmp dir: where the command's shell ended
 FG_CAPTURE = 5_000_000                 # the most one foreground command's output keeps (the spill behind the handle)
 BG_BUFFER = 200_000                    # a background job's rolling buffer
+POLL_WAIT_MAX = 300                    # the longest one shell_poll(wait_s) blocks
 MAX_TRACKED = 64
 FINISHED_KEEP_S = 30 * 60
 SPILL_DAYS = 7
@@ -245,6 +248,7 @@ class Job:
         self.status = "running"        # running | exited | killed | timed_out | orphaned | failed
         self.exit_code: int | None = None
         self.started = time.time()
+        self.out_at = self.started    # when it last printed anything: a waiting agent whose job prints is not stalled
         self.finished: float | None = None
         self.tmp: str | None = None
         self.pump: asyncio.Task | None = None
@@ -264,6 +268,8 @@ class Job:
         return self.base + len(self.buf)
 
     def append(self, text: str) -> None:
+        if text:
+            self.out_at = time.time()
         self.buf += text
         if len(self.buf) > self.cap:
             drop = len(self.buf) - self.cap
@@ -561,12 +567,29 @@ class ShellJobs:
     def finished_output(self, job: Job) -> str:
         return job.buf
 
-    async def kill_conversation(self, conversation_id: str | None) -> int:
-        """End every live job a conversation's run started. Called when its run ends."""
-        mine = [j for j in self.jobs.values() if j.live() and j.conversation_id == conversation_id]
+    async def kill_conversation(self, conversation_id: str | None, run_id: str | None = None) -> int:
+        """End every live job a conversation's run started. Called when its run ends. With `run_id`, a job another run owns
+        (a worker's, which outlives the reply) is left alone; one with no owner recorded still ends."""
+        mine = [j for j in self.jobs.values() if j.live() and j.conversation_id == conversation_id
+                and (run_id is None or j.run_id in (None, run_id))]
         for j in mine:
             await self.kill(j)
         return len(mine)
+
+    async def kill_run(self, run_id: str) -> int:
+        """End every live job one run started (a worker that ended, however it ended), together. A coding session's
+        OpenCode job (conversation `coding:<id>`) is not one of them: it outlives a normal finish, and a stop ends it
+        through codingagents.CodingSessions.stop_owned, which records why."""
+        mine = [j for j in self.jobs.values() if run_id and j.live() and j.run_id == run_id
+                and not (j.conversation_id or "").startswith("coding:")]
+        await asyncio.gather(*(self.kill(j) for j in mine), return_exceptions=True)
+        return len(mine)
+
+    async def wait_output(self, job: Job, wait_s: float, stop: Any = None) -> None:
+        """Until the job has output the model has not read, or ends, or `wait_s` passes (or `stop` is set)."""
+        deadline = time.monotonic() + max(0.0, min(float(wait_s), POLL_WAIT_MAX))
+        while job.live() and job.read_pos >= job.total and time.monotonic() < deadline and not (stop is not None and stop.is_set()):
+            await asyncio.sleep(0.25)
 
     async def shutdown(self) -> None:
         for j in list(self.jobs.values()):
@@ -753,7 +776,8 @@ def register(tb: Any) -> None:
 
         if background:
             return {"job_id": job.id, "pid": job.pid, "background": True, **base,
-                    "note": "Running in the background. shell_poll(job_id) reads new output; shell_kill(job_id) stops it."
+                    "note": "Running in the background. shell_poll(job_id) reads new output (wait_s=120 waits for some instead of "
+                            "sleeping); shell_kill(job_id) stops it."
                             + (" You are told when it finishes." if job.notify and in_desk else "")
                             + ("" if in_desk else " It is stopped when this reply ends, so finish with it before replying.")}
         t0 = time.time()
@@ -771,7 +795,8 @@ def register(tb: Any) -> None:
                                    "job_id": job.id, "pid": job.pid, "background": True, "duration_s": round(time.time() - t0, 2),
                                    **base,
                                    "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). "
-                                           "shell_poll(job_id) reads new output, shell_kill(job_id) stops it"
+                                           "shell_poll(job_id, wait_s=120) waits for new output (never sleep in a shell to wait), "
+                                           "shell_kill(job_id) stops it"
                                            + ("; you are told when it finishes." if job.notify else ".")}
             net_report(res)
             _note_shell_copies(ctx, since_ns)
@@ -832,11 +857,17 @@ def register(tb: Any) -> None:
     spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (bool(ctx.get("tainted")) and reaches_out(cfg(ctx)))
     R("shell_run", spec)
 
-    async def shell_poll(ctx: dict[str, Any], job_id: str) -> Any:
+    async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:
         job = jobs.get(str(job_id), ctx.get("conversation_id"))
         if not job:
             return tool_error(_scrub(f"No shell job '{job_id}' in this conversation."), field="job_id",
                               alternative="start one with shell_run(background=true)")
+        try:
+            wait = float(wait_s or 0)
+        except (TypeError, ValueError):
+            return tool_error("wait_s must be a number of seconds.", field="wait_s", example={"job_id": job.id, "wait_s": 120})
+        if wait > 0:
+            await jobs.wait_output(job, wait, ctx.get("stop"))
         out = jobs.poll(job)
         seen = jobs.net_view(job)
         if seen is not None:
@@ -849,9 +880,14 @@ def register(tb: Any) -> None:
         return out
     R("shell_poll", ToolSpec("shell_poll", "Read the new output of a background shell job and whether it is still running "
                              "(status running | exited | timed_out | killed | orphaned, and the exit code once it ends). "
-                             "Each call returns only what is new since the last one.",
-                             _obj({"job_id": {"type": "string"}}, ["job_id"]), shell_poll, "shell", "safe",
-                             examples=[{"job_id": "a1b2c3"}]))
+                             "Each call returns only what is new since the last one. To wait for a job, pass wait_s (at most "
+                             f"{POLL_WAIT_MAX}): the call returns as soon as there is new output or the job ends. Never run "
+                             "`sleep` in shell_run to wait for a job.",
+                             _obj({"job_id": {"type": "string"},
+                                   "wait_s": {"type": "number", "default": 0,
+                                              "description": f"Wait up to this many seconds (max {POLL_WAIT_MAX}) for new output or the end"}},
+                                  ["job_id"]), shell_poll, "shell", "safe",
+                             examples=[{"job_id": "a1b2c3"}, {"job_id": "a1b2c3", "wait_s": 120}]))
 
     async def shell_kill(ctx: dict[str, Any], job_id: str) -> Any:
         job = jobs.get(str(job_id), ctx.get("conversation_id"))

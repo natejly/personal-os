@@ -203,6 +203,31 @@ def test_a_silent_target_sends_back_a_note() -> None:
     assert [m["kind"] for m in msgs(b)] == ["chat_in"]  # the silent reply row is removed
 
 
+def _ended_reply(text: str) -> str:
+    a, b = chat("End sender"), chat("End target")
+    link = appmod.chat_links.send(a, b, "hi", 0)
+
+    async def go() -> str:
+        fut = asyncio.get_running_loop().create_future()
+        appmod.chat_links.waiters[link["id"]] = fut
+        appmod.chat_links.ended({"id": link["id"], "kind": "chat_in"}, text)
+        return fut.result()
+    return asyncio.run_coroutine_threadsafe(go(), appmod._loop).result(timeout=10)  # type: ignore[arg-type]
+
+
+def test_ended_never_relays_the_marker() -> None:
+    assert _ended_reply("NO_REPLY") == "(That chat had nothing to send back.)"
+    assert _ended_reply("Answer.\nNO_REPLY") == "Answer."
+
+
+def test_tell_chat_strips_the_marker_and_skips_empty() -> None:
+    cid = chat("Told")
+    appmod._tell_chat(cid, "NO_REPLY")
+    assert msgs(cid) == []
+    appmod._tell_chat(cid, "Hi\nNO_REPLY")
+    assert [m["content"] for m in msgs(cid)] == ["Hi"]
+
+
 def test_a_message_to_a_busy_chat_waits_for_its_reply_to_end() -> None:
     a, b = chat("Sender busy"), chat("Busy")
     appmod._chat_waiting.discard(b)
@@ -266,6 +291,25 @@ def test_identical_messages_are_deduped() -> None:
     assert call("message_chat", ctx_of(a), chat_id=b, text="Same  thing")["ok"]
     again = call("message_chat", ctx_of(a), chat_id=b, text="same thing")
     assert "already sent" in again["error"]
+
+
+def test_an_echo_back_the_other_way_is_deduped_too() -> None:
+    a, b, c = chat("Echo A"), chat("Echo B"), chat("Echo C")
+    link = appmod.chat_links.send(a, b, "Please check the build", 1)
+    assert "already sent" in (appmod.chat_links.refusal(b, a, "please check  the build", 2) or "")  # the same text bounced back
+    appmod.chat_links._set(link["id"], status="replied", reply="The build is green")
+    assert "already sent" in (appmod.chat_links.refusal(a, b, "the build is green", 2) or "")   # its reply forwarded back
+    assert appmod.chat_links.refusal(a, c, "Please check the build", 1) is None                 # another pair is not affected
+
+
+def test_a_reply_turn_carries_its_depth_so_the_cap_holds_on_the_way_back() -> None:
+    a, b = chat("Back A"), chat("Back B")
+    link = appmod.chat_links.send(a, b, "deep question", chatlink.MAX_DEPTH)
+    appmod.chat_links._set(link["id"], status="replied", reply="deep answer")
+    _text, rec = appmod.chat_links.turn("chat_reply", appmod.chat_links.get(link["id"]))  # type: ignore[misc]
+    assert rec["depth"] == chatlink.MAX_DEPTH
+    over = call("message_chat", ctx_of(a, chat_link=rec), chat_id=b, text="and another thing")
+    assert "chain" in over["error"]
 
 
 def test_ping_pong_between_a_pair_is_capped() -> None:

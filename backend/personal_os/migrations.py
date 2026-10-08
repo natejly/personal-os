@@ -494,7 +494,60 @@ def _plan_mode_into_plan_first(c: sqlite3.Connection) -> None:
     c.execute("DELETE FROM settings WHERE key = 'planMode'")  # a legacy top-level row
 
 
+def _usage_sources_and_backfill(c: sqlite3.Connection) -> None:
+    """usage_log learns where a row came from and how its cost was set, and calls logged before their model had a
+    price get one.
+
+    source: 'grain' (this app's own calls) or 'opencode' (imported by opencode_usage.py, external_id = its message
+    id, unique). cost_source: NULL = priced when recorded, 'backfill' = priced here from stored tokens, 'opencode' =
+    the cost OpenCode itself reported. A row with no tokens, a cost already above 0 or a model with no price is left
+    alone; prices are today's table with the user's own modelPrices winning, as the Usage page would price it."""
+    from .usage import Pricing
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='usage_log'").fetchone():
+        return
+    have = {r[1] for r in c.execute("PRAGMA table_info(usage_log)")}
+    for col, ddl in (("source", "TEXT NOT NULL DEFAULT 'grain'"), ("cost_source", "TEXT"), ("external_id", "TEXT")):
+        if col not in have:
+            c.execute(f"ALTER TABLE usage_log ADD COLUMN {col} {ddl}")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_external ON usage_log(external_id) WHERE external_id IS NOT NULL")
+    row = c.execute("SELECT value FROM settings WHERE key = 'modelPrices'").fetchone()
+    try:
+        prices = json.loads(row[0]) if row else {}
+    except ValueError:
+        prices = {}
+    cfg, pricing = {"modelPrices": prices if isinstance(prices, dict) else {}}, Pricing()
+    rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens FROM usage_log "
+                     "WHERE (cost IS NULL OR cost = 0) AND (prompt_tokens > 0 OR completion_tokens > 0)").fetchall()
+    for rid, model, pt, ct, cached, cwrite in rows:
+        cost = pricing.cost(cfg, model, pt, ct, cached, cwrite)
+        if cost:
+            c.execute("UPDATE usage_log SET cost = ?, cost_source = 'backfill' WHERE id = ?", (cost, rid))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
+# Chat-model settings a change of default re-resolves. Embedding, rerank and vision keys are not among them.
+_CHAT_MODEL_KEYS = ("defaultModel", "modelHigh", "modelMedium", "modelLow", "extractionModel", "fastModel")
+# The old default chat model, per spelling, and what replaces it.
+_EMBER_TO_DEEPSEEK = {"accounts/fireworks/models/ember-1": "accounts/fireworks/models/deepseek-v4p1-flash",
+                      "ember-1": "deepseek-v4-flash"}
+
+
+def _deepseek_default(c: sqlite3.Connection) -> None:
+    """DeepSeek V4.1 Flash became the chat default and the medium and low tier (Ember 1 keeps the high tier), high the
+    default effort, and the user asked to switch existing installs too. On Fireworks or the proxy the saved chat-model
+    keys are deleted, so they resolve to the new defaults (and keep following them). A chat on the old default model moves to DeepSeek, and a chat's saved
+    medium effort becomes high. Any other per-chat model or effort is the user's pick and stays."""
+    from . import permissions, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings WHERE key IN ('provider', 'baseUrl')")}
+    if providers.effective(stored) in ("fireworks", "litellm"):
+        c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in _CHAT_MODEL_KEYS])
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'").fetchone():
+        return
+    c.executemany("UPDATE conversations SET model = ? WHERE model = ?", [(new, old) for old, new in _EMBER_TO_DEEPSEEK.items()])
+    c.execute("UPDATE conversations SET settings = json_set(settings, '$.effort', 'high') "
+              "WHERE json_valid(settings) AND json_extract(settings, '$.effort') = 'medium'")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -528,6 +581,8 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (30, "drop_private_chats", _drop_private_chats),
     (31, "chat_links", _chat_links),
     (32, "plan_mode_into_plan_first", _plan_mode_into_plan_first),
+    (33, "usage_sources_and_backfill", _usage_sources_and_backfill),
+    (34, "deepseek_default", _deepseek_default),
 ]
 
 

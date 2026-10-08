@@ -6,8 +6,8 @@ worker's wake). When that turn ends its reply goes back to A, into a message_cha
 'chat_reply' turn that wakes A. Both kinds are backend text (kinds.is_internal) the renderer still shows, as "From <chat>".
 
 What keeps two agents from talking forever: a chain of messages is at most MAX_DEPTH hops deep (a reply carries the depth
-of the message it answers), the same text to the same chat is refused for DEDUPE_SECONDS, and a pair of chats gets at most
-PAIR_MAX messages, either way, per PAIR_SECONDS.
+of the message it answers), the same text between the same two chats, either way (a repeat, an echo of a message or of a
+reply straight back), is refused for DEDUPE_SECONDS, and a pair of chats gets at most PAIR_MAX messages, either way, per PAIR_SECONDS.
 """
 from __future__ import annotations
 
@@ -137,12 +137,13 @@ class ChatLinks:
             return f"This is already a chain of {MAX_DEPTH} messages between chats; it stops here. Tell the user instead."
         now = time.time()
         with self.db.tx() as c:
-            dup = c.execute("SELECT 1 FROM chat_links WHERE from_conv=? AND to_conv=? AND digest=? AND created_at>?",
-                            (from_id, to_id, digest(text), now - DEDUPE_SECONDS)).fetchone()
+            recent = c.execute("SELECT digest, reply FROM chat_links WHERE ((from_conv=? AND to_conv=?) OR (from_conv=? AND to_conv=?)) "
+                               "AND created_at>?", (from_id, to_id, to_id, from_id, now - DEDUPE_SECONDS)).fetchall()
             n = c.execute("SELECT COUNT(*) FROM chat_links WHERE ((from_conv=? AND to_conv=?) OR (from_conv=? AND to_conv=?)) AND created_at>?",
                           (from_id, to_id, to_id, from_id, now - PAIR_SECONDS)).fetchone()[0]
-        if dup:
-            return "That chat was already sent this message; its reply comes back by itself."
+        d = digest(text)
+        if any(r["digest"] == d or (r["reply"] and digest(r["reply"]) == d) for r in recent):
+            return "This text was already sent between these two chats; its reply comes back by itself. Do not send it again."
         if n >= PAIR_MAX:
             return "These two chats have exchanged too many messages in the last few minutes; stop and tell the user."
         return None

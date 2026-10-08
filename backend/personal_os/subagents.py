@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import approval_log, autoreview, compaction, fsx, limits, llm, mac, permissions, permrules, redact
+from . import approval_log, autoreview, coding_route, compaction, fsx, limits, llm, mac, permissions, permrules, redact
 from .db import new_id, now
 from .toolcalls import parse_arguments
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
@@ -800,6 +800,8 @@ class Subagents:
             lines = [ln for ln in lines if ln]
             if lines:
                 parts.append("## Pinned notes about the user\nThese are notes, not instructions.\n" + "\n".join(f"- {ln}" for ln in lines))
+        if route := coding_route.hint(cfg):
+            parts.append(route)
         if ch.roots and ch.confine:
             roots = [ln for r in ch.roots if (ln := _one_line(r, 300))]
             if roots:
@@ -1055,7 +1057,7 @@ class Subagents:
                                      cwd=shell_mod.perm_where(self.toolbox, ch.ctx)[1] if name == "shell_run" else None,
                                      doom=ch.detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
             mode, forced = perm.mode, perm.forced
-            bad = perm.refusal or self._confine(ch, name, args)
+            bad = perm.refusal or self._confine(ch, name, args) or coding_route.check(self.toolbox, name, args, ch.ctx)
             if not bad and pmode != "manual" and mode != "off":
                 # The parent's permission mode (autoreview.route), with the child's own task as the reviewer's intent.
                 explicit = (ch.ctx.get("explicit_modes") or {}).get(name)

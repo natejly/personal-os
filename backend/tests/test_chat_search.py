@@ -47,6 +47,14 @@ def test_finds_words_with_snippet_and_prefix() -> None:
     check(search("quokka missingword") == [], "AND excludes")
 
 
+def test_a_silent_marker_row_is_not_a_hit() -> None:
+    cid = conv("ask", "NO_REPLY", "ask again", "the okapiword answer")
+    check(search("no_reply") == [], "marker-only row has no hit")
+    r = search("okapiword")
+    check([x["id"] for x in r] == [cid], f"real row still found: {r}")
+    check(all("NO_REPLY" not in s["text"] for s in r[0]["snippets"]), "no marker in snippets")
+
+
 def test_short_query_and_route_order() -> None:
     check(search("a") == [], "one char is empty")
     check(client.get("/conversations/search?q=zz").status_code == 200, "not matched as an id")

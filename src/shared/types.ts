@@ -747,6 +747,7 @@ export interface ContextMeter {
   window: number
   estimated_tokens: number
   compact_at: number
+  compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
@@ -770,6 +771,8 @@ export interface Message {
   conversation_id: string
   role: Role
   content: string
+  /** Streamed text held back while it could still be the NO_REPLY marker (lib/noReply.ts); live only, never stored. */
+  held?: string
   /** Uploaded files sent with a user turn; the server inlines their text for the model. */
   attachments?: Attachment[] | null
   model: string | null
@@ -1554,6 +1557,10 @@ export interface Settings {
   compactKeepRecent?: number
   microKeep?: number
   microAt?: number
+  /** Absolute token triggers: history alone for summarizing, the whole request for clearing tool results. */
+  compactAtTokens?: number
+  compactKeepTokens?: number
+  microAtTokens?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
   /** Coding goes to a coding agent: Grain's own agents may not edit files or run file-changing commands inside a git repo,

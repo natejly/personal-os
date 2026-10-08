@@ -4,7 +4,9 @@ import { SKILL_PRESETS, type SkillPreset } from '@shared/skillPresets'
 import { api } from '../lib/api'
 import CaretMenu from '../features/notes/CaretMenu'
 import { slashMenuKey } from '../features/notes/slash'
-import { clientCommand, skillSlug, slashItems, suggestSkills } from '../lib/slashCommands'
+import { clientCommand, scheduleForm, skillSlug, slashItems, suggestSkills, type SlashItem } from '../lib/slashCommands'
+import { composerContext, EMPTY_CONTEXT, overlap, rankByContext, rankChats, type ComposerContext } from '../lib/composerRank'
+import ScheduleForm from './ScheduleForm'
 import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
 import AutonomyToggle from './AutonomyToggle'
@@ -24,6 +26,8 @@ import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDra
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
 import QueueTray from './QueueTray'
+
+const NO_MESSAGES: never[] = []
 
 interface ComposerProps {
   conversationId?: string
@@ -89,8 +93,31 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const conversations = useStore((s) => s.conversations)
   const chatRows = useMemo(() => mentionChats(conversations, activeId), [conversations, activeId])
   const caret = box.current?.querySelector('textarea')?.selectionStart ?? text.length
+  // Menus rank against this chat (lib/composerRank.ts), read only while one could open: subscribing would re-render on every streamed token.
+  const menuCtx = (): ComposerContext => {
+    if (!text.startsWith('/') && !text.includes('@')) return EMPTY_CONTEXT
+    const s = useStore.getState()
+    const conv = activeId ? s.sessions[activeId]?.conversation : undefined
+    return composerContext(conv?.messages ?? NO_MESSAGES, { files: files.map((f) => f.name), docTitle: s.activeDoc?.title, projectId: conv?.project_id ?? s.draftProjectId })
+  }
+  const ctx = slashClosedAt === text ? EMPTY_CONTEXT : menuCtx()
   const slash = slashClosedAt === text ? null
-    : slashItems(text, commands, skills) ?? (onSend ? null : mentionItems(text, caret, agentRows, 8, chatRows))
+    : slashItems(text, commands, skills, ctx) ?? (onSend ? null : mentionItems(text, caret,
+      rankByContext(agentRows, (a) => overlap(a.description, ctx)), 8, rankChats(chatRows, ctx)))
+  /** `/schedule` or `/loop` without a time: the inline form (ScheduleForm), seeded with the rest of the line. */
+  const [sched, setSched] = useState<{ loop: boolean; task: string } | null>(null)
+  const pickSlash = (it: SlashItem | { insert: string }): void => {
+    const act = 'act' in it ? it.act : undefined
+    if (act === 'form') { setText(''); setSched({ loop: (it as SlashItem).key === 'builtin:loop', task: '' }); return }
+    if (act === 'library') {
+      setText('')
+      const s = useStore.getState()
+      s.setLibraryTab((it as SlashItem).key === 'library:skills' ? 'skills' : 'automations')
+      s.setView('library')
+      return
+    }
+    setText(it.insert)
+  }
   useEffect(() => setSlashActive(0), [text])
 
   // Skills that fit what is being typed: the user's approved ones to use now, or, with none of those fitting,
@@ -119,9 +146,25 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
   }
 
-  /** A built-in the UI handles itself (/compact, /skills, /commands). The draft is dropped once it has run. */
+  /** A built-in the UI handles itself (/clear, /compact, /skills, /commands). The draft is dropped once it has run. */
   const runClient = async ({ name, args }: { name: string; args: string }, k0: string): Promise<void> => {
     const s = useStore.getState()
+    if (name === 'clear') {
+      // A marker row: the transcript stays, the model's context starts after it (backend history_rows).
+      if (!activeId || activeId === PAGE_AGENT_DRAFT) return s.toast('Nothing to clear yet: this chat has no history.', 'info')
+      if (streaming) return s.toast('Stop the reply before clearing the context.', 'info')
+      try {
+        const row = await api.clearContext(activeId)
+        dropDraft(k0)
+        useStore.setState((st) => {
+          const se = st.sessions[activeId]
+          return se ? { sessions: { ...st.sessions, [activeId]: { ...se, conversation: { ...se.conversation, messages: [...(se.conversation.messages ?? []), row] } } } } : {}
+        })
+      } catch (e) {
+        s.toast(`Could not clear: ${(e as Error).message}`, 'error')
+      }
+      return
+    }
     if (name === 'compact') {
       // "/compact [focus]" summarizes this chat's history instead of sending a message.
       if (!activeId) return s.toast('Nothing to compact yet: this chat has no history.', 'info')
@@ -134,11 +177,8 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       }
       return
     }
-    dropDraft(k0)
-    if (name === 'skills' || name === 'commands') {
-      s.setLibraryTab(name === 'skills' ? 'skills' : 'automations')
-      s.setView('library')
-    }
+    // "/skills" and "/commands" list inline: the menu opens over them (slashItems), each row inserts its command.
+    if (name === 'skills' || name === 'commands') setText(`/${name} `)
   }
 
   /** Up/Down through this chat's earlier prompts (lib/promptHistory.ts); null when not recalling. */
@@ -255,6 +295,13 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!t.trim() && !sent.length) return
     const client = onSend ? null : clientCommand(t)
     if (client) return runClient(client, k0)
+    const form = onSend ? null : scheduleForm(t)
+    if (form) { dropDraft(k0); setSched(form); return }
+    const sk = onSend ? null : /^\/skill\s+(\S+)/.exec(t.trim())
+    if (sk && !skills.some((x) => x.status === 'approved' && skillSlug(x.name) === sk[1].toLowerCase())) {
+      const waiting = skills.some((x) => skillSlug(x.name) === sk[1].toLowerCase())
+      return useStore.getState().toast(waiting ? `“${sk[1]}” is waiting for approval under Library → Skills.` : `No approved skill is called “${sk[1]}”. Type /skills to list them.`, 'error')
+    }
     const entry = getDraft(k0)
     // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
     // relaunch only the draft remembers it, so it is re-armed here before the send reads it.
@@ -294,7 +341,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!canSend) return
     // A built-in the UI handles ("/compact", "/skills") runs now, never queued: it is not a message for the reply.
     // A chat working autonomously sends straight to its desk, which steers the live turn or wakes the next.
-    const action = queueId && !deskBound && !clientCommand(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
+    const action = queueId && !deskBound && !clientCommand(text) && !scheduleForm(text) ? enterAction({ busy: streaming && !stopping, mod, cardPending, desk }) : 'send'
     if (action === 'queue' && queueId) {
       updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID(), files))
       clearRedirect(key)
@@ -355,6 +402,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           ))}
         </div>
       )}
+      {sched && (
+        <ScheduleForm key={`${sched.loop}:${sched.task}`} loop={sched.loop} task={sched.task}
+          projectId={(activeId && useStore.getState().sessions[activeId]?.conversation.project_id) || draftProjectId}
+          onClose={() => { setSched(null); box.current?.querySelector('textarea')?.focus() }} />
+      )}
       {confirm && (
         <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
           Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
@@ -400,7 +452,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             if (act) {
               e.preventDefault()
               if (act.kind === 'move') setSlashActive(act.active)
-              else if (act.kind === 'pick') setText(slash![slashActive].insert)
+              else if (act.kind === 'pick') pickSlash(slash![slashActive])
               else setSlashClosedAt(text)
             }
             else if (onRecallKey(e)) return
@@ -412,7 +464,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         />
         {slash && (
           <CaretMenu label="Commands" active={slashActive} onHover={setSlashActive}
-            onPick={(i) => setText(slash[i].insert)}
+            onPick={(i) => pickSlash(slash[i])}
             items={slash.map((c) => ({ key: c.key, label: c.label, hint: c.hint }))} />
         )}
         {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so

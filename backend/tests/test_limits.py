@@ -62,11 +62,11 @@ class SlotsTests(unittest.TestCase):
 
 
 class ContextSharesTests(unittest.TestCase):
-    def test_shares_scale_with_the_window(self) -> None:
+    def test_shares_scale_with_the_window_up_to_the_fallback(self) -> None:
         small, mid, big = (limits.context_shares(w) for w in (8_000, limits.CONTEXT_WINDOW_FALLBACK, 1_000_000))
         for k in limits.CONTEXT_SHARES:
             self.assertLess(small[k], mid[k], k)
-            self.assertLess(mid[k], big[k], k)
+            self.assertEqual(mid[k], big[k], k)  # a 1M window gets the 128K block sizes
         self.assertEqual(mid["memories"], int(limits.CONTEXT_WINDOW_FALLBACK * limits.CONTEXT_SHARES["memories"]))
 
     def test_no_budget_constants_remain(self) -> None:

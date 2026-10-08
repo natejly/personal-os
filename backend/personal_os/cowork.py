@@ -247,6 +247,18 @@ def continue_message(kind: str, notes: str = "") -> str:
             f"from the user) ---\n{quoted}\n--- end of notes ---")
 
 
+def inputs_line(inputs: list[dict[str, Any]]) -> str:
+    """The files the user handed this desk. It changes as files are added or edited, so the chat sends it with the
+    turn's context rather than in the cached system prompt."""
+    if not inputs:
+        return ""
+    names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
+                      for e in inputs[:40])
+    more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
+    return (f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
+            f"{names}{more}. Read them first; write your own copies under `work/`.")
+
+
 def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
     """What this desk can do, as short lines each gated on the tools it names actually being offered
     this turn — a model told about a tool it does not have wastes rounds calling it."""
@@ -254,13 +266,8 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         return any(n in offered for n in names)
 
     out = ["## What you can do here"]
-    inputs = facts.get("inputs") or []
-    if inputs:
-        names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
-                          for e in inputs[:40])
-        more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
-        out.append(f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
-                   f"{names}{more}. Read them first; write your own copies under `work/`.")
+    if line := inputs_line(facts.get("inputs") or []):
+        out.append(line)
     if has("desk_list_files", "desk_read_file", "desk_write_file"):
         out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
                    "`desk_write_file` handle whole text files.")

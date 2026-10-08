@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { isClear } from '../lib/workers'
 import { Pencil, Sparkles, SlidersHorizontal, ArrowDown, PanelRight } from 'lucide-react'
 import { useStore, useProject, useChatFace, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import MessageView, { PendingUserMessage, Thinking } from './Message'
@@ -175,9 +176,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
+                    {isClear(m) ? <div className="day-divider" role="separator">Context cleared</div> : <MessageView message={m} face={face} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} resendable={!isStreamingHere && !isDeskOrJob} showContextChips
                       branchable={m.created_at > 0 && !isDeskOrJob}
-                      browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />
+                      browserSession={m.id === watchId ? (deskId ? deskBrowserSession(deskId) : chatBrowserSession(m.conversation_id)) : undefined} />}
                   </Fragment>
                 ))}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} attachments={p.attachments} />)}

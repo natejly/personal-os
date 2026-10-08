@@ -792,7 +792,8 @@ class Subagents:
             parts.append("## Project instructions\n" + project["system_prompt"].strip())
         if self.memories is not None:
             try:
-                pinned = [m for m in self.memories.for_context(cx.get("project_id"), ch.task) if m.get("pinned")]
+                # Not for_context: its order follows the task text, and this block must be the same for every sibling.
+                pinned = [m for m in self.memories.profile(cx.get("project_id")) if m.get("pinned")]
             except Exception:  # noqa: BLE001
                 pinned = []
             lines = [_one_line(redact.scrub_command_output(str(m.get("content") or "")), 500) for m in pinned[:20]]
@@ -877,6 +878,8 @@ class Subagents:
             kw["effort"] = ch.ctx["effort"]
         buf: list[str] = []
         end: dict[str, Any] = {}
+        # Siblings of one kind share a system prompt and tool list: one replica, so they reuse each other's cached prefix.
+        llm.session_affinity.set(f"{ch.conversation_id or ch.id}:{ch.kind}:{ch.role.name}")
         async for ev in llm.stream_chat(cfg, ch.model, ch.messages, schemas or None, **kw):
             ch.touch()
             if ch.halt_reason:
@@ -907,7 +910,8 @@ class Subagents:
             known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
             window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
-            compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5))
+            compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5),
+                                  at_tokens=int(cfg.get("microAtTokens") or limits.MICRO_AT_TOKENS))
             text, end = await self._model_round(ch, schemas)
             if ch.halt_reason:
                 raise _Halt(ch.halt_reason)

@@ -32,6 +32,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import redact
+from .workers import strip_no_reply
 from .telegram_format import html_to_plain, plan, render, split_plain, to_plain  # noqa: F401 - to_plain is re-exported
 
 log = logging.getLogger("personal_os.telegram")
@@ -945,13 +946,15 @@ class TelegramBridge:
     async def _reply_final(self, run: Any, chat_id: int) -> None:
         if run.run_id in self._muted.seen or run.status == "interrupted" or getattr(run, "silent", False):
             return  # a backend going down sends nothing, and a reply that only handed work on was removed (its work shows in the app)
-        text = ((self.deps.message_text(run.message_id) if run.message_id else "") or "").strip()
-        if not to_plain(text):
-            text = RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone
+        raw = ((self.deps.message_text(run.message_id) if run.message_id else "") or "").strip()
+        text = strip_no_reply(raw)  # NO_REPLY never reaches the phone
+        if not to_plain(text):  # only the marker says nothing; an empty reply was an error or a stop
+            text = "" if raw and not run.error else RUN_ERROR if run.error else "Stopped."  # the error text itself stays off the phone
         await self.flush_updates(run.conversation_id)  # progress waiting out its window goes before the answer
         atts = self._unsent(self.deps.message_attachments(run.message_id) if run.message_id else [])
         async with self._order_lock:  # and a delivery still in flight finishes first
-            await self._send_all(chat_id, text)
+            if text:
+                await self._send_all(chat_id, text)
             if atts:
                 await self._deliver(chat_id, "", atts)
 
@@ -1008,7 +1011,7 @@ class TelegramBridge:
         """Text the owner a reply written outside any run they started (a worker's result, after its wake turn)."""
         if self._lock_fd is None:
             return
-        owner, md, atts = self._state().get("ownerChatId"), (text or "").strip(), self._unsent(attachments)
+        owner, md, atts = self._state().get("ownerChatId"), strip_no_reply(text), self._unsent(attachments)
         if owner is not None and (to_plain(md) or atts):
             self._spawn(self._deliver_in_order(owner, md, atts))
 
@@ -1038,7 +1041,7 @@ class TelegramBridge:
     def send_update(self, conversation_id: str | None, text: str, attachments: list[dict[str, Any]] | None = None) -> bool:
         """Progress from a tool mid-run, sent to the phone when this process polls and the conversation is the Texts one.
         True when accepted. At most one message per PROGRESS_MIN_SECONDS: sooner ones are joined and flushed by one timer."""
-        md, atts = (text or "").strip(), [a for a in attachments or [] if a.get("id")]
+        md, atts = strip_no_reply(text), [a for a in attachments or [] if a.get("id")]
         if self._lock_fd is None or not self.is_texts_conversation(conversation_id) or self._state().get("ownerChatId") is None \
                 or not (to_plain(md) or atts):
             return False

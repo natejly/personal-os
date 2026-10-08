@@ -352,6 +352,13 @@ def test_outside_a_repo_there_is_no_worktree_and_no_git_report(box: Box, fake_ed
 
 
 @needs_seatbelt
+def test_a_background_run_points_at_a_blocking_poll_not_a_sleep(box: Box, fake_edit: None) -> None:
+    r = box.run("opencode_run", prompt="write hello", cwd=str(box.root), background=True)
+    assert r["background"] is True and f"shell_poll(job_id='{r['job_id']}', wait_s=300)" in r["note"], r
+    assert "do not sleep" in r["note"]
+
+
+@needs_seatbelt
 @pytest.mark.skipif(not shutil.which("opencode"), reason="needs the real opencode")
 def test_killing_the_job_ends_opencodes_private_server_too(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     """`opencode run` starts `opencode serve --stdio` in a process group of its own, so the job's group kill does not

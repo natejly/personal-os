@@ -15,10 +15,12 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   (permrules.claude_code_floor), which apply in every mode, bypassPermissions included: Grain's own data folder and app
   and disk wipes are refused; credential stores, deletes that skip the Trash and force-pushes ask (needs_you).
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
-  has no prompt to answer: the sandbox is its boundary. On a repo's main checkout it gets its own worktree unless the
-  caller passes new_worktree=false, so it never edits a checkout the user or another agent is working in by default. It runs until it exits or Stop ends it (no time limit: app shutdown
+  has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
   `--continue`s the same opencode state folder.
+
+On a repo's main checkout either agent gets its own worktree unless the caller passes new_worktree=false, so neither
+edits a checkout the user or another agent is working in by default.
 
 Every change is saved and published on the app `events` topic as a `coding_session` event carrying `summary(row)`.
 Nothing here removes a session, force-pushes, or runs git beyond `worktree add`, `status`, `diff` and `log`.
@@ -431,8 +433,8 @@ class CodingSessions:
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
         repo = self.check_repo(repo_path, opencode._desk_root(self.tb, ctx))
-        if new_worktree is None:  # OpenCode stays off a main checkout unless asked; Claude Code keeps its own default
-            found = await asyncio.to_thread(opencode.repo_of, repo) if agent == "opencode" else None
+        if new_worktree is None:  # either agent stays off a main checkout unless asked
+            found = await asyncio.to_thread(opencode.repo_of, repo)
             new_worktree = bool(found and found[1])
         self._check_capacity()
         name = " ".join(str(name or prompt).split())[:60].lstrip("- ") or "coding session"
@@ -660,7 +662,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code) or 'opencode' "
                     f"(installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
-                    "untouched (OpenCode on a repo's main checkout gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
+                    "untouched (on a repo's main checkout either agent gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
                     "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
                     "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
@@ -669,7 +671,7 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},
                           "prompt": {"type": "string", "description": "The task, with the files or folders it concerns"},
-                          "new_worktree": {"type": "boolean", "description": "Default: true for opencode on a repo's main checkout, else false"},
+                          "new_worktree": {"type": "boolean", "description": "Default: true on a repo's main checkout, else false"},
                           "branch": {"type": "string", "description": "Branch for the new worktree (default grain/<task>-<hex>); never main/master"},
                           "model": {"type": "string"},
                           "permission_mode": {"type": "string", "enum": ["acceptEdits", "auto", "dontAsk", "bypassPermissions"]},

@@ -251,3 +251,59 @@ def test_run_python_bridge_and_workflow_steps_refuse_before_any_card(home: Path,
         with pytest.raises(workflows._StepFailed, match="coding_session_start"):
             asyncio.run(coro)
     assert cards == [] and (home / "repo/src/a.py").read_text() == "x = 1\n"
+
+
+# ---- after the fact: a script the text check cannot read is still caught and put back ----
+@pytest.fixture
+def gitrepo(home: Path) -> Path:
+    import subprocess
+    r = home / "proj"
+    (r / "src").mkdir(parents=True)
+    (r / "src" / "a.py").write_text("x = 1\n")
+    (r / "src" / "b.py").write_text("y = 1\n")
+    (r / ".gitignore").write_text("node_modules/\ndist/\n")
+    g = ["git", "-C", str(r), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*g[:3], "init", "-q"], check=True)
+    subprocess.run([*g, "add", "-A"], check=True)
+    subprocess.run([*g, "commit", "-qm", "init"], check=True)
+    (r / "src" / "b.py").write_text("y = 2  # the user's own edit\n")  # dirty before any command
+    (home / "notes" / "w.py").write_text(
+        "import pathlib, sys\nroot = pathlib.Path(sys.argv[1])\n"
+        "(root / 'src/a.py').write_text('x = 99\\n')\n(root / 'src/new.py').write_text('z = 1\\n')\n"
+        "(root / 'node_modules').mkdir(exist_ok=True)\n(root / 'node_modules/pkg.js').write_text('1')\n")
+    return r
+
+
+def test_script_writing_a_repo_is_reverted_and_refused(home: Path, gitrepo: Path, tmp_path: Path) -> None:
+    tb, _ = make(tmp_path)
+    cmd = f"python3 {home}/notes/w.py {gitrepo}"
+    assert coding_route._shell_refusal(cmd, str(gitrepo)) is None  # the text check cannot see it
+    out = call(tb, "shell_run", {"conversation_id": "c-guard"}, command=cmd, cwd=str(gitrepo))
+    assert refused(out), out
+    assert "src/a.py" in out["error"] and "reverted" in out["error"]
+    assert (gitrepo / "src/a.py").read_text() == "x = 1\n"
+    assert not (gitrepo / "src/new.py").exists()
+    assert (gitrepo / "src/b.py").read_text() == "y = 2  # the user's own edit\n"  # already dirty: never touched
+    assert (gitrepo / "node_modules/pkg.js").exists()  # gitignored: not a source edit
+
+
+def test_heredoc_from_outside_the_repo_is_caught(home: Path, gitrepo: Path, tmp_path: Path) -> None:
+    tb, _ = make(tmp_path)
+    cmd = f"cd {gitrepo} && python3 - <<'PY'\nimport pathlib\npathlib.Path('src/a.py').write_text('')\nPY"
+    out = call(tb, "shell_run", {"conversation_id": "c-guard2"}, command=cmd, cwd=str(home / "notes"))
+    assert refused(out), out
+    assert (gitrepo / "src/a.py").read_text() == "x = 1\n"
+
+
+def test_guard_skips_reads_tests_builds_and_setting_off(home: Path, gitrepo: Path, tmp_path: Path) -> None:
+    tb, _ = make(tmp_path)
+    ctx = {"conversation_id": "c-guard3"}
+    for cmd in ("npm test", "npx vitest run x.test.ts", "cd web && npm ci", "python3 -m pytest -q | tail -5", "make build",
+                "uv run pytest -q", "cargo test"):
+        assert coding_route.guard_start(tb, {"command": cmd, "cwd": str(gitrepo)}, ctx) is None, cmd
+    assert coding_route.guard_start(tb, {"command": "python3 w.py", "cwd": str(gitrepo)}, ctx) is not None
+    assert coding_route.guard_start(tb, {"command": "python3 w.py", "cwd": str(home / "notes")}, ctx) is None  # no repo
+    off, _ = make(tmp_path, codingRoute=False)
+    assert coding_route.guard_start(off, {"command": "python3 w.py", "cwd": str(gitrepo)}, ctx) is None
+    out = call(tb, "shell_run", ctx, command="cat src/a.py && ls", cwd=str(gitrepo))
+    assert not refused(out) and "x = 1" in out["output"], out

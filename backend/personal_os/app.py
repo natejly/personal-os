@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, fsx
+from . import chatlink, coding_route, fsx
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -646,7 +646,8 @@ QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 PERSONA_FOLDER_HINT = ("## Working folder\nThis agent keeps its work in `{path}`. Start there: pass it as cwd to shell_run and "
                        "opencode_run and as root to the fs_* tools. For a whole coding task (a feature, a fix, a refactor) prefer "
-                       "opencode_run with a self-contained brief, then check its diff. Say which files you changed.")
+                       "coding_session_start (or opencode_run for a quick one) with a self-contained brief, then check its diff. "
+                       "Say which files changed.")
 
 
 def _persona_folder(persona: Any) -> str | None:
@@ -2269,7 +2270,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
-                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "")
+                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
+                 coding_route.hint(cfg) if tool_schemas else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
@@ -2914,7 +2916,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
                 claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
                 pre: Any = None                        # a result settled before the gate: nothing to approve
-                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args)) is not None:
+                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args, tool_ctx)) is not None:
                     # Arguments the tool's signature cannot take: nothing the user could approve would ever run, so
                     # no card opens and no plan step is spent on it. Not the plan tool: its placeholder function is
                     # narrower than its schema, and normalize_plan below is its check.

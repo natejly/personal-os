@@ -164,6 +164,7 @@ def test_here_documents_work_inside_the_sandbox(box: Box) -> None:
 
 @needs_seatbelt
 def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
+    box.settings["codingRoute"] = False  # the OS sandbox is under test here, not the coding route that refuses repo writes first
     (box.root / ".git" / "hooks").mkdir(parents=True)
     (box.root / ".git" / "config").write_text("[core]\n")
     r = box.run("shell_run", command="echo x > .git/hooks/pre-commit; echo y >> .git/config; echo z > .git/HEAD; echo done")
@@ -179,6 +180,7 @@ PROTECTED = (".zshrc", ".bash_profile", ".envrc", ".gitconfig", ".mcp.json", ".g
 
 @needs_seatbelt
 def test_rc_files_and_tool_config_are_not_writable_inside_a_root(box: Box) -> None:
+    box.settings["codingRoute"] = False  # .git/info/exclude makes the root a repo; the sandbox is what is under test
     for rel in PROTECTED:
         (box.root / rel).parent.mkdir(parents=True, exist_ok=True)
         (box.root / rel).write_text("orig\n")

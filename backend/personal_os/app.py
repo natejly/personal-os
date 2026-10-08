@@ -312,7 +312,7 @@ def settings() -> dict[str, Any]:
     perms = permissions.load(stored)
     out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
-    if not out.get("defaultModel"):  # nothing saved: Ember 1 as the active provider names it (a saved model always wins)
+    if not out.get("defaultModel"):  # nothing saved: the high tier as the active provider names it (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
     # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
     if not out.get("extractionModel"):
@@ -2741,6 +2741,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _normalise_call(c, known_names, advertised, fr == "length" and i == len(calls) - 1)
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
+            if end.get("reasoning"):  # interleaved thinking: the next round reads this round's reasoning back
+                turn["reasoning_content"] = end["reasoning"]
             if fr == "length" and not steers:
                 # The output limit cut this round's tool calls short. They are never replayed as written (see
                 # _replay_args), so the model can try again smaller; twice in one reply is a loop of its own.

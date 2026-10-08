@@ -863,6 +863,14 @@ def _prompt_chars(messages: list[dict[str, Any]]) -> int:
 # Kimi K3 always thinks and accepts only low, high, and max. Omitting the field is max, and
 # medium / xhigh are rejected. High is the middle of that scale, so the app's Medium lands there.
 _KIMI_K3_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}
+# DeepSeek V4 takes none/low/medium/high/xhigh/max, but runs low and medium as high and xhigh as max. Name the level it runs.
+_DEEPSEEK_V4_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max", "off": "none", "none": "none"}
+# Without max_tokens Fireworks stops DeepSeek V4 at 2048 tokens, which thinking alone can use up. A per-response
+# ceiling, not a budget: a turn still runs as many rounds as it needs.
+DEEPSEEK_V4_MAX_TOKENS = 32_768
+# Families that want their own reasoning_content back on an assistant tool-call message (interleaved thinking).
+# Anything else gets the field stripped: a model that does not know it may reject the request.
+_REASONING_ECHO = ("deepseek", "kimi", "glm")
 
 
 def _model_slug(model: str) -> str:
@@ -879,9 +887,18 @@ def requires_max_tokens(settings: dict[str, Any]) -> bool:
 
 
 def output_cap(settings: dict[str, Any], model: str) -> int | None:
-    """The max_tokens to send: the model's own output maximum for a provider that requires the field, else None.
-    Never a number of ours; a model whose maximum is unknown goes without."""
-    return int(caps_lookup(model).get("max_output_tokens") or 0) or None if requires_max_tokens(settings) else None
+    """The max_tokens to send: the model's own output maximum for a provider that requires the field, DeepSeek V4's
+    ceiling (its provider default truncates thinking replies), else None."""
+    if requires_max_tokens(settings):
+        return int(caps_lookup(model).get("max_output_tokens") or 0) or None
+    return DEEPSEEK_V4_MAX_TOKENS if _model_slug(model).startswith("deepseek-v4") else None
+
+
+def wire_messages(model: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`messages` as sent: reasoning_content kept for a family that reads it back, dropped for any other."""
+    if _model_slug(model).startswith(_REASONING_ECHO) or not any("reasoning_content" in m for m in messages):
+        return messages
+    return [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
 
 
 def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
@@ -895,7 +912,7 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, ba
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
-    new chats start at medium (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as high.
+    new chats start at high (`repos.DEFAULT_EFFORT`).
     """
     if not effort or effort == "default":
         return None
@@ -905,6 +922,8 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, ba
         return None
     if slug.startswith("kimi-k3"):
         return _KIMI_K3_EFFORT.get(effort, "high")
+    if slug.startswith("deepseek-v4"):
+        return _DEEPSEEK_V4_EFFORT.get(effort, "high")
     if (caps or {}).get("reasoning") is False:
         return None
     # What this provider already rejected for this model (see _send_with_retry), so a tool loop does not pay a failed request per round.
@@ -1062,7 +1081,7 @@ async def stream_chat(
     under the one `llmRetries` cap) until the first content, reasoning or tool-call fragment; never after. `end` carries
     `effort_dropped` (the value) when the provider rejected reasoning_effort and the request went without it.
     """
-    body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
+    body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
@@ -1083,6 +1102,7 @@ async def stream_chat(
     t0 = time.time()
     out_chars = 0
     reason_chars = 0
+    reason_buf: list[str] = []  # the whole reasoning, handed back on `end` for the next tool round
     cancelled = timed_out = saw_done = False
     splitter = ThinkSplitter()
     known = {t.get("function", {}).get("name") for t in tools or []}
@@ -1166,11 +1186,13 @@ async def stream_chat(
                         if reason:
                             emitted = True
                             reason_chars += len(reason)
+                            reason_buf.append(reason)
                             yield {"type": "reasoning", "text": reason}
                         for kind_p, piece in splitter.feed(_content_text(delta)):
                             emitted = emitted or bool(piece)
                             if kind_p == "reasoning":
                                 reason_chars += len(piece)
+                                reason_buf.append(piece)
                             else:
                                 out_chars += len(piece)
                             yield {"type": kind_p, "text": piece}
@@ -1218,6 +1240,7 @@ async def stream_chat(
     for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
         if kind_p == "reasoning":
             reason_chars += len(piece)
+            reason_buf.append(piece)
         else:
             out_chars += len(piece)
         yield {"type": kind_p, "text": piece}
@@ -1242,6 +1265,8 @@ async def stream_chat(
                            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
     if dropped:
         end["effort_dropped"] = dropped
+    if reason_buf:
+        end["reasoning"] = "".join(reason_buf)
     yield end
 
 
@@ -1328,7 +1353,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     'timeout'; neither is read from a context var, so a call made after a run's deadline has passed is unaffected.
     """
     t0 = time.time()
-    body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    body: dict[str, Any] = {"model": model, "messages": wire_messages(model, messages), "stream": False}
     wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
     if wired:
         body["reasoning_effort"] = wired

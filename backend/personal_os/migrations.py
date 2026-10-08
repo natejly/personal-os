@@ -495,6 +495,29 @@ def _plan_mode_into_plan_first(c: sqlite3.Connection) -> None:
 
 
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
+# Chat-model settings a change of default re-resolves. Embedding, rerank and vision keys are not among them.
+_CHAT_MODEL_KEYS = ("defaultModel", "modelHigh", "modelMedium", "modelLow", "extractionModel", "fastModel")
+# The old default chat model, per spelling, and what replaces it.
+_EMBER_TO_DEEPSEEK = {"accounts/fireworks/models/ember-1": "accounts/fireworks/models/deepseek-v4p1-flash",
+                      "ember-1": "deepseek-v4-flash"}
+
+
+def _deepseek_default(c: sqlite3.Connection) -> None:
+    """DeepSeek V4.1 Flash became the model of every tier and high the default effort, and the user asked to switch
+    existing installs too. On Fireworks or the proxy the saved chat-model keys are deleted, so they resolve to the new
+    tier defaults (and keep following them). A chat on the old default model moves to DeepSeek, and a chat's saved
+    medium effort becomes high. Any other per-chat model or effort is the user's pick and stays."""
+    from . import permissions, providers
+    stored = {k: permissions._json(v) for k, v in c.execute("SELECT key, value FROM settings WHERE key IN ('provider', 'baseUrl')")}
+    if providers.effective(stored) in ("fireworks", "litellm"):
+        c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in _CHAT_MODEL_KEYS])
+    if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations'").fetchone():
+        return
+    c.executemany("UPDATE conversations SET model = ? WHERE model = ?", [(new, old) for old, new in _EMBER_TO_DEEPSEEK.items()])
+    c.execute("UPDATE conversations SET settings = json_set(settings, '$.effort', 'high') "
+              "WHERE json_valid(settings) AND json_extract(settings, '$.effort') = 'medium'")
+
+
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
@@ -528,6 +551,7 @@ MIGRATIONS: list[tuple[int, str, Step]] = [
     (30, "drop_private_chats", _drop_private_chats),
     (31, "chat_links", _chat_links),
     (32, "plan_mode_into_plan_first", _plan_mode_into_plan_first),
+    (33, "deepseek_default", _deepseek_default),
 ]
 
 

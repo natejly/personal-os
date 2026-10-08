@@ -143,10 +143,23 @@ def dispatch_only(names: Iterable[str | None]) -> bool:
     return bool(ns) and all(n in FRONT_TOOLS or n == "todo_write" for n in ns)
 
 
-def is_silent(text: str) -> bool:
-    """A wake reply that is exactly NO_REPLY (any case, stray punctuation or fence aside) or empty says nothing."""
-    t = re.sub(r"[\s`*.\"']+", "", text or "").upper()
-    return t in ("", NO_REPLY)
+_SENTINEL = re.compile(r"[\s`*_~>.\"'“”‘’]*NO_REPLY[\s`*_~.!?,;:\"'“”‘’]*", re.I)
+
+
+def is_silent(text: str | None) -> bool:
+    """A wake reply that is exactly NO_REPLY (any case, markdown, quotes or trailing punctuation aside) or empty says nothing."""
+    t = text or ""
+    return not t.strip() or _SENTINEL.fullmatch(t) is not None
+
+
+def strip_no_reply(text: str | None) -> str:
+    """The reply as the user should see it: NO_REPLY lines at its start or end dropped ("" when that was all it said)."""
+    lines = (text or "").strip().split("\n")
+    while lines and is_silent(lines[0]):
+        lines.pop(0)
+    while lines and is_silent(lines[-1]):
+        lines.pop()
+    return "\n".join(lines)
 
 
 # ---- the wake turn -------------------------------------------------------------------------------
@@ -407,7 +420,7 @@ class Workers:
                 # the face: a Library agent keeps its name; a resumed worker keeps the id it started as
                 "agent": str(inp.get("role") or ""), "origin": str(inp.get("origin") or row["run_id"]),
                 # ponytail: capped here, and the list recomputes it per poll; a per-worker report route is the upgrade
-                "report": self.report_text(row)[:4000] if ended else ""}
+                "report": strip_no_reply(self.report_text(row))[:4000] if ended else ""}  # the wake turn still reads the raw text
 
     def info_of(self, ch: Child) -> dict[str, Any]:
         return self.info(self.row(ch.id) or {"run_id": ch.id, "input": {"conversation_id": ch.conversation_id}, "status": "running"})

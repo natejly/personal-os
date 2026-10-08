@@ -908,6 +908,7 @@ class Engine:
         raw = ctx["modes"].get(name, "off")
         if spec is None or raw == "off" or not self.toolbox.available(name):
             raise _StepFailed(f"{name} is not available (the tool is off or not connected)")
+        self._precheck(ctx, name, args)
         # The chat loop's gates, in its order: untrusted content and calls that may never run unasked force a card,
         # a credential store or a write after untrusted content asks, then the argument-pattern rules (deny and the hardline list
         # refuse, ask cards, allow lifts a plain ask). The plan's approval covers the step it named, never a
@@ -1035,10 +1036,18 @@ class Engine:
         return [items[str(i)] for i in range(len(over))]
 
     # ---- approvals
+    def _precheck(self, ctx: dict[str, Any], name: str, args: dict[str, Any]) -> None:
+        """What Toolbox.call would refuse anyway (bad arguments, a repo edit routed to a coding agent) fails the step
+        before any card is shown for it."""
+        if (bad := self.toolbox.precheck(name, args, ctx)) is not None:
+            raise _StepFailed(str(bad.get("error") or bad)[:500])
+
     async def _approve_step(self, run: dict[str, Any], ctx: dict[str, Any], step: dict[str, Any], params: dict[str, Any],
                             results: dict[str, Any], stop: asyncio.Event) -> bool:
         shown = (render(step.get("args") or {}, params, results) if "tool" in step
                  else render(step.get("agent") or step.get("fan_out") or {}, params, results, keep_steps=True))
+        if "tool" in step:
+            self._precheck(ctx, step["tool"], shown)
         return await self._ask(run, ctx, f"{run['id']}:{step['id']}:step", step.get("tool") or "workflow_step", shown, False,
                                "external" if "tool" in step and (self.toolbox.specs.get(step["tool"]) and
                                                                  self.toolbox.specs[step["tool"]].danger == "external") else "writes", stop,

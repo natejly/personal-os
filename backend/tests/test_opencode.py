@@ -103,7 +103,7 @@ def test_opencodes_own_config_and_state_are_left_alone(box: Box, monkeypatch: py
               "XDG_CACHE_HOME", "XDG_STATE_HOME"):
         assert k not in env, k
     assert env["HOME"] == os.path.expanduser("~")  # so it finds ~/.config/opencode and its own sessions
-    assert "-m" not in got["argv"]  # no model named: opencode's own default stands
+    assert got["argv"][got["argv"].index("-m") + 1] == opencode.DEFAULT_MODEL  # no model named: the Grain default
     assert not any(a.startswith("grain/") for a in got["argv"])
 
 
@@ -171,7 +171,7 @@ def test_runs_the_agent_sandboxed_in_the_working_folder_with_its_own_state(box: 
     r = box.run("opencode_run", prompt="write hello", cwd=str(box.root))
     assert r.get("exit_code") == 0, r
     assert (box.root / "hello.txt").read_text() == "hello from fake opencode\n"
-    assert r["session_id"] == "ses_fake" and r["model"] == "opencode default" and r["sandboxed"] is True
+    assert r["session_id"] == "ses_fake" and r["model"] == opencode.DEFAULT_MODEL and r["sandboxed"] is True
     assert "[write] hello.txt" in r["output"] and f"Wrote hello.txt in {box.root}" in r["output"]
     assert "write failed" not in r["output"]
     # the reply is tainted: a model with network access wrote the output

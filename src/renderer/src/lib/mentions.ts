@@ -7,7 +7,7 @@ import { chatSlug } from './chatLink'
  */
 export interface MentionAgent { name: string; description: string }
 /** A chat the `@` menu can name; the backend resolves `@<chatSlug(title)>` in the sent message. */
-export interface MentionChat { id: string; title: string }
+export interface MentionChat { id: string; title: string; projectId?: string | null }
 export interface MentionItem { key: string; label: string; hint: string; /** The whole draft after picking this row. */ insert: string }
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,39}$/
@@ -42,7 +42,7 @@ export function mentionItems(text: string, caret: number, agents: MentionAgent[]
 
 /** Chats worth offering in the `@` menu: open, not the current one, not a scheduled job's. */
 export const mentionChats = (conversations: Conversation[], currentId: string | null): MentionChat[] =>
-  conversations.filter((c) => !c.archived_at && c.id !== currentId && !c.settings.job_id).map((c) => ({ id: c.id, title: c.title }))
+  conversations.filter((c) => !c.archived_at && c.id !== currentId && !c.settings.job_id).map((c) => ({ id: c.id, title: c.title, projectId: c.project_id }))
 
 /** A draft that opens with `@name` for a known agent: who it is for and the message without the mention. Null otherwise. */
 export function routeMention(text: string, names: string[]): { agent: string; text: string } | null {

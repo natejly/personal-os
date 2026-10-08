@@ -305,8 +305,8 @@ def register(tb: Any) -> None:
                         isolation=f"Working in its own git worktree on branch {wt['branch']}, off {wt['base'][:12]} of "
                                   f"{wt['repo']}; the checkout itself is untouched. Follow up with continue_session=true "
                                   f"(or cwd={wt['worktree']}).")
-        poll = (f"shell_poll(job_id) reads its raw JSON events as they come and shell_kill(job_id) stops it; you are told "
-                f"when it finishes" + (f", then review it with shell_run `git status` / `git diff {wt['base'][:12]}` in "
+        poll = (f"shell_poll(job_id='{job.id}', wait_s=300) blocks until it has new raw JSON events or ends (do not sleep "
+                f"in a shell to wait) and shell_kill(job_id) stops it; you are told when it finishes" + (f", then review it with shell_run `git status` / `git diff {wt['base'][:12]}` in "
                                         f"{wt['worktree']}." if wt else "."))
         if background:
             return {"job_id": job.id, "background": True, **info, "note": f"opencode is working in the background. {poll}"}
@@ -353,7 +353,7 @@ def register(tb: Any) -> None:
                     "untouched; in_place=true edits the checkout itself (only when the user asked for that). The result is its narration and "
                     "final answer plus a git report (worktree, branch, status, diff stat, commits); verify the change yourself (shell_run "
                     "`git diff <base>` in the worktree) before reporting it done. Default timeout 300s (max 600s), then in a desk it carries "
-                    "on as a background job you follow with shell_poll; background=true starts it that way.",
+                    "on as a background job you follow with shell_poll(job_id, wait_s=...); background=true starts it that way.",
                     _obj({"prompt": {"type": "string", "description": "The task, with the files or folder it concerns"},
                           "cwd": {"type": "string", "description": "The folder to work in, usually a repo; relative to the default folder"},
                           "timeout_s": {"type": "integer", "default": 300}, "background": {"type": "boolean", "default": False},

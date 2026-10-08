@@ -926,9 +926,10 @@ def test_bridge_texts_a_workers_card_with_buttons_whatever_chat_it_came_from(tmp
 
 # ---------------- 8. Claude Code argv ----------------
 @pytest.mark.parametrize("mode", list(codingagents.PERMISSION_MODES))
-def test_claude_argv_defaults_to_fable_with_two_sonnet_helpers(mode: str | None) -> None:
+def test_claude_argv_leaves_the_model_to_the_cli_with_two_sonnet_helpers(mode: str | None) -> None:
+    # #88: no --model pin by default, the user's own CLI default is the model they have quota for
     argv = codingagents.claude_argv("/bin/claude", "n", "do it", None, mode)
-    assert argv[argv.index("--model") + 1] == "fable" and argv.count("--model") == 1
+    assert "--model" not in argv and "fable" not in argv
     agents = json.loads(argv[argv.index("--agents") + 1])
     assert set(agents) == {"implementer", "tester-reviewer"}
     for a in agents.values():

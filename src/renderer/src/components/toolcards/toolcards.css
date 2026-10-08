@@ -13,6 +13,8 @@
 .tc-edited { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
 
 .tc-status { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); white-space: nowrap; }
+/* A call still in progress is a plain muted status, not a chip; the text carries the sweep. */
+.tc-status.running { background: none; padding: 2px 0; }
 .tc-status.awaiting { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
 .tc-status.done, .tc-status.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .tc-status.denied { background: var(--hover); color: var(--text-muted); }

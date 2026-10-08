@@ -31,13 +31,13 @@ test('waitText stays quiet for 5s, then counts, then says the model is slow', ()
   assert.equal(waitText(65_400), 'Still waiting on the model… 65s')
 })
 
-test('nowText: tool in flight wins, then subagents, then thinking; nothing once the answer streams', () => {
+test('nowText: tool in flight wins, then subagents; thinking text and a streaming answer say nothing', () => {
   const call = { id: 'c1', name: 'gmail_search', arguments: { query: 'from:bob' }, result_preview: '', duration_ms: 0, error: null, pending: true }
   const sub = { id: 's1', parent_run_id: 'r', role: 'researcher', state: 'running' as const, exit_reason: null, task: 't', rounds: 0, calls: 0, cost: 0, depth: 1, background: false, now: 'thinking' }
   assert.match(nowText({ reasoning: 'Check mail.', tool_events: [call], content: '' }) ?? '', /from:bob$/)
   assert.equal(nowText({ reasoning: '', tool_events: [{ ...call, pending: false }], content: '' }, { s1: sub }), 'Running 1 subagent')
   assert.equal(nowText({ reasoning: '', tool_events: [{ ...call, name: 'agent_wait', pending: true }], content: '' }, { s1: sub, s2: { ...sub, id: 's2' } }), 'Waiting on 2 subagents')
-  assert.equal(nowText({ reasoning: 'Reading mail\nChecking calendar', tool_events: [{ ...call, pending: false }], content: '' }), 'Checking calendar')
+  assert.equal(nowText({ reasoning: 'Reading mail\nChecking calendar', tool_events: [{ ...call, pending: false }], content: '' }), null)
   assert.equal(nowText({ reasoning: 'Check mail.', tool_events: [call], content: 'Here is' }), null)
   assert.equal(nowText({ reasoning: null, tool_events: [], content: '' }), null)
   assert.equal(nowText(null), null)

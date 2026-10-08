@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
-from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_KEEP_RECENT, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
+from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
 
@@ -27,6 +27,9 @@ usage_context: ContextVar[dict[str, Any]] = ContextVar("usage_context", default=
 # Absolute time.monotonic() by which the current stream must be over; set only around a closing-answer call (a hang
 # bound, not a reply cap). A context var rather than a parameter so every caller of stream_chat keeps its signature.
 stream_deadline: ContextVar[float | None] = ContextVar("stream_deadline", default=None)
+# Requests that share a prompt prefix (one chat's turns, sibling workers of one kind) carry the same id, so Fireworks
+# routes them to the replica that holds that prefix in its cache. Set by the chat loop and the worker loop.
+session_affinity: ContextVar[str | None] = ContextVar("session_affinity", default=None)
 
 
 def on_usage(fn: UsageListener) -> None:
@@ -139,6 +142,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "autoCompact": True,
     "compactAt": COMPACT_AT,
     "compactKeepRecent": COMPACT_KEEP_RECENT,
+    "compactAtTokens": COMPACT_AT_TOKENS,  # absolute trigger on history alone, for windows too large for the fraction to ever fire
+    "compactKeepTokens": COMPACT_KEEP_TOKENS,
+    "microAtTokens": MICRO_AT_TOKENS,
     "microKeep": MICRO_KEEP,
     "microAt": MICRO_AT,  # old tool results stub out past a quarter of the window: past ~30k tokens a round, time to first token dominates
     # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
@@ -674,6 +680,8 @@ def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | No
         return "reasoning_effort"
     if "service_tier" in body and (param == "service_tier" or "service_tier" in msg or "service tier" in msg):
         return "service_tier"
+    if "user" in body and param == "user":  # the affinity id is an optimisation, never worth a failed reply
+        return "user"
     return None
 
 
@@ -781,7 +789,21 @@ def _headers(settings: dict[str, Any]) -> dict[str, str]:
     h = {"Content-Type": "application/json"}
     if settings.get("apiKey"):
         h["Authorization"] = f"Bearer {settings['apiKey']}"
+    if (sid := session_affinity.get()) and _affinity_ok(settings):
+        h["x-session-affinity"] = sid
     return h
+
+
+def _affinity_ok(settings: dict[str, Any]) -> bool:
+    """Fireworks reads the header; a LiteLLM proxy ignores it and forwards the `user` field instead (see _with_affinity)."""
+    return providers.effective(settings) in ("fireworks", "litellm")
+
+
+def _with_affinity(settings: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """`user` carries the same id in the body: the proxy passes it to Fireworks, which also routes on it."""
+    if (sid := session_affinity.get()) and _affinity_ok(settings):
+        body["user"] = sid
+    return body
 
 
 # Ids that name a non-chat model when the proxy reports no `mode` for them: a conservative
@@ -1094,6 +1116,7 @@ async def stream_chat(
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
+    _with_affinity(settings, body)
     calls: dict[int, dict[str, Any]] = {}
     by_index: dict[int, int] = {}  # provider `index` -> slot, re-pointed when an index is reused for a new call
     last_idx = 0
@@ -1359,6 +1382,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
         body["reasoning_effort"] = wired
     if cap := output_cap(settings, model):
         body["max_tokens"] = cap
+    _with_affinity(settings, body)
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         try:
             r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)

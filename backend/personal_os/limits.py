@@ -22,6 +22,9 @@ from typing import Any
 CONTEXT_WINDOW_FALLBACK = 128_000  # used only when neither the proxy nor an overflow told us the real window
 CONTEXT_WINDOW_FLOOR = 4096        # a learned or stored window never goes below this
 COMPACT_AT = 0.7                   # summarize history past this share of the window (token counts are len//4 estimates)
+COMPACT_AT_TOKENS = 30_000         # summarize once the replayed history (not the cached system prompt) passes this many estimated tokens
+COMPACT_KEEP_TOKENS = 10_000       # newest history kept verbatim after a compaction
+MICRO_AT_TOKENS = 64_000           # stub old tool results in a run once the whole request passes this
 COMPACT_KEEP_RECENT = 8            # newest messages never summarized
 MICRO_AT = 0.25                    # stub old tool results past this share of the window (time to first token dominates past ~30k)
 MICRO_KEEP = 3                     # newest tool results left intact
@@ -110,6 +113,9 @@ RANGES: dict[str, tuple[float, float]] = {
     "compactAt": (0.1, 0.95),
     "microAt": (0.05, 0.95),
     "compactKeepRecent": (2, 200),
+    "compactAtTokens": (4_000, 4_000_000),
+    "compactKeepTokens": (1_000, 1_000_000),
+    "microAtTokens": (8_000, 4_000_000),
     "microKeep": (0, 50),
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),

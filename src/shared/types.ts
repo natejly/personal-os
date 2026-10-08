@@ -747,6 +747,7 @@ export interface ContextMeter {
   window: number
   estimated_tokens: number
   compact_at: number
+  compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
@@ -1554,6 +1555,10 @@ export interface Settings {
   compactKeepRecent?: number
   microKeep?: number
   microAt?: number
+  /** Absolute token triggers: history alone for summarizing, the whole request for clearing tool results. */
+  compactAtTokens?: number
+  compactKeepTokens?: number
+  microAtTokens?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */

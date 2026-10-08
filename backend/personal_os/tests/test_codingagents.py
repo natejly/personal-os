@@ -173,7 +173,7 @@ class ClaudeDriver(CodingTestCase):
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
         # No --model either: without one the CLI uses the user's own default, the model they have quota for.
-        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "do it"])
+        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "--settings", ca.floor_settings(), "do it"])
         self.assertNotIn("--permission-mode", plain)
         self.assertNotIn("--model", plain)
         agents = json.loads(plain[plain.index("--agents") + 1])
@@ -186,6 +186,24 @@ class ClaudeDriver(CodingTestCase):
         for argv in (plain, asked, ca.resume_argv("/bin/claude", SID, "go on"), dashed):
             self.assertFalse(any(a.startswith("--dangerously") for a in argv))
         self.assertEqual(dashed[-1], "Task: -x")
+
+    def test_every_start_and_resume_carries_the_floor(self) -> None:
+        """Allow everything's floor reaches Claude Code as deny/ask rules on every start and follow-up, whatever the mode."""
+        for argv in (ca.claude_argv("/bin/claude", "n", "do it"), ca.claude_argv("/bin/claude", "n", "x", None, "bypassPermissions"),
+                     ca.resume_argv("/bin/claude", SID, "go on")):
+            rules = json.loads(argv[argv.index("--settings") + 1])["permissions"]
+            self.assertEqual(rules, ca.permrules.claude_code_floor()["permissions"])
+            self.assertIn("Bash(git push --force*)", rules["ask"])
+
+    def test_claude_env_carries_no_app_secrets(self) -> None:
+        """The claude CLI gets the scrubbed allowlist plus PATH and TMPDIR, never the app's keys and tokens."""
+        from personal_os import shell
+        secrets = {"PERSONAL_OS_API_KEY": "fw_secret1", "FIREWORKS_API_KEY": "fw_secret2", "TELEGRAM_BOT_TOKEN": "123:abc",
+                   "PERSONAL_OS_AUTH_TOKEN": "tok_secret3", "ANTHROPIC_API_KEY": "sk-ant-secret4"}
+        with unittest.mock.patch.dict("os.environ", secrets), unittest.mock.patch.object(ca, "login_path", return_value="/usr/bin:/bin"):
+            env = {**shell.scrubbed_env("/tmp/x"), **ca.claude_env()}
+        self.assertFalse(set(secrets) & set(env))
+        self.assertFalse([v for v in env.values() if any(x in v for x in secrets.values())])
 
     async def test_start_records_ids_and_maps_grain_mode_to_the_flag(self) -> None:
         row = await self.started()

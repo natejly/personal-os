@@ -106,6 +106,32 @@ class Validation(CodingTestCase):
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", new_worktree=True, branch="taken")
 
+    async def test_opencode_gets_a_worktree_on_a_main_checkout_unless_told_otherwise(self) -> None:
+        launched: list[str] = []
+
+        async def launch(row: dict[str, Any], *_a: Any) -> None:
+            launched.append(row["worktree"])
+            row["external_id"] = "j"
+
+        main = unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True))
+        with main, unittest.mock.patch.object(ca.opencode, "binary", return_value="/bin/opencode"), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):
+            row = await self.cs.start("opencode", str(self.repo), "Fix the bug")
+            self.assertRegex(row["branch"], r"^grain/fix-the-bug-[0-9a-f]{4}$")
+            self.assertEqual(launched[-1], row["worktree"])
+            self.assertIn("worktree", self.fake.calls[-1])
+            n = len(self.fake.calls)
+            row = await self.cs.start("opencode", str(self.repo), "in place", new_worktree=False)
+            self.assertEqual((row["worktree"], row["branch"], len(self.fake.calls)), (str(self.repo), None, n))
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, False)), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):  # already a linked worktree
+            row = await self.cs.start("opencode", str(self.repo), "x")
+            self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
+        self.job_files("deadbeef", "working")
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True)):
+            row = await self.cs.start("claude", str(self.repo), "x")  # Claude Code's default is unchanged
+            self.assertEqual(row["branch"], None)
+
     async def test_permission_mode_and_agent_rules(self) -> None:
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", permission_mode="plan")
@@ -147,7 +173,7 @@ class ClaudeDriver(CodingTestCase):
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
         # No --model either: without one the CLI uses the user's own default, the model they have quota for.
-        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "do it"])
+        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "--settings", ca.floor_settings(), "do it"])
         self.assertNotIn("--permission-mode", plain)
         self.assertNotIn("--model", plain)
         agents = json.loads(plain[plain.index("--agents") + 1])
@@ -160,6 +186,24 @@ class ClaudeDriver(CodingTestCase):
         for argv in (plain, asked, ca.resume_argv("/bin/claude", SID, "go on"), dashed):
             self.assertFalse(any(a.startswith("--dangerously") for a in argv))
         self.assertEqual(dashed[-1], "Task: -x")
+
+    def test_every_start_and_resume_carries_the_floor(self) -> None:
+        """Allow everything's floor reaches Claude Code as deny/ask rules on every start and follow-up, whatever the mode."""
+        for argv in (ca.claude_argv("/bin/claude", "n", "do it"), ca.claude_argv("/bin/claude", "n", "x", None, "bypassPermissions"),
+                     ca.resume_argv("/bin/claude", SID, "go on")):
+            rules = json.loads(argv[argv.index("--settings") + 1])["permissions"]
+            self.assertEqual(rules, ca.permrules.claude_code_floor()["permissions"])
+            self.assertIn("Bash(git push --force*)", rules["ask"])
+
+    def test_claude_env_carries_no_app_secrets(self) -> None:
+        """The claude CLI gets the scrubbed allowlist plus PATH and TMPDIR, never the app's keys and tokens."""
+        from personal_os import shell
+        secrets = {"PERSONAL_OS_API_KEY": "fw_secret1", "FIREWORKS_API_KEY": "fw_secret2", "TELEGRAM_BOT_TOKEN": "123:abc",
+                   "PERSONAL_OS_AUTH_TOKEN": "tok_secret3", "ANTHROPIC_API_KEY": "sk-ant-secret4"}
+        with unittest.mock.patch.dict("os.environ", secrets), unittest.mock.patch.object(ca, "login_path", return_value="/usr/bin:/bin"):
+            env = {**shell.scrubbed_env("/tmp/x"), **ca.claude_env()}
+        self.assertFalse(set(secrets) & set(env))
+        self.assertFalse([v for v in env.values() if any(x in v for x in secrets.values())])
 
     async def test_start_records_ids_and_maps_grain_mode_to_the_flag(self) -> None:
         row = await self.started()
@@ -297,6 +341,25 @@ class OpencodeDriver(CodingTestCase):
         row["status"] = "working"
         self.jobs.jobs.clear()
         self.assertEqual(self.cs.refresh(row)["status"], "blocked")
+
+    async def test_a_job_ending_publishes_the_session_at_once(self) -> None:
+        """The job registry's change hook refreshes live OpenCode sessions, so the chat card sees "done" without a poll;
+        the hook that was there before still runs."""
+        before: list[int] = []
+        jobs = SimpleNamespace(jobs={}, on_change=lambda: before.append(1))
+        cs = ca.CodingSessions(self.cs.db, jobs, self.fake, lambda e, d: self.events.append((e, d)), lambda: {})
+        wt, t = str(self.repo), 1.0
+        with cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s3','opencode','j3',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s4','opencode',NULL,?,?,'n','p','starting','',?,?)", (wt, wt, t, t))
+        jobs.jobs["j3"] = SimpleNamespace(status="exited", exit_code=0, buf="", total=0, live=lambda: False)
+        self.events.clear()
+        jobs.on_change()
+        self.assertEqual(before, [1])
+        self.assertEqual([(d["id"], d["status"]) for e, d in self.events if e == "coding_session"], [("s3", "done")])
+        self.assertEqual(cs.get("s4")["status"], "starting")  # still launching: not mistaken for a lost job
 
 
 class Diff(CodingTestCase):

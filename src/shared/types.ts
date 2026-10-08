@@ -1721,6 +1721,7 @@ export interface UsageReport {
   by_model: (UsageBucket & { model: string; ids?: string[] })[]
   /** What the calls were for (chat, jobs, memory, embeddings...), in display order. */
   by_feature?: (UsageBucket & { feature: string; label: string })[]
+  by_source?: (UsageBucket & { source: string; label: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
   by_tag: (UsageBucket & { tag: string })[]

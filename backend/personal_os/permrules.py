@@ -653,8 +653,10 @@ def hardline(cmd: str, parsed: Parsed | None = None) -> str | None:
 
 RM_COMMANDS = {"rm", "unlink", "srm", "shred"}
 GIT_GLOBAL_ARG = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
-DISKUTIL_WIPES = re.compile(r"^(erase|secureErase|zeroDisk|randomDisk|reformat|partitionDisk)", re.I)
-APFS_WIPES = {"deletecontainer", "deletevolume", "erasevolume"}
+DISKUTIL_WIPE_VERBS = ("erase", "secureErase", "zeroDisk", "randomDisk", "reformat", "partitionDisk")
+DISKUTIL_WIPES = re.compile("^(" + "|".join(DISKUTIL_WIPE_VERBS) + ")", re.I)
+APFS_WIPE_VERBS = ("deleteContainer", "deleteVolume", "eraseVolume")
+APFS_WIPES = {v.lower() for v in APFS_WIPE_VERBS}
 DEV_OK = ("/dev/null", "/dev/zero", "/dev/stdout", "/dev/stderr", "/dev/tty")
 
 
@@ -844,7 +846,8 @@ def destructive(cmd: str, cwd: str | None = None, scratch: Iterable[str] = ()) -
     return walk(normalize(cmd or ""), 0, cwd)
 
 
-KEYCHAIN_SUBCOMMANDS = re.compile(r"^(find-|dump-keychain|export|delete-|add-|set-|unlock-keychain|import)")
+KEYCHAIN_VERBS = ("find-", "dump-keychain", "export", "delete-", "add-", "set-", "unlock-keychain", "import")
+KEYCHAIN_SUBCOMMANDS = re.compile("^(" + "|".join(map(re.escape, KEYCHAIN_VERBS)) + ")")
 
 
 def touches_protected(cmd: str, cwd: str | None = None, roots: Iterable[str] = ()) -> str | None:
@@ -888,6 +891,45 @@ def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
         return "external_directory", why
     why = destructive(cmd, cwd, scratch)
     return ("destructive", why) if why else None
+
+
+# The claude.ai Gmail connector's sending tools, as the Claude Code CLI names them (it ships with the user's account).
+CLAUDE_MAIL_SENDS = ("mcp__claude_ai_Gmail__send_message", "mcp__claude_ai_Gmail__reply", "mcp__claude_ai_Gmail__forward")
+
+
+def claude_code_floor() -> dict[str, Any]:
+    """Allow everything's floor as Claude Code settings (`claude --settings`), for a coding session that runs outside the
+    OS sandbox, often in bypassPermissions. Claude Code applies deny and ask rules in every permission mode, and an ask in
+    a background session shows here as needs_you, the session's version of a card. Deny what no mode lifts here: Grain's
+    own data folder and app (mac.protected_paths, refused to every file tool) and disk wipes / formatting (the hardline
+    list). Ask for what the floor cards: the credential stores the shell sandbox denies (mac.CRED_*, browser cookie and
+    password files, .env, private keys) and the Keychain CLI, deletes that skip the Trash, force-pushes, and sending mail
+    through the CLI's own Gmail connector (CLAUDE_MAIL_SENDS; other mail servers the user added are not known here). Built from
+    the same lists as `allow_all_floor` and the sandbox so they cannot drift. Best effort like the shell floor: Bash rules
+    match the command as written (a delete inside `sh -c`, behind `sudo`, or in a script is not seen; temp folders are not
+    exempt), and Read/Edit rules cover Claude Code's file tools and the file commands it recognises in Bash only."""
+    from . import mac
+    deny: list[str] = []
+    ask: list[str] = []
+    for root in dict.fromkeys(mac.protected_paths()):
+        pat = "//" + str(root).lstrip("/") + "/**"  # `//` is an absolute path in Claude Code's rule syntax
+        deny += [f"Edit({pat})"] + ([] if root.suffix.lower() == ".app" else [f"Read({pat})"])
+    paths = [f"~/{d}/**" for d in mac.CRED_HOME_DIRS] + [f"//{k.lstrip('/')}/**" for k in mac.SYSTEM_KEYCHAINS]
+    paths += [f"~/{f}" for f in mac.CRED_HOME_FILES]
+    paths += [f"~/Library/Application Support/{b}/**/{n}" for b in mac.BROWSER_DIRS for n in mac.BROWSER_FILE_NAMES]
+    paths += [".env", ".env.*"] + [f"id_{k}" for k in mac.KEY_TYPES]  # a bare name matches at any depth
+    ask += [f"{t}({p})" for p in paths for t in ("Read", "Edit")]
+    ask += [f"Bash(security {v}*)" for v in KEYCHAIN_VERBS]
+    ask += [f"Bash({c} *)" for c in sorted(RM_COMMANDS)] + ["Bash(find * -delete*)", "Bash(find * -exec rm *)"]
+    for flag in ("--force", "--mirror", "--delete", "-f", "-d"):  # --force* covers --force-with-lease
+        ask += [f"Bash(git push {flag}*)", f"Bash(git push * {flag}*)"]
+    # A +refspec forces. A :refspec delete has no rule: a pattern ending in `:*` is Claude Code's prefix syntax, so
+    # `git push * :*` would ask for every push.
+    ask.append("Bash(git push * +*)")
+    ask += list(CLAUDE_MAIL_SENDS)  # the email card: Grain's gmail_send always asks, so the CLI's own mail connector does too
+    deny += [f"Bash(diskutil {v}*)" for v in DISKUTIL_WIPE_VERBS] + [f"Bash(diskutil apfs {v}*)" for v in APFS_WIPE_VERBS]
+    deny += [f"Bash(dd *of={d}*)" for d in ("/dev/disk", "/dev/rdisk", "/dev/sd")] + ["Bash(mkfs*)", "Bash(newfs*)"]
+    return {"permissions": {"deny": deny, "ask": ask}}
 
 
 # ---------------------------------------------------------------- subjects

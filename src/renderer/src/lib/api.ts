@@ -231,6 +231,10 @@ export const api = {
   /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */
   inboxRunSeen: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/seen`, { method: 'POST' }),
   inboxSeenAll: (hours = 72) => req<{ ok: boolean; marked: number }>(`/inbox/seen_all?hours=${hours}`, { method: 'POST' }),
+  /** Erase one "While you were away" message (the run row and its journal, not the chat). */
+  inboxRunDelete: (runId: string) => req<{ ok: boolean; deleted: number }>(`/inbox/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
+  /** Erase exactly the run messages GET /inbox lists for this window. A run still going is left alone. */
+  inboxClear: (hours = 72) => req<{ ok: boolean; deleted: number; skipped: number }>(`/inbox?hours=${hours}`, { method: 'DELETE' }),
   jobs: {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);

@@ -161,6 +161,13 @@ class RunStore:
         self._exec(f"DELETE FROM run_events WHERE run_id IN ({old})", (job_id, job_id, keep))
         self._exec(f"DELETE FROM agent_runs WHERE run_id IN ({old})", (job_id, job_id, keep))
 
+    def delete(self, run_id: str) -> bool:
+        """Erase one run and the journal rows the Agent Inbox reads from it. agent_runs cascades to run_events,
+        approvals and proposals (db.py); inbox_seen has no foreign key, so it is cleared here. Conversation and
+        message history are not touched: a run is a journal row, not the chat it ran in."""
+        self._exec("DELETE FROM inbox_seen WHERE run_id=?", (run_id,))
+        return self._exec("DELETE FROM agent_runs WHERE run_id=?", (run_id,)) > 0
+
     def children(self, run_id: str) -> list[dict[str, Any]]:
         """Runs started by `run_id` (subagents), oldest first."""
         return [self._run_row(r) for r in self._all("SELECT * FROM agent_runs WHERE parent_run_id=? ORDER BY started_at, rowid", (run_id,))]  # type: ignore[misc]

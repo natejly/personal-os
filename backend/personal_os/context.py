@@ -99,6 +99,18 @@ def _public(text: str) -> str:
 # from there (tools._cite), so a "[3]" in the answer names one passage the UI can open.
 CITE_RULE = "When a sentence relies on an excerpt, end it with that excerpt's number in brackets, like [1] or [1][3]."
 
+# Fixed working-style rules, always applied. They ride in the stable prefix so they survive prompt caching
+# and reach an install whose stored systemPrompt predates them; llm.DEFAULT_SETTINGS["systemPrompt"] mirrors
+# the same wording for the Settings box. Kept short: they are behaviour, not context.
+DIRECTNESS_RULES = (
+    "## Working style\n"
+    "- Be direct: answer what was asked, with no preamble and without restating the question. When what is already in "
+    "front of you answers the question, answer it in plain text — do not make tool calls or retrieve context that would "
+    "not change the answer.\n"
+    "- When you hand work to a subagent or background worker, say so in your reply and name what is running, so a reply "
+    "never comes back as bare tool calls with no visible output."
+)
+
 
 def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
     """What a message keeps about cited excerpt `n`: enough to label it and open the passage in its source."""
@@ -263,6 +275,7 @@ def build_context(
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [redact.scrub_command_output(global_system_prompt.strip())] if global_system_prompt.strip() else []
+    parts.append(DIRECTNESS_RULES)
     hidden = [{"docs": "Files"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).

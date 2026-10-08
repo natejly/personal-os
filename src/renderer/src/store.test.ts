@@ -764,7 +764,7 @@ const backend = (state: Record<string, unknown>, tape: string): Backend => {
 
 const reset = (): void => {
   useStore.getState().closeSession('c1')
-  useStore.setState({ view: 'home', focusedConversationId: null, toasts: [] } as never)
+  useStore.setState({ view: 'home', focusedConversationId: null, toasts: [], completionPopup: null } as never)
 }
 
 test('a stream that closes without its done, from a run that died, settles the open reply as interrupted and notifies once', async () => {
@@ -1319,4 +1319,101 @@ test('a streamed NO_REPLY never shows, before or after done', () => {
   s = applyEvent(s, ev({ event: 'done', data: { id: 'a1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } }), true)
   assert.equal(s.conversation.messages?.[0].content, '')
   assert.equal(s.conversation.messages?.[0].held, undefined)
+})
+
+// ---- the learned-memory toast body and the in-app completion popup ------------------------------
+
+test('the learned toast body opens exactly the memories the pass created, and Undo stays on the button', () => {
+  const before = useStore.getState()
+  const noop = async (): Promise<void> => undefined
+  useStore.setState({ toasts: [], memoryFocus: null, settingsOpen: false, refreshMemories: noop, refreshGraph: noop, refreshDocuments: noop, refreshProjects: noop })
+  try {
+    useStore.getState().onLearned({ memories: [{ id: 'm1' }, { id: 'm2' }], nodes: [], edges: [] } as never)
+    const t = useStore.getState().toasts.at(-1)!
+    assert.equal(t.action?.label, 'Undo', 'Undo still owns the action button')
+    assert.ok(t.onClick, 'the body is clickable')
+    t.onClick!()
+    const st = useStore.getState()
+    assert.deepEqual(st.memoryFocus, ['m1', 'm2'], 'it opens the rows that were stored, in order')
+    assert.equal(st.memoryMode, 'list')
+    assert.equal(st.settingsOpen, true)
+    assert.equal(st.settingsTab, 'memory')
+  } finally {
+    useStore.setState({ ...before, toasts: [] })
+  }
+})
+
+test('a learned pass with nothing new leaves the toast body inert', () => {
+  const before = useStore.getState()
+  const noop = async (): Promise<void> => undefined
+  useStore.setState({ toasts: [], refreshMemories: noop, refreshGraph: noop, refreshDocuments: noop, refreshProjects: noop })
+  try {
+    useStore.getState().onLearned({ memories: [], nodes: [{ id: 'n' }], edges: [] } as never)
+    assert.equal(useStore.getState().toasts.at(-1)?.onClick, undefined)
+  } finally {
+    useStore.setState({ ...before, toasts: [] })
+  }
+})
+
+test('a snoozed completion popup survives a dismissed toast and comes back after five minutes', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ toasts: [], completionPopup: null })
+  useStore.getState().showCompletion({ convId: 'c1', runId: 'r1', title: 'A chat' })
+  useStore.getState().toast('Learned 1 memory', 'learned')
+  const learnedId = useStore.getState().toasts.at(-1)!.id
+
+  useStore.getState().snoozeCompletion()
+  assert.equal(useStore.getState().completionPopup, null, 'hidden now')
+  assert.equal(useStore.getState().toasts.length, 1, 'the learned toast is untouched')
+
+  useStore.getState().dismissToast(learnedId)
+  assert.equal(useStore.getState().toasts.length, 0)
+  assert.equal(useStore.getState().completionPopup, null, 'dismissing the toast did not drop the snooze')
+
+  t.mock.timers.tick(5 * 60 * 1000)
+  assert.deepEqual(useStore.getState().completionPopup, { convId: 'c1', runId: 'r1', title: 'A chat' }, 'the same popup returns')
+})
+
+test('dismissing the completion popup cancels its snooze; opening the chat clears it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  stubFetch(t, (m, p) => p.includes('/runs') ? json([]) : p.includes('/conversations/c1') ? json(session().conversation) : json([]))
+  useStore.setState({ toasts: [], completionPopup: null, sessions: {}, conversations: [] })
+  useStore.getState().showCompletion({ convId: 'c1', runId: 'r1', title: 'A chat' })
+  useStore.getState().snoozeCompletion()
+  useStore.getState().dismissCompletion()
+  t.mock.timers.tick(5 * 60 * 1000)
+  assert.equal(useStore.getState().completionPopup, null, 'a cancelled snooze never fires')
+
+  useStore.getState().showCompletion({ convId: 'c1', runId: 'r2', title: 'A chat' })
+  await useStore.getState().selectChat('c1')
+  assert.equal(useStore.getState().completionPopup, null, 'opening the named chat settles the popup')
+  useStore.getState().dismissCompletion()
+})
+
+test('an off-screen reply raises the in-app completion popup; an on-screen one does not', async () => {
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const realN = g.Notification
+  const realD = g.document
+  g.Notification = class { static permission = 'denied'; constructor() { /* no OS notice in this test */ } }
+  g.document = { hasFocus: () => false }
+  const done = block(2, 'done', { id: 'a1', error: null, context_used: null, tool_events: [], trace: [], stopped: false })
+  try {
+    useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [], completionPopup: null })
+    const fake = backend({ live: true, status: 'running', seq: 1 }, block(1, 'assistant_message', msg({ id: 'a1', content: '' })))
+    try {
+      await useStore.getState().attachSession('c1')
+      await tick(30)
+      fake.push(done)
+      await tick(60)
+      assert.equal(useStore.getState().completionPopup?.convId, 'c1', 'the reply is named')
+      assert.equal(useStore.getState().completionPopup?.title, 'A chat')
+    } finally {
+      fake.close()
+      reset()
+      fake.restore()
+    }
+  } finally {
+    g.Notification = realN
+    g.document = realD
+  }
 })

@@ -106,6 +106,38 @@ class Validation(CodingTestCase):
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", new_worktree=True, branch="taken")
 
+    async def test_either_agent_gets_a_worktree_on_a_main_checkout_unless_told_otherwise(self) -> None:
+        launched: list[str] = []
+
+        async def launch(row: dict[str, Any], *_a: Any) -> None:
+            launched.append(row["worktree"])
+            row["external_id"] = "j"
+
+        main = unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True))
+        with main, unittest.mock.patch.object(ca.opencode, "binary", return_value="/bin/opencode"), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):
+            row = await self.cs.start("opencode", str(self.repo), "Fix the bug")
+            self.assertRegex(row["branch"], r"^grain/fix-the-bug-[0-9a-f]{4}$")
+            self.assertEqual(launched[-1], row["worktree"])
+            self.assertIn("worktree", self.fake.calls[-1])
+            n = len(self.fake.calls)
+            row = await self.cs.start("opencode", str(self.repo), "in place", new_worktree=False)
+            self.assertEqual((row["worktree"], row["branch"], len(self.fake.calls)), (str(self.repo), None, n))
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, False)), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):  # already a linked worktree
+            row = await self.cs.start("opencode", str(self.repo), "x")
+            self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
+        self.job_files("deadbeef", "working")
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True)):
+            row = await self.cs.start("claude", str(self.repo), "Fix it")  # Claude Code too
+            wt = str(self.repo / ".claude" / "worktrees" / row["branch"].rsplit("/", 1)[-1])
+            self.assertRegex(row["branch"], r"^grain/fix-it-[0-9a-f]{4}$")
+            self.assertEqual((row["worktree"], self.fake.calls[-2][-5:-1]), (wt, ["worktree", "add", "-b", row["branch"]]))
+            n = len(self.fake.calls)
+            row = await self.cs.start("claude", str(self.repo), "in place", new_worktree=False)
+            self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
+            self.assertFalse(any("worktree" in c for c in self.fake.calls[n:]))
+
     async def test_permission_mode_and_agent_rules(self) -> None:
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", permission_mode="plan")
@@ -147,7 +179,7 @@ class ClaudeDriver(CodingTestCase):
     def test_argv_has_no_permission_flag_unless_asked(self) -> None:
         plain = ca.claude_argv("/bin/claude", "n", "do it")
         # No --model either: without one the CLI uses the user's own default, the model they have quota for.
-        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "do it"])
+        self.assertEqual(plain, ["/bin/claude", "--bg", "-n", "n", "--agents", ca.CLAUDE_AGENTS, "--settings", ca.floor_settings(), "do it"])
         self.assertNotIn("--permission-mode", plain)
         self.assertNotIn("--model", plain)
         agents = json.loads(plain[plain.index("--agents") + 1])
@@ -160,6 +192,24 @@ class ClaudeDriver(CodingTestCase):
         for argv in (plain, asked, ca.resume_argv("/bin/claude", SID, "go on"), dashed):
             self.assertFalse(any(a.startswith("--dangerously") for a in argv))
         self.assertEqual(dashed[-1], "Task: -x")
+
+    def test_every_start_and_resume_carries_the_floor(self) -> None:
+        """Allow everything's floor reaches Claude Code as deny/ask rules on every start and follow-up, whatever the mode."""
+        for argv in (ca.claude_argv("/bin/claude", "n", "do it"), ca.claude_argv("/bin/claude", "n", "x", None, "bypassPermissions"),
+                     ca.resume_argv("/bin/claude", SID, "go on")):
+            rules = json.loads(argv[argv.index("--settings") + 1])["permissions"]
+            self.assertEqual(rules, ca.permrules.claude_code_floor()["permissions"])
+            self.assertIn("Bash(git push --force*)", rules["ask"])
+
+    def test_claude_env_carries_no_app_secrets(self) -> None:
+        """The claude CLI gets the scrubbed allowlist plus PATH and TMPDIR, never the app's keys and tokens."""
+        from personal_os import shell
+        secrets = {"PERSONAL_OS_API_KEY": "fw_secret1", "FIREWORKS_API_KEY": "fw_secret2", "TELEGRAM_BOT_TOKEN": "123:abc",
+                   "PERSONAL_OS_AUTH_TOKEN": "tok_secret3", "ANTHROPIC_API_KEY": "sk-ant-secret4"}
+        with unittest.mock.patch.dict("os.environ", secrets), unittest.mock.patch.object(ca, "login_path", return_value="/usr/bin:/bin"):
+            env = {**shell.scrubbed_env("/tmp/x"), **ca.claude_env()}
+        self.assertFalse(set(secrets) & set(env))
+        self.assertFalse([v for v in env.values() if any(x in v for x in secrets.values())])
 
     async def test_start_records_ids_and_maps_grain_mode_to_the_flag(self) -> None:
         row = await self.started()
@@ -261,6 +311,57 @@ class ClaudeDriver(CodingTestCase):
         self.assertEqual(again.get(row["id"])["status"], "done")
 
 
+class Ownership(CodingTestCase):
+    """A session belongs to the run that started it and stops when that run is stopped, never when it finishes."""
+
+    async def owned(self, owner: str, **ctx: Any) -> dict[str, Any]:
+        self.job_files("deadbeef", "working", "reading files")
+        return await self.cs.start("claude", str(self.repo), "fix the bug", ctx={"agent_run_id": owner, **ctx})
+
+    async def test_the_calling_worker_owns_the_session_else_the_reply(self) -> None:
+        row = await self.owned("worker-1", run_id="reply-1")
+        self.assertEqual(row["run_id"], "worker-1")
+        self.job_files("deadbeef", "working")
+        row = await self.cs.start("claude", str(self.repo), "x", ctx={"run_id": "reply-2"})
+        self.assertEqual(row["run_id"], "reply-2")
+
+    async def test_stopping_the_owner_stops_its_live_sessions_with_the_reason(self) -> None:
+        mine = await self.owned("worker-1")
+        self.job_files("deadbeef", "working")
+        other = await self.owned("worker-2")
+        Path(mine["worktree"]).mkdir(parents=True, exist_ok=True)
+        self.fake.out["--porcelain"] = (True, " M src/a.py\n")
+        out = await self.cs.stop_owned("worker-1", "the worker that started it was stopped")
+        self.assertEqual([r["id"] for r in out], [mine["id"]])
+        row = self.cs.get(mine["id"])
+        self.assertEqual(row["status"], "stopped")
+        self.assertIn("the worker that started it was stopped", row["detail"])
+        self.assertIn("uncommitted changes are kept in " + row["worktree"], row["detail"])
+        self.assertEqual(self.cs.get(other["id"])["status"], "working")
+        self.assertFalse(any("remove" in a or "rm" in a for a in self.fake.calls), "the worktree is never removed")
+        # the CLI's own "stopped" state must not overwrite why it was stopped
+        self.job_files("deadbeef", "stopped", "stopped")
+        self.assertIn("worker that started it", self.cs.refresh(row)["detail"])
+
+    async def test_finished_sessions_unknown_owners_and_closing_are_left_alone(self) -> None:
+        row = await self.owned("worker-1")
+        self.cs._apply(row, status="done")
+        self.assertEqual(await self.cs.stop_owned("worker-1", "x"), [])
+        self.assertEqual(await self.cs.stop_owned(None, "x"), [])
+        self.job_files("deadbeef", "working")
+        live = await self.owned("worker-3")
+        self.cs.closing = True
+        self.assertEqual(await self.cs.stop_owned("worker-3", "x"), [])
+        self.assertEqual(self.cs.get(live["id"])["status"], "working")
+
+    async def test_a_stop_that_fails_says_so_instead_of_claiming_stopped(self) -> None:
+        row = await self.owned("worker-1")
+        self.fake.out["/bin/claude stop deadbeef"] = (False, "daemon not reachable")
+        out = await self.cs.stop_owned("worker-1", "the worker was stopped")
+        self.assertNotEqual(out[0]["status"], "stopped")
+        self.assertIn("could not stop it", out[0]["detail"])
+
+
 class OpencodeDriver(CodingTestCase):
     def test_job_status_mapping(self) -> None:
         def job(status: str, code: int | None = None) -> Any:
@@ -297,6 +398,25 @@ class OpencodeDriver(CodingTestCase):
         row["status"] = "working"
         self.jobs.jobs.clear()
         self.assertEqual(self.cs.refresh(row)["status"], "blocked")
+
+    async def test_a_job_ending_publishes_the_session_at_once(self) -> None:
+        """The job registry's change hook refreshes live OpenCode sessions, so the chat card sees "done" without a poll;
+        the hook that was there before still runs."""
+        before: list[int] = []
+        jobs = SimpleNamespace(jobs={}, on_change=lambda: before.append(1))
+        cs = ca.CodingSessions(self.cs.db, jobs, self.fake, lambda e, d: self.events.append((e, d)), lambda: {})
+        wt, t = str(self.repo), 1.0
+        with cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s3','opencode','j3',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s4','opencode',NULL,?,?,'n','p','starting','',?,?)", (wt, wt, t, t))
+        jobs.jobs["j3"] = SimpleNamespace(status="exited", exit_code=0, buf="", total=0, live=lambda: False)
+        self.events.clear()
+        jobs.on_change()
+        self.assertEqual(before, [1])
+        self.assertEqual([(d["id"], d["status"]) for e, d in self.events if e == "coding_session"], [("s3", "done")])
+        self.assertEqual(cs.get("s4")["status"], "starting")  # still launching: not mistaken for a lost job
 
 
 class Diff(CodingTestCase):

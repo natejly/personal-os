@@ -5,7 +5,7 @@ import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
-import { stepZoom } from '../lib/zoom'
+import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
 import { HOME_MODULES } from '../modules'
@@ -382,6 +382,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
+              <RunSafetySettings draft={draft} patch={patch} />
               <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Allow everything still asks before permanent deletes outside the Trash, disk wipes, force-pushes and sending email. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
@@ -472,10 +473,10 @@ export default function SettingsModal(): JSX.Element {
               <div className="setting-row">
                 <span className="toggle-text"><b>Zoom</b><small>Scales the whole interface, in every window. ⌘= and ⌘− step it, ⌥⌘0 resets.</small></span>
                 <div className="seg" role="group" aria-label="Zoom">
-                  <button type="button" aria-label="Zoom out" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? 100, -1) })}>−</button>
-                  <button type="button" disabled>{settings.uiZoom ?? 100}%</button>
-                  <button type="button" aria-label="Zoom in" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? 100, 1) })}>+</button>
-                  <button type="button" onClick={() => void saveEarly({ uiZoom: 100 })}>Reset</button>
+                  <button type="button" aria-label="Zoom out" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, -1) })}>−</button>
+                  <button type="button" disabled>{settings.uiZoom ?? DEFAULT_ZOOM}%</button>
+                  <button type="button" aria-label="Zoom in" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, 1) })}>+</button>
+                  <button type="button" onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
                 </div>
               </div>
               <h4>Today cards</h4>
@@ -556,7 +557,6 @@ export default function SettingsModal(): JSX.Element {
                 <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
                 <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
                 <GrantsPanel draft={draft} patch={patch} />
-                <RunSafetySettings draft={draft} patch={patch} />
                 <div className="setting-row">
                   <span className="toggle-text"><b>File edits</b><small>Ask: review each diff. Accept all: write it and still show the diff. You can undo either from the file's history.</small></span>
                   <div className="seg" role="group" aria-label="File edits">
@@ -603,6 +603,14 @@ export default function SettingsModal(): JSX.Element {
                   <input type="number" min={1} max={16} value={draft.workerMaxConcurrent ?? 4} onChange={(e) => patch({ workerMaxConcurrent: Math.min(16, Math.max(1, Math.round(Number(e.target.value)) || 4)) })} />
                 </label>
                 <h4>Coding sessions</h4>
+                <Switch title="Route coding to OpenCode / Claude Code" help="Grain's own agents plan, hand code changes to a coding session and check the result. They can't edit files or run file-changing commands inside a git repository themselves." checked={draft.codingRoute !== false} onChange={(codingRoute) => patch({ codingRoute })} />
+                <label className="setting-row"><span className="toggle-text"><b>Preferred coding agent</b><small>Which one the agents start for a coding task.</small></span>
+                  <select value={draft.codingAgent ?? 'any'} onChange={(e) => patch({ codingAgent: e.target.value as Settings['codingAgent'] })}>
+                    <option value="any">Let the agent choose</option>
+                    <option value="opencode">OpenCode</option>
+                    <option value="claude">Claude Code</option>
+                  </select>
+                </label>
                 <label className="setting-row"><span className="toggle-text"><b>Coding sessions at once</b><small>Their own limit, separate from background shell jobs.</small></span>
                   <input type="number" min={1} max={20} value={draft.codingSessionMaxConcurrent ?? 3} onChange={(e) => patch({ codingSessionMaxConcurrent: Math.min(20, Math.max(1, Math.round(Number(e.target.value)) || 3)) })} />
                 </label>

@@ -280,13 +280,10 @@ class Compactor:
                       focus: str | None = None, complete: Complete | None = None, include_untrusted: bool = False) -> dict[str, Any] | None:
         """Fold everything but the recent tail into the rolling summary. None when there is nothing to fold."""
         complete = complete or llm.complete
-        keep = _int(cfg, "compactKeepRecent", 8)
         rows = history_rows
         prev = self.get(conv_id)
         start = self._tail_start(rows, prev)
-        cut = len(rows) - keep
-        while 0 < cut < len(rows) and rows[cut]["role"] != "user":
-            cut -= 1  # the kept tail must open on a user turn
+        cut = _cut(cfg, rows, include_untrusted)
         if cut <= start or cut < 1:
             return None
         aged = rows[start:cut]
@@ -331,11 +328,42 @@ def bind_supported(complete: Complete, **kw: Any) -> Complete:
     return functools.partial(complete, **ok) if ok else complete
 
 
+def _row_tokens(r: dict[str, Any], include_untrusted: bool) -> int:
+    return estimate_messages(_with_tools(r, include_untrusted))
+
+
+def _cut(cfg: dict[str, Any], rows: list[dict[str, Any]], include_untrusted: bool = False) -> int:
+    """Index of the first row kept verbatim: the newest rows that fit `compactKeepTokens`, at most
+    `compactKeepRecent` of them, and never fewer than the newest user turn (the tail opens on a user row)."""
+    if not rows:
+        return 0
+    keep_rows, keep_tokens = _int(cfg, "compactKeepRecent", limits.COMPACT_KEEP_RECENT), _int(cfg, "compactKeepTokens", limits.COMPACT_KEEP_TOKENS)
+    cut, used = len(rows) - 1, _row_tokens(rows[-1], include_untrusted)
+    for i in range(len(rows) - 2, -1, -1):
+        used += _row_tokens(rows[i], include_untrusted)
+        if len(rows) - i > keep_rows or used > keep_tokens:
+            break
+        cut = i
+    while 0 < cut < len(rows) and rows[cut]["role"] != "user":
+        cut -= 1
+    return cut
+
+
 def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[dict[str, str]], system_tokens: int,
-                window: int | None) -> bool:
-    limit = _float(cfg, "compactAt", 0.7) * (window or limits.context_window(cfg.get("contextWindow")))
-    return bool(cfg.get("autoCompact", True) and len(rows) > _int(cfg, "compactKeepRecent", 8) + 2
-                and estimate_messages(history) + system_tokens > limit)
+                window: int | None, include_untrusted: bool = False, summary: dict[str, Any] | None = None) -> bool:
+    """Past `compactAt` of the window (system prompt included), or past `compactAtTokens` of history alone (the
+    system prompt is a cached prefix). The absolute trigger also needs a quarter of that threshold to be
+    foldable, so one giant newest turn does not re-summarize every reply."""
+    if not (cfg.get("autoCompact", True) and len(rows) > _int(cfg, "compactKeepRecent", limits.COMPACT_KEEP_RECENT) + 2):
+        return False
+    hist = estimate_messages(history)
+    if hist + system_tokens > _float(cfg, "compactAt", limits.COMPACT_AT) * (window or limits.context_window(cfg.get("contextWindow"))):
+        return True
+    at = _int(cfg, "compactAtTokens", limits.COMPACT_AT_TOKENS)
+    if hist <= at:
+        return False
+    start = Compactor._tail_start(rows, summary)
+    return sum(_row_tokens(r, include_untrusted) for r in rows[start:_cut(cfg, rows, include_untrusted)]) >= max(1, at // 4)
 
 
 def needs_compaction(compactor: Compactor, convos: Any, cfg: dict[str, Any], conv_id: str, system_tokens: int, *,
@@ -343,8 +371,8 @@ def needs_compaction(compactor: Compactor, convos: Any, cfg: dict[str, Any], con
     """Whether `prepare_history` would run the summarizer now, so the caller can say so first. Never raises."""
     try:
         rows = convos.history_rows(conv_id)
-        history = compactor.build_history(rows, compactor.get(conv_id), _tainted(convos, conv_id))
-        return _over_limit(cfg, rows, history, system_tokens, window)
+        summary, untrusted = compactor.get(conv_id), _tainted(convos, conv_id)
+        return _over_limit(cfg, rows, compactor.build_history(rows, summary, untrusted), system_tokens, window, include_untrusted=untrusted, summary=summary)
     except Exception:  # noqa: BLE001 - an announcement must never fail the reply
         return False
 
@@ -365,7 +393,7 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
         untrusted = _tainted(convos, conv_id)
         summary = compactor.get(conv_id)
         history = compactor.build_history(rows, summary, untrusted)
-        if _over_limit(cfg, rows, history, system_tokens, window):
+        if _over_limit(cfg, rows, history, system_tokens, window, include_untrusted=untrusted, summary=summary):
             res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted,
                                           complete=bind_supported(complete or llm.complete, cancel=cancel, deadline=deadline))
             if res:
@@ -417,13 +445,17 @@ def memory_nudge(n_cleared: int, already_nudged: bool, tool_schemas: list[dict[s
     return MEMORY_NUDGE
 
 
-def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float) -> tuple[int, int]:
+def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float,
+                 at_tokens: int | None = None) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
 
     Skips the tool messages after the last assistant tool-call turn (the round the model has not seen yet),
     the newest `keep` results before that, small results, and anything already cleared. Returns (cleared, tokens_saved).
     """
-    if estimate_messages(messages) <= at_fraction * window_tokens:
+    threshold = at_fraction * window_tokens
+    if at_tokens:
+        threshold = min(threshold, at_tokens)
+    if estimate_messages(messages) <= threshold:
         return 0, 0
     last_call = max((i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")), default=-1)
     names = {tc.get("id", ""): (tc.get("function") or {}).get("name", "")
@@ -485,7 +517,7 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
             spend = c.execute("SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(prompt_tokens+completion_tokens),0) AS tokens"
                               " FROM usage_log WHERE conversation_id=?", (conv_id,)).fetchone()
         return {"window": window, "estimated_tokens": estimate_messages(hist),
-                "compact_at": _float(cfg, "compactAt", 0.7), "summary": s,
+                "compact_at": _float(cfg, "compactAt", 0.7), "compact_at_tokens": _int(cfg, "compactAtTokens", limits.COMPACT_AT_TOKENS), "summary": s,
                 "spend": {"cost": spend["cost"], "tokens": spend["tokens"]}}
 
     return r

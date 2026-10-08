@@ -253,4 +253,34 @@ check(compaction.needs_compaction(compactor, object(), CFG, "x", 100) is False, 
 
 check(estimate_tokens("a" * 40) == 10 and estimate_tokens("你" * 40) == 40 and estimate_tokens("") == 1, "non-ASCII counts a token a character")
 
+# (g) absolute thresholds with a ~1M window
+BIG = {"contextWindow": 1_040_000, "compactAt": 0.7, "autoCompact": True}
+abs_conv = make_conv(40, 2000)  # ~20k tokens: under 30k
+n0 = len(calls)
+run(compaction.prepare_history(compactor, convos, BIG, "m", abs_conv, 100, complete=stub))
+check(len(calls) == n0, "history under compactAtTokens does not compact")
+abs_conv = make_conv(80, 2000)  # ~40k tokens
+h, info = run(compaction.prepare_history(compactor, convos, BIG, "m", abs_conv, 100, complete=stub))
+check(info["compacted"] and len(calls) == n0 + 1, "a 1M window still compacts past compactAtTokens")
+tail = h[2:]
+check(compaction.estimate_messages(tail) <= compaction._int(BIG, "compactKeepTokens", 10_000) + 600 and len(tail) <= 8, "kept tail fits compactKeepTokens")
+h2, info2 = run(compaction.prepare_history(compactor, convos, BIG, "m", abs_conv, 100, complete=stub))
+check(len(calls) == n0 + 1 and h2 == h and not info2["compacted"], "second prepare does not re-summarize")
+giant = convos.create(None, "t", "m")["id"]
+for i in range(12):
+    convos.add_message(giant, "user" if i % 2 == 0 else "assistant", f"s{i}")
+convos.add_message(giant, "user", "G" * 160_000)  # one turn alone is ~40k tokens
+n1 = len(calls)
+for _ in range(3):
+    run(compaction.prepare_history(compactor, convos, BIG, "m", giant, 100, complete=stub))
+check(len(calls) - n1 <= 1, "one giant newest turn does not re-summarize every reply")
+
+# (h) microcompact by absolute tokens under a huge window
+msgs2: list[dict[str, Any]] = [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}]
+for i in range(6):
+    msgs2 += tmsg(i, json.dumps({"rows": ["y" * 20_000]}))
+check(compaction.microcompact(msgs2, 1, 1_000_000, 0.25) == (0, 0), "huge window alone never clears")
+n, saved = compaction.microcompact(msgs2, 1, 1_000_000, 0.25, at_tokens=8_000)
+check(n > 0 and saved > 0, "at_tokens fires on a huge window")
+
 print(f"test_compaction: {passed} checks passed")

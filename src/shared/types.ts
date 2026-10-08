@@ -747,6 +747,7 @@ export interface ContextMeter {
   window: number
   estimated_tokens: number
   compact_at: number
+  compact_at_tokens?: number
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
@@ -770,6 +771,8 @@ export interface Message {
   conversation_id: string
   role: Role
   content: string
+  /** Streamed text held back while it could still be the NO_REPLY marker (lib/noReply.ts); live only, never stored. */
+  held?: string
   /** Uploaded files sent with a user turn; the server inlines their text for the model. */
   attachments?: Attachment[] | null
   model: string | null
@@ -827,7 +830,7 @@ export interface WorkerInfo {
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** What a new chat starts on. `'default'` is a different choice: it omits `reasoning_effort`. */
-export const DEFAULT_EFFORT: Effort = 'medium'
+export const DEFAULT_EFFORT: Effort = 'high'
 
 export interface ConversationSettings {
   /** A chat opened on an agent (Library > Agents > Chat): its prompt leads the system prompt and its tools bound the chat's. */
@@ -1554,8 +1557,17 @@ export interface Settings {
   compactKeepRecent?: number
   microKeep?: number
   microAt?: number
+  /** Absolute token triggers: history alone for summarizing, the whole request for clearing tool results. */
+  compactAtTokens?: number
+  compactKeepTokens?: number
+  microAtTokens?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
+  /** Coding goes to a coding agent: Grain's own agents may not edit files or run file-changing commands inside a git repo,
+   *  and are told to use coding_session_start. Missing means on. */
+  codingRoute?: boolean
+  /** The coding agent they are told to start. Missing means 'any' (the agent picks). */
+  codingAgent?: 'any' | 'opencode' | 'claude'
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number
@@ -1647,7 +1659,7 @@ export interface Settings {
   compactChats?: boolean
   /** A small Explain / Summarize / Verify / Ask bubble over text selected in a chat, note, mail or the page agent. Missing reads as on. */
   selectionToolbar?: boolean
-  /** Interface zoom in percent, 80-160. Missing reads as 100. */
+  /** Interface zoom in percent, 80-160. Missing reads as 110. */
   uiZoom?: number
   /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
   notifyJobs?: boolean
@@ -1716,6 +1728,7 @@ export interface UsageReport {
   by_model: (UsageBucket & { model: string; ids?: string[] })[]
   /** What the calls were for (chat, jobs, memory, embeddings...), in display order. */
   by_feature?: (UsageBucket & { feature: string; label: string })[]
+  by_source?: (UsageBucket & { source: string; label: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
   by_tag: (UsageBucket & { tag: string })[]

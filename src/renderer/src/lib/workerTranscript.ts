@@ -1,4 +1,5 @@
 import type { Message, SubagentView, ToolEvent } from '@shared/types'
+import { stripNoReply } from './noReply'
 
 /** One row of a worker's chat: a Message the main chat's MessageView can draw, and who sent a user-role row. */
 export type WorkerRow = { message: Message; from?: 'user' | 'agent' }
@@ -28,7 +29,7 @@ export function workerRows(messages: SubagentView['messages'], conversationId: s
         reply = { ...base, role: 'assistant', content: '', tool_events: [] }
         rows.push({ message: reply })
       }
-      const said = text(m.content).trim()
+      const said = stripNoReply(text(m.content))  // the worker's NO_REPLY is for the orchestrator, not the user
       if (said) reply.content = reply.content ? `${reply.content}\n\n${said}` : said
       for (const c of m.tool_calls ?? []) {
         const id = c.id ?? `${reply.id}-${reply.tool_events!.length}`

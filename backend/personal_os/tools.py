@@ -37,6 +37,7 @@ from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import MAX_FILE_CHARS, Workspace, WorkspaceError
 from . import plans, router
+from . import coding_route
 from . import firecrawl, reach
 from . import mcp_search
 from .learn import KINDS as MEMORY_KINDS, normalize_memory, skill_block, until_ts
@@ -969,13 +970,15 @@ class Toolbox:
                           expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
                           example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
 
-    def precheck(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    def precheck(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> dict[str, Any] | None:
         """The error `call` would return for arguments the tool's signature cannot take, found before anything is
         approved or run. Binds only (no type checks: tools coerce), so None means the call may go on. Not a spec
-        (a connector tool) is None as well."""
+        (a connector tool) is None as well. With `ctx`, a repo edit that coding_route sends to a coding agent too."""
         spec = self.specs.get(name)
         if not spec:
             return None
+        if ctx is not None and (routed := coding_route.check(self, name, args, ctx)):
+            return tool_error(routed, alternative="coding_session_start")
         try:
             inspect.signature(spec.fn).bind(None, **args)
         except TypeError as e:
@@ -991,12 +994,18 @@ class Toolbox:
         if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
             refused = PROPOSAL_ONLY_REFUSED_SCHEDULE if spec.danger == "schedules" else PROPOSAL_ONLY_REFUSED
             return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
+        if routed := coding_route.check(self, name, args, ctx):  # every caller (chat, desk, worker, subagent, script, workflow)
+            return tool_error(routed, alternative="coding_session_start")
         if ctx.get("proposal_only") and self._networked_sandbox_call(spec, ctx):
             return tool_error(f"{name} would run code in a sandbox that has network access, and this is an unattended "
                               "background run, so it is refused: code could send data out with nobody watching.",
                               alternative="run_python, which has no network")
+        # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
+        guard = await asyncio.to_thread(coding_route.guard_start, self, args, ctx) if name == "shell_run" else None
         try:
             out = await self._dispatch(spec, ctx, args)
+            if guard and (routed := await asyncio.to_thread(coding_route.guard_finish, guard)):
+                return tool_error(routed, alternative="coding_session_start")
         except TypeError as e:  # backstop: signature mismatch, wrong types
             return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001

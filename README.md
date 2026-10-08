@@ -705,6 +705,16 @@ commits ahead of `origin/main` in the session's worktree (the full patch with `f
 removes a session (`claude rm` is never run), force-pushes or pushes at all; shipping the branch is `ship_checklist`.
 OpenCode jobs end at the shell registry's 600 second cap; a follow-up carries on.
 
+**Coding is routed to a coding agent.** While Settings → Advanced → Coding sessions → *Route coding to OpenCode /
+Claude Code* is on (`codingRoute`, the default), Grain's own agents (chat, desks, workers, subagents, scripts and
+workflow steps) plan, brief and verify, and leave the editing to a session: inside a git work tree, Grain's file
+writers (`fs_edit`, `fs_copy`, `fs_mkdir`, `write_local_file`, `move_local_file`, `trash_local_file`) and `shell_run`
+commands that change files (redirects, `sed -i`, `rm`/`mv`/`cp`/`mkdir`, `git commit`/`checkout`/`stash`/…,
+`npm install`, `--fix` formatters) are refused under every permission mode, with a message pointing at
+`coding_session_start`. Reading, running tests, typecheck and builds, `npm ci`, and `git push` / `gh` stay allowed, so
+the agent can review a session's diff and land its branch. *Preferred coding agent* (`codingAgent`: `any`, `opencode`,
+`claude`) is the one the prompt and the refusal name. `backend/personal_os/coding_route.py` has the details.
+
 Routes: `GET /coding-sessions`, `GET /coding-sessions/{id}`, `GET /coding-sessions/{id}/logs?limit=`,
 `GET /coding-sessions/{id}/diff?full=0|1`, `POST /coding-sessions/{id}/stop`, `POST /coding-sessions/{id}/send`
 (`{message}`, 409 when the session cannot take one).

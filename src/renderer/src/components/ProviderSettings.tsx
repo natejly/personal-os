@@ -8,8 +8,8 @@ import { showsBaseUrl, type ProviderInfo } from './onboarding/steps'
 import type { ModelInfo, Settings } from '@shared/types'
 
 const HELP: Record<ModelKey, { help: string; placeholder: string }> = {
-  defaultModel: { help: 'Used for new chats.', placeholder: 'Model id' },
-  modelHigh: { help: 'Chat and agent turns, planning and drafting skills.', placeholder: 'Provider default' },
+  defaultModel: { help: 'Used for new chats and the workers they start.', placeholder: 'Model id' },
+  modelHigh: { help: 'Drafting skills and agents.', placeholder: 'Provider default' },
   modelMedium: { help: 'Auto-review of tool calls, summaries and recaps, memory tidy-ups, and short messages under Auto.', placeholder: 'Provider default' },
   modelLow: { help: 'Titles, memories, follow-ups and other background learning.', placeholder: 'Provider default' },
   fastModel: { help: '', placeholder: '' },
@@ -133,7 +133,7 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
           <Fragment key={f.key}>
             {tier === 'high' && <p className="muted small"><b>Model tiers</b> trade cost for quality. Leave a tier empty to use the provider's default.</p>}
           <label><span className="toggle-text"><b>{f.label}</b><small>{HELP[f.key].help}</small></span>
-            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
+            <input list="provider-model-options" value={value} onChange={(e) => patch({ [f.key]: e.target.value })} placeholder={tier && preset?.tiers?.[tier] ? preset.tiers[tier] : f.key === 'defaultModel' && preset?.defaultModel ? preset.defaultModel : f.key === 'retrievalRerankModel' && preset?.rerankModel ? preset.rerankModel : HELP[f.key].placeholder} spellCheck={false} />
             {!value && cleared.includes(f.label) && <small className="model-prompt" role="status">Pick a model for {f.label}</small>}
           </label>
           </Fragment>

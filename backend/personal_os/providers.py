@@ -11,9 +11,9 @@ from urllib.parse import urlparse
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "fireworks", "name": "Fireworks AI", "baseUrl": "https://api.fireworks.ai/inference/v1", "needsKey": True,
-     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/ember-1",
-     "models": ["accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
-                "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
+     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/deepseek-v4p1-flash",
+     "models": ["accounts/fireworks/models/deepseek-v4p1-flash", "accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/glm-5p3-flash", "accounts/fireworks/models/kimi-k3",
+                "accounts/fireworks/models/deepseek-v4-pro",
                 "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
      "note": None,
      "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b"},
@@ -36,7 +36,7 @@ PROVIDERS: list[dict[str, Any]] = [
      "note": "Runs on this Mac; pull the model first (ollama pull llama3.2).",
      "rerankModel": ""},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "glm-5.3", "kimi-k3", "deepseek-v4-flash"],
+     "keyUrl": None, "defaultModel": "deepseek-v4-flash", "models": ["deepseek-v4-flash", "ember-1", "glm-5.3", "glm-5.3-flash", "kimi-k3"],
      "note": "Your own proxy; model names are whatever its config defines.",
      "rerankModel": "qwen3-reranker-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
@@ -52,16 +52,19 @@ def get(provider_id: str | None) -> dict[str, Any] | None:
 
 # Three model tiers, spelled the way each preset names them. A preset with no row (ollama, custom) uses its defaultModel.
 TIER_DEFAULTS: dict[str, dict[str, str]] = {
-    "fireworks": {"high": "accounts/fireworks/models/ember-1", "medium": "accounts/fireworks/models/glm-5p3",
+    # Ember 1 for the explicit high-tier work; DeepSeek V4.1 Flash (also the chat default) for everything else.
+    "fireworks": {"high": "accounts/fireworks/models/ember-1", "medium": "accounts/fireworks/models/deepseek-v4p1-flash",
                   "low": "accounts/fireworks/models/deepseek-v4p1-flash"},
-    "litellm": {"high": "ember-1", "medium": "glm-5.3", "low": "deepseek-v4-flash"},
+    "litellm": {"high": "ember-1", "medium": "deepseek-v4-flash", "low": "deepseek-v4-flash"},
     "openai": {"high": "gpt-5", "medium": "gpt-5-mini", "low": "gpt-5-nano"},
     "anthropic": {"high": "claude-opus-5-5", "medium": "claude-sonnet-5-5", "low": "claude-haiku-4-5-20251001"},
     "openrouter": {"high": "anthropic/claude-sonnet-5-5", "medium": "openai/gpt-5-mini", "low": "google/gemini-2.5-flash"},
 }
 
 # Which tier each kind of work runs on: cost against quality. The one place to change it.
-#   high   - what the user reads and what acts: chat and agent turns, planning, drafting skills and agents.
+#   default - chat and agent turns, and the workers they start: the provider's defaultModel (default_model), not a tier.
+#   high   - explicit high-tier work: drafting skills and agents. Planning is listed here, but a plan is drafted
+#            inside the chat turn, so it runs on that chat's model.
 #   medium - quality matters but the user does not watch it: Auto's fast path (still a visible reply), the auto-review
 #            of tool calls, compaction and recaps (a bad summary poisons later turns), memory consolidation.
 #   low    - high-volume and checkable: memory and graph extraction, auto-learn, style learning, titles, follow-ups,
@@ -69,7 +72,7 @@ TIER_DEFAULTS: dict[str, dict[str, str]] = {
 # `settings()` in app.py resolves the legacy keys from these: a blank extractionModel is the low tier, a blank fastModel
 # the medium tier (an explicit saved value still wins). Medium sites call tier_model(cfg, "medium") directly.
 TASK_TIERS: dict[str, str] = {
-    "chat": "high", "planning": "high", "draft_skill": "high", "draft_agent": "high",
+    "chat": "default", "planning": "high", "draft_skill": "high", "draft_agent": "high",
     "auto_route_fast": "medium", "auto_review": "medium", "compaction": "medium", "recap": "medium", "consolidation": "medium",
     "extraction": "low", "auto_learn": "low", "style": "low", "title": "low", "followups": "low", "thinking_summary": "low",
 }
@@ -89,9 +92,9 @@ def tier_model(settings: dict[str, Any], tier: str) -> str:
 
 
 def default_model(settings: dict[str, Any]) -> str:
-    """The chat model when none is saved: the high tier for the active provider, else that provider's own default."""
+    """The chat model when none is saved: the active provider's defaultModel, which is deliberately not its high tier."""
     p = get(effective(settings))
-    return tier_model({**settings, "defaultModel": ""}, "high") if p else ""
+    return str(p.get("defaultModel") or "") if p else ""
 
 
 def rerank_model(settings: dict[str, Any]) -> str:

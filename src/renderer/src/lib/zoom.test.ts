@@ -7,8 +7,8 @@ test('clampZoom bounds, snaps and defaults', () => {
   assert.equal(clampZoom(500), 160)
   assert.equal(clampZoom(103), 105)
   assert.equal(clampZoom(100), 100)
-  assert.equal(clampZoom(undefined), 100)
-  assert.equal(clampZoom(NaN), 100)
+  assert.equal(clampZoom(undefined), 110)
+  assert.equal(clampZoom(NaN), 110)
 })
 
 test('stepZoom moves one step and stops at the ends', () => {

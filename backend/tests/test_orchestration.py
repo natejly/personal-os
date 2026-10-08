@@ -585,7 +585,7 @@ def test_stop_from_the_ui_wakes_the_chat_and_resume_keeps_history() -> None:
     assert new["id"] != wid and new["resume_of"] == wid and new["conversation_id"] == cid and new["status"] in ("running", "queued", "done")
     msgs = settle(cid)
     assert msgs[-1]["content"] == "The follow up is done."
-    resumed = [s for s in seat("worker") if brief_of(s["messages"]) == "Now also do Y"]
+    resumed = [s for s in seat("worker") if brief_of(s["messages"]).endswith("Now also do Y")]  # the route prefixes USER_NOTE
     assert resumed, "the resumed worker was shown the new instruction"
     hist = json.dumps(resumed[0]["messages"])
     assert "Long job" in hist, "and it still has the original brief in its history"
@@ -667,7 +667,7 @@ def test_restart_interrupts_workers_and_wakes_their_chat() -> None:
     assert r.status_code == 200 and r.json()["worker"]["resume_of"] == running
     WAKE[:] = [{"text": "NO_REPLY"}]
     settle(cid)
-    assert "partial progress" in json.dumps([s for s in seat("worker") if brief_of(s["messages"]) == "carry on"][0]["messages"])
+    assert "partial progress" in json.dumps([s for s in seat("worker") if brief_of(s["messages"]).endswith("carry on")][0]["messages"])
 
 
 def test_recover_wakes_an_ended_worker_whose_report_never_arrived() -> None:

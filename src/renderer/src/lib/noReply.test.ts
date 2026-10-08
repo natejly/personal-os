@@ -52,3 +52,10 @@ test('appendDelta: ordinary replies pass straight through; a held "No" comes bac
   assert.deepEqual(appendDelta(no, ' problem'), { content: 'No problem', held: undefined })
   assert.deepEqual(settleHeld(no), { content: 'No', held: undefined })
 })
+
+test('isNoReply: a reply cut off inside the marker is the marker; a settled "NO_REP" shows nothing', () => {
+  for (const t of ['NO_', 'no_rep', 'NO_REPL', ' `NO_RE` ']) assert.equal(isNoReply(t), true, t)
+  for (const t of ['NO', 'No.', 'NO_REPORT', 'NOT']) assert.equal(isNoReply(t), false, t)
+  assert.deepEqual(settleHeld({ content: '', held: 'NO_REP' }), { content: '', held: undefined })
+  assert.equal(stripNoReply('Done.\nNO_REP'), 'Done.')
+})

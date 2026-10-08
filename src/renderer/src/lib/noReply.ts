@@ -2,10 +2,12 @@
 
 const SENTINEL = 'NO_REPLY'
 const WHOLE = /^[\s`*_~>."'“”‘’]*NO_REPLY[\s`*_~.!?,;:"'“”‘’]*$/i
+// A reply cut off partway through the marker ("NO_", "NO_REP"): never a real answer either (workers.py _PARTIAL).
+const PARTIAL = /^[\s`*]*NO_(?:R|RE|REP|REPL)?[\s`*]*$/i
 
-/** The text is only the marker (markdown, quotes or trailing punctuation aside). Empty text is not. */
+/** The text is only the marker (markdown, quotes or trailing punctuation aside) or a cut-off start of it. Empty text is not. */
 export function isNoReply(text: string | null | undefined): boolean {
-  return WHOLE.test(text ?? '')
+  return WHOLE.test(text ?? '') || PARTIAL.test(text ?? '')
 }
 
 /** A streaming reply that so far could still become the marker ("N", "NO_", "NO_REPL"): show nothing yet. */

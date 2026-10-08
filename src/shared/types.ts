@@ -1446,6 +1446,8 @@ export interface Settings {
   apiKey: string
   /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
   apiKeySet?: boolean
+  /** Set (the message) while the provider has rejected the saved key and requests are paused; empty otherwise. Computed, never saved. */
+  providerAuthBlocked?: string
   /** The provider preset in use (a /setup/providers id); null or missing means the address was typed by hand. */
   provider?: string | null
   /** Which providers have a key saved. Never the keys. Missing on an older backend. */
@@ -1825,6 +1827,7 @@ export type BackgroundEvent =
   | { event: 'todos_changed'; data: Record<string, never> }
   /** A workflow run or one of its steps moved (payloads stripped): crew windows and the run list refetch. */
   | { event: 'workflow_run'; data: WorkflowRun }
+  | { event: 'provider_auth'; data: { provider: string; open: boolean; message: string } }
   /** A ship checklist moved (ship.py): the whole row, so the card and the job row update without a refetch. */
   | { event: 'ship_checklist'; data: ShipChecklist }
   /** A coding session moved (codingagents.py): the whole summary row. */

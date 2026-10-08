@@ -16,3 +16,12 @@ def test_strip_no_reply() -> None:
     assert W.strip_no_reply("**NO_REPLY**\nDone.") == "Done."
     assert W.strip_no_reply("A\nNO_REPLY\nB") == "A\nNO_REPLY\nB"  # only the edges
     assert W.strip_no_reply("  Hello  ") == "Hello"
+
+
+def test_a_reply_cut_off_inside_the_marker_is_silent() -> None:
+    for t in ("NO_", "no_rep", "NO_REPL", " `NO_RE` ", "NO_R"):
+        assert W.is_silent(t), t
+        assert W.strip_no_reply(t) == "", t
+    for t in ("NO", "No.", "NO_REPORT", "NO_REPX", "NOT"):
+        assert not W.is_silent(t), t
+    assert W.strip_no_reply("Done.\nNO_REP") == "Done."

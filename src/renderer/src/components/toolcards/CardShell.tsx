@@ -49,7 +49,7 @@ export default function CardShell({ event, pending, decide, rules, icon, title, 
   return (
     <div
       ref={root}
-      className={`tool-event tc-card ${pending ? 'awaiting' : ''} ${event.error ? 'error' : ''} ${tone ?? ''}`}
+      className={`tool-event tc-card ${event.pending ? 'pending' : ''} ${pending ? 'awaiting' : ''} ${event.error ? 'error' : ''} ${tone ?? ''}`}
       role="group"
       aria-label={subject ? `${title} ${subject}` : title}
       onKeyDown={(e) => {

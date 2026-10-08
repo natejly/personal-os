@@ -29,8 +29,8 @@ export const waitText = (ms: number): string | null => {
 }
 
 /**
- * What a reply is doing right now, in one line: the tool call in flight, the subagents it is waiting on, or
- * the latest line of its thinking summary. Null once the answer itself is streaming or nothing is known yet.
+ * What a reply is doing right now, in one line: the tool call in flight or the subagents it is waiting on.
+ * Null once the answer itself is streaming or nothing is known yet.
  */
 export const nowText = (m: Pick<Message, 'reasoning' | 'tool_events' | 'content'> | null | undefined, subs: Record<string, SubagentInfo> = {}): string | null => {
   if (!m || m.content) return null
@@ -40,5 +40,6 @@ export const nowText = (m: Pick<Message, 'reasoning' | 'tool_events' | 'content'
   if (call && running.length && /^agent_(spawn|wait)$/.test(call.name)) return `Waiting on ${running.length} subagent${running.length === 1 ? '' : 's'}`
   if (call) return fullTitle(call.name, call.arguments)
   if (running.length) return `Running ${running.length} subagent${running.length === 1 ? '' : 's'}`
-  return m.reasoning?.trim().split('\n').pop() || null
+  // The thinking summary is never a status: reasoning text does not render anywhere.
+  return null
 }

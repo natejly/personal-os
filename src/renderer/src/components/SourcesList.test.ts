@@ -9,13 +9,42 @@ import type { ChunkRef } from './ChunkViewer'
 const chunk = (n: number, name: string, extra: Partial<ChunkRef> = {}): ChunkRef =>
   ({ n, name, chunk_id: `c${n}`, document_id: 'd', idx: 0, text: '', ...extra })
 
-test('a reply citing only [2] of 3 excerpts lists 2 first in bold, the others muted', () => {
+test('a reply citing only [2] of 3 excerpts lists it alone, renumbered [1]: excerpts never cited are not shown', () => {
   const html = renderToStaticMarkup(createElement(SourcesList, {
     content: 'The notice period is thirty days [2].', chunks: [chunk(1, 'a.txt'), chunk(2, 'lease.txt'), chunk(3, 'c.txt')], onOpen: () => {}
   }))
-  assert.ok(html.includes('Sources (3)'), html)
-  const rows = [...html.matchAll(/<li class="(\w+)">.*?\[(\d)\]/g)].map((m) => `${m[1]}:${m[2]}`)
-  assert.deepEqual(rows, ['cited:2', 'consulted:1', 'consulted:3'])
+  const rows = [...html.matchAll(/<li class="(\w+)">.*?\[(\d)\]<\/span> ([\w.]+)/g)].map((m) => `${m[1]}:${m[2]}:${m[3]}`)
+  assert.deepEqual(rows, ['cited:1:lease.txt'])
+})
+
+test('sources are numbered in order of first citation, each listed once', () => {
+  const html = renderToStaticMarkup(createElement(SourcesList, {
+    content: 'Rent [3], pets [1], rent again [3].', chunks: [chunk(1, 'pets.txt'), chunk(2, 'b.txt'), chunk(3, 'rent.txt')], onOpen: () => {}
+  }))
+  const rows = [...html.matchAll(/\[(\d)\]<\/span> ([\w.]+)/g)].map((m) => `${m[1]}:${m[2]}`)
+  assert.deepEqual(rows, ['1:rent.txt', '2:pets.txt'])
+})
+
+test('a [n] inside a link, maths or code is not a citation and takes no number', () => {
+  const html = renderToStaticMarkup(createElement(SourcesList, {
+    content: 'See [2](http://x), $[3]$ and `[3]`; the rent is due [1].', chunks: [chunk(1, 'rent.txt'), chunk(2, 'b.txt'), chunk(3, 'c.txt')], onOpen: () => {}
+  }))
+  const rows = [...html.matchAll(/\[(\d)\]<\/span> ([\w.]+)/g)].map((m) => `${m[1]}:${m[2]}`)
+  assert.deepEqual(rows, ['1:rent.txt'])
+})
+
+test('an inline chip shows its renumbered position, not the excerpt number', () => {
+  const cites = new Map([[3, { label: 'rent.txt', shown: 1 }], [1, { label: 'pets.txt', shown: 2 }]])
+  const html = renderToStaticMarkup(createElement(MarkdownPreview, { source: 'Rent [3], pets [1].', cites, onCite: () => {} }))
+  const chips = [...html.matchAll(/class="cite-chip"[^>]*>(\d)</g)].map((m) => m[1])
+  assert.deepEqual(chips, ['1', '2'])
+})
+
+test('a reply that cites nothing lists nothing, however many excerpts it consulted', () => {
+  const html = renderToStaticMarkup(createElement(SourcesList, {
+    content: 'No excerpts needed for this one.', chunks: [chunk(1, 'a.txt'), chunk(2, 'b.txt')], onOpen: () => {}
+  }))
+  assert.equal(html, '')
 })
 
 test('no numbered excerpts, no sources row', () => {

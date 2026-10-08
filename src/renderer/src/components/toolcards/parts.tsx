@@ -153,7 +153,7 @@ const STATUS: Record<CardStatus, { label: string; icon: JSX.Element }> = {
 export function StatusChip({ event }: { event: ToolEvent }): JSX.Element {
   const s = cardStatus(event)
   const label = s === 'running' && event.approval && event.approval !== 'deny' ? 'Approved · running' : STATUS[s].label
-  return <span className={`tc-status ${s}`} role="status">{STATUS[s].icon}{label}</span>
+  return <span className={`tc-status ${s}`} role="status">{STATUS[s].icon}<span className={s === 'running' ? 'shimmer' : undefined}>{label}</span></span>
 }
 
 const fmtSize = (n: number): string =>

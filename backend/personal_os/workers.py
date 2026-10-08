@@ -45,7 +45,7 @@ SPAWN_TOOLS = ("agent_spawn", "agent_wait", "agent_stop")
 # What a reply may still use once it has to hand work on (delegation_forced): the hand-off tools, the task list, and the two
 # tools that exist to hand a decision to the user (a plan card, a question; a desk asks and finishes with its own), which are not
 # the reply doing the work itself.
-FORCED_ALLOW = frozenset({*FRONT_TOOLS, "todo_write", "propose_plan", "ask_user", "desk_ask", "desk_done"})
+FORCED_ALLOW = frozenset({*FRONT_TOOLS, "todo_write", "propose_plan", "ask_user", "desk_ask", "desk_done", "deep_research"})
 ENDED = ("done", "error", "interrupted", "stopped")
 NO_REPLY = "NO_REPLY"
 WAKE_REPORT_CHARS = 12_000
@@ -158,12 +158,14 @@ def dispatch_only(names: Iterable[str | None]) -> bool:
 
 
 _SENTINEL = re.compile(r"[\s`*_~>.\"'“”‘’]*NO_REPLY[\s`*_~.!?,;:\"'“”‘’]*", re.I)
+# A reply cut off partway through the marker ("NO_", "NO_REP"): never a real answer, so it is silent too.
+_PARTIAL = re.compile(r"[\s`*]*NO_(?:R|RE|REP|REPL)?[\s`*]*", re.I)
 
 
 def is_silent(text: str | None) -> bool:
-    """A wake reply that is exactly NO_REPLY (any case, markdown, quotes or trailing punctuation aside) or empty says nothing."""
+    """A wake reply that is exactly NO_REPLY (any case, markdown, quotes or trailing punctuation aside), a cut-off start of it, or empty says nothing."""
     t = text or ""
-    return not t.strip() or _SENTINEL.fullmatch(t) is not None
+    return not t.strip() or _SENTINEL.fullmatch(t) is not None or _PARTIAL.fullmatch(t) is not None
 
 
 def strip_no_reply(text: str | None) -> str:

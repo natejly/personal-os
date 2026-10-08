@@ -33,6 +33,8 @@ import pytest
 
 # Tests never touch the login Keychain: secrets go to a file in each test's temp data dir (children inherit it).
 os.environ["GRAIN_SECRETS_BACKEND"] = "file"
+# Nor the user's OpenCode data: the usage import reads a missing file unless a test points it at its own fake.
+os.environ["PERSONAL_OS_OPENCODE_DB"] = os.path.join(tempfile.mkdtemp(prefix="no-opencode-"), "opencode.db")
 
 BACKEND = Path(__file__).resolve().parent
 REPO = BACKEND.parent

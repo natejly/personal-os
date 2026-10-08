@@ -201,3 +201,54 @@ def test_auto_and_manual_still_card_a_bypass_session(pmode: str) -> None:
 def test_floor_still_cards_in_a_tainted_reply() -> None:
     c = go("allow_all", sh("rm -rf ~/Documents/x"), tainted=True)
     assert len(c) == 1 and not T.RAN and c[0]["permission"]["kind"] == "destructive"
+
+
+# ---- the same floor handed to Claude Code sessions (codingagents.floor_settings), which run outside the sandbox
+
+def _claude_rules() -> dict[str, list[str]]:
+    return permrules.claude_code_floor()["permissions"]
+
+
+def _bash_hit(rules: list[str], cmd: str) -> bool:
+    """Claude Code's Bash(pattern) match, approximated: `*` matches any text, the pattern covers the whole command."""
+    import fnmatch
+    return any(r.startswith("Bash(") and fnmatch.fnmatchcase(cmd, r[5:-1]) for r in rules)
+
+
+@pytest.mark.parametrize("cmd", ["rm -rf ~/Documents/x", "rm a.txt", "unlink ~/x", "shred secret.txt", "find . -name '*.o' -delete",
+                                 "git push --force", "git push -f origin main", "git push origin main --force-with-lease",
+                                 "git push origin +main", "git push --delete origin x",
+                                 "security find-generic-password -s x -w"])
+def test_claude_floor_asks_for_what_the_shell_floor_cards(cmd: str) -> None:
+    assert permrules.destructive(cmd, cwd=HOME_PROJ) or permrules.touches_protected(cmd, HOME_PROJ), cmd
+    assert _bash_hit(_claude_rules()["ask"], cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", ["diskutil eraseDisk JHFS+ x disk2", "diskutil zeroDisk disk2", "diskutil apfs deleteVolume disk3s1",
+                                 "dd if=/dev/zero of=/dev/disk3", "mkfs.ext4 /dev/sda1"])
+def test_claude_floor_refuses_disk_wipes(cmd: str) -> None:
+    assert permrules.destructive(cmd, cwd=HOME_PROJ), cmd
+    assert _bash_hit(_claude_rules()["deny"], cmd), cmd
+
+
+@pytest.mark.parametrize("cmd", ["ls -la", "git push origin main", "git push --follow-tags", "git push --dry-run origin x",
+                                 "git status", "diskutil list", "npm test", "dd if=a of=b"])
+def test_claude_floor_leaves_routine_commands_alone(cmd: str) -> None:
+    rules = _claude_rules()
+    assert not _bash_hit(rules["ask"] + rules["deny"], cmd), cmd
+
+
+def test_claude_floor_paths_come_from_the_sandbox_lists() -> None:
+    from personal_os import mac
+    rules = _claude_rules()
+    for root in mac.protected_paths():
+        pat = "//" + str(root).lstrip("/") + "/**"
+        assert f"Edit({pat})" in rules["deny"], root
+        assert (f"Read({pat})" in rules["deny"]) is (root.suffix.lower() != ".app"), root
+    for d in mac.CRED_HOME_DIRS:
+        assert {f"Read(~/{d}/**)", f"Edit(~/{d}/**)"} <= set(rules["ask"]), d
+    for f in mac.CRED_HOME_FILES:
+        assert f"Read(~/{f})" in rules["ask"], f
+    assert {"Read(.env)", "Read(.env.*)", "Read(id_ed25519)", *permrules.CLAUDE_MAIL_SENDS} <= set(rules["ask"])
+    assert not set(rules["ask"]) & set(rules["deny"])
+    assert not [r for r in rules["ask"] + rules["deny"] if r.endswith(":*)")], "`:*` at the end is the CLI's prefix syntax"

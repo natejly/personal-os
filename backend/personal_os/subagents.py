@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,7 @@ from .db import new_id, now
 from .toolcalls import parse_arguments
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .tools import ALTERNATIVE, ASK_LOCKED_DANGER, DISCARDED, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
-from .working import escape_tags
+from .working import escape_tags, fence_untrusted
 
 log = logging.getLogger(__name__)
 
@@ -997,6 +998,7 @@ class Subagents:
         uid = f"{ch.id}:{c['id']}"
         spec = self.toolbox.specs.get(name)
         raw_mode = ch.modes.get(name, "off")
+        sources_before = len(ch.ctx.get("taint_sources") or [])
         t0 = time.time()
         self._set_now(ch, _now_line(name, args))
         self._emit(ch, "tool_call", {"id": uid, "name": name, "arguments": _short(args)})
@@ -1115,10 +1117,17 @@ class Subagents:
         preview = summarize_result(result)
         self._emit(ch, "tool_result", {"id": uid, "name": name, "result_preview": preview, "error": err, "approval": decision,
                                        "duration_ms": int((time.time() - t0) * 1000)})
+        # The parent loop's fence, per call: a result that read untrusted text (web, a coding agent's log) is wrapped as data
+        # with an id the text cannot guess, so it reads as data, not as instructions to this child.
+        fence = ch.ctx.setdefault("fence_nonce", secrets.token_hex(8)) \
+            if len(ch.ctx.get("taint_sources") or []) > sources_before else None
         if self.results is not None and ch.conversation_id:
-            return self.results.for_model(ch.conversation_id, ch.message_id, name, result) + nudge
+            content = self.results.render(ch.conversation_id, ch.message_id, name, result, untrusted=bool(ch.ctx.get("tainted")),
+                                          fence=fence)[0]
+            return content + nudge
         blob = redact.scrub_command_output(json.dumps(result, default=str, ensure_ascii=False))
-        return (blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]") + nudge
+        blob = blob if len(blob) <= 8000 else blob[:8000] + "...[truncated]"
+        return (fence_untrusted(blob, fence, name) if fence else blob) + nudge
 
     async def _call(self, ch: Child, name: str, args: dict[str, Any], uid: str, spec: ToolSpec) -> Any:
         async def go() -> Any:
@@ -1135,7 +1144,7 @@ class Subagents:
         """One approval_log row for what the permission mode decided about a child's call."""
         if self.store is not None:
             approval_log.record(self.store.db, tool=name, args=args, conversation_id=ch.conversation_id, call_id=uid,
-                                run_id=ch.id, desk_id=ch.desk_id, agent="subagent", decision=decision, scope=scope, note=note, review=review)
+                                run_id=ch.id, desk_id=ch.desk_id, agent=ch.kind, decision=decision, scope=scope, note=note, review=review)
 
     def _unattended(self, ch: Child, pmode: str = "manual") -> str | None:
         """Why a card may not open for this child (mirrors the parent loop), or None when one may."""

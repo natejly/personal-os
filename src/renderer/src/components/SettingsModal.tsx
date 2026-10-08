@@ -382,6 +382,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" aria-label="Allow all domains and MCP servers" checked={!!draft.allowAllConnections}
                   onChange={(e) => void saveEarly({ allowAllConnections: e.target.checked }).catch((err: Error) => toast(err.message, 'error'))} /><span className="switch" />
               </label>
+              <RunSafetySettings draft={draft} patch={patch} />
               <p className="muted small">Grain can work anywhere on this Mac. Whatever the mode, its own data and the app are off limits, and passwords, keys and sign-in files always ask first. Allow everything still asks before permanent deletes outside the Trash, disk wipes, force-pushes and sending email. Per-tool rules and the always-ask list are under Advanced.</p>
               {mode === 'auto' && (
                 <details className="modal-free">
@@ -556,7 +557,6 @@ export default function SettingsModal(): JSX.Element {
                 <AlwaysAsk value={draft.alwaysAsk ?? []} onChange={(alwaysAsk) => patch({ alwaysAsk })} />
                 <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
                 <GrantsPanel draft={draft} patch={patch} />
-                <RunSafetySettings draft={draft} patch={patch} />
                 <div className="setting-row">
                   <span className="toggle-text"><b>File edits</b><small>Ask: review each diff. Accept all: write it and still show the diff. You can undo either from the file's history.</small></span>
                   <div className="seg" role="group" aria-label="File edits">

@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="authbreaker-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -28,7 +28,7 @@ BAD = '{"error": {"message": "Invalid API key"}}'
 
 
 @pytest.fixture(autouse=True)
-def fresh(monkeypatch: Any) -> list[float]:
+def fresh(monkeypatch: Any) -> Iterator[list[float]]:
     now = [1000.0]
     monkeypatch.setattr(ab, "clock", lambda: now[0])
     ab._state.clear()

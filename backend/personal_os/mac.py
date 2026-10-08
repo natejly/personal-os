@@ -158,7 +158,8 @@ SENSITIVE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".jks", ".keysto
 SENSITIVE_NAMES = frozenset({".netrc", ".npmrc", ".pgpass", ".git-credentials", ".pypirc", "credentials", "credentials.json",
                              "credentials.toml", ".vault-token", "application_default_credentials.json"})
 SENSITIVE_PREFIXES = ("/dev/", "/proc/")
-KEY_FILE_RE = re.compile(r"^id_(rsa|dsa|ecdsa|ed25519)(?!.*\.pub$)")
+KEY_TYPES = ("rsa", "dsa", "ecdsa", "ed25519")
+KEY_FILE_RE = re.compile(rf"^id_({'|'.join(KEY_TYPES)})(?!.*\.pub$)")
 # Keychains and cookie jars: whole folders under the home folder (or /Library) the user has to approve.
 KEYCHAIN_DIRS = ("Library/Keychains", "Library/Cookies", "Library/Containers/com.apple.Safari/Data/Library/Cookies")
 SYSTEM_KEYCHAINS = ("/Library/Keychains",)

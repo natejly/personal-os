@@ -1000,8 +1000,12 @@ class Toolbox:
             return tool_error(f"{name} would run code in a sandbox that has network access, and this is an unattended "
                               "background run, so it is refused: code could send data out with nobody watching.",
                               alternative="run_python, which has no network")
+        # The precheck above judges the command's text; this diffs the repo it ran in, for what the text hid (a script, a heredoc).
+        guard = await asyncio.to_thread(coding_route.guard_start, self, args, ctx) if name == "shell_run" else None
         try:
             out = await self._dispatch(spec, ctx, args)
+            if guard and (routed := await asyncio.to_thread(coding_route.guard_finish, guard)):
+                return tool_error(routed, alternative="coding_session_start")
         except TypeError as e:  # backstop: signature mismatch, wrong types
             return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001

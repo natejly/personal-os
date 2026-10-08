@@ -90,8 +90,9 @@ _LOOP_NOTE = ("\n\n[The user ran /loop: they want this repeated on an interval. 
               "matching the interval they typed (every 5 minutes → */5 * * * *, every weekday at 9 → 0 9 * * 1-5) and `prompt` "
               "as a self-contained instruction for each run. Then tell them the schedule and that Scheduled in the inbox lists it.]")
 
-_RESEARCH_NOTE = ("\n\n[The user ran /research: call deep_research once with their question as `question` (add depth \"deep\" only if they "
-                  "asked for a thorough or exhaustive pass), then give the answer it returns, keeping its [n] source numbers.]")
+_RESEARCH_NOTE = ("\n\n[The user ran /research: call deep_research once, first, with their question as `question` (add depth \"deep\" only if "
+                  "they asked for a thorough or exhaustive pass). It plans the question and runs its own researchers in parallel, so do "
+                  "not delegate it or search yourself instead. Then give the answer it returns, keeping its [n] source numbers.]")
 
 
 def _skill_key(name: str) -> str:

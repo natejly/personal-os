@@ -48,6 +48,7 @@ def test_final_model_mapping() -> None:
     fw = providers.get("fireworks")
     assert "accounts/fireworks/models/glm-5p3-flash" in fw["models"] and "glm-5.3-flash" in providers.get("litellm")["models"]
     assert usage.FIREWORKS_PRICES["glm-5p3-flash"] == {"input": 0.15, "cache_read": 0.03, "output": 0.50}
+    assert usage.price_key("glm-5.3-flash") == usage.price_key("accounts/fireworks/models/glm-5p3-flash") == "glm-5p3-flash"
 
 
 def test_fresh_database_is_at_the_latest_version() -> None:

@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent } from 'react'
 import { ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useStore } from '../store'
-import { ALL_CONNECTIONS_LABEL, MODES, allConnectionsOn, allConnectionsTitle, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
+import { MODES, modeOf, needsConfirm, pillLabel, pillTitle, type PermissionMode } from '../lib/permissionMode'
 
 /** Three radio cards for the global permission mode. Choosing Allow everything asks first; the choice saves at once. */
 export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; onPick: (m: PermissionMode) => Promise<void> }): JSX.Element {
@@ -62,25 +62,16 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
   )
 }
 
-/** Composer pills: the current mode (red under Allow everything) and, beside it, a red "All domains + MCP" pill while
-    that setting is on. These red pills are the only cues (no app-wide banner). Each opens Settings on Permissions. */
+/** The composer pill: the current mode, in red text under Allow everything and otherwise plain. It opens Settings on
+    Permissions, which also holds the domains and MCP controls. */
 export function PermissionModePill(): JSX.Element {
   const mode = useStore((s) => modeOf(s.settings))
-  const allConn = useStore((s) => allConnectionsOn(s.settings))
   const openSettings = useStore((s) => s.openSettings)
   const title = pillTitle(mode)
   return (
-    <>
-      <button type="button" className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title}
-        data-mode={mode} onClick={() => openSettings('permissions')}>
-        {mode === 'allow_all' ? <ShieldAlert size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />} {pillLabel(mode)}
-      </button>
-      {allConn && (
-        <button type="button" className="ghost-btn skip-perms on" title={allConnectionsTitle} aria-label={allConnectionsTitle}
-          data-allow-all-connections onClick={() => openSettings('permissions')}>
-          <ShieldAlert size={13} aria-hidden /> {ALL_CONNECTIONS_LABEL}
-        </button>
-      )}
-    </>
+    <button type="button" className={`ghost-btn skip-perms ${mode === 'allow_all' ? 'on' : ''}`} title={title} aria-label={title}
+      data-mode={mode} onClick={() => openSettings('permissions')}>
+      <ShieldCheck size={13} aria-hidden /> {pillLabel(mode)}
+    </button>
   )
 }

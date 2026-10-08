@@ -495,6 +495,44 @@ def test_jobs_belong_to_their_conversation_and_die_with_its_run(box: Box) -> Non
 
 
 @needs_seatbelt
+def test_a_workers_jobs_outlive_the_reply_and_end_with_the_worker(box: Box) -> None:
+    async def go() -> None:
+        reply = await box.tb.call("shell_run", box._args("shell_run", {"command": "sleep 30", "background": True}),
+                                  dict(box.ctx, run_id="run_reply"))
+        mine = await box.tb.call("shell_run", box._args("shell_run", {"command": "sleep 30", "background": True}),
+                                 dict(box.ctx, run_id="sa_worker"))
+        jobs = box.tb.shell.jobs
+        assert jobs[mine["job_id"]].run_id == "sa_worker"
+        # the reply's teardown ends its own jobs, not the worker's
+        assert await box.tb.shell.kill_conversation("c1", run_id="run_reply") == 1
+        assert jobs[reply["job_id"]].status == "killed" and jobs[mine["job_id"]].live()
+        # the worker ending ends its jobs
+        assert await box.tb.shell.kill_run("sa_worker") == 1
+        assert jobs[mine["job_id"]].status == "killed"
+        assert await box.tb.shell.kill_run("") == 0
+    asyncio.run(go())
+
+
+@needs_seatbelt
+def test_shell_poll_wait_s_returns_on_new_output_not_after_the_whole_wait(box: Box) -> None:
+    async def go() -> None:
+        a = await box.arun("shell_run", command="sleep 1; echo tick; sleep 30", background=True)
+        t0 = time.monotonic()
+        out = await box.arun("shell_poll", job_id=a["job_id"], wait_s=20)
+        assert "tick" in out["output"] and out["status"] == "running" and time.monotonic() - t0 < 10
+        t0 = time.monotonic()
+        quiet = await box.arun("shell_poll", job_id=a["job_id"], wait_s=0.6)  # nothing new: it waits, then says so
+        assert quiet["output"] == "" and 0.5 <= time.monotonic() - t0 < 5
+        job = box.tb.shell.jobs[a["job_id"]]
+        assert job.out_at > job.started
+        await box.tb.shell.kill(job)
+        done = await box.arun("shell_poll", job_id=a["job_id"], wait_s=20)  # an ended job never waits
+        assert done["status"] == "killed"
+        assert "wait_s" in (await box.arun("shell_poll", job_id=a["job_id"], wait_s="soon"))["error"]
+    asyncio.run(go())
+
+
+@needs_seatbelt
 def test_shutdown_kills_every_live_job(box: Box) -> None:
     async def go() -> None:
         a = await box.arun("shell_run", command="sleep 30", background=True)

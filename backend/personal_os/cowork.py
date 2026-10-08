@@ -277,8 +277,8 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         out.append("- `coding_session_start` hands a coding task (a feature, a fix, a refactor in a git repo) to OpenCode or Claude "
                    "Code in its own worktree; give it a self-contained brief, then check `coding_session_diff` and run the tests.")
     if has("opencode_run"):
-        out.append("- `opencode_run` runs OpenCode in the foreground for a small coding change; give it a self-contained brief and "
-                   "check its diff after.")
+        out.append("- `opencode_run` runs OpenCode in the foreground for a small coding change (in a repo's checkout it works in a "
+                   "fresh git worktree); give it a self-contained brief with the repo path and check the diff it reports after.")
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")

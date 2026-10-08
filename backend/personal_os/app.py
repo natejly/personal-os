@@ -65,7 +65,7 @@ from . import mail_attachments, mail_edits  # noqa: F401 - mail_edits registers 
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
-from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, inputs_line, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -623,7 +623,7 @@ def _mcp_server_notes(slugs: set[str]) -> str:
     connection, never stored, so a reconnect or Refresh re-pulls them."""
     owners = {t["server_id"] for t in mcp_store.tools() if t["slug"] in slugs}
     live = [{"server_id": i["server_id"], "name": i["name"], "instructions": (i.get("server_info") or {}).get("instructions")}
-            for i in mcp.status() if i["server_id"] in owners and i.get("status") == "ready"]
+            for i in sorted(mcp.status(), key=lambda i: i["server_id"]) if i["server_id"] in owners and i.get("status") == "ready"]
     return mcp_search.server_notes(live, {s["server_id"]: mcp_store.latest_eval(s["server_id"]) for s in live})
 
 
@@ -1860,6 +1860,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     _job = conv["settings"].get("job_id")
     _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
     llm.usage_context.set(_ucx)
+    llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
@@ -2233,13 +2234,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
             net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
                    "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
+            text = desk_manual({s["function"]["name"] for s in tool_schemas},
+                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+            return "\n\n" + text if text else ""
+
+        def _desk_inputs_block() -> str:
+            # The handed-in files change as the user adds or edits them: sent with the turn, not in the cached prefix.
             try:
                 inputs = workspace.inputs(desk_id) if desk_id else []
             except WorkspaceError:
                 inputs = []
-            text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True)), "inputs": inputs})
-            return "\n\n" + text if text else ""
+            line = inputs_line(inputs)
+            return "## Desk inputs\n" + line if line else ""
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         front_hint = bool(tool_schemas) and _front() and any(s["function"]["name"] == "delegate" for s in tool_schemas)
@@ -2272,7 +2278,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
                  TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
                  coding_route.hint(cfg) if tool_schemas else "")
-        used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
+        inputs_block = _desk_inputs_block() if desk else ""
+        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -2281,7 +2288,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
             stable = None
-            system = "\n\n".join(p for p in (system, *hints, _today_hint()) if p)
+            system = "\n\n".join(p for p in (system, *hints, inputs_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
@@ -2630,7 +2637,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # turns replay every tool result they stored, so a few briefings grew a chat to 45k tokens a round, and
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
-                                                         float(cfg.get("microAt", 0.25)))
+                                                         float(cfg.get("microAt", 0.25)),
+                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS))
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})

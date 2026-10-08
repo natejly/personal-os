@@ -10,7 +10,10 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   with a new id that the row then follows; a stopped one is woken under the same id. The session's `--permission-mode`
   follows Grain's own mode (Auto -> auto, Allow all -> bypassPermissions, Manual -> no flag, so it prompts and shows
   needs_you) unless the caller names a permission_mode (acceptEdits, auto, dontAsk or bypassPermissions) for that one
-  session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift.
+  session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift. Every start
+  and follow-up also gets `--settings` with Allow everything's floor as Claude Code deny/ask rules
+  (permrules.claude_code_floor), which apply in every mode, bypassPermissions included: Grain's own data folder and app
+  and disk wipes are refused; credential stores, deletes that skip the Trash and force-pushes ask (needs_you).
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
   has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
@@ -34,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import mac, opencode, shell
+from . import mac, opencode, permrules, shell
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
@@ -152,17 +155,24 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
+def floor_settings() -> str:
+    """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules. Inline, so
+    nothing on disk can be swapped under the session; the CLI merges these lists with the user's own settings."""
+    return json.dumps(permrules.claude_code_floor(), separators=(",", ":"))
+
+
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None) -> list[str]:
-    """The start command, with the two inline sub-agents. A model flag appears only when the caller named one: the
-    session runs on the user's own account, so their own CLI default is the one model they are known to have quota for
-    (pinning one here started every session on it and failed the moment that model's limit was reached). A permission
-    flag likewise appears only when the caller asked for a mode."""
+    """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
+    named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
+    have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
+    A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
 def resume_argv(exe: str, session_id: str, message: str) -> list[str]:
-    return [exe, "--bg", "--resume", session_id, _lead(message)]
+    """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
+    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(), _lead(message)]
 
 
 def _slug(text: str) -> str:
@@ -635,7 +645,8 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
                     "untouched. Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
-                    "(status needs_you; the user answers with `claude attach <id>`). OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
+                    "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
+                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
                     "files that run code later are off limits). permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",

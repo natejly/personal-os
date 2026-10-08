@@ -922,6 +922,7 @@ class Subagents:
                 ch.state, ch.exit_reason = ("error", "error") if end.get("finish_reason") == "error" else ("completed", "completed")
                 return
             ch.messages.append({"role": "assistant", "content": text or None,
+                                **({"reasoning_content": end["reasoning"]} if end.get("reasoning") else {}),
                                 "tool_calls": [{"id": c["id"], "type": "function",
                                                 "function": {"name": c["name"] or "invalid_tool",
                                                              "arguments": self._echo_args(c)}} for c in calls]})

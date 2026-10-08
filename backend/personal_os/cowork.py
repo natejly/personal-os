@@ -282,7 +282,8 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
                    "`background=true`, then `shell_poll`.")
     if has("opencode_run"):
         out.append("- `opencode_run` hands a whole coding task (a feature, a fix, a refactor in a repo under the workspace) to a "
-                   "coding agent that edits files and runs commands there; give it a self-contained brief and check its diff after.")
+                   "coding agent that edits files and runs commands there (in a repo's checkout it works in a fresh git worktree); give it "
+                   "a self-contained brief with the repo path and check the diff it reports after.")
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")

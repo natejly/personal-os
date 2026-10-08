@@ -828,7 +828,7 @@ export interface WorkerInfo {
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** What a new chat starts on. `'default'` is a different choice: it omits `reasoning_effort`. */
-export const DEFAULT_EFFORT: Effort = 'medium'
+export const DEFAULT_EFFORT: Effort = 'high'
 
 export interface ConversationSettings {
   /** A chat opened on an agent (Library > Agents > Chat): its prompt leads the system prompt and its tools bound the chat's. */

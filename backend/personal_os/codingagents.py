@@ -10,9 +10,13 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   with a new id that the row then follows; a stopped one is woken under the same id. The session's `--permission-mode`
   follows Grain's own mode (Auto -> auto, Allow all -> bypassPermissions, Manual -> no flag, so it prompts and shows
   needs_you) unless the caller names a permission_mode (acceptEdits, auto, dontAsk or bypassPermissions) for that one
-  session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift.
+  session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift. Every start
+  and follow-up also gets `--settings` with Allow everything's floor as Claude Code deny/ask rules
+  (permrules.claude_code_floor), which apply in every mode, bypassPermissions included: Grain's own data folder and app
+  and disk wipes are refused; credential stores, deletes that skip the Trash and force-pushes ask (needs_you).
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
-  has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
+  has no prompt to answer: the sandbox is its boundary. On a repo's main checkout it gets its own worktree unless the
+  caller passes new_worktree=false, so it never edits a checkout the user or another agent is working in by default. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
   `--continue`s the same opencode state folder.
 
@@ -34,7 +38,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import mac, opencode, shell
+from . import mac, opencode, permrules, shell
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
@@ -152,17 +156,24 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
+def floor_settings() -> str:
+    """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules. Inline, so
+    nothing on disk can be swapped under the session; the CLI merges these lists with the user's own settings."""
+    return json.dumps(permrules.claude_code_floor(), separators=(",", ":"))
+
+
 def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None) -> list[str]:
-    """The start command, with the two inline sub-agents. A model flag appears only when the caller named one: the
-    session runs on the user's own account, so their own CLI default is the one model they are known to have quota for
-    (pinning one here started every session on it and failed the moment that model's limit was reached). A permission
-    flag likewise appears only when the caller asked for a mode."""
+    """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
+    named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
+    have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
+    A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
 def resume_argv(exe: str, session_id: str, message: str) -> list[str]:
-    return [exe, "--bg", "--resume", session_id, _lead(message)]
+    """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
+    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(), _lead(message)]
 
 
 def _slug(text: str) -> str:
@@ -269,6 +280,18 @@ class CodingSessions:
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
         self._recover()
+        self._prev_on_change = getattr(jobs, "on_change", None)
+        jobs.on_change = self._job_changed
+
+    def _job_changed(self) -> None:
+        """A shell job started or ended: a live OpenCode session publishes its new state now, not at the next poll."""
+        if self._prev_on_change:
+            self._prev_on_change()
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE agent = 'opencode' AND external_id IS NOT NULL "
+                                               f"AND status IN ({','.join('?' * len(LIVE))})", LIVE)]
+        for row in rows:
+            self.refresh(row)
 
     # ---- rows ----
     def get(self, sid: str) -> dict[str, Any] | None:
@@ -391,7 +414,7 @@ class CodingSessions:
             raise CodingError(f"The {what} is over {opencode.MAX_PROMPT} characters; point the agent at a file instead.")
         return text
 
-    async def start(self, agent: str, repo_path: str, prompt: str, *, new_worktree: bool = False, branch: str | None = None,
+    async def start(self, agent: str, repo_path: str, prompt: str, *, new_worktree: bool | None = None, branch: str | None = None,
                     model: str | None = None, permission_mode: str | None = None, name: str | None = None,
                     ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         ctx = ctx if ctx is not None else {}
@@ -408,6 +431,9 @@ class CodingSessions:
         if model and not MODEL_RE.fullmatch(model):
             raise CodingError(f"'{model}' is not a model id this tool accepts.")
         repo = self.check_repo(repo_path, opencode._desk_root(self.tb, ctx))
+        if new_worktree is None:  # OpenCode stays off a main checkout unless asked; Claude Code keeps its own default
+            found = await asyncio.to_thread(opencode.repo_of, repo) if agent == "opencode" else None
+            new_worktree = bool(found and found[1])
         self._check_capacity()
         name = " ".join(str(name or prompt).split())[:60].lstrip("- ") or "coding session"
         sid, wt, want = new_id(), repo, branch
@@ -611,13 +637,14 @@ def register(tb: Any, sessions: CodingSessions) -> None:
         row = sessions.get(str(sid or ""))
         return (sessions.refresh(row), None) if row else (None, tool_error(f"No coding session '{sid}'.", field="id"))
 
-    async def coding_session_start(ctx: dict[str, Any], agent: str, repo_path: str, prompt: str, new_worktree: bool = False,
+    async def coding_session_start(ctx: dict[str, Any], agent: str, repo_path: str, prompt: str, new_worktree: bool | None = None,
                                    branch: str | None = None, model: str | None = None, permission_mode: str | None = None,
                                    name: str | None = None) -> Any:
         if ctx.get("proposal_only"):
             return unattended("coding_session_start")
         try:
-            row = await sessions.start(agent, repo_path, prompt, new_worktree=bool(new_worktree), branch=branch, model=model,
+            row = await sessions.start(agent, repo_path, prompt, new_worktree=None if new_worktree is None else bool(new_worktree),
+                                       branch=branch, model=model,
                                        permission_mode=permission_mode, name=name, ctx=ctx)
         except (CodingError, shell.ShellError) as e:
             return tool_error(shell._scrub(str(e)))
@@ -633,15 +660,16 @@ def register(tb: Any, sessions: CodingSessions) -> None:
                     "Start a coding agent on a repo and let it work in the background: agent 'claude' (Claude Code) or 'opencode' "
                     f"(installed here: {installed()}). repo_path must be a git repo anywhere on this Mac; new_worktree=true gives "
                     "the agent its own branch and git worktree under <repo>/.claude/worktrees so the repo's checkout stays "
-                    "untouched. Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
+                    "untouched (OpenCode on a repo's main checkout gets one unless new_worktree=false). Give a complete, self-contained task: it does not see this conversation. Claude Code runs OUTSIDE "
                     "the OS sandbox with the user's own account and tools, and asks for permission inside its own session "
-                    "(status needs_you; the user answers with `claude attach <id>`). OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
+                    "(status needs_you; the user answers with `claude attach <id>`); in every mode it is refused Grain's own data folder and app "
+                    "and asks before credential stores, deletes, force-pushes and sending mail. OpenCode runs inside the OS sandbox (Grain's own data folder and app, credential stores and the "
                     "files that run code later are off limits). permission_mode ('acceptEdits', 'auto', 'dontAsk' or 'bypassPermissions', "
                     "Claude Code only) overrides the mode this session runs in (default follows Grain's permission mode); only 'bypassPermissions' "
                     "(under Auto or Manual) asks the user first. Leave it out unless the user asked. Follow progress with coding_session_status and review with coding_session_diff.",
                     _obj({"agent": {"type": "string", "enum": list(AGENTS)}, "repo_path": {"type": "string"},
                           "prompt": {"type": "string", "description": "The task, with the files or folders it concerns"},
-                          "new_worktree": {"type": "boolean", "default": False},
+                          "new_worktree": {"type": "boolean", "description": "Default: true for opencode on a repo's main checkout, else false"},
                           "branch": {"type": "string", "description": "Branch for the new worktree (default grain/<task>-<hex>); never main/master"},
                           "model": {"type": "string"},
                           "permission_mode": {"type": "string", "enum": ["acceptEdits", "auto", "dontAsk", "bypassPermissions"]},

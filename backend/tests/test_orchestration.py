@@ -585,7 +585,7 @@ def test_stop_from_the_ui_wakes_the_chat_and_resume_keeps_history() -> None:
     assert new["id"] != wid and new["resume_of"] == wid and new["conversation_id"] == cid and new["status"] in ("running", "queued", "done")
     msgs = settle(cid)
     assert msgs[-1]["content"] == "The follow up is done."
-    resumed = [s for s in seat("worker") if brief_of(s["messages"]) == "Now also do Y"]
+    resumed = [s for s in seat("worker") if brief_of(s["messages"]).endswith("Now also do Y")]  # the route prefixes USER_NOTE
     assert resumed, "the resumed worker was shown the new instruction"
     hist = json.dumps(resumed[0]["messages"])
     assert "Long job" in hist, "and it still has the original brief in its history"
@@ -667,7 +667,7 @@ def test_restart_interrupts_workers_and_wakes_their_chat() -> None:
     assert r.status_code == 200 and r.json()["worker"]["resume_of"] == running
     WAKE[:] = [{"text": "NO_REPLY"}]
     settle(cid)
-    assert "partial progress" in json.dumps([s for s in seat("worker") if brief_of(s["messages"]) == "carry on"][0]["messages"])
+    assert "partial progress" in json.dumps([s for s in seat("worker") if brief_of(s["messages"]).endswith("carry on")][0]["messages"])
 
 
 def test_recover_wakes_an_ended_worker_whose_report_never_arrived() -> None:
@@ -950,25 +950,25 @@ def test_a_prompt_that_looks_like_a_flag_stays_the_prompt() -> None:
     assert argv[-1] == "Task: -rf everything" and argv[:3] == ["/bin/claude", "--bg", "-n"]
 
 
-# ---------------- 9. ember-1 ----------------
-def test_ember_1_is_the_default_model_per_provider_and_a_saved_one_wins() -> None:
+# ---------------- 9. default model ----------------
+def test_deepseek_is_the_default_model_per_provider_and_a_saved_one_wins() -> None:
     assert llm.DEFAULT_SETTINGS["defaultModel"] == "", "no provider alias is hardcoded for every provider"
     by = {p["id"]: p for p in providers.PROVIDERS}
-    assert by["litellm"]["defaultModel"] == "ember-1" and by["litellm"]["models"][0] == "ember-1"
-    assert by["fireworks"]["defaultModel"] == "accounts/fireworks/models/ember-1"
-    assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/ember-1"
-    assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "ember-1"
-    assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "ember-1", "an inferred proxy too"
-    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5", "no Ember there: the preset's high tier"
+    assert by["litellm"]["defaultModel"] == "deepseek-v4-flash" and by["litellm"]["models"][0] == "deepseek-v4-flash"
+    assert by["fireworks"]["defaultModel"] == "accounts/fireworks/models/deepseek-v4p1-flash"
+    assert providers.default_model({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}) == "accounts/fireworks/models/deepseek-v4p1-flash"
+    assert providers.default_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}) == "deepseek-v4-flash"
+    assert providers.default_model({"baseUrl": "http://127.0.0.1:4000"}) == "deepseek-v4-flash", "an inferred proxy too"
+    assert providers.default_model({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "gpt-5-mini", "the preset's own default, not its high tier"
     assert providers.default_model({}) == "", "no provider yet: nothing"
     saved = {k: v for k, v in appmod.db.get_settings().items() if k in ("provider", "baseUrl", "defaultModel")}
     try:
         with appmod.db.tx() as c:
             c.execute("DELETE FROM settings WHERE key='defaultModel'")
         appmod.db.set_settings({"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"})
-        assert appmod.settings()["defaultModel"] == "accounts/fireworks/models/ember-1", "nothing saved: Ember 1 as Fireworks names it"
+        assert appmod.settings()["defaultModel"] == "accounts/fireworks/models/deepseek-v4p1-flash", "nothing saved: DeepSeek as Fireworks names it"
         appmod.db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000"})
-        assert appmod.settings()["defaultModel"] == "ember-1", "nothing saved: Ember 1 as the proxy names it"
+        assert appmod.settings()["defaultModel"] == "deepseek-v4-flash", "nothing saved: DeepSeek as the proxy names it"
         appmod.db.set_settings({"defaultModel": "my-own-model"})
         assert appmod.settings()["defaultModel"] == "my-own-model", "a saved choice is never overwritten"
         assert client.get("/settings").json()["defaultModel"] == "my-own-model"
@@ -1109,8 +1109,8 @@ def test_the_subagent_routes_open_a_workers_transcript() -> None:
 def test_tier_model_saved_wins_then_preset_then_default_model() -> None:
     fw = {"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
     assert providers.tier_model(fw, "high") == "accounts/fireworks/models/ember-1"
-    assert providers.tier_model(fw, "medium") == "accounts/fireworks/models/glm-5p3"
+    assert providers.tier_model(fw, "medium") == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.tier_model(fw, "low") == "accounts/fireworks/models/deepseek-v4p1-flash"
     assert providers.tier_model({**fw, "modelLow": "x"}, "low") == "x"
-    assert providers.tier_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}, "medium") == "glm-5.3"
+    assert providers.tier_model({"provider": "litellm", "baseUrl": "http://localhost:4000"}, "medium") == "deepseek-v4-flash"
     assert providers.tier_model({"provider": "custom", "baseUrl": "http://h/v1", "defaultModel": "mine"}, "low") == "mine"

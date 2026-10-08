@@ -149,9 +149,9 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-# New chats start at medium. The stored value "default" is a separate choice: it omits
+# New chats start at high. The stored value "default" is a separate choice: it omits
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
-DEFAULT_EFFORT = "medium"
+DEFAULT_EFFORT = "high"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True,
                          "useStyle": True, "draftMode": False, "autoLearn": True, "useTools": True, "tools": {},
                          "responseStyle": "default", "responseStyleText": ""}
@@ -233,8 +233,11 @@ class Conversations:
         # (a dotted capital I becomes two characters) and shift every offset.
         needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
         out: dict[str, dict[str, Any]] = {}
+        from .workers import is_silent  # here, not at the top: workers imports half the app
         for r in rows:
             snip = r["snip"]
+            if is_silent(snip.replace("\x02", "").replace("\x03", "")):
+                continue  # a stored NO_REPLY is not something the user was told
             if not fts_ok:
                 m = needle.search(snip)
                 if m is None:  # LIKE's own folding found it where Python's does not: head of the row, unmarked

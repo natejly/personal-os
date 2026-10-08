@@ -1308,3 +1308,15 @@ test('the composer Stop stops the main agent of a chat working autonomously, wit
     api.stopRun = real
   }
 })
+
+test('a streamed NO_REPLY never shows, before or after done', () => {
+  const s0 = session({ conversation: { ...session().conversation, messages: [msg({ id: 'a1', content: '' })] } })
+  let s = s0
+  for (const text of ['NO', '_REP', 'LY']) {
+    s = applyEvent(s, ev({ event: 'delta', data: { id: 'a1', text } }), true)
+    assert.equal(s.conversation.messages?.[0].content, '', `after ${text}`)
+  }
+  s = applyEvent(s, ev({ event: 'done', data: { id: 'a1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } }), true)
+  assert.equal(s.conversation.messages?.[0].content, '')
+  assert.equal(s.conversation.messages?.[0].held, undefined)
+})

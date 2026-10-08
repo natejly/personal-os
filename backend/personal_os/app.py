@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, fsx, opencode_usage
+from . import chatlink, coding_route, fsx, opencode_usage
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -65,7 +65,7 @@ from . import mail_attachments, mail_edits  # noqa: F401 - mail_edits registers 
 from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers, review_text as mcp_review_text
-from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
+from .cowork import (AUTO_RESUME_FROM, internal_kind, AUTONOMY, CHAT_HANDOFF, CONTINUE_MESSAGES, MESSAGE_FROM, PAUSE_FROM, RESUME_FROM, START_FROM, STOP_FROM, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, inputs_line, read_notes,
                      STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -312,7 +312,7 @@ def settings() -> dict[str, Any]:
     perms = permissions.load(stored)
     out = {**llm.DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if k not in permissions.KEYS},
            **perms, permissions.KEY: {"version": permissions.VERSION, **perms}}
-    if not out.get("defaultModel"):  # nothing saved: Ember 1 as the active provider names it (a saved model always wins)
+    if not out.get("defaultModel"):  # nothing saved: the provider's chat default (a saved model always wins)
         out["defaultModel"] = providers.default_model(out)
     # Blank legacy knobs follow the tiers (providers.TASK_TIERS); a saved value still wins.
     if not out.get("extractionModel"):
@@ -632,7 +632,7 @@ def _mcp_server_notes(slugs: set[str]) -> str:
     connection, never stored, so a reconnect or Refresh re-pulls them."""
     owners = {t["server_id"] for t in mcp_store.tools() if t["slug"] in slugs}
     live = [{"server_id": i["server_id"], "name": i["name"], "instructions": (i.get("server_info") or {}).get("instructions")}
-            for i in mcp.status() if i["server_id"] in owners and i.get("status") == "ready"]
+            for i in sorted(mcp.status(), key=lambda i: i["server_id"]) if i["server_id"] in owners and i.get("status") == "ready"]
     return mcp_search.server_notes(live, {s["server_id"]: mcp_store.latest_eval(s["server_id"]) for s in live})
 
 
@@ -655,7 +655,8 @@ QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
 PERSONA_FOLDER_HINT = ("## Working folder\nThis agent keeps its work in `{path}`. Start there: pass it as cwd to shell_run and "
                        "opencode_run and as root to the fs_* tools. For a whole coding task (a feature, a fix, a refactor) prefer "
-                       "opencode_run with a self-contained brief, then check its diff. Say which files you changed.")
+                       "coding_session_start (or opencode_run for a quick one) with a self-contained brief, then check its diff. "
+                       "Say which files changed.")
 
 
 def _persona_folder(persona: Any) -> str | None:
@@ -1868,6 +1869,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     _job = conv["settings"].get("job_id")
     _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
     llm.usage_context.set(_ucx)
+    llm.session_affinity.set(conv_id)  # every turn of this chat shares one cached prefix: keep it on one replica
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model, **({"routed_from": "auto", "reason": routed[1]} if routed else {})})
@@ -2241,13 +2243,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
             net = ("open" if permissions.get(cfg, "shellNetwork") or permissions.get(cfg, "allowAllConnections") else
                    "allowlist" if permissions.get(cfg, "shellRegistryAccess") or permissions.get(cfg, "shellAllowedDomains") else "off")
+            text = desk_manual({s["function"]["name"] for s in tool_schemas},
+                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+            return "\n\n" + text if text else ""
+
+        def _desk_inputs_block() -> str:
+            # The handed-in files change as the user adds or edits them: sent with the turn, not in the cached prefix.
             try:
                 inputs = workspace.inputs(desk_id) if desk_id else []
             except WorkspaceError:
                 inputs = []
-            text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True)), "inputs": inputs})
-            return "\n\n" + text if text else ""
+            line = inputs_line(inputs)
+            return "## Desk inputs\n" + line if line else ""
 
         fence_nonce = secrets.token_hex(8)  # per run: untrusted results are fenced with an id the page cannot guess
         front_hint = bool(tool_schemas) and _front() and any(s["function"]["name"] == "delegate" for s in tool_schemas)
@@ -2278,8 +2285,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                  job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  PERSONA_FOLDER_HINT.format(path=folder) if folder and not desk and tool_schemas else "",
-                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "")
-        used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
+                 TELEGRAM_HINT if tool_schemas and telegram_bridge.is_texts_conversation(conv_id) else "",
+                 coding_route.hint(cfg) if tool_schemas else "")
+        inputs_block = _desk_inputs_block() if desk else ""
+        used["volatile_blocks"] = [*used["volatile_blocks"], *([inputs_block] if inputs_block else []), _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -2288,7 +2297,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
             stable = None
-            system = "\n\n".join(p for p in (system, *hints, _today_hint()) if p)
+            system = "\n\n".join(p for p in (system, *hints, inputs_block, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
@@ -2495,8 +2504,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
             the very end of the reply, after its `done`, and on cancellation: no await sits between the last
             steer check and `done`, so a steer is either folded in or already answered with a 409."""
-            if not desk_id:
-                await toolbox.shell.kill_conversation(conv_id)
+            if not desk_id:  # a worker's jobs are its own (keyed to its run): they outlive this reply and end with the worker
+                await toolbox.shell.kill_conversation(conv_id, run_id=run.run_id if run else None)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a breaker stop: one tool-free call, abandoned if it hangs past FINAL_ROUND_SECONDS."""
@@ -2637,7 +2646,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # turns replay every tool result they stored, so a few briefings grew a chat to 45k tokens a round, and
             # past that size the provider's time to first token is what a tool round costs. Handles stay readable.
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
-                                                         float(cfg.get("microAt", 0.25)))
+                                                         float(cfg.get("microAt", 0.25)),
+                                                         at_tokens=_int_setting(cfg, "microAtTokens", limits.MICRO_AT_TOKENS))
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
@@ -2750,6 +2760,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _normalise_call(c, known_names, advertised, fr == "length" and i == len(calls) - 1)
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
+            if end.get("reasoning"):  # interleaved thinking: the next round reads this round's reasoning back
+                turn["reasoning_content"] = end["reasoning"]
             if fr == "length" and not steers:
                 # The output limit cut this round's tool calls short. They are never replayed as written (see
                 # _replay_args), so the model can try again smaller; twice in one reply is a loop of its own.
@@ -2923,7 +2935,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
                 claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
                 pre: Any = None                        # a result settled before the gate: nothing to approve
-                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args)) is not None:
+                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args, tool_ctx)) is not None:
                     # Arguments the tool's signature cannot take: nothing the user could approve would ever run, so
                     # no card opens and no plan step is spent on it. Not the plan tool: its placeholder function is
                     # narrower than its schema, and normalize_plan below is its check.
@@ -4127,7 +4139,8 @@ toolbox.chat_links = chat_links
 def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
     """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
     and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
-    if not settings().get("telegramPushWorkerResults"):
+    text = workers_mod.strip_no_reply(text)
+    if not settings().get("telegramPushWorkerResults") or not (text or attachments):
         return
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
@@ -4683,7 +4696,7 @@ async def draft_agent_def(body: AgentIntentIn) -> dict[str, Any]:
     from .subagents import draft_def
     cfg = settings()
     try:
-        return await draft_def(cfg, cfg["defaultModel"], body.intent, set(toolbox.specs),
+        return await draft_def(cfg, providers.tier_model(cfg, "high"), body.intent, set(toolbox.specs),
                                [s["name"] for s in skills.list(status="approved")])
     except ValueError as e:
         return {"text": None, "reason": str(e)}
@@ -5076,10 +5089,13 @@ async def _recover_runs() -> None:
 @app.on_event("startup")
 async def _workers_startup() -> None:
     """After run recovery: workers that were queued or running when the last process died are interrupted (resumable), their
-    cards denied, and every ended worker whose report never reached its chat gets its wake."""
+    cards denied, every ended worker whose report never reached its chat gets its wake, and shell jobs those workers left
+    running are killed (nothing can poll them again)."""
     try:
         for cid in workers_mgr.recover():
             _schedule_wake(cid)
+        if n := await workers_mgr.reap_orphan_jobs():
+            log.info("killed %d shell job(s) left running by workers of the previous backend", n)
     except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
         log.warning("worker recovery failed", exc_info=True)
     try:
@@ -5566,7 +5582,7 @@ def _job_run_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     counts = proposals.counts([r["run_id"] for r in rows])
     out = []
     for r in rows:
-        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r.get("message_id") else ""
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r.get("message_id") else ""
         out.append(job_history.summarize_run(r, run_store.event_counts(r["run_id"]), counts.get(r["run_id"], {}), text))
     return out
 
@@ -5917,7 +5933,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     for r in runs:
         fire = r["input"] if isinstance(r.get("input"), dict) else {}
         ev = run_store.event_counts(r["run_id"])
-        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r["message_id"] else ""
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
         mine = counts.get(r["run_id"], {})
         away.append({
             "run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
@@ -6824,7 +6840,7 @@ async def _shutdown() -> None:
     workers_mgr.closing = True  # an ending worker must not start a wake turn into a dying backend
     live = workers_mgr.live()
     for c in live:
-        subagent_mgr.halt(c)  # each writes its transcript and ends interrupted, so it can be resumed
+        subagent_mgr.halt(c, "shutdown")  # each writes its transcript and ends interrupted (saying why), so it can be resumed
     await asyncio.gather(*(asyncio.wait_for(c.finished.wait(), 5) for c in live), return_exceptions=True)
     await telegram_bridge.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit
@@ -8298,7 +8314,7 @@ async def draft_skill_from_intent(body: SkillIntentIn) -> dict[str, Any]:
         msgs = [m for m in ((conv or {}).get("messages") or [])
                 if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()]
         context = "\n\n".join(f"{m['role']}: {m['content']}" for m in msgs[-12:])
-    return await skillbuild.draft_skill(settings=cfg, model=cfg["defaultModel"], intent=body.intent,
+    return await skillbuild.draft_skill(settings=cfg, model=providers.tier_model(cfg, "high"), intent=body.intent,
                                         context=context, known_tools=_known_tools(), existing=skills.list())
 
 
@@ -8835,6 +8851,9 @@ def _desk_report(desk: dict[str, Any]) -> None:
 
 def _tell_chat(cid: str, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
     """Add one assistant message to a chat and tell any open window to re-read it (callable from any thread)."""
+    text = workers_mod.strip_no_reply(text)
+    if not (text or attachments):
+        return
     convos.add_message(cid, "assistant", text, attachments=attachments or None)
     _announce_conversation(cid)
 

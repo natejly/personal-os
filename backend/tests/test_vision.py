@@ -61,6 +61,8 @@ def test_routing(monkeypatch: Any) -> None:
     assert vision.model_for({}, None) is None
     assert vision.model_for({}, "claude-sonnet-5-5") == "claude-sonnet-5-5"
     assert vision.model_for({}, "accounts/fireworks/models/qwen3-vl-235b-a22b-instruct") is not None
+    for ok in ("accounts/fireworks/models/deepseek-v4p1-flash", "deepseek-v4-flash"):
+        assert vision.model_for({}, ok) == ok
     # a provider listing beats the name guess, in both directions
     llm.note_vision_listing([{"id": "weird-model", "architecture": {"input_modalities": ["text", "image"]}},
                              {"id": "claude-text-only", "supports_vision": False}])

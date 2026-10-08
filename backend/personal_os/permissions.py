@@ -88,6 +88,11 @@ DEFAULTS: dict[str, Any] = {
     # "off". Private addresses, the MCP taint rule, deny rules and permissionMode are unchanged. migration 25 turns it on for
     # an install that already has user data; a fresh install starts off.
     "allowAllConnections": False,
+    # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
+    # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
+    # the agent they are told to start: "opencode", "claude", or "any" (the agent picks). A code default: nothing to migrate.
+    "codingRoute": True,
+    "codingAgent": "any",
 }
 KEYS = frozenset(DEFAULTS)
 # An image reference as an argv word: no leading dash (it would read as a flag), no spaces or shell characters.
@@ -101,6 +106,7 @@ CHOICES: dict[str, tuple[str, ...]] = {
     "sandboxRuntime": SANDBOX_RUNTIMES,
     "sandboxNetwork": ("off", "proxy", "open"),
     "docEditMode": ("review", "apply"),
+    "codingAgent": ("any", "opencode", "claude"),
 }
 CHOICE_ERRORS = {
     "permissionMode": "permissionMode must be 'auto', 'manual' or 'allow_all'",
@@ -109,6 +115,7 @@ CHOICE_ERRORS = {
     "sandboxRuntime": f"sandboxRuntime must be one of {', '.join(SANDBOX_RUNTIMES)}",
     "sandboxNetwork": "sandboxNetwork must be 'off', 'proxy' or 'open'",
     "docEditMode": "docEditMode must be 'review' or 'apply'",
+    "codingAgent": "codingAgent must be 'any', 'opencode' or 'claude'",
 }
 
 

@@ -37,11 +37,12 @@ import 'katex/dist/katex.min.css'
  * streaming reply re-parses only its last block and finished code / chart / diagram blocks are untouched.
  */
 
-function CopyButton({ text }: { text: string }): JSX.Element {
+/** Copies `text` and says so for a moment; `label` adds the words beside the icon (a code block's header). */
+function CopyButton({ text, label = false }: { text: string; label?: boolean }): JSX.Element {
   const [ok, setOk] = useState(false)
   return (
-    <button className="icon-btn ghost" title="Copy" aria-label={ok ? 'Copied' : 'Copy'} onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
-      {ok ? <Check size={13} /> : <Copy size={13} />}
+    <button className={label ? 'code-copy' : 'icon-btn ghost'} title="Copy" aria-label={ok ? 'Copied' : 'Copy'} onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
+      {ok ? <Check size={13} /> : <Copy size={13} />}{label && <span>{ok ? 'Copied' : 'Copy'}</span>}
     </button>
   )
 }
@@ -115,7 +116,7 @@ function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?:
   if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
   return (
     <div className="code-block">
-      <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>
+      <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} label /></div>
       <pre {...props} />
     </div>
   )
@@ -226,8 +227,8 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
         const n = cite ? citeNumber(p.href) : null
         if (n !== null) {
           return (
-            <button type="button" className={`cite-chip${cites?.get(n)?.weak ? ' weak' : ''}`} title={citeTitle(cites?.get(n))} aria-label={`Source ${n}: ${citeTitle(cites?.get(n))}`}
-              onClick={() => citeRef.current?.(n)}>{n}</button>
+            <button type="button" className={`cite-chip${cites?.get(n)?.weak ? ' weak' : ''}`} title={citeTitle(cites?.get(n))} aria-label={`Source ${cites?.get(n)?.shown ?? n}: ${citeTitle(cites?.get(n))}`}
+              onClick={() => citeRef.current?.(n)}>{cites?.get(n)?.shown ?? n}</button>
           )
         }
         const target = wikiTarget(p.href)

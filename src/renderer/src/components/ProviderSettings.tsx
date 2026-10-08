@@ -101,6 +101,12 @@ export default function ProviderSettings({ draft, settings, patch, models }: { d
       ) : (
         <div className="setting-row"><span className="toggle-text"><b>Provider address</b><small>{draft.baseUrl}</small></span></div>
       )}
+      {settings.providerAuthBlocked && (
+        <p className="notice error" role="alert">
+          The provider rejected this key, so model requests are paused until it is fixed. Save a working key, or{' '}
+          <button type="button" className="link" onClick={() => void api.settings.retryAuth().then((r) => useStore.setState((st) => ({ settings: { ...st.settings, providerAuthBlocked: r.providerAuthBlocked } }))).catch(() => undefined)}>try this one again</button>.
+        </p>
+      )}
       {keySaved && !replacing && !draft.apiKey ? (
         <div className="setting-row">
           <span className="toggle-text"><b>{keyLabel}</b><small>Key saved ••••. Stored on this Mac.</small></span>

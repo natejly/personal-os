@@ -1242,6 +1242,9 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'provider_auth') {
+            const d = ev.data
+            set((st) => ({ settings: { ...st.settings, providerAuthBlocked: d.open ? d.message || 'The provider rejected the API key.' : '' } }))
           } else if (ev.event === 'todos_changed') {
             if (todosTickTimer === null) todosTickTimer = setTimeout(() => { todosTickTimer = null; set((st) => ({ todosTick: st.todosTick + 1 })); void get().refreshDashboard() }, 200)
           } else if (ev.event === 'ship_checklist') {

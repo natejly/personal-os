@@ -90,6 +90,45 @@ def test_real_tool_calls_without_words_are_not_deleted() -> None:
     assert final_done(run_quietly(cid, "again"))["id"]
 
 
+def test_a_plain_no_reply_answer_leaves_no_reply_row() -> None:
+    """A front turn that answers with only the sentinel (no tools at all) is as silent as a dispatch-only one."""
+    cid = new_conv()
+    FRONT[:] = [{"text": "NO_REPLY"}]
+    events = run_quietly(cid, "anything?")
+    assert any(e == "removed_message" for e, _ in events)
+    done = final_done(events)
+    assert done["id"] is None and done["error"] is None, "the run ends normally"
+    assert [m["role"] for m in messages(cid)] == ["user"]
+
+
+def test_a_reply_cut_off_inside_the_marker_leaves_no_row() -> None:
+    """A reply that stopped partway through the sentinel ("NO_REP") is the sentinel: nothing is stored or sent."""
+    cid = new_conv()
+    FRONT[:] = [{"text": "NO_REP"}]
+    events = run_quietly(cid, "anything?")
+    assert any(e == "removed_message" for e, _ in events)
+    assert [m["role"] for m in messages(cid)] == ["user"]
+
+
+def test_a_real_answer_trailing_the_marker_is_stored_without_it() -> None:
+    cid = new_conv()
+    FRONT[:] = [{"text": "Done.\nNO_REPLY"}]
+    final_done(run_quietly(cid, "go"))
+    assert messages(cid)[-1]["content"] == "Done."
+
+
+def test_real_tool_calls_with_no_reply_keep_the_row_but_not_the_marker() -> None:
+    """A reply that did its own work and then answered NO_REPLY keeps its tool cards; the marker is never stored."""
+    cid = new_conv()
+    FRONT[:] = [{"text": "", "calls": [search(1)]}, {"text": "NO_REPLY"}]
+    events = run_quietly(cid, "look")
+    assert not any(e == "removed_message" for e, _ in events)
+    done = final_done(events)
+    assert done["id"] and done["error"] is None and [e["name"] for e in done["tool_events"]] == ["search_memory"]
+    last = messages(cid)[-1]
+    assert last["role"] == "assistant" and last["content"] == "", "the sentinel itself is never stored"
+
+
 def test_a_worker_result_after_a_silent_dispatch_is_a_visible_reply() -> None:
     cid = new_conv()
     WORKER["Quiet job"] = [{"text": "FOUND 42"}]

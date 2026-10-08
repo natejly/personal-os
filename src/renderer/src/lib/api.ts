@@ -175,7 +175,9 @@ export const api = {
   diagnostics: () => req<Record<string, unknown>>('/diagnostics'),
   settings: {
     get: () => req<Settings>('/settings'),
-    set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
+    set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) }),
+    /** Let the next request try a key the provider rejected again (the auth breaker's retry). */
+    retryAuth: () => req<Settings>('/provider/auth/reset', { method: 'POST' })
   },
   /** First-run setup (backend setup routes). `body` is the same for test and complete. */
   setup: {

@@ -177,6 +177,13 @@ class RunStore:
         except sqlite3.Error:
             log.warning("could not update run %s", run_id, exc_info=True)
 
+    def heartbeat(self, run_id: str) -> None:
+        """Bump a live run's updated_at: it is still making progress (subagents.py calls it, throttled). Never raises."""
+        try:
+            self._exec("UPDATE agent_runs SET updated_at=? WHERE run_id=? AND ended_at IS NULL", (time.time(), run_id))
+        except sqlite3.Error:
+            log.warning("could not record a heartbeat for run %s", run_id, exc_info=True)
+
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self._run_row(self._one("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)))
 

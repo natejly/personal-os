@@ -66,6 +66,8 @@ DELEGATION_AFTER_ROUNDS = 2        # rounds of tool calls a chat reply makes its
 WORKER_MAX_CONCURRENT = 4          # workers running at once; the rest wait in a queue and start in order
 WORKER_MEMORY_FLOOR = 0.15         # a queued worker is not started while free system memory is below this share
 WORKER_RECHECK_SECONDS = 5.0       # how often a non-empty queue looks again for a free slot or recovered memory
+RUN_HEARTBEAT_SECONDS = 20.0       # a working child's agent_runs.updated_at is bumped at most this often (liveness, never a limit)
+WORKER_STALL_NOTE_SECONDS = 300    # a worker with no model, tool or job output this long says so in its status line (nothing is stopped)
 
 # ---- Jobs ----
 JOB_RETRY_BACKOFF_S = 120          # retry backoff base, doubles per attempt

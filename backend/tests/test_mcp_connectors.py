@@ -174,3 +174,46 @@ def test_routes_detected_install_409_and_paste(tmp_path: Path, monkeypatch) -> N
     assert again["created"] == [] and [s["name"] for s in again["skipped"]] == ["a", "off"]
     bad = http.post("/mcp/import/json", json={"text": "FAKE_TOKEN {"})
     assert bad.status_code == 400 and "FAKE_TOKEN" not in bad.text
+
+
+def test_a_service_that_went_away_is_found_again_once() -> None:
+    """The user's service restarted on a new port: the next call reconnects instead of failing for good; a second
+    refusal is reported with what to do, and nothing that reached the service is ever retried."""
+    urls = iter(["http://old.test", "http://new.test", "http://new2.test", "http://new3.test"])
+    found: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host != "new.test":
+            raise httpx.ConnectError("refused")
+        return httpx.Response(200, json={"version": "2"})
+
+    async def connect() -> tuple[opencode_mcp.OpenCodeClient, str]:
+        url = next(urls)
+        found.append(url)
+        return opencode_mcp.OpenCodeClient(httpx.AsyncClient(base_url=url, transport=httpx.MockTransport(handler))), url
+
+    svc = opencode_mcp.Service(connect)
+    assert asyncio.run(svc.call(lambda c: c.info())) == {"version": "2"}
+    assert found == ["http://old.test", "http://new.test"] and svc.url == "http://new.test"
+    svc.client = None  # the service moves again and stays down: one retry, then an actionable error
+    try:
+        asyncio.run(svc.call(lambda c: c.info()))
+        raise AssertionError("expected an error")
+    except RuntimeError as e:
+        assert "opencode service start" in str(e)
+    assert found[2:] == ["http://new2.test", "http://new3.test"]
+
+    sent: list[str] = []
+
+    def flaky(req: httpx.Request) -> httpx.Response:  # reached the service, then broke: not retried
+        sent.append(req.url.path)
+        raise httpx.ReadError("reset")
+
+    async def once() -> tuple[opencode_mcp.OpenCodeClient, str]:
+        return opencode_mcp.OpenCodeClient(httpx.AsyncClient(base_url="http://x.test", transport=httpx.MockTransport(flaky))), "u"
+
+    try:
+        asyncio.run(opencode_mcp.Service(once).call(lambda c: c.info()))
+    except httpx.ReadError:
+        pass
+    assert sent == ["/api/info"]

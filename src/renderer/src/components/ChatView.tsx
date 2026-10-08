@@ -22,7 +22,7 @@ import { pimConnected } from '../lib/pim'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
 import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
-import DeskStrip, { DeskInline } from './DeskStrip'
+import { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
 import TelegramIcon from './TelegramIcon'
@@ -199,7 +199,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             </button>
           )}
           <WorkersPanel conversationId={conversationId} />
-          {deskId && <DeskStrip deskId={deskId} panelOpen={deskPanel} onPanel={conversationId ? undefined : () => setDeskPanel((o) => !o)} />}
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>
         {showing && <ShowPanel conversationId={showKey} />}

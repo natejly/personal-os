@@ -278,7 +278,7 @@
 .cowork-error { margin: 0; color: var(--danger); font-size: 12px; }
 .cowork-env-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* ---------- A chat working autonomously (DeskStrip, DeskPanel, AutonomyToggle) ---------- */
+/* ---------- A chat working autonomously (DeskPanel, AutonomyToggle) ---------- */
 .autonomy.on { color: var(--accent); }
 .autonomy-ctl { position: relative; display: inline-flex; }
 .autonomy-menu {
@@ -287,13 +287,6 @@
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.18));
 }
 .autonomy-menu .desk-autonomy { grid-template-columns: 1fr; }
-.desk-strip {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 auto 6px; padding: 5px 10px;
-  width: min(calc(100% - 48px), var(--chat-col)); box-sizing: border-box; font-size: 12.5px;
-  border: 1px solid var(--border); border-left: 3px solid var(--ring, var(--border)); border-radius: 8px; background: var(--bg-elev);
-}
-.desk-strip-status { font-weight: 600; white-space: nowrap; }
-.desk-strip-detail { color: var(--text-muted); min-width: 0; flex: 1 1 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desk-inline { display: flex; flex-direction: column; gap: 8px; }
 .desk-inline:empty { display: none; }
 .desk-panel {

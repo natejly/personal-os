@@ -11,7 +11,7 @@ from pathlib import Path
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="deepseek-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os import migrations, providers, repos  # noqa: E402
+from personal_os import migrations, providers, repos, usage  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 
 DS = "accounts/fireworks/models/deepseek-v4p1-flash"
@@ -33,14 +33,26 @@ def _settings(con: sqlite3.Connection) -> dict:
     return {k: json.loads(v) for k, v in con.execute("SELECT key, value FROM settings")}
 
 
-def test_fresh_database_resolves_to_deepseek_at_high() -> None:
-    db, con = _db({})
-    assert migrations.current(con) == migrations.latest()
+def test_final_model_mapping() -> None:
+    """Chat (and the workers a chat starts, which inherit its model) = DeepSeek; only the high tier is Ember 1."""
     cfg = {"provider": "fireworks", "baseUrl": "https://api.fireworks.ai/inference/v1"}
     assert providers.default_model(cfg) == DS
-    assert {providers.tier_model(cfg, t) for t in providers.TIERS} == {DS}
-    assert {providers.tier_model({"provider": "litellm"}, t) for t in providers.TIERS} == {"deepseek-v4-flash"}
+    assert [providers.tier_model(cfg, t) for t in providers.TIERS] == ["accounts/fireworks/models/ember-1", DS, DS]
+    px = {"provider": "litellm", "baseUrl": "http://localhost:4000"}
+    assert providers.default_model(px) == "deepseek-v4-flash"
+    assert [providers.tier_model(px, t) for t in providers.TIERS] == ["ember-1", "deepseek-v4-flash", "deepseek-v4-flash"]
+    assert providers.TASK_TIERS["chat"] == "default"
+    assert {t for k, t in providers.TASK_TIERS.items() if k != "chat"} <= {"high", "medium", "low"}
+    assert {k for k, t in providers.TASK_TIERS.items() if t == "high"} == {"planning", "draft_skill", "draft_agent"}
     assert repos.DEFAULT_EFFORT == "high"
+    fw = providers.get("fireworks")
+    assert "accounts/fireworks/models/glm-5p3-flash" in fw["models"] and "glm-5.3-flash" in providers.get("litellm")["models"]
+    assert usage.FIREWORKS_PRICES["glm-5p3-flash"] == {"input": 0.15, "cache_read": 0.03, "output": 0.50}
+
+
+def test_fresh_database_is_at_the_latest_version() -> None:
+    db, con = _db({})
+    assert migrations.current(con) == migrations.latest()
     con.close()
 
 

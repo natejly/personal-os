@@ -101,6 +101,22 @@ def test_a_plain_no_reply_answer_leaves_no_reply_row() -> None:
     assert [m["role"] for m in messages(cid)] == ["user"]
 
 
+def test_a_reply_cut_off_inside_the_marker_leaves_no_row() -> None:
+    """A reply that stopped partway through the sentinel ("NO_REP") is the sentinel: nothing is stored or sent."""
+    cid = new_conv()
+    FRONT[:] = [{"text": "NO_REP"}]
+    events = run_quietly(cid, "anything?")
+    assert any(e == "removed_message" for e, _ in events)
+    assert [m["role"] for m in messages(cid)] == ["user"]
+
+
+def test_a_real_answer_trailing_the_marker_is_stored_without_it() -> None:
+    cid = new_conv()
+    FRONT[:] = [{"text": "Done.\nNO_REPLY"}]
+    final_done(run_quietly(cid, "go"))
+    assert messages(cid)[-1]["content"] == "Done."
+
+
 def test_real_tool_calls_with_no_reply_keep_the_row_but_not_the_marker() -> None:
     """A reply that did its own work and then answered NO_REPLY keeps its tool cards; the marker is never stored."""
     cid = new_conv()

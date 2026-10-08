@@ -1,9 +1,9 @@
-import { Component, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
-import { citeInfo, openCite } from '../lib/remarkCites'
+import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
 import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
-import type { Attachment, Effort, Message, RunChanges, ToolEvent } from '@shared/types'
+import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
 import { fetchBlobUrl } from '../features/notes/api'
@@ -26,10 +26,7 @@ import { clockTime, fullTime } from '../lib/chatMeta'
 import Face from './Face'
 import ResearchTrail from './ResearchTrail'
 import { trailFromEvents } from '../lib/researchTrail'
-
-/** The backend's "nothing to say" sentinel (workers.is_silent): a reply that is only this must never render as text. */
-export const isNoReply = (text?: string | null): boolean =>
-  (text ?? '').replace(/[\s`*.\"']+/g, '').toUpperCase() === 'NO_REPLY'
+import { isNoReply, stripNoReply } from '../lib/noReply'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -69,45 +66,51 @@ function SaveSkill({ conversationId, messageId }: { conversationId: string; mess
   )
 }
 
-/** The reasoning level a reply ran at, standing where its thinking used to: the thinking itself is never shown. */
-const EFFORT_WORD: Record<Exclude<Effort, 'default'>, string> = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max' }
-
-function EffortLabel({ conversationId }: { conversationId: string }): JSX.Element | null {
-  const effort = useStore((s) => s.sessions[conversationId]?.conversation.settings.effort)
-  if (!effort || effort === 'default') return null
-  return <div className="effort-label">{EFFORT_WORD[effort]} effort</div>
-}
-
-/**
- * One collapsed line per reply holding every tool call that does not need the user, plus the effort the
- * reply ran at when it thought. Closed by default, streaming or not; only the user's click opens it, and
- * that state lives here, so stream updates keep it. The thinking summary itself is never rendered.
- */
-function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
+/** One folded line of a reply: closed by default, streaming or not. Only the user's click opens it, and that state lives here, so stream updates keep it. */
+function Fold({ label, live, children }: { label: string; live: boolean; children: ReactNode }): JSX.Element {
   const [open, setOpen] = useState(false)
-  const last = events[events.length - 1]
-  // The live segment is what the reply is doing now: the call in flight or its subagents.
-  const subs = useSubagents(conversationId)
-  const live = streaming && !answering
-  const now = live ? nowText({ tool_events: events, content: '' }, subs) : null
-  const label = [
-    reasoning && live ? 'Thinking…' : '',
-    events.length ? `${events.length} tool call${events.length === 1 ? '' : 's'}` : '',
-    now ?? (live && last ? describeCall(last.name, last.arguments).verb : '')
-  ].filter(Boolean).join(' · ')
   return (
     <div className={`reasoning ${live ? 'live' : ''}`}>
-      {events.length > 0 ? (
-        <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-          <ChevronRight size={12} className={open ? 'rot90' : ''} />
-          <span className={`reasoning-label ${live ? 'shimmer' : ''}`}>{label}</span>
-        </button>
-      ) : label ? (
-        <div className="reasoning-head"><span className={`reasoning-label ${live ? 'shimmer' : ''}`}>{label}</span></div>
-      ) : null}
-      {reasoning && <EffortLabel conversationId={conversationId} />}
-      {open && events.length > 0 && <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>}
+      <button className="reasoning-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <ChevronRight size={12} className={open ? 'rot90' : ''} />
+        <span className={`reasoning-label ${live ? 'shimmer' : ''}`}>{label}</span>
+      </button>
+      {open && children}
     </div>
+  )
+}
+
+/** The thinking summary, opened: it follows the newest line while the reply still thinks. */
+function ThinkingBody({ reasoning, streaming }: { reasoning: string; streaming: boolean }): JSX.Element {
+  const body = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    if (streaming && body.current) body.current.scrollTop = body.current.scrollHeight
+  }, [reasoning, streaming])
+  return <ul className="reasoning-body" ref={body}>{reasoning.split('\n').map((l, i) => <li key={i}>{l}</li>)}</ul>
+}
+
+/** A reply's thinking and its tool calls that do not need the user, each folded into one line. */
+function ReplyActivity({ reasoning, events, conversationId, streaming, answering, browserSession }: { reasoning?: string | null; events: ToolEvent[]; conversationId: string; streaming: boolean; answering: boolean; browserSession?: string }): JSX.Element {
+  const last = events[events.length - 1]
+  const subs = useSubagents(conversationId)
+  const live = streaming && !answering
+  const calling = live && events.some((t) => t.pending)
+  // The tools line names what the reply is doing now: the call in flight or its subagents.
+  const now = live ? nowText({ tool_events: events, content: '' }, subs) ?? (last ? describeCall(last.name, last.arguments).verb : null) : null
+  const tools = [`${events.length} tool call${events.length === 1 ? '' : 's'}`, now].filter(Boolean).join(' · ')
+  return (
+    <>
+      {reasoning && (
+        <Fold label={live && !calling ? 'Thinking…' : 'Thought'} live={live && !calling}>
+          <ThinkingBody reasoning={reasoning} streaming={streaming} />
+        </Fold>
+      )}
+      {events.length > 0 && (
+        <Fold label={tools} live={live}>
+          <div className="activity-tools"><ToolEvents events={events} conversationId={conversationId} streaming={streaming} browserSession={browserSession} /></div>
+        </Fold>
+      )}
+    </>
   )
 }
 
@@ -277,16 +280,22 @@ export type ChatFace = { name: string; hue?: number; tone?: number }
 const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, resendable = editable, showContextChips = false, branchable = false, browserSession, face, plain = false, from }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; /** Edit and resend; defaults to `editable`. A desk or job transcript is edit-proof, but a message in it can still be deleted. */ resendable?: boolean; showContextChips?: boolean; branchable?: boolean; browserSession?: string; face?: ChatFace; /** A row not stored as a chat message (a worker's history): no actions under it. */ plain?: boolean; /** A user-role row someone else wrote, labelled with their face and name (the main agent's task to a worker). */ from?: { label: string; face: ChatFace } }): JSX.Element | null {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
-  // A reply that is only the NO_REPLY sentinel renders as nothing: its tool cards still show, its text never does.
+  // The NO_REPLY marker is never text the user sees: a reply that is only the marker keeps its tool cards, and one that trails it loses the line.
   const sentinel = !isUser && isNoReply(message.content)
-  const content = sentinel ? '' : message.content
+  const content = useMemo(() => (isUser ? message.content : stripNoReply(message.content)), [isUser, message.content])
   const chatFrom = useMemo(() => (message.kind === 'chat_in' || message.kind === 'chat_reply' ? parseChatMessage(message.content) : null), [message.kind, message.content])
   const ctx = message.context_used
   // Memories have their own chip and sources their own list below the reply, so only graph nodes are counted here.
   const ctxCount = ctx?.nodes.filter((n) => !n.kind).length ?? 0
   // Numbered sources this reply may cite as [n]; rows saved before numbering have no `n` and stay plain text.
   const chunks = ctx?.chunks
-  const cites = useMemo(() => new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, citeInfo(c)])), [chunks])
+  // Chips and the sources footer number by first citation, so a reply citing [4] then [2] reads [1], [2].
+  // Keyed on a string: a streamed token that cites nothing new keeps the same map, and the markdown blocks stay memoised.
+  const citedKey = useMemo(() => (chunks?.length ? splitSources(content, chunks).cited.map((c) => c.n).join(',') : ''), [content, chunks])
+  const cites = useMemo(() => {
+    const order = citedKey.split(',').map(Number)
+    return new Map((chunks ?? []).filter((c) => c.n).map((c) => [c.n!, { ...citeInfo(c), shown: order.indexOf(c.n!) + 1 || undefined }]))
+  }, [chunks, citedKey])
   const [citing, setCiting] = useState<ChunkRef | null>(null)
   const onCite = useCallback((n: number) => { const c = chunks?.find((x) => x.n === n); if (c) openCite(c, setCiting) }, [chunks])
   // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.

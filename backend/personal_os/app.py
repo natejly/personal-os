@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, fsx
+from . import chatlink, fsx, opencode_usage
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -2486,8 +2486,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
             the very end of the reply, after its `done`, and on cancellation: no await sits between the last
             steer check and `done`, so a steer is either folded in or already answered with a 409."""
-            if not desk_id:
-                await toolbox.shell.kill_conversation(conv_id)
+            if not desk_id:  # a worker's jobs are its own (keyed to its run): they outlive this reply and end with the worker
+                await toolbox.shell.kill_conversation(conv_id, run_id=run.run_id if run else None)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a breaker stop: one tool-free call, abandoned if it hangs past FINAL_ROUND_SECONDS."""
@@ -5067,10 +5067,13 @@ async def _recover_runs() -> None:
 @app.on_event("startup")
 async def _workers_startup() -> None:
     """After run recovery: workers that were queued or running when the last process died are interrupted (resumable), their
-    cards denied, and every ended worker whose report never reached its chat gets its wake."""
+    cards denied, every ended worker whose report never reached its chat gets its wake, and shell jobs those workers left
+    running are killed (nothing can poll them again)."""
     try:
         for cid in workers_mgr.recover():
             _schedule_wake(cid)
+        if n := await workers_mgr.reap_orphan_jobs():
+            log.info("killed %d shell job(s) left running by workers of the previous backend", n)
     except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
         log.warning("worker recovery failed", exc_info=True)
     try:
@@ -6006,10 +6009,19 @@ async def _jobs_shutdown() -> None:
 
 
 # ---------------- usage / cost ----------------
+@app.on_event("startup")
+async def _opencode_usage_startup() -> None:
+    cfg = settings()
+    with contextlib.suppress(Exception):  # usage import is best effort; it must never stop the app from coming up
+        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+
+
 @app.get("/usage")
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
+    with contextlib.suppress(Exception):  # OpenCode calls since the last look; incremental, so cheap on every open
+        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
     return {**usage.report(days), "prices": pricing.table(cfg)}
 
 
@@ -6806,7 +6818,7 @@ async def _shutdown() -> None:
     workers_mgr.closing = True  # an ending worker must not start a wake turn into a dying backend
     live = workers_mgr.live()
     for c in live:
-        subagent_mgr.halt(c)  # each writes its transcript and ends interrupted, so it can be resumed
+        subagent_mgr.halt(c, "shutdown")  # each writes its transcript and ends interrupted (saying why), so it can be resumed
     await asyncio.gather(*(asyncio.wait_for(c.finished.wait(), 5) for c in live), return_exceptions=True)
     await telegram_bridge.stop()  # before the runs are cancelled: a dying backend must not send "interrupted" replies
     await toolbox.shell.shutdown()  # first: host shell jobs (SIGTERM then SIGKILL per group) before anything slow can stall exit

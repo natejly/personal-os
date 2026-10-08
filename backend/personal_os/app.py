@@ -32,7 +32,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
-from . import chatlink, fsx
+from . import chatlink, fsx, opencode_usage
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -6014,10 +6014,19 @@ async def _jobs_shutdown() -> None:
 
 
 # ---------------- usage / cost ----------------
+@app.on_event("startup")
+async def _opencode_usage_startup() -> None:
+    cfg = settings()
+    with contextlib.suppress(Exception):  # usage import is best effort; it must never stop the app from coming up
+        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
+
+
 @app.get("/usage")
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
+    with contextlib.suppress(Exception):  # OpenCode calls since the last look; incremental, so cheap on every open
+        await asyncio.to_thread(opencode_usage.import_usage, db, pricing, cfg)
     return {**usage.report(days), "prices": pricing.table(cfg)}
 
 

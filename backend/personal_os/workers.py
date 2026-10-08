@@ -12,7 +12,9 @@ what it is attached to:
   - when it ends, the conversation's front agent is woken (app.py builds the hidden turn from the functions below).
   - it owns what it starts: its ctx run_id is its own run id, so its shell and opencode jobs (background ones too) are
     not ended by the next reply's teardown and are killed when it ends, however it ends. Survivors of a backend that
-    died are killed at startup (reap_orphan_jobs), since no worker can ever poll them again.
+    died are killed at startup (reap_orphan_jobs), since no worker can ever poll them again. Its coding sessions
+    (coding_session_start) are the exception: they keep running when it completes, and stop only when it is stopped
+    (subagents.SESSION_STOPS, codingagents.stop_owned).
   - its status line says when it has shown no progress for WORKER_STALL_NOTE_SECONDS (subagents heartbeat); an ended
     worker's row says why it ended (subagents.ENDED_EARLY, or who stopped it).
 

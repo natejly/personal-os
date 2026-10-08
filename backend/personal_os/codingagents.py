@@ -13,7 +13,9 @@ Two drivers behind one row (`coding_sessions`, migration 11):
   session. Only an explicit bypassPermissions under Auto or Manual forces a card the reviewer cannot lift. Every start
   and follow-up also gets `--settings` with Allow everything's floor as Claude Code deny/ask rules
   (permrules.claude_code_floor), which apply in every mode, bypassPermissions included: Grain's own data folder and app
-  and disk wipes are refused; credential stores, deletes that skip the Trash and force-pushes ask (needs_you).
+  and disk wipes are refused; credential stores, deletes that skip the Trash and force-pushes ask (needs_you). A Bash
+  PreToolUse hook (claude_hook) applies the same floor through `sh -c`, `eval`, `sudo` and other wrappers, and lets
+  deletes in temp folders and in the session's own Grain-made worktree run.
 - opencode: `opencode.launch` under the OS sandbox as a background job in the shell registry (shell.ShellJobs). It
   has no prompt to answer: the sandbox is its boundary. It runs until it exits or Stop ends it (no time limit: app shutdown
   kills every shell job group, and a session a crash orphaned is recorded as `orphaned`); a follow-up
@@ -21,6 +23,12 @@ Two drivers behind one row (`coding_sessions`, migration 11):
 
 On a repo's main checkout either agent gets its own worktree unless the caller passes new_worktree=false, so neither
 edits a checkout the user or another agent is working in by default.
+
+A session belongs to the run that started it (`run_id`: the calling subagent or worker, else the chat or desk reply).
+When that run is stopped, not when it finishes normally, its live sessions are stopped too (stop_owned, called from
+subagents' _finish and the reply's teardown in app.py), with the reason on the row's detail. At app shutdown the
+sessions of runs still going (halted workers, live replies and subagents) are stopped; ones whose run already finished
+keep running in the daemon. Stopping never removes a worktree, so uncommitted or unmerged work stays.
 
 Every change is saved and published on the app `events` topic as a `coding_session` event carrying `summary(row)`.
 Nothing here removes a session, force-pushes, or runs git beyond `worktree add`, `status`, `diff` and `log`.
@@ -40,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import mac, opencode, permrules, shell
+from . import claude_hook, mac, opencode, permrules, shell
 from .db import new_id
 from .limits import CODING_SESSION_MAX_CONCURRENT, LOGIN_SHELL_TIMEOUT_SECONDS
 from .ship import BRANCH_RE, PROTECTED
@@ -158,24 +166,33 @@ CLAUDE_AGENTS = json.dumps({
 }, separators=(",", ":"))
 
 
-def floor_settings() -> str:
-    """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules. Inline, so
-    nothing on disk can be swapped under the session; the CLI merges these lists with the user's own settings."""
-    return json.dumps(permrules.claude_code_floor(), separators=(",", ":"))
+def floor_settings(worktree: str | None = None) -> str:
+    """The `--settings` JSON every claude start and resume carries: the allow-all floor as permission rules plus the
+    Bash PreToolUse hook (claude_hook) that judges what a command runs. `worktree` is a worktree Grain made for this
+    session, where deleting files is the session's own work. Inline, so nothing on disk can be swapped under the
+    session; the CLI merges these lists with the user's own settings."""
+    return json.dumps({**permrules.claude_code_floor(), "hooks": claude_hook.settings_hooks(worktree)}, separators=(",", ":"))
 
 
-def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None) -> list[str]:
+def claude_argv(exe: str, name: str, prompt: str, model: str | None = None, permission_mode: str | None = None,
+                worktree: str | None = None) -> list[str]:
     """The start command, with the two inline sub-agents and the floor settings. A model flag appears only when the caller
     named one: the session runs on the user's own account, so their own CLI default is the one model they are known to
     have quota for (pinning one here started every session on it and failed the moment that model's limit was reached).
     A permission flag likewise appears only when the caller asked for a mode."""
     return [exe, "--bg", "-n", name, *(["--model", model] if model else []), "--agents", CLAUDE_AGENTS,
-            "--settings", floor_settings(), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
+            "--settings", floor_settings(worktree), *(["--permission-mode", permission_mode] if permission_mode else []), _lead(prompt)]
 
 
-def resume_argv(exe: str, session_id: str, message: str) -> list[str]:
+def resume_argv(exe: str, session_id: str, message: str, worktree: str | None = None) -> list[str]:
     """A follow-up is a new CLI process: it needs the floor settings again (the mode is the session's own)."""
-    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(), _lead(message)]
+    return [exe, "--bg", "--resume", session_id, "--settings", floor_settings(worktree), _lead(message)]
+
+
+def own_worktree(row: dict[str, Any]) -> str | None:
+    """The worktree Grain made for this session (a row with a branch), else None: a checkout the session was merely
+    pointed at is not its own to delete in."""
+    return row["worktree"] if row.get("branch") else None
 
 
 def _slug(text: str) -> str:
@@ -281,6 +298,7 @@ class CodingSessions:
         self.claude_home = claude_home or Path.home() / ".claude" / "jobs"
         self.resumed: dict[str, float] = {}   # id -> when a follow-up started: a stale "done" in state.json is ignored for a moment
         self.seen: dict[str, tuple[int, str]] = {}   # id -> (output size, job status) at the last opencode refresh
+        self.closing = False  # set at app shutdown, after the halted workers' sessions are stopped (see stop_owned)
         self._recover()
         self._prev_on_change = getattr(jobs, "on_change", None)
         jobs.on_change = self._job_changed
@@ -374,6 +392,8 @@ class CodingSessions:
             return row  # a follow-up was just sent and state.json has not caught up
         sid = state.get("sessionId")
         log = shell._scrub("\n".join(lines))[-LOG_TAIL:]
+        if status == row["status"] == "stopped":
+            detail = row.get("detail") or detail  # the recorded stop reason, not the CLI's own word for it
         return self._apply(row, status=status, detail=detail or row.get("detail"), log_tail=log or row.get("log_tail") or "",
                            session_id=sid if isinstance(sid, str) and UUID_RE.fullmatch(sid) else row.get("session_id"))
 
@@ -460,7 +480,8 @@ class CodingSessions:
         t = time.time()
         row = {"id": sid, "agent": agent, "external_id": None, "session_id": None, "repo_path": str(repo), "worktree": str(wt),
                "branch": branch, "conversation_id": ctx.get("conversation_id"), "desk_id": ctx.get("desk_id"),
-               "run_id": ctx.get("run_id"), "name": name, "prompt": prompt, "model": model, "permission_mode": permission_mode,
+               # the owner: the subagent or worker that called (agent_run_id), else the chat or desk reply (stop_owned)
+               "run_id": ctx.get("agent_run_id") or ctx.get("run_id"), "name": name, "prompt": prompt, "model": model, "permission_mode": permission_mode,
                "status": "starting", "detail": None, "log_tail": "", "created_at": t, "updated_at": t, "ended_at": None}
         with self.db.tx() as c:
             c.execute("INSERT INTO coding_sessions(id, agent, external_id, session_id, repo_path, worktree, branch, conversation_id, "
@@ -483,7 +504,7 @@ class CodingSessions:
         exe = claude_binary()
         if not exe:
             raise CodingError(CLAUDE_HINT)
-        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"]),
+        ok, out = await self.run(claude_argv(exe, row["name"], row["prompt"], row["model"], row["permission_mode"], own_worktree(row)),
                                  row["worktree"], START_TIMEOUT, await asyncio.to_thread(claude_env))
         if not ok:
             raise CodingError(f"claude did not start: {out.strip()[-300:]}")
@@ -546,7 +567,7 @@ class CodingSessions:
             exe = claude_binary()
             if not exe:
                 raise CodingError(CLAUDE_HINT)
-            ok, out = await self.run(resume_argv(exe, row["session_id"], message), row["worktree"], START_TIMEOUT,
+            ok, out = await self.run(resume_argv(exe, row["session_id"], message, own_worktree(row)), row["worktree"], START_TIMEOUT,
                                      await asyncio.to_thread(claude_env))
             if not ok:
                 raise CodingError(f"claude did not resume: {out.strip()[-300:]}")
@@ -574,7 +595,7 @@ class CodingSessions:
             detail = "follow-up sent"
         return self._apply(row, status="working", detail=detail, log_tail="", ended_at=None)
 
-    async def stop(self, sid: str) -> dict[str, Any]:
+    async def stop(self, sid: str, reason: str = "stopped by the user") -> dict[str, Any]:
         row = self._known(sid)
         if row["status"] not in (*LIVE, "blocked"):
             return row
@@ -590,7 +611,40 @@ class CodingSessions:
             job = self.jobs.jobs.get(row.get("external_id") or "")
             if job is not None:
                 await self.jobs.kill(job)
-        return self._apply(row, status="stopped", detail="stopped by the user")
+        return self._apply(row, status="stopped", detail=reason)
+
+    async def stop_owned(self, run_id: str | None, why: str) -> list[dict[str, Any]]:
+        """Stop the live sessions `run_id` started, because that run was stopped (a user or assistant Stop, a parent
+        stopping, a watchdog or breaker, a worker halted at shutdown). Never called on a normal finish: a session the run
+        left working in the background keeps going. Stopping ends processes only (OpenCode's job group, `claude stop`);
+        the worktree, its branch and the session files stay, and a worktree with work in it is named in the reason.
+        A no-op once the app is closing (`closing`): Claude Code sessions outlive the app by design, and every OpenCode
+        job ends with the shell registry anyway."""
+        if not run_id or self.closing:
+            return []
+        live = (*LIVE, "blocked")
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute(f"SELECT * FROM coding_sessions WHERE run_id = ? AND status IN ({','.join('?' * len(live))})",
+                                               (run_id, *live))]
+        out = []
+        for row in rows:
+            reason = f"stopped: {why}{await self._kept(row)}"
+            try:
+                out.append(await self.stop(row["id"], reason))
+            except (CodingError, shell.ShellError) as e:  # still running: say so on the row rather than claim it stopped
+                out.append(self._apply(row, detail=shell._scrub(f"could not stop it ({why}): {e}")[:300]))
+        return out
+
+    async def _kept(self, row: dict[str, Any]) -> str:
+        """Where the session's work stays, for a stop reason: its own worktree and branch, or uncommitted changes in it."""
+        wt, branch = row["worktree"], row.get("branch")
+        if not os.path.isdir(wt):
+            return ""
+        ok, st = await self.run([*GIT, "status", "--porcelain"], wt, GIT_TIMEOUT)
+        where = wt + (f" (branch {branch})" if branch else "")
+        if ok and st.strip():
+            return f"; its uncommitted changes are kept in {where}"
+        return f"; its worktree stays at {where}" if branch else ""
 
     async def diff(self, sid: str, full: bool = False) -> dict[str, Any]:
         row = self._known(sid)

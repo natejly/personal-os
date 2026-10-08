@@ -3502,6 +3502,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # A front turn that only handed work on (hand-off tools, the task list) and has nothing to say is silent too: the app shows the work.
     silent = silent or (not is_wake and not error and not stop.is_set() and _front() and workers_mod.dispatch_only(e.get("name") for e in tool_events)
                         and workers_mod.is_silent(text))
+    # A reply whose whole text is the NO_REPLY sentinel says nothing, whatever the turn: with no tool cards or files
+    # to show, its row goes like a silent wake's — the marker is never a message the user can see.
+    silent = silent or (bool(text) and not error and not stop.is_set() and workers_mod.is_silent(text)
+                        and not tool_events and not tool_ctx.get("reply_attachments"))
     if silent:
         if run is not None:
             run.silent = True  # the Telegram bridge reads this: a removed reply is not "Stopped."
@@ -3510,6 +3514,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         convos.touch(conv_id)
         yield "removed_message", {"id": am["id"]}
     else:
+        if text and workers_mod.is_silent(text):
+            text = ""  # the row stays for its tool cards; the sentinel itself is never stored
         convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning,
                               outcome=outcome, error_kind=error_kind, attachments=tool_ctx.get("reply_attachments"))
         convos.touch(conv_id)

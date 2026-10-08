@@ -1174,7 +1174,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .sources li button { background: none; border: none; padding: 2px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .sources li button:hover { text-decoration: underline; }
 .sources li.cited { font-weight: 600; }
-.sources li.consulted { color: var(--text-faint); }
 .sources-n { color: var(--accent); }
 .muted.small, .small { font-size: 12px; }
 
@@ -1461,11 +1460,8 @@ textarea.instructions:focus { border-color: var(--accent); }
 .reasoning-head svg.rot90 { transform: rotate(90deg); }
 .reasoning-head > svg:first-child { transition: transform 0.15s; flex-shrink: 0; }
 .reasoning-label { font-weight: 400; }
-.reasoning-body {
-  max-height: 220px; overflow-y: auto; margin: 2px 0 0; padding: 0 0 6px 18px; list-style: none;
-  font-size: 12px; line-height: 1.5;
-  color: var(--text-muted); word-break: break-word;
-}
+/* The reasoning level a reply ran at, in place of the thinking summary: a plain muted note. */
+.effort-label { flex-basis: 100%; padding: 0 0 2px 18px; font-size: 11px; color: var(--text-faint); }
 .activity-tools { padding: 0 0 6px 12px; }
 .activity-tools .tool-events { margin: 0; }
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
@@ -1476,6 +1472,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 /* A finished, successful call is a line in a list, not a box: only a call that is waiting
    or failed keeps its card, so the eye lands on the rows that still need something. */
 .tool-event:not(.tc-card):not(.awaiting):not(.error) { border-color: transparent; background: none; }
+/* A call still running is a status line, not a card: the box arrives with the result. */
+.tool-event.tc-card.pending:not(.awaiting):not(.error) { border-color: transparent; background: none; }
+.tool-event.tc-card.pending:not(.awaiting):not(.error) > .tc-head { border-bottom-color: transparent; }
 .tool-event:not(.tc-card):not(.awaiting):not(.error) > .tool-head:hover { background: var(--hover); }
 .tool-event.error { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 /* Waiting on the user: the row itself is the card, with the one waiting edge and wash. */
@@ -2610,7 +2609,7 @@ select:focus-visible {
 .subagent-panel header h2 { display: flex; align-items: center; gap: 8px; }
 .reasoning { display: flex; flex-wrap: wrap; align-items: center; }
 .reasoning .reasoning-head { flex: 1 1 0; width: auto; }
-.reasoning .reasoning-body, .reasoning .activity-tools { flex-basis: 100%; }
+.reasoning .activity-tools { flex-basis: 100%; }
 .subagent-thread { margin: -4px 0 12px 16px; padding-left: 8px; border-left: 1px solid var(--border); font-size: 12px; }
 .subagent-head, .subagent-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26px; padding: 0 6px; border-radius: 6px; color: var(--text-muted); text-align: left; }
 .subagent-head:hover, .subagent-row:hover { background: var(--hover); color: var(--text); }

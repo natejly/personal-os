@@ -1547,6 +1547,8 @@ export interface Settings {
   permissionMode?: 'auto' | 'manual' | 'allow_all'
   /** Lifts the host allow-lists (fetch, browse, shell network) and the per-tool approval for connector tools. Independent of permissionMode. */
   allowAllConnections?: boolean
+  /** Off by default. Lifts the two taint-forced cards (networked shell, writes outside the desk after untrusted content). Hard blocks still ask. */
+  trustExternalContent?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   /** Show traces, the context preview, the full system prompt and OTLP export. Off by default; traces are recorded either way. */

@@ -1482,7 +1482,10 @@ NO_EMOJI_HINT = "Don't use emoji in replies, documents, or messages unless the u
 
 TOOLS_HINT = ("You have tools. Reach for them whenever they could make the answer more accurate, more current or grounded in "
               "the user's own data; answer directly only when nothing you could look up would change it. "
-              "After using tools, write the final answer for the user. " + FENCE_RULE)
+              "Be direct: when what is already in front of you answers the question, answer it in plain text — do not make "
+              "tool calls or retrieve context that would not change the answer. "
+              "After using tools, write the final answer for the user. "
+              + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT + " " + FENCE_RULE)
 # The agent stance for an ordinary chat (desks and scheduled runs carry their own). Text only: the leash is the
 # alwaysAsk list and the approval cards, so the model is told to act and let the app stop it where a card is due.
 PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off tools); a delegating chat gets FRONT_AGENT_HINT
@@ -1493,7 +1496,8 @@ PROACTIVE_HINT = (  # chats that cannot delegate (a persona without the hand-off
     "deadline). Act where the app lets you; it stops you where an approval is needed, so do not ask permission in advance. "
     "Prefer a draft or proposal over a silent change to anything the user owns. If they describe a recurring want, offer "
     "schedule_task once. End with at most one specific next step you can do right now, or none; never a generic offer. "
-    "A wrong suggestion costs more than silence."
+    "A wrong suggestion costs more than silence. "
+    + workers_mod.ORCHESTRATION_HINT + " " + workers_mod.OBSERVABILITY_HINT
 )
 # A plain chat turn that can delegate is told this instead of PROACTIVE_HINT and PLAN_HINT (workers.py).
 FRONT_AGENT_HINT = workers_mod.FRONT_AGENT_HINT
@@ -6013,6 +6017,33 @@ def inbox_seen_all(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -
     ids = [r["run_id"] for r in _inbox_runs(hours, limit, include_dry)]
     run_store.mark_seen(ids)
     return {"ok": True, "marked": len(ids)}
+
+
+@app.delete("/inbox/runs/{run_id}")
+def inbox_delete_run(run_id: str) -> dict[str, Any]:
+    """Erase one "While you were away" message: its agent_runs row and the journal the inbox reads from it
+    (run_events, inbox_seen, and the run's approvals and proposals). The chat it ran in is not touched."""
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    if row.get("status") == "running":
+        raise HTTPException(409, "That run is still going")
+    run_store.delete(run_id)
+    return {"ok": True, "deleted": 1}
+
+
+@app.delete("/inbox")
+def inbox_clear(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
+    """Erase exactly the run messages GET /inbox would list with the same window. A run still going is left
+    (deleting its row would break the live run); chats and every other run are untouched."""
+    runs = _inbox_runs(hours, limit, include_dry)
+    deleted = skipped = 0
+    for r in runs:
+        if r["status"] == "running":
+            skipped += 1
+            continue
+        deleted += bool(run_store.delete(r["run_id"]))
+    return {"ok": True, "deleted": deleted, "skipped": skipped}
 
 
 @app.get("/inbox/notify")

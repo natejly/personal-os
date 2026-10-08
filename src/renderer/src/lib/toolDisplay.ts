@@ -233,6 +233,18 @@ export function readVerdict(preview: string | null | undefined): Verdict | null 
   } catch { return null }
 }
 
+/** What a doc_edit result's status says happened: 'waiting' in Diff review, 'written' in Full agentic editing.
+ *  null when the preview is cut or carries no status, so the row shows no label rather than a guess. */
+export function docEditStatus(preview: string | null | undefined): 'waiting' | 'written' | null {
+  if (!preview) return null
+  try {
+    const s = (JSON.parse(preview) as { status?: unknown }).status
+    if (s === 'pending_review') return 'waiting'
+    if (s === 'applied') return 'written'
+  } catch { /* a cut preview */ }
+  return null
+}
+
 export function cardStatus(t: Pick<ToolEvent, 'pending' | 'needs_approval' | 'error' | 'approval' | 'result_preview'>): CardStatus {
   if (t.pending) return t.needs_approval ? 'awaiting' : 'running'
   if (t.approval === 'deny') return 'denied'
@@ -292,7 +304,6 @@ export function staysVisible(t: ToolEvent): boolean {
 }
 
 export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
-
 /** Maximal runs of at least `min` foldable events become one group keyed by the first id; order is kept. */
 export function partitionEvents(events: ToolEvent[], hasCard: (name: string) => boolean, min = 3): ToolItem[] {
   const out: ToolItem[] = []

@@ -1019,6 +1019,8 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .toast-close:hover { background: var(--hover); color: var(--text); }
 .toast-action { margin-left: auto; background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
 .toast-action:hover { background: var(--hover); }
+.toast-body { background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; border-radius: 6px; }
+.toast-body:hover { text-decoration: underline; }
 .trash-group { margin-top: 14px; }
 .trash-group h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
 .trash-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -170,4 +170,12 @@ test('only calls that need the user, refused calls and actionable results stay o
   assert.equal(staysVisible(ev({ name: 'propose_plan', pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ blocked: 'loop' })), true)
   assert.equal(staysVisible(ev({ name: 'doc_edit' })), true)
+})
+
+test('a doc_edit result reads as waiting for you or written, and says nothing when it cannot tell', () => {
+  assert.equal(docEditStatus(JSON.stringify({ status: 'pending_review', revision_id: 'r1' })), 'waiting')
+  assert.equal(docEditStatus(JSON.stringify({ status: 'applied', revision_id: 'r2' })), 'written')
+  assert.equal(docEditStatus(JSON.stringify({ unchanged: true })), null)
+  assert.equal(docEditStatus('{"status":"pending_re'), null, 'a cut preview carries no label')
+  assert.equal(docEditStatus(null), null)
 })

@@ -853,8 +853,11 @@ def register(tb: Any) -> None:
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
     # Unsandboxed asks (Allow everything lifts it, autoreview.route); so does a reply that read untrusted content while a command could reach out, and no
-    # standing grant, session grant or allow rule buys that card off (it is forced).
-    spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (bool(ctx.get("tainted")) and reaches_out(cfg(ctx)))
+    # standing grant, session grant or allow rule buys that card off (it is forced). trustExternalContent lifts only the
+    # taint half: an unsandboxed command still asks.
+    spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (
+        bool(ctx.get("tainted")) and reaches_out(cfg(ctx))
+        and not permissions.get(cfg(ctx), "trustExternalContent"))
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str, wait_s: float = 0) -> Any:

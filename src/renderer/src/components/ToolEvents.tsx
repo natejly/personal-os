@@ -9,7 +9,7 @@ import DiffView from './DiffView'
 import ActionPlanCard from './ActionPlanCard'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
-import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
+import { describeCall, docEditStatus, errorLine, fmtMs, groupSummary, partitionEvents, QUESTION_TOOLS, recalledChats } from '../lib/toolDisplay'
 import { AskQuestion } from './DeskApprovalCard'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 import { OutputFiles } from './toolcards/parts'
@@ -326,6 +326,10 @@ function ToolEvents({ events: all, conversationId, streaming = false, browserSes
           {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
           <span className="tool-summary">{d.subject}</span>
           <Verdict event={t} />
+          {t.name === 'doc_edit' && (() => {
+            const s = docEditStatus(t.result_preview)
+            return s ? <span className={`tag ${s === 'waiting' ? 'ask' : ''}`} title={s === 'waiting' ? 'Diff review: waiting for you to accept or reject' : 'Full agentic editing: written, undo from the file history'}>{s === 'waiting' ? 'waiting for you' : 'written'}</span> : null
+          })()}
           {t.plan ? (
             <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}

@@ -19,6 +19,7 @@ import { ATTENTION_RANK, jobAttention, wantsYou } from '../lib/attention'
 import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 import { inboxBadge } from '../lib/inboxBadge'
 import { rowButton } from '../lib/rowButton'
+import { projectGroupOpen, toggleProjectGroup } from '../lib/projectGroups'
 import { useChatFileCountsSync } from '../lib/useChatFiles'
 import SidebarChatFiles from './SidebarChatFiles'
 
@@ -163,15 +164,10 @@ export default function Sidebar(): JSX.Element {
     return m
   }, [conversations])
   const projectById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
-  // The group you are in cannot fold away under you: its header would be the only trace of where you are.
-  const activeProjectId = view === 'project' ? projectViewId
-    : view === 'chat' ? conversations.find((c) => c.id === focusedId)?.project_id ?? null
-      : null
+  const liveProjectIds = useMemo(() => new Set(projects.map((p) => p.id)), [projects])
   const toggleCollapsed = (id: string): void => {
     setCollapsed((prev) => {
-      // Rebuilt from the live projects, so a deleted project's id does not linger in storage.
-      const next = new Set([...prev].filter((x) => projectById[x]))
-      if (!next.delete(id)) next.add(id)
+      const next = toggleProjectGroup(prev, id, liveProjectIds)
       writeCollapsed(next)
       return next
     })
@@ -283,17 +279,16 @@ export default function Sidebar(): JSX.Element {
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
             const rows = chatsByProject[p.id] ?? []
-            const pinned = activeProjectId === p.id
-            const open = pinned || !collapsed.has(p.id)
+            const open = projectGroupOpen(p.id, collapsed)
             return (
               <div key={p.id} className={`project-group${open ? '' : ' collapsed'}`}>
                 <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} aria-current={view === 'project' && projectViewId === p.id ? 'page' : undefined} {...rowButton(() => openProject(p.id))}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   {/* The folder is the disclosure: hovering the row swaps it for a chevron, and the name still opens the project. */}
-                  <button className="project-twist" aria-expanded={open} aria-disabled={pinned}
+                  <button className="project-twist" aria-expanded={open}
                     aria-label={`${open ? 'Collapse' : 'Expand'} ${p.name}`}
-                    title={pinned ? 'Stays open while you are in this project' : open ? 'Collapse' : 'Expand'}
-                    onClick={(e) => { e.stopPropagation(); if (!pinned) toggleCollapsed(p.id) }}>
+                    title={open ? 'Collapse' : 'Expand'}
+                    onClick={(e) => { e.stopPropagation(); toggleCollapsed(p.id) }}>
                     <Folder size={13} className="twist-folder" style={{ color: p.color }} />
                     <ChevronRight size={13} className={`twist-chevron${open ? ' rot90' : ''}`} />
                   </button>

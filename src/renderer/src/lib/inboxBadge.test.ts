@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { AgentInbox, JobRunSummary } from '@shared/types'
-import { inboxBadge, markRunsSeen } from './inboxBadge'
+import { inboxBadge, markRunsSeen, withoutInboxRuns } from './inboxBadge'
 
 const run = (run_id: string, seen: boolean): JobRunSummary => ({ run_id, seen } as JobRunSummary)
 const box = (needs_you: number, runs: JobRunSummary[]): AgentInbox => ({
@@ -24,4 +24,13 @@ test('marking one run read drops it from the badge and leaves the others', () =>
 
 test('mark all read clears every run but not needs-you', () => {
   assert.equal(inboxBadge(markRunsSeen(box(3, [run('a', false), run('b', false)]), null)), 3)
+})
+
+test('removing runs drops exactly those rows and recomputes the run counts', () => {
+  const next = withoutInboxRuns(box(2, [run('a', false), run('b', true), run('c', false)]), ['a', 'c'])
+  assert.deepEqual(next.while_you_were_away.map((r) => r.run_id), ['b'])
+  assert.equal(next.counts.runs, 1)
+  assert.equal(next.counts.unseen_runs, 0)
+  assert.equal(next.counts.needs_you, 2, 'a run message is not a pending decision')
+  assert.equal(inboxBadge(next), 2)
 })

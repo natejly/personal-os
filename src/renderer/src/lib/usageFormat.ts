@@ -24,6 +24,12 @@ export function costNote(b: Priced): string {
 /** "accounts/fireworks/models/ember-1" → "ember-1". Matches usage.short_model on the backend. */
 export const shortModel = (id: string): string => id.replace(/\/+$/, '').split('/').pop() || id
 
+/** A token count for a small chip: exact under a thousand, "12.3k" above it. */
+export const compactCount = (n: number): string => {
+  if (n < 1000) return n.toLocaleString()
+  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+}
+
 /** "1,234 in · 56 out · 1,000 cached", leaving out cached when there is none. */
 export function tokenSplit(b: Pick<UsageBucket, 'prompt_tokens' | 'completion_tokens' | 'cached_tokens'>, fmt: (n: number) => string): string {
   const parts = [`${fmt(b.prompt_tokens)} in`, `${fmt(b.completion_tokens)} out`]

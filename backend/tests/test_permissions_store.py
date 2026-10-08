@@ -126,7 +126,7 @@ class GatesReadTheSameValues(unittest.TestCase):
 
 class Writes(unittest.TestCase):
     def tearDown(self) -> None:
-        client.put("/settings", json={"docEditMode": "apply", "unattendedApprovals": "deny"})
+        client.put("/settings", json={"docEditMode": "apply", "unattendedApprovals": "deny", "trustExternalContent": False})
 
     def test_legacy_put_lands_in_the_store_and_reads_back_flat(self) -> None:
         r = client.put("/settings", json={"docEditMode": "apply"})
@@ -158,6 +158,17 @@ class Writes(unittest.TestCase):
         permissions.update(app_mod.db, lambda cur: {"fetchAllowlist": [*cur["fetchAllowlist"], "docs.example.org"]})
         self.assertEqual(app_mod.settings()["fetchAllowlist"], ["example.com", "docs.example.org"])
         permissions.save(app_mod.db, {"fetchAllowlist": ["example.com"]})
+
+    def test_trust_external_content_defaults_off_and_round_trips(self) -> None:
+        self.assertFalse(permissions.DEFAULTS["trustExternalContent"])
+        r = client.put("/settings", json={"trustExternalContent": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["trustExternalContent"])
+        self.assertTrue(r.json()[permissions.KEY]["trustExternalContent"])
+        self.assertEqual(_rows(app_mod.db.path)[permissions.KEY]["trustExternalContent"], True)
+        self.assertFalse(client.put("/settings", json={"trustExternalContent": "yes"}).status_code == 200)
+        r = client.put("/settings", json={"trustExternalContent": False})
+        self.assertFalse(r.json()["trustExternalContent"])
 
 
 if __name__ == "__main__":

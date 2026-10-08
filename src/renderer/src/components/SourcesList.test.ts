@@ -25,6 +25,14 @@ test('sources are numbered in order of first citation, each listed once', () => 
   assert.deepEqual(rows, ['1:rent.txt', '2:pets.txt'])
 })
 
+test('a [n] inside a link, maths or code is not a citation and takes no number', () => {
+  const html = renderToStaticMarkup(createElement(SourcesList, {
+    content: 'See [2](http://x), $[3]$ and `[3]`; the rent is due [1].', chunks: [chunk(1, 'rent.txt'), chunk(2, 'b.txt'), chunk(3, 'c.txt')], onOpen: () => {}
+  }))
+  const rows = [...html.matchAll(/\[(\d)\]<\/span> ([\w.]+)/g)].map((m) => `${m[1]}:${m[2]}`)
+  assert.deepEqual(rows, ['1:rent.txt'])
+})
+
 test('an inline chip shows its renumbered position, not the excerpt number', () => {
   const cites = new Map([[3, { label: 'rent.txt', shown: 1 }], [1, { label: 'pets.txt', shown: 2 }]])
   const html = renderToStaticMarkup(createElement(MarkdownPreview, { source: 'Rent [3], pets [1].', cites, onCite: () => {} }))

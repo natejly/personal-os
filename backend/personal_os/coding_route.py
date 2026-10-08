@@ -22,16 +22,27 @@ desk_* workspace tools (the desk workspace is Grain's data folder, never a user'
 desk workspace or a temp folder).
 
 A command the parser cannot follow is refused only when it runs in a repo and its raw text has a write-ish verb.
+
+The judging above is a heuristic: a script file, a heredoc or code it cannot read can still write. So a shell_run that
+runs in a repo (its cwd, or a folder its words name) is also checked after the fact (`guard_start` / `guard_finish`):
+`git status` before and after, and a source file the command newly changed is put back (a tracked file from HEAD, a new
+file deleted) and the call refused. Files that were already modified before it are never touched, only named. Gitignored
+paths, caches, build output and lockfiles do not count, and a command that only tests, builds or installs is not
+snapshotted at all.
 A repo whose root is the home folder (a dotfiles checkout) does not count, or every file under ~ would be refused.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from . import permissions, permrules
+
+log = logging.getLogger(__name__)
 
 AGENT_NAMES = {"opencode": "OpenCode", "claude": "Claude Code"}
 
@@ -229,6 +240,156 @@ def _shell_refusal(cmd: str, start: str) -> tuple[str, str] | None:
     return walk(permrules.normalize(cmd or ""), 0, start)
 
 
+def _shell_cwd(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> str:
+    from . import shell
+    roots, start = shell.perm_where(tb, ctx)
+    raw = os.path.expanduser(str(args.get("cwd") or "").strip())
+    return os.path.join(roots[0] if roots else str(Path.home()), raw) if raw else start  # as shell.floor judges it
+
+
+# ---- after the fact: what a shell_run really changed in a repo ----
+# Not snapshotted: a command whose every subcommand tests, builds or installs (or only reads, around one of those).
+VERIFY = {"pytest", "py.test", "tsc", "vitest", "jest", "eslint", "mypy", "make", "tox", "nox", "cmake", "ninja", "mvn",
+          "gradle", "gradlew", "xcodebuild", "playwright"}
+VERIFY_SUB = {"npm": {"test", "t", "ci", "run", "run-script", "build"}, "pnpm": {"test", "t", "run", "build"},
+              "yarn": {"test", "run", "build"}, "bun": {"test", "run"}, "cargo": {"build", "test", "check", "clippy", "bench"},
+              "go": {"build", "test", "vet"}, "swift": {"build", "test"}, "uv": {"sync"}, "poetry": {"install"},
+              "bundle": {"install"}, "pip": {"install"}, "pip3": {"install"}}
+RUNNERS = {"npx", "pnpx", "bunx"}  # run the tool named next: judged as that tool
+BENIGN = permrules.READONLY | {"cd", "true", "sort", "uniq", "tr", "cut", "less", "env", "printf", "sleep"}
+# Changes that are never source edits, even when not gitignored.
+NOT_SOURCE_DIRS = {"node_modules", "dist", "build", "out", "coverage", "__pycache__", ".pytest_cache", ".mypy_cache",
+                   ".ruff_cache", ".next", ".turbo", ".cache", ".venv", "venv", "target", ".tox", ".nyc_output", ".gradle"}
+LOCKFILES = {"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock", "uv.lock",
+             "poetry.lock", "Cargo.lock", "Gemfile.lock", "go.sum", "Pipfile.lock"}
+NOT_SOURCE_SUFFIX = (".pyc", ".tsbuildinfo", ".log", ".DS_Store")
+GIT_TIMEOUT = 10
+
+
+def _verifying(tokens: list[str]) -> bool:
+    if not tokens:
+        return False
+    name = os.path.basename(tokens[0])
+    if name in RUNNERS or (name in ("uv", "poetry") and tokens[1:2] == ["run"]):
+        rest = tokens[2:] if name in ("uv", "poetry") else tokens[1:]
+        while rest and rest[0].startswith("-"):
+            rest = rest[1:]
+        return _verifying(rest)
+    if re.fullmatch(r"python[\d.]*", name):
+        return tokens[1:2] == ["-m"] and tokens[2:3] in (["pytest"], ["unittest"], ["mypy"], ["compileall"])
+    return name in VERIFY or (len(tokens) > 1 and tokens[1] in VERIFY_SUB.get(name, ()))
+
+
+def _only_verifies(cmd: str) -> bool:
+    p = permrules.split_command(cmd)
+    if p.opaque or p.nested:
+        return False
+    kinds = []
+    for seg in p.segments:
+        tokens = permrules.strip_wrappers(seg.words, True)
+        if any(op.startswith((">", "&>")) and t not in permrules.EXEMPT_PATHS for op, t in seg.redirects):
+            return False
+        kinds.append("v" if _verifying(tokens) else "b" if tokens and os.path.basename(tokens[0]) in BENIGN else "x")
+    return "v" in kinds and "x" not in kinds
+
+
+def _git(root: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "--literal-pathspecs", "-C", root, *args], input=stdin, capture_output=True, text=True,
+                          timeout=GIT_TIMEOUT, check=True)
+
+
+def _status(root: str) -> dict[str, str]:
+    """path -> XY for every non-ignored change in the work tree (untracked files listed one by one)."""
+    out = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames").stdout
+    return {e[3:]: e[:2] for e in out.split("\0") if len(e) > 3}
+
+
+def _stat(path: str) -> tuple[int, int] | None:
+    try:
+        st = os.lstat(path)
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
+def _source(path: str) -> bool:
+    parts = path.split("/")
+    return not (NOT_SOURCE_DIRS & set(parts[:-1]) or parts[-1] in LOCKFILES or parts[-1].endswith(NOT_SOURCE_SUFFIX))
+
+
+def guard_start(tb: Any, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any] | None:
+    """The repos a foreground shell_run may touch, with what was already modified in each, or None when there is nothing
+    to watch: the setting is off, it runs in no repo, or it only tests / builds / installs."""
+    if not isinstance(args, dict) or args.get("background"):  # ponytail: a background job is not diffed when it ends; only the precheck judges it
+        return None
+    cfg = ctx.get("settings") or tb.settings()
+    if not enabled(cfg):
+        return None
+    cmd = permrules.normalize(str(args.get("command") or ""))
+    if not cmd.strip() or _only_verifies(cmd):
+        return None
+    cwd = _shell_cwd(tb, args, ctx)
+    # Where it may write: its cwd, and any folder its words name (`cd ~/repo && ...`, `python ~/repo/x.py`).
+    words = re.findall(r"[^\s'\"`;&|()<>=]+", cmd)
+    cands = [cwd] + [_resolve(w, cwd) for w in words if "/" in w or w.startswith("~") or w in (".", "..")
+                     or os.path.isdir(os.path.join(cwd, w))]
+    roots = list(dict.fromkeys(r for c in cands if (r := repo_root(c))))[:4]
+    snap: dict[str, Any] = {"cfg": cfg, "repos": {}}
+    for root in roots:
+        try:
+            before = _status(root)
+        except (OSError, subprocess.SubprocessError):
+            log.warning("coding_route: git status failed in %s; not guarding it", root, exc_info=True)
+            continue
+        snap["repos"][root] = {p: (xy, _stat(os.path.join(root, p))) for p, xy in before.items()}
+    return snap if snap["repos"] else None
+
+
+def guard_finish(snap: dict[str, Any]) -> str | None:
+    """Put back the source files the command newly changed and return the refusal, or None when it changed none."""
+    for root, before in snap["repos"].items():
+        try:
+            after = _status(root)
+        except (OSError, subprocess.SubprocessError):
+            log.warning("coding_route: git status failed in %s after a command", root, exc_info=True)
+            continue
+        new = [p for p in after if p not in before and _source(p)]
+        # Already modified before the command: never touched, only named when the command changed them further.
+        also = [p for p, (xy, st) in before.items() if _source(p) and (after.get(p) != xy or _stat(os.path.join(root, p)) != st)]
+        if not new and not also:
+            continue
+        reverted, failed = [], []
+        if new:
+            try:
+                check = _git(root, "cat-file", "--batch-check", stdin="".join(f"HEAD:{p}\n" for p in new)).stdout.splitlines()
+                in_head = [p for p, line in zip(new, check) if not line.endswith(" missing")]
+                if in_head:
+                    _git(root, "restore", "--source=HEAD", "--staged", "--worktree", "--", *in_head)
+                fresh = [p for p in new if p not in in_head]
+                if fresh:
+                    _git(root, "rm", "-q", "--cached", "--ignore-unmatch", "--", *fresh)
+                    for p in fresh:
+                        f = os.path.join(root, p)
+                        if os.path.lexists(f) and not os.path.isdir(f):
+                            os.remove(f)
+                reverted = new
+            except (OSError, subprocess.SubprocessError):
+                log.warning("coding_route: could not revert %s in %s", new, root, exc_info=True)
+                failed = new
+        def names(ps: list[str]) -> str:
+            return ", ".join(ps[:8]) + (f" and {len(ps) - 8} more" if len(ps) > 8 else "")
+        msg = refusal_text(snap["cfg"], "This shell_run", root)
+        if reverted:
+            msg += f" It changed {names(reverted)}; those changes were reverted."
+        if failed:
+            msg += f" It changed {names(failed)}, and putting them back failed: check `git status` there."
+        if also:
+            msg += (f" It also changed {names(also)}, which already had uncommitted changes, so they were left as they are; "
+                    "tell the user.")
+        return msg
+    return None
+
+
 def check(tb: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str | None:
     """The refusal for this call while coding is routed to a coding agent, or None. Called by Toolbox.precheck (before
     any card) and Toolbox.call (every path that runs a tool)."""
@@ -237,7 +398,7 @@ def check(tb: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str 
     cfg = ctx.get("settings") or tb.settings()
     if not enabled(cfg):
         return None
-    from . import fsx, shell
+    from . import fsx
     if name in fsx.WRITE_ARGS:
         g = fsx.grants_for(tb, ctx)
         base = str(g.desk) if g.desk and name not in fsx.LOCAL_TOOLS else str(Path.home())
@@ -247,9 +408,6 @@ def check(tb: Any, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> str 
                 return refusal_text(cfg, name, root)
         return None
     if name == "shell_run":
-        roots, start = shell.perm_where(tb, ctx)
-        raw = os.path.expanduser(str(args.get("cwd") or "").strip())
-        cwd = os.path.join(roots[0] if roots else str(Path.home()), raw) if raw else start  # as shell.floor judges it
-        if hit := _shell_refusal(str(args.get("command") or ""), cwd):
+        if hit := _shell_refusal(str(args.get("command") or ""), _shell_cwd(tb, args, ctx)):
             return refusal_text(cfg, f"shell_run ({hit[0]})", hit[1])
     return None

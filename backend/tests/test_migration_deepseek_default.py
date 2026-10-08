@@ -1,4 +1,4 @@
-"""Migration 33 moves an install onto DeepSeek V4.1 Flash at high effort and leaves explicit picks and other keys alone."""
+"""Migration 34 moves an install onto DeepSeek V4.1 Flash at high effort and leaves explicit picks and other keys alone."""
 from __future__ import annotations
 
 import json
@@ -67,9 +67,9 @@ def test_upgraded_fireworks_install_moves_to_deepseek_high() -> None:
     _chat(con, "b", "ember-1", {"effort": "medium", "fast": True})
     _chat(con, "c", "glm-5.3", {"effort": "low"})
     _chat(con, "d", "kimi-k3", {"effort": "max"})
-    con.execute("PRAGMA user_version = 32")
+    con.execute("PRAGMA user_version = 33")
     con.commit()
-    assert migrations.run(con) == [33]
+    assert migrations.run(con) == [34]
     s = _settings(con)
     assert not {"defaultModel", "modelHigh", "extractionModel", "fastModel"} & set(s)
     assert s["embeddingModel"] == "accounts/fireworks/models/qwen3-embedding-8b"
@@ -89,7 +89,7 @@ def test_upgraded_fireworks_install_moves_to_deepseek_high() -> None:
 
 def test_other_provider_keeps_its_saved_models() -> None:
     db, con = _db({"provider": "openai", "baseUrl": "https://api.openai.com/v1", "defaultModel": "gpt-5", "modelLow": "gpt-5-nano"})
-    con.execute("PRAGMA user_version = 32")
+    con.execute("PRAGMA user_version = 33")
     con.commit()
     migrations.run(con)
     s = _settings(con)

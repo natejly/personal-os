@@ -14,6 +14,9 @@
 
 What does not count: a run the user stopped (it ends `done`, or `stopped`/`cancelled`, never `error`); a manual
 "Run now" (the user is watching, and a manual failure should not switch off the schedule); a dry run.
+A run that fails while the provider auth breaker is open (auth_breaker: the key was rejected) is neither retried nor
+counted: the job is not at fault, and its next slot runs once the key works again. A slot that comes due while the
+breaker is open is skipped with the breaker's message as the reason.
 A run left `interrupted` by a backend restart lost its watcher with the process, so nothing follows it live.
 `boot_retry` is the one place that picks it up again: once, on start, only if it is the job's latest run, it is
 `interrupted` (a user stop ends `done`), and its stored `attempt` is under the job's `max_retries`.
@@ -28,6 +31,7 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
+from . import auth_breaker
 from .job_history import result_digest
 from .jobs import Proposals, retryable
 
@@ -84,9 +88,10 @@ class JobPolicy:
 
     async def admit(self, job: dict[str, Any], fire: dict[str, Any]) -> tuple[bool, str | None]:
         """Whether this fire may launch. A refusal is recorded on the job, except for a manual run (no slot)."""
-        if self.live_run(job["id"]) is None:
+        why = auth_breaker.blocked(self.settings())
+        if why is None and self.live_run(job["id"]) is None:
             return True, None
-        why = "previous run still running"
+        why = why or "previous run still running"
         if not fire.get("manual"):
             self.jobs.record_skip(job["id"], why, self.clock(), fire.get("due_at"))
         return False, why
@@ -188,6 +193,9 @@ class JobPolicy:
             return  # stopped / cancelled by the user: neither a success nor a failure
         cur = self.jobs.get(jid)
         if cur is None:
+            return
+        if (held := auth_breaker.blocked(self.settings())) is not None:
+            self.jobs.record_skip(jid, held, self.clock(), fire.get("due_at"))
             return
         retries = int(cur.get("max_retries") or 0)
         if attempt <= retries and retryable(cur) and self.live_run(jid) is None:

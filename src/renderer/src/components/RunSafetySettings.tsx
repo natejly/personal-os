@@ -4,8 +4,8 @@ import { HostList } from './CoworkSettings'
 type Props = { draft: Settings; patch: (p: Partial<Settings>) => void }
 
 /**
- * Two standing safety settings of Settings > Advanced: which hosts fetch_url may still read after a reply has seen
- * untrusted content, and folder snapshots before a reply edits. It edits the modal's `draft` through `patch`, so
+ * Two standing safety settings: which hosts fetch_url may still read after a reply has seen untrusted content (Settings >
+ * Permissions, beside the domains and MCP switch), and folder snapshots before a reply edits (Advanced). It edits the modal's `draft` through `patch`, so
  * nothing is saved until Save. The permission mode itself lives in PermissionMode.tsx.
  */
 export default function RunSafetySettings({ draft, patch }: Props): JSX.Element {

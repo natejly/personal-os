@@ -9,7 +9,7 @@ import type { ApprovalDecision, Attachment, BackendInfo, BackendState, PlanEdit,
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import type { DraftAutonomy } from './lib/autonomyDefault'
-import { markRunsSeen } from './lib/inboxBadge'
+import { markRunsSeen, withoutInboxRuns } from './lib/inboxBadge'
 import { latestAgentChat } from './lib/mentions'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
@@ -22,6 +22,7 @@ import { chatNotice, finishNotice, type FinishInfo, finishStatus, foldRunState, 
 import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
+import { COMPLETION_SNOOZE_MS, shouldShowCompletion, type CompletionPopup } from './lib/completionNotice'
 import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
@@ -124,7 +125,7 @@ const PROMOTED_TO: Record<string, string> = {
   doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'uploaded files', download: 'your Mac'
 }
 
-interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
+interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void }; onClick?: () => void }
 
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
 const MAX_SESSIONS = 12
@@ -287,6 +288,8 @@ export interface State {
   /** A draft handed to the Mail compose window (an assistant's email card moved there); MailView takes it and clears it. */
   mailComposePrefill: MailComposePrefill | null
   toasts: Toast[]
+  /** The in-app completion popup: a reply that finished while the user was elsewhere, with Open/Snooze/Dismiss. */
+  completionPopup: CompletionPopup | null
   /** The ⌘K command palette. */
   paletteOpen: boolean
   /** The help overlay (⌘/ or ?): shortcuts, or the "Using Grain" guide. */
@@ -393,10 +396,16 @@ export interface State {
   setProjectModal: (m: State['projectModal']) => void
   openUploadPreview: (id: string | null) => void
   openMailCompose: (prefill: MailComposePrefill) => void
-  toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
+  toast: (text: string, kind?: Toast['kind'], action?: Toast['action'], onClick?: () => void) => void
   dismissToast: (id: number) => void
   /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
   holdToasts: (on: boolean) => void
+  /** Show the completion popup for a finished reply (replacing any earlier one). */
+  showCompletion: (p: CompletionPopup) => void
+  /** Close the completion popup and drop any snooze it was on. */
+  dismissCompletion: () => void
+  /** Hide the completion popup now and bring the same one back after COMPLETION_SNOOZE_MS. */
+  snoozeCompletion: () => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
   offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
@@ -548,6 +557,10 @@ export interface State {
   refreshAgentInbox: () => Promise<void>
   /** Mark one "While you were away" run read, or every run in the window when `runId` is null. Optimistic. */
   markInboxRunSeen: (runId: string | null) => Promise<void>
+  /** Erase one "While you were away" message from the journal. The chat it ran in is untouched. */
+  deleteInboxRun: (runId: string) => Promise<void>
+  /** Erase every "While you were away" message in the current window. Runs still going are left. */
+  clearInbox: () => Promise<void>
   refreshJobs: () => Promise<void>
   /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
   createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
@@ -649,6 +662,8 @@ export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: u
 /** Each live toast's remaining time; `at` is when its running timer started (unset while held). */
 const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnType<typeof setTimeout> }>()
 let toastsHeld = false
+/** The completion popup's snooze timer. Its own, so dismissing a toast never clears a snoozed popup. */
+let completionTimer: ReturnType<typeof setTimeout> | null = null
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
@@ -1337,10 +1352,13 @@ export const useStore = create<State>((set, get) => {
     runNoticed.add(key)  // the `/events` feed sees the same run end too: one notice per run, whichever path got there first
     if (kind === 'approval') void get().refreshAgentInbox()  // the Today badge counts every open card, this one too
     if (get().settings.chatNotify === false) return true
-    if (visible && typeof document !== 'undefined' && document.hasFocus()) return true
+    const focused = typeof document !== 'undefined' && document.hasFocus()
+    if (visible && focused) return true
     // A desk's chat: its status notifier already says finished / failed / needs you, so one run is not two banners.
     if (get().desks.some((d) => d.conversation_id === convId) && (kind === 'approval' || get().settings.deskNotify !== false)) return true
     const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
+    // In-app twin of the OS notice: a reply that finished off-screen gets a popup with Open/Snooze/Dismiss.
+    if (shouldShowCompletion(kind, visible, focused)) get().showCompletion({ convId, runId, title })
     const onClick = (): void => {
       try { window.os.showMain() } catch { /* no bridge: window.focus() in notify() is the fallback */ }
       void get().selectChat(convId)
@@ -1800,6 +1818,7 @@ export const useStore = create<State>((set, get) => {
     uploadPreview: null,
     mailComposePrefill: null,
     toasts: [],
+    completionPopup: null,
     paletteOpen: false,
     helpOpen: false,
     helpSection: 'shortcuts',
@@ -1996,9 +2015,9 @@ export const useStore = create<State>((set, get) => {
     setProjectModal: (projectModal) => set({ projectModal }),
     openUploadPreview: (uploadPreview) => set({ uploadPreview }),
     openMailCompose: (mailComposePrefill) => { set({ mailComposePrefill }); get().setView('mail') },
-    toast: (text, kind = 'info', action) => {
+    toast: (text, kind = 'info', action, onClick) => {
       const id = ++toastSeq
-      set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
+      set((s) => ({ toasts: [...s.toasts, { id, text, kind, action, onClick }] }))
       toastClocks.set(id, { left: action ? UNDO_MS : kind === 'error' ? 6000 : 3500 })
       if (!toastsHeld) get().holdToasts(false)
     },
@@ -2022,6 +2041,21 @@ export const useStore = create<State>((set, get) => {
           c.timer = setTimeout(() => get().dismissToast(id), Math.max(c.left, 0))
         }
       }
+    },
+    showCompletion: (p) => {
+      if (completionTimer) { clearTimeout(completionTimer); completionTimer = null }
+      set({ completionPopup: p })
+    },
+    dismissCompletion: () => {
+      if (completionTimer) { clearTimeout(completionTimer); completionTimer = null }
+      set({ completionPopup: null })
+    },
+    snoozeCompletion: () => {
+      const p = get().completionPopup
+      if (!p) return
+      set({ completionPopup: null })
+      if (completionTimer) clearTimeout(completionTimer)
+      completionTimer = setTimeout(() => { completionTimer = null; set({ completionPopup: p }) }, COMPLETION_SNOOZE_MS)
     },
     offerUndo: (what, items, note) => {
       get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
@@ -2108,6 +2142,8 @@ export const useStore = create<State>((set, get) => {
     selectChat: async (id) => {
       set({ view: 'chat', settingsOpen: false, traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
+      // Opening the chat the completion popup named settles it: there is nothing left to open.
+      if (get().completionPopup?.convId === id) get().dismissCompletion()
       set({ focusedConversationId: id })
       get().clearSessionStatus(id)
       // A session mid-run holds content the backend has not persisted yet, so never refetch over it.
@@ -3271,7 +3307,7 @@ export const useStore = create<State>((set, get) => {
       // A drafted skill waits in Library → Skills; the toast's one action takes the user there to decide.
       const skillDrafted = !!(l.skill_candidates?.length || l.skill_revisions?.length)
       const review = skillDrafted ? { label: 'Review', run: () => { get().setLibraryTab('skills'); get().setView('library') } } : undefined
-      get().toast(text, 'learned', review ?? undo)
+      get().toast(text, 'learned', review ?? undo, added.length ? () => get().showMemories(added) : undefined)
       if (skillDrafted) void get().refreshSkills()
       refreshAll()
     },
@@ -3433,6 +3469,25 @@ export const useStore = create<State>((set, get) => {
       } catch {
         void get().refreshAgentInbox()
       }
+    },
+    deleteInboxRun: async (runId) => {
+      // Optimistic: the row leaves at once, and the re-read puts the truth back if the server refused.
+      set((st) => (st.agentInbox ? { agentInbox: withoutInboxRuns(st.agentInbox, [runId]) } : {}))
+      try {
+        await api.inboxRunDelete(runId)
+      } catch (e) {
+        get().toast(`Could not delete that run: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
+    },
+    clearInbox: async () => {
+      try {
+        const res = await api.inboxClear()
+        if (res.skipped) get().toast(`Cleared ${res.deleted} run${res.deleted === 1 ? '' : 's'}; ${res.skipped} still running`, 'info')
+      } catch (e) {
+        get().toast(`Could not clear the inbox: ${(e as Error).message}`, 'error')
+      }
+      void get().refreshAgentInbox()
     },
     refreshJobs: async () => {
       const seen = jobsEdits

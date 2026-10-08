@@ -88,6 +88,12 @@ DEFAULTS: dict[str, Any] = {
     # "off". Private addresses, the MCP taint rule, deny rules and permissionMode are unchanged. migration 25 turns it on for
     # an install that already has user data; a fresh install starts off.
     "allowAllConnections": False,
+    # Off by default. A reply that has read content from outside Grain (a web page, mail, a connector) otherwise asks
+    # before a shell command that could reach the network and before a write outside the desk workspace, because what
+    # it read could be steering it. On, exactly those two taint-forced cards are lifted: an unsandboxed shell command,
+    # credential stores, Grain's own data folder and app, the destructive-command floor, PROMPT_WRITES, ask_locked
+    # tools, the network-tool taint rule and cancel_send all still ask, and every deny rule and off mode still wins.
+    "trustExternalContent": False,
     # Coding goes to a coding agent (coding_route.py): Grain's own file writers and file-changing shell commands are refused
     # inside a git work tree under every permission mode, and the agents are told to use coding_session_start. codingAgent is
     # the agent they are told to start: "opencode", "claude", or "any" (the agent picks). A code default: nothing to migrate.

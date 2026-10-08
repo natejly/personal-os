@@ -219,6 +219,7 @@ function ReportBody({ text }: { text: string }): JSX.Element {
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const deleteInboxRun = useStore((s) => s.deleteInboxRun)
   const chatFace = useChatFaceById(r.conversation_id)
   // An unread problem opens itself; Mark all read collapses it. A row the user opened stays open — that click
   // marks it read too, and a click must not undo itself.
@@ -258,6 +259,9 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         <span className="muted small inbox-when" title={r.attempt > 1 ? 'Re-launched after the earlier run ended in an error' : undefined}>
           {fmtWhen(r.fired_at)}{r.test ? ' · test' : r.manual ? ' · by hand' : ''}{r.attempt > 1 ? ` · retry ${r.attempt}` : ''}
         </span>
+        {/* Direct delete: the row leaves now and the chat it ran in is kept. A run still going is refused by the server. */}
+        <button className="icon-btn sm" title="Delete this message" aria-label={`Delete the ${r.job} run message`}
+          onClick={() => void deleteInboxRun(r.run_id)}><X size={13} /></button>
       </div>
       {open && (
         <>
@@ -792,7 +796,7 @@ export function NewTask({ onDone, job, draft, agentId }: { onDone: () => void; j
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
+  const { refreshJobs, setJobEnabled, setView, openFiles, openDoc, goToDesk, selectChat, setLibraryTab, markDeskSeen, markInboxRunSeen, rejectJobProposals, clearInbox } = useStore()
   const draft = useStore((s) => s.routineDraft)
   const [showJobs, setShowJobs] = useState(!!draft)
   const [adding, setAdding] = useState(!!draft)
@@ -936,9 +940,11 @@ export default function AgentInbox(): JSX.Element | null {
           <h5>While you were away <span className="muted small">
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}
             {away.length} run{away.length === 1 ? '' : 's'}</span>
-            {(box.counts.unseen_runs ?? 0) > 0 && (
-              <><span className="spacer" /><button className="link small" onClick={() => void markInboxRunSeen(null)}>Mark all read</button></>
-            )}</h5>
+            <span className="spacer" />
+            {(box.counts.unseen_runs ?? 0) > 0 && <button className="link small" onClick={() => void markInboxRunSeen(null)}>Mark all read</button>}
+            <button className="link small" onClick={() => {
+              if (confirm(`Clear the Agent inbox? This deletes these ${away.length} run message${away.length === 1 ? '' : 's'}; the chats they ran in are kept.`)) void clearInbox()
+            }}>Clear</button></h5>
           <ul className="inbox-list">{away.map((r) => <RunCard key={r.run_id} r={r} />)}</ul>
         </div>
       )}

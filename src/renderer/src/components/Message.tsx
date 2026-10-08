@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite, splitSources } from '../lib/remarkCites'
-import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2 } from 'lucide-react'
+import { AlertCircle, User, Share2, FileText, Activity, ChevronRight, Play, RotateCw, GraduationCap, CalendarClock, Pencil, GitBranch, Trash2, Zap } from 'lucide-react'
 import type { Attachment, Message, RunChanges, ToolEvent } from '@shared/types'
 import { useStore, useMessageSubagents, useSubagents } from '../store'
 import { api } from '../lib/api'
@@ -12,6 +12,8 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { ShowCtx } from './ShowButton'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { replyMetrics } from '../lib/replyMetrics'
+import { compactCount } from '../lib/usageFormat'
 import { parseChatMessage } from '../lib/chatLink'
 import { parseQuotedMessage } from '../lib/selectionActions'
 import { modelLabel } from '../lib/modelLabel'
@@ -270,6 +272,20 @@ function TraceChip({ message }: { message: Message }): JSX.Element | null {
   )
 }
 
+/** The per-reply cost chip: total tokens and generation speed, on every finished reply that has a trace.
+ *  It reads no store state, so it stays out of MessageView's render path. */
+function TokenChip({ message }: { message: Message }): JSX.Element | null {
+  const m = replyMetrics(message.trace)
+  if (!m) return null
+  const speed = m.tokPerSec != null ? ` · ${m.tokPerSec.toFixed(1)} tok/s` : ''
+  const title = `${m.tokens.toLocaleString()} tokens used${m.tokPerSec != null ? ` at ${m.tokPerSec.toFixed(1)} tokens/second` : ''}`
+  return (
+    <span className="ctx-chip" title={title}>
+      <span><Zap size={11} />{compactCount(m.tokens)} tok{speed}</span>
+    </span>
+  )
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
@@ -380,6 +396,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               </button>
             )}
             {showContextChips && <TraceChip message={message} />}
+            {!isUser && !streaming && <TokenChip message={message} />}
             {!bare && <CopyButton text={content} />}
             {resendable && isUser && !message.kind && (
               <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>

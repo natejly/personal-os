@@ -17,7 +17,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="spottest-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import app as appmod  # noqa: E402
-from personal_os import llm, shell  # noqa: E402
+from personal_os import llm, shell, workers  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 from personal_os.working import FENCE_RULE, INLINE_CHARS, escape_tags, fence_untrusted  # noqa: E402
 
@@ -118,6 +118,29 @@ def test_fence_rule_is_sent_only_with_tools() -> None:
     assert FENCE_RULE in "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
     run([], settings={"useTools": False})
     assert FENCE_RULE not in "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
+
+
+def test_direct_answer_hint_is_sent_only_with_tools() -> None:
+    def system() -> str:
+        return "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
+    run([])
+    assert "Be direct: when what is already in front of you answers the question" in system()
+    run([], settings={"useTools": False})
+    assert "Be direct: when what is already in front of you answers the question" not in system()
+
+
+def test_tools_hint_carries_orchestration_and_observability() -> None:
+    def system() -> str:
+        return "\n".join(m["content"] for m in SEEN[-1] if m["role"] == "system" and isinstance(m.get("content"), str))
+    run([])
+    text = system()
+    assert appmod.TOOLS_HINT in text
+    assert "own each request end to end" in appmod.TOOLS_HINT.lower()
+    assert workers.OBSERVABILITY_HINT in appmod.TOOLS_HINT and "name what is running" in appmod.TOOLS_HINT
+    assert workers.ORCHESTRATION_HINT in text and workers.OBSERVABILITY_HINT in text
+    # The agent-stance fragments carry the same wording, so the rule reads the same wherever it lands.
+    for hint in (appmod.FRONT_AGENT_HINT, appmod.PROACTIVE_HINT):
+        assert workers.ORCHESTRATION_HINT in hint and workers.OBSERVABILITY_HINT in hint
 
 
 def test_agent_stance_hint_is_sent_only_with_tools() -> None:

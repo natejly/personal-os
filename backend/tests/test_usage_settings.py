@@ -95,12 +95,12 @@ def test_alias_pricing_and_reprice_keeps_known_costs() -> None:
     assert pricing.cost({"modelPrices": {}}, "accounts/fireworks/models/minimax-m3", 10, 10) is None, "no price is unknown, never a guess"
     assert pricing.cost({"modelPrices": {}}, FW, 1_000_000, 0) == 3.0, "the Fireworks list price covers the full id"
 
-    _rec(u, model="glm-5.3", cost=0.42)      # priced by the proxy when it ran
+    _rec(u, model="mystery-model", cost=0.42)  # priced by a proxy that is gone; no price now
     _rec(u, model=FW, cost=None, pt=1_000_000, ct=0)
     n = u.reprice(pricing, cfg)
     with db.tx() as c:
         costs = {r["model"]: r["cost"] for r in c.execute("SELECT model, cost FROM usage_log")}
-    assert n == 1 and costs["glm-5.3"] == 0.42 and costs[FW] == 1.0
+    assert n == 1 and costs["mystery-model"] == 0.42 and costs[FW] == 1.0
 
 
 def test_embedding_calls_are_logged() -> None:

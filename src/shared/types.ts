@@ -1556,6 +1556,11 @@ export interface Settings {
   microAt?: number
   /** Coding sessions: how many run at once (1-20, default 3). */
   codingSessionMaxConcurrent?: number
+  /** Coding goes to a coding agent: Grain's own agents may not edit files or run file-changing commands inside a git repo,
+   *  and are told to use coding_session_start. Missing means on. */
+  codingRoute?: boolean
+  /** The coding agent they are told to start. Missing means 'any' (the agent picks). */
+  codingAgent?: 'any' | 'opencode' | 'claude'
   /** Background workers. Past `delegationAfterRounds` tool rounds in one reply the assistant hands remaining work to a worker (default on, 2, 1-20). */
   delegationForce?: boolean
   delegationAfterRounds?: number

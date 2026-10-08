@@ -242,10 +242,10 @@ def test_a_steer_after_the_final_done_gets_a_409_even_while_teardown_runs() -> N
     real = appmod.toolbox.shell.kill_conversation
     gate = {"entered": False}
 
-    async def slow(conv_id: str) -> Any:
+    async def slow(conv_id: str, **kw: Any) -> Any:
         gate["entered"] = True
         await asyncio.sleep(1.0)
-        return await real(conv_id)
+        return await real(conv_id, **kw)
 
     appmod.toolbox.shell.kill_conversation = slow
     try:

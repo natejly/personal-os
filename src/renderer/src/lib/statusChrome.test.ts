@@ -1,13 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { inlinePlanShown, stripShown, workersCardShown } from './statusChrome'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { inlinePlanShown, workersCardShown } from './statusChrome'
 
-const ALL = ['draft', 'queued', 'planning', 'awaiting_plan', 'working', 'needs_approval', 'blocked', 'paused', 'interrupted', 'review', 'done', 'failed', 'stopped'] as const
+const src = (f: string): string => readFileSync(join('src/renderer/src', f), 'utf8')
 
-test('no strip for the main agent in any state: it only shows while a background worker is live', () => {
-  for (const s of ALL) assert.equal(stripShown(s, 0), false, s)
-  assert.equal(stripShown(undefined, 0), false)
-  for (const s of ALL) assert.equal(stripShown(s, 1), true, s)
+// The main agent's status bar (face, "Working", Pause / Stop / panel above the composer) came back once by being gated on
+// live workers. Nothing in a chat may render it, running or not, workers or not; the workers card is the only strip.
+test('no main-agent status bar renders in a chat, while workers still get their card', () => {
+  const chat = src('components/ChatView.tsx')
+  assert.doesNotMatch(chat, /<DeskStrip\b/)
+  assert.doesNotMatch(src('components/DeskStrip.tsx'), /export default|desk-strip/)
+  assert.match(chat, /<WorkersPanel conversationId=/)
+  assert.equal(workersCardShown(1), true)
 })
 
 test('the workers card shows only while a worker is live, never for finished ones', () => {

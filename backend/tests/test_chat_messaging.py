@@ -203,6 +203,31 @@ def test_a_silent_target_sends_back_a_note() -> None:
     assert [m["kind"] for m in msgs(b)] == ["chat_in"]  # the silent reply row is removed
 
 
+def _ended_reply(text: str) -> str:
+    a, b = chat("End sender"), chat("End target")
+    link = appmod.chat_links.send(a, b, "hi", 0)
+
+    async def go() -> str:
+        fut = asyncio.get_running_loop().create_future()
+        appmod.chat_links.waiters[link["id"]] = fut
+        appmod.chat_links.ended({"id": link["id"], "kind": "chat_in"}, text)
+        return fut.result()
+    return asyncio.run_coroutine_threadsafe(go(), appmod._loop).result(timeout=10)  # type: ignore[arg-type]
+
+
+def test_ended_never_relays_the_marker() -> None:
+    assert _ended_reply("NO_REPLY") == "(That chat had nothing to send back.)"
+    assert _ended_reply("Answer.\nNO_REPLY") == "Answer."
+
+
+def test_tell_chat_strips_the_marker_and_skips_empty() -> None:
+    cid = chat("Told")
+    appmod._tell_chat(cid, "NO_REPLY")
+    assert msgs(cid) == []
+    appmod._tell_chat(cid, "Hi\nNO_REPLY")
+    assert [m["content"] for m in msgs(cid)] == ["Hi"]
+
+
 def test_a_message_to_a_busy_chat_waits_for_its_reply_to_end() -> None:
     a, b = chat("Sender busy"), chat("Busy")
     appmod._chat_waiting.discard(b)

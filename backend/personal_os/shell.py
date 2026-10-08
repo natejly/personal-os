@@ -577,8 +577,11 @@ class ShellJobs:
         return len(mine)
 
     async def kill_run(self, run_id: str) -> int:
-        """End every live job one run started (a worker that ended, however it ended), together."""
-        mine = [j for j in self.jobs.values() if run_id and j.live() and j.run_id == run_id]
+        """End every live job one run started (a worker that ended, however it ended), together. A coding session's
+        OpenCode job (conversation `coding:<id>`) is not one of them: it outlives a normal finish, and a stop ends it
+        through codingagents.CodingSessions.stop_owned, which records why."""
+        mine = [j for j in self.jobs.values() if run_id and j.live() and j.run_id == run_id
+                and not (j.conversation_id or "").startswith("coding:")]
         await asyncio.gather(*(self.kill(j) for j in mine), return_exceptions=True)
         return len(mine)
 

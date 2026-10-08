@@ -311,6 +311,57 @@ class ClaudeDriver(CodingTestCase):
         self.assertEqual(again.get(row["id"])["status"], "done")
 
 
+class Ownership(CodingTestCase):
+    """A session belongs to the run that started it and stops when that run is stopped, never when it finishes."""
+
+    async def owned(self, owner: str, **ctx: Any) -> dict[str, Any]:
+        self.job_files("deadbeef", "working", "reading files")
+        return await self.cs.start("claude", str(self.repo), "fix the bug", ctx={"agent_run_id": owner, **ctx})
+
+    async def test_the_calling_worker_owns_the_session_else_the_reply(self) -> None:
+        row = await self.owned("worker-1", run_id="reply-1")
+        self.assertEqual(row["run_id"], "worker-1")
+        self.job_files("deadbeef", "working")
+        row = await self.cs.start("claude", str(self.repo), "x", ctx={"run_id": "reply-2"})
+        self.assertEqual(row["run_id"], "reply-2")
+
+    async def test_stopping_the_owner_stops_its_live_sessions_with_the_reason(self) -> None:
+        mine = await self.owned("worker-1")
+        self.job_files("deadbeef", "working")
+        other = await self.owned("worker-2")
+        Path(mine["worktree"]).mkdir(parents=True, exist_ok=True)
+        self.fake.out["--porcelain"] = (True, " M src/a.py\n")
+        out = await self.cs.stop_owned("worker-1", "the worker that started it was stopped")
+        self.assertEqual([r["id"] for r in out], [mine["id"]])
+        row = self.cs.get(mine["id"])
+        self.assertEqual(row["status"], "stopped")
+        self.assertIn("the worker that started it was stopped", row["detail"])
+        self.assertIn("uncommitted changes are kept in " + row["worktree"], row["detail"])
+        self.assertEqual(self.cs.get(other["id"])["status"], "working")
+        self.assertFalse(any("remove" in a or "rm" in a for a in self.fake.calls), "the worktree is never removed")
+        # the CLI's own "stopped" state must not overwrite why it was stopped
+        self.job_files("deadbeef", "stopped", "stopped")
+        self.assertIn("worker that started it", self.cs.refresh(row)["detail"])
+
+    async def test_finished_sessions_unknown_owners_and_closing_are_left_alone(self) -> None:
+        row = await self.owned("worker-1")
+        self.cs._apply(row, status="done")
+        self.assertEqual(await self.cs.stop_owned("worker-1", "x"), [])
+        self.assertEqual(await self.cs.stop_owned(None, "x"), [])
+        self.job_files("deadbeef", "working")
+        live = await self.owned("worker-3")
+        self.cs.closing = True
+        self.assertEqual(await self.cs.stop_owned("worker-3", "x"), [])
+        self.assertEqual(self.cs.get(live["id"])["status"], "working")
+
+    async def test_a_stop_that_fails_says_so_instead_of_claiming_stopped(self) -> None:
+        row = await self.owned("worker-1")
+        self.fake.out["/bin/claude stop deadbeef"] = (False, "daemon not reachable")
+        out = await self.cs.stop_owned("worker-1", "the worker was stopped")
+        self.assertNotEqual(out[0]["status"], "stopped")
+        self.assertIn("could not stop it", out[0]["detail"])
+
+
 class OpencodeDriver(CodingTestCase):
     def test_job_status_mapping(self) -> None:
         def job(status: str, code: int | None = None) -> Any:

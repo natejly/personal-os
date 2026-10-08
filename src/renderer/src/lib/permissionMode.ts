@@ -18,13 +18,8 @@ export const needsConfirm = (from: PermissionMode, to: PermissionMode): boolean 
 
 export const pillLabel = (m: PermissionMode): string => MODES.find((x) => x.id === m)?.pill ?? 'Auto'
 
-/** Hover text and accessible name for the composer pill. Under Allow everything the red pill is the only cue, so it says so. */
+/** Hover text and accessible name for the composer pill. Under Allow everything its red text is the only cue, so it says so. */
 export const pillTitle = (m: PermissionMode): string =>
   m === 'allow_all'
     ? 'Dangerously allow all is on: Grain acts without asking. It still asks before permanent deletes, disk wipes, force-pushes and sending email. Click to change it in Settings.'
     : `Permission mode: ${pillLabel(m)}. Click to change it in Settings.`
-
-/** Second composer pill, independent of the mode: shown only while "Allow all domains and MCP servers" is on. */
-export const ALL_CONNECTIONS_LABEL = 'All domains + MCP'
-export const allConnectionsTitle = 'All domains and MCP servers are allowed: fetching, browsing, shell network and every connector tool run without a host list or per-tool approval. Click to change it in Settings.'
-export const allConnectionsOn = (s: { allowAllConnections?: unknown } | null | undefined): boolean => s?.allowAllConnections === true

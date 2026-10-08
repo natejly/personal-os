@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-from . import providers
+from . import auth_breaker, providers
 from .limits import (BROWSER_IDLE_SECONDS, CODING_SESSION_MAX_CONCURRENT, BROWSER_MAX_TABS, COMPACT_AT, COMPACT_AT_TOKENS, COMPACT_KEEP_RECENT, COMPACT_KEEP_TOKENS, MICRO_AT_TOKENS, CONSOLIDATE_EVERY, DELEGATION_AFTER_ROUNDS, DESK_PARK_AFTER_SECONDS, FETCH_CACHE_SECONDS, FILE_SNAPSHOT_BUDGET_MB, FILE_SNAPSHOT_MAX_BYTES, FILE_SNAPSHOT_RETAIN_DAYS, GMAIL_SEND_HOLD_SECONDS, TELEGRAM_LONG_RUN_MINUTES, JOB_EXPIRE_DAYS, JOB_FAILURE_STREAK_LIMIT, JOB_RETRY_BACKOFF_S, LLM_IDLE_SECONDS, LLM_RETRIES, MCP_DEFER_ABOVE, MICRO_AT, MICRO_KEEP, PROPOSAL_EXPIRE_DAYS, RETAIN_APPROVAL_DAYS, RETAIN_TOOL_RESULT_DAYS, RETAIN_TRACE_DAYS, RETAIN_USAGE_DAYS, RETRIEVAL_CANDIDATES, RETRIEVAL_MIN_SIMILARITY, RETRIEVAL_PER_DOC_CAP, SANDBOX_KEEP_DAYS, SHELL_MAX_BACKGROUND, SHELL_TIMEOUT_SECONDS, SUBAGENT_MAX_DEPTH, SUBAGENT_STALE_SECONDS, SUBAGENT_TOOL_SECONDS, TOOL_DEFER_ABOVE, TOOL_READ_RETRIES, WORKER_MAX_CONCURRENT, WORKFLOW_MAX_FAN_OUT)
 from .permissions import DEFAULTS as PERMISSION_DEFAULTS
 log = logging.getLogger("personal_os.llm")
@@ -711,9 +711,13 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
     provider's own error is raised instead. A 400/422 that names `reasoning_effort` or `service_tier` is resent with
     the field stepped down or dropped, without using an attempt; the body is edited in place, so the caller can see
     what was dropped.
+
+    A key the provider already rejected fails here before any request (auth_breaker), with kind "auth" and no status.
     """
     retries = _retries(settings)
     url = _url(settings, "/chat/completions", body.get("model"))
+    if (held := auth_breaker.check(settings)) is not None:
+        raise LLMError(held, kind="auth")
     stepped = dropped = False
     sent_effort = body.get("reasoning_effort")
     while True:
@@ -744,6 +748,7 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
                 raise _Aborted("cancelled") from e
             continue
         if r.status_code < 400:
+            auth_breaker.success(settings)
             if sent_effort and (stepped or dropped):
                 _learn_cap(settings, str(body.get("model") or ""), "none" if dropped else "high")
             yield {"type": "response", "response": r, "cm": cm, "attempt": attempt}
@@ -751,6 +756,7 @@ async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], bo
         retry_after = retry_after_from(r.headers, status=r.status_code)
         kind = classify_error(r.status_code, r.text)
         await _close_cm(cm)
+        auth_breaker.failure(settings, r.status_code, r.text)
         field = _rejected_optional(r.status_code, r.text, body)
         if field == "reasoning_effort" and body[field] in ("xhigh", "max") and not stepped:
             stepped = True

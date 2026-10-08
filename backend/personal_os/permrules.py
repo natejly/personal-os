@@ -687,11 +687,9 @@ def _in_temp(arg: str, cwd: str | None, roots: list[str]) -> bool:
         a = os.path.dirname(re.split(r"[*?\[]", a)[0] + "x") or "."
     if not os.path.isabs(a):
         a = os.path.join(cwd or os.path.expanduser("~"), a)
-    for p in {os.path.normpath(a), os.path.realpath(a)}:
-        for r in roots:
-            if p.startswith(r + "/") or (glob and p == r):
-                return True
-    return False
+    # Both as spelled (no `..` climbing out) and resolved (no link inside a temp folder pointing at user files).
+    return all(any(p.startswith(r + "/") or (glob and p == r) for r in roots)
+               for p in (os.path.normpath(a), os.path.realpath(a)))
 
 
 def _git_force_push(args: list[str]) -> bool:
@@ -903,11 +901,13 @@ def claude_code_floor() -> dict[str, Any]:
     a background session shows here as needs_you, the session's version of a card. Deny what no mode lifts here: Grain's
     own data folder and app (mac.protected_paths, refused to every file tool) and disk wipes / formatting (the hardline
     list). Ask for what the floor cards: the credential stores the shell sandbox denies (mac.CRED_*, browser cookie and
-    password files, .env, private keys) and the Keychain CLI, deletes that skip the Trash, force-pushes, and sending mail
+    password files, .env, private keys) and the Keychain CLI, force-pushes, and sending mail
     through the CLI's own Gmail connector (CLAUDE_MAIL_SENDS; other mail servers the user added are not known here). Built from
-    the same lists as `allow_all_floor` and the sandbox so they cannot drift. Best effort like the shell floor: Bash rules
-    match the command as written (a delete inside `sh -c`, behind `sudo`, or in a script is not seen; temp folders are not
-    exempt), and Read/Edit rules cover Claude Code's file tools and the file commands it recognises in Bash only."""
+    the same lists as `allow_all_floor` and the sandbox so they cannot drift. Bash rules match the command as written, so
+    deletes have no rule here: the session's PreToolUse hook (claude_hook) judges them with the shell floor's own parser,
+    through `sh -c`, `eval`, `sudo`, `xargs`, `find -exec` and chains, and lets temp folders and the session's own
+    worktree through. The Bash rules below stay as a second check for the forms written plainly. Read/Edit rules cover
+    Claude Code's file tools and the file commands it recognises in Bash only."""
     from . import mac
     deny: list[str] = []
     ask: list[str] = []
@@ -920,7 +920,6 @@ def claude_code_floor() -> dict[str, Any]:
     paths += [".env", ".env.*"] + [f"id_{k}" for k in mac.KEY_TYPES]  # a bare name matches at any depth
     ask += [f"{t}({p})" for p in paths for t in ("Read", "Edit")]
     ask += [f"Bash(security {v}*)" for v in KEYCHAIN_VERBS]
-    ask += [f"Bash({c} *)" for c in sorted(RM_COMMANDS)] + ["Bash(find * -delete*)", "Bash(find * -exec rm *)"]
     for flag in ("--force", "--mirror", "--delete", "-f", "-d"):  # --force* covers --force-with-lease
         ask += [f"Bash(git push {flag}*)", f"Bash(git push * {flag}*)"]
     # A +refspec forces. A :refspec delete has no rule: a pattern ending in `:*` is Claude Code's prefix syntax, so

@@ -22,6 +22,8 @@ The rules the rest of the app relies on:
     run owns) its agent_runs.updated_at is bumped at most every RUN_HEARTBEAT_SECONDS. A child that ends early carries
     why in the row's error (ENDED_EARLY), and a resumed child replays its predecessor's executed calls instead of
     running a write again (RunStore.call_once inherit).
+  - the coding sessions a child starts are its own (coding_sessions.run_id = its id). A child that is stopped (any
+    SESSION_STOPS exit reason) stops them with a reason on the row; one that completes or errors leaves them running.
 """
 from __future__ import annotations
 
@@ -72,6 +74,15 @@ SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill", "opencode_run", "coding_
 UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
 # What an interrupted child's run row says, by exit reason: an empty error left the user guessing why a worker stopped.
+# exit reasons that stop the coding sessions a child started (codingagents.stop_owned), and how the row says it. A
+# completed child or one that errored leaves them running: a session started to work in the background keeps going.
+SESSION_STOPS = {
+    "stopped": "was stopped",
+    "stale": "was stopped by the hang watchdog",
+    "stuck": "was stopped by the stuck breaker",
+    "interrupted": "was stopped with the reply or agent that started it",
+    "shutdown": "was halted at app shutdown",
+}
 ENDED_EARLY = {
     "stopped": "Stopped by the user.",
     "stale": "Stopped by the hang watchdog: no model or tool progress for too long.",
@@ -1290,6 +1301,16 @@ class Subagents:
                     await asyncio.shield(jobs.kill_run(ch.id))
             except BaseException:  # noqa: BLE001 - a second cancel or a kill that failed must not skip `finished`
                 log.warning("could not end the jobs of worker %s", ch.id, exc_info=True)
+        if ch.exit_reason in SESSION_STOPS:  # stopped, not finished: the coding sessions it started stop with it
+            coding = getattr(self.toolbox, "coding", None)
+            how = SESSION_STOPS[ch.exit_reason]
+            if ch.exit_reason == "stopped" and ch.error:  # who stopped it, e.g. "Stopped by the user."
+                how = "was " + ch.error[0].lower() + ch.error[1:].rstrip(".")
+            try:
+                if coding is not None:
+                    await asyncio.shield(coding.stop_owned(ch.id, f"the {'worker' if ch.detached else 'subagent'} that started it {how}"))
+            except BaseException:  # noqa: BLE001 - as above: `finished` must still be set
+                log.warning("could not stop the coding sessions of %s", ch.id, exc_info=True)
         if not ch.text:
             ch.text = "(the subagent produced no text)" if ch.state != "error" else f"(the subagent failed: {ch.error})"
         try:

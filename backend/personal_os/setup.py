@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import provider_keys, providers
+from . import auth_breaker, provider_keys, providers
 
 # Tests swap in an httpx.MockTransport; production leaves it None.
 _transport: httpx.AsyncBaseTransport | None = None
@@ -106,7 +106,8 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
     fail = lambda msg: {"ok": False, "error": msg, "latencyMs": None, "models": None}  # noqa: E731
     if not base:
         return fail("Enter a base URL first.")
-    headers = _headers(_resolve_key(body, stored, secrets))
+    key = _resolve_key(body, stored, secrets)
+    headers = _headers(key)
     t0 = time.time()
     models: list[str] | None = None
     try:
@@ -141,6 +142,7 @@ async def test_connection(body: SetupIn, stored: dict[str, Any] | None = None, s
         return fail(f"Model {model} not found.")
     if r.status_code >= 400:
         return fail(f"The provider returned {r.status_code}: {_error_text(r)}")
+    auth_breaker.success({"baseUrl": base, "apiKey": (key or "").strip()})  # a passing Test reopens a held key at once
     return {"ok": True, "error": None, "latencyMs": int((time.time() - t0) * 1000), "models": models}
 
 

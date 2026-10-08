@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from .tools import ToolSpec, _obj, tool_error
 from .working import escape_tags, fence_untrusted
+from .workers import strip_no_reply
 
 KINDS = ("chat_in", "chat_reply")
 MAX_DEPTH = 3
@@ -193,8 +194,9 @@ class ChatLinks:
         if chat_link.get("kind") != "chat_in":
             self._set(link["id"], status="done")
             return
+        text = strip_no_reply(text)  # the marker is never relayed, alone or trailing a real answer
         reply = ("(That chat stopped before replying.)" if stopped else f"(That chat's reply failed: {error})" if error
-                 else "(That chat had nothing to send back.)" if silent or not text.strip() else text)[:TEXT_CHARS]
+                 else "(That chat had nothing to send back.)" if silent or not text else text)[:TEXT_CHARS]
         fut = self.waiters.get(link["id"])
         if fut is not None and not fut.done():
             fut.set_result(reply)

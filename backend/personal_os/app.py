@@ -4130,7 +4130,8 @@ toolbox.chat_links = chat_links
 def _push_wake_reply(text: str, attachments: list[dict[str, Any]] | None = None, conv_id: str | None = None) -> None:
     """The reply written for a finished worker (and the files it sent), to the phone when telegramPushWorkerResults is on,
     and into the Telegram chat in Grain when it came from another chat (that chat is the phone's transcript)."""
-    if not settings().get("telegramPushWorkerResults"):
+    text = workers_mod.strip_no_reply(text)
+    if not settings().get("telegramPushWorkerResults") or not (text or attachments):
         return
     telegram_bridge.push(text, attachments or None)
     texts = telegram_bridge.texts_conversation_id()
@@ -5572,7 +5573,7 @@ def _job_run_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     counts = proposals.counts([r["run_id"] for r in rows])
     out = []
     for r in rows:
-        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r.get("message_id") else ""
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r.get("message_id") else ""
         out.append(job_history.summarize_run(r, run_store.event_counts(r["run_id"]), counts.get(r["run_id"], {}), text))
     return out
 
@@ -5923,7 +5924,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     for r in runs:
         fire = r["input"] if isinstance(r.get("input"), dict) else {}
         ev = run_store.event_counts(r["run_id"])
-        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r["message_id"] else ""
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
         mine = counts.get(r["run_id"], {})
         away.append({
             "run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
@@ -8841,6 +8842,9 @@ def _desk_report(desk: dict[str, Any]) -> None:
 
 def _tell_chat(cid: str, text: str, attachments: list[dict[str, Any]] | None = None) -> None:
     """Add one assistant message to a chat and tell any open window to re-read it (callable from any thread)."""
+    text = workers_mod.strip_no_reply(text)
+    if not (text or attachments):
+        return
     convos.add_message(cid, "assistant", text, attachments=attachments or None)
     _announce_conversation(cid)
 

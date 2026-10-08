@@ -771,6 +771,8 @@ export interface Message {
   conversation_id: string
   role: Role
   content: string
+  /** Streamed text held back while it could still be the NO_REPLY marker (lib/noReply.ts); live only, never stored. */
+  held?: string
   /** Uploaded files sent with a user turn; the server inlines their text for the model. */
   attachments?: Attachment[] | null
   model: string | null

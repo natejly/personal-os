@@ -165,7 +165,7 @@ test('only calls that need the user, refused calls and actionable results stay o
   const ev = (o: Partial<ToolEvent>): ToolEvent => ({ id: 'x', name: 'web_search', arguments: {}, result_preview: '', duration_ms: 1, error: null, ...o })
   assert.equal(staysVisible(ev({})), false)
   assert.equal(staysVisible(ev({ pending: true })), false)
-  assert.equal(staysVisible(ev({ error: 'boom' })), false)
+  assert.equal(staysVisible(ev({ error: 'boom' })), true) // a failure is never folded away
   assert.equal(staysVisible(ev({ pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ name: 'propose_plan', pending: true, needs_approval: true })), true)
   assert.equal(staysVisible(ev({ blocked: 'loop' })), true)

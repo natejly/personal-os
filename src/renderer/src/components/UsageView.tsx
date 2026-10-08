@@ -157,6 +157,7 @@ export default function UsageView(): JSX.Element {
   const anyPriced = t.calls > t.unpriced
   const models: Row[] = report.by_model.map((m) => ({ ...m, key: m.model, name: shortModel(m.model), title: m.ids?.join(', ') || m.model }))
   const features: Row[] = (report.by_feature ?? []).map((f) => ({ ...f, key: f.feature, name: f.label }))
+  const sources: Row[] = (report.by_source ?? []).filter((s) => s.calls > 0).map((s) => ({ ...s, key: s.source, name: s.label }))
 
   return (
     <div className="usage">
@@ -195,6 +196,13 @@ export default function UsageView(): JSX.Element {
             {anyPriced && <ChartBlock source={charts.cost} streaming={false} />}
           </div>
 
+          {sources.length > 1 && (
+            <>
+              <h4 className="usage-sub">By source</h4>
+              <Breakdown rows={sources} label="Source" />
+            </>
+          )}
+
           <h4 className="usage-sub">By model</h4>
           <Breakdown rows={models} label="Model" />
 
@@ -202,7 +210,7 @@ export default function UsageView(): JSX.Element {
             <>
               <h4 className="usage-sub">By feature</h4>
               <Breakdown rows={features} label="Feature" />
-              <p className="muted small">Coding sessions (Claude Code, OpenCode) bill their own accounts, so their tokens are not counted here.</p>
+              <p className="muted small">OpenCode's calls are read from its local history and counted here. Claude Code sessions bill their own account and are not.</p>
             </>
           )}
 

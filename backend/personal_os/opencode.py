@@ -36,6 +36,7 @@ BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.opencode/bin", "~/.local/
 INSTALL_HINT = ("opencode is not installed on this Mac. The user can install it with `brew install opencode` "
                 "(or `npm i -g opencode-ai`), then try again.")
 MAX_PROMPT = 20_000
+DEFAULT_MODEL = "fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash"  # opencode provider/model spelling; a caller model wins
 
 
 def binary() -> str | None:
@@ -124,7 +125,7 @@ async def launch(tb: Any, ctx: dict[str, Any], prompt: str, *, cwd: str | None, 
     if not shell.sandbox_available():
         raise Refused("The OS sandbox opencode runs in is not available here (it needs macOS sandbox-exec), so nothing "
                       "was run.", "fs_edit and shell_run for the change yourself")
-    use_model = str(model or "").strip()
+    use_model = str(model or "").strip() or DEFAULT_MODEL
     dr = _desk_root(tb, ctx)
     where = shell.resolve_cwd(cwd, dr or mac.home(), dr)
     timeout = None if no_timeout else timeout or default_timeout(s, None, background)

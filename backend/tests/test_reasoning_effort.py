@@ -1,4 +1,4 @@
-"""Reasoning effort: new chats start at medium, and Kimi K3 only hears a value it accepts.
+"""Reasoning effort: new chats start at high, and Kimi K3 and DeepSeek V4 only hear a value they accept.
 
 K3 rejects medium and xhigh, and a missing field is its own max. The dropdown can still say
 Medium; the wire value for that model is high.
@@ -27,11 +27,11 @@ from personal_os.llm import effort_param  # noqa: E402
 from personal_os.repos import Conversations, DEFAULT_EFFORT  # noqa: E402
 
 
-def test_new_chat_starts_at_medium() -> None:
+def test_new_chat_starts_at_high() -> None:
     with tempfile.TemporaryDirectory() as d:
         conv = Conversations(Database(d)).create(None, "hi", "kimi-k3")
-    assert conv["settings"]["effort"] == "medium"
-    assert DEFAULT_EFFORT == "medium"
+    assert conv["settings"]["effort"] == "high"
+    assert DEFAULT_EFFORT == "high"
 
 
 def test_kimi_k3_medium_is_sent_as_high() -> None:
@@ -51,8 +51,29 @@ def test_omitted_effort_stays_off_the_wire() -> None:
     assert effort_param("kimi-k3", "") is None
 
 
+def test_deepseek_v4_hears_the_level_it_runs() -> None:
+    """Fireworks runs low and medium as high and xhigh as max; none turns thinking off."""
+    for m in ("accounts/fireworks/models/deepseek-v4p1-flash", "deepseek-v4-flash", "deepseek-v4-pro"):
+        assert [effort_param(m, e) for e in ("low", "medium", "high", "xhigh", "max", "off")] == ["low", "high", "high", "max", "max", "none"]
+
+
+def test_deepseek_v4_gets_an_output_ceiling() -> None:
+    """Without max_tokens the provider stops at 2048 tokens; other models still go without."""
+    fw = {"baseUrl": "https://api.fireworks.ai/inference/v1"}
+    assert llm.output_cap(fw, "accounts/fireworks/models/deepseek-v4p1-flash") == llm.DEEPSEEK_V4_MAX_TOKENS
+    assert llm.output_cap({"baseUrl": "http://localhost:4000"}, "deepseek-v4-flash") == llm.DEEPSEEK_V4_MAX_TOKENS
+    assert llm.output_cap(fw, "accounts/fireworks/models/glm-5p3") is None
+
+
+def test_reasoning_content_only_goes_to_models_that_read_it() -> None:
+    msgs = [{"role": "assistant", "content": None, "reasoning_content": "think", "tool_calls": []}]
+    assert llm.wire_messages("deepseek-v4-flash", msgs)[0]["reasoning_content"] == "think"
+    assert "reasoning_content" not in llm.wire_messages("gpt-5", msgs)[0]
+    assert msgs[0]["reasoning_content"] == "think"  # the caller's list is not mutated
+
+
 def test_other_models_keep_medium() -> None:
-    assert effort_param("deepseek-v4-flash", "medium") == "medium"
+    assert effort_param("glm-5.3", "medium") == "medium"
     assert effort_param("glm-5.3", "xhigh") == "xhigh"
 
 
@@ -194,6 +215,15 @@ def test_complete_sends_effort_only_when_asked(monkeypatch: Any) -> None:
     assert "reasoning_effort" not in bodies[1] and "reasoning_effort" not in bodies[2]
 
 
+def test_end_carries_the_rounds_reasoning(monkeypatch: Any) -> None:
+    """The tool loop echoes this back as reasoning_content on the assistant tool-call message."""
+    sse = (b'data: {"choices":[{"delta":{"reasoning_content":"let me "}}]}\n\n'
+           b'data: {"choices":[{"delta":{"reasoning_content":"think"}}]}\n\n' + SSE)
+    evs, bodies = _stream(monkeypatch, lambda _b: httpx.Response(200, content=sse), model="deepseek-v4-flash", effort="high")
+    assert evs[-1]["reasoning"] == "let me think"
+    assert bodies[0]["reasoning_effort"] == "high" and bodies[0]["max_tokens"] == llm.DEEPSEEK_V4_MAX_TOKENS
+
+
 if __name__ == "__main__":
     # The provider cases take pytest's monkeypatch and run only under pytest.
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v) and not inspect.signature(v).parameters]
@@ -207,3 +237,4 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+

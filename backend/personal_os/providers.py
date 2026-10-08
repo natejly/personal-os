@@ -11,9 +11,9 @@ from urllib.parse import urlparse
 
 PROVIDERS: list[dict[str, Any]] = [
     {"id": "fireworks", "name": "Fireworks AI", "baseUrl": "https://api.fireworks.ai/inference/v1", "needsKey": True,
-     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/ember-1",
-     "models": ["accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
-                "accounts/fireworks/models/deepseek-v4-pro", "accounts/fireworks/models/deepseek-v4p1-flash",
+     "keyUrl": "https://fireworks.ai/account/api-keys", "defaultModel": "accounts/fireworks/models/deepseek-v4p1-flash",
+     "models": ["accounts/fireworks/models/deepseek-v4p1-flash", "accounts/fireworks/models/ember-1", "accounts/fireworks/models/glm-5p3", "accounts/fireworks/models/kimi-k3",
+                "accounts/fireworks/models/deepseek-v4-pro",
                 "accounts/fireworks/models/qwen3p8-max", "accounts/fireworks/models/gpt-oss-120b"],
      "note": None,
      "rerankModel": "accounts/fireworks/models/qwen3-reranker-8b"},
@@ -36,7 +36,7 @@ PROVIDERS: list[dict[str, Any]] = [
      "note": "Runs on this Mac; pull the model first (ollama pull llama3.2).",
      "rerankModel": ""},
     {"id": "litellm", "name": "LiteLLM proxy", "baseUrl": "http://localhost:4000", "needsKey": False,
-     "keyUrl": None, "defaultModel": "ember-1", "models": ["ember-1", "glm-5.3", "kimi-k3", "deepseek-v4-flash"],
+     "keyUrl": None, "defaultModel": "deepseek-v4-flash", "models": ["deepseek-v4-flash", "ember-1", "glm-5.3", "kimi-k3"],
      "note": "Your own proxy; model names are whatever its config defines.",
      "rerankModel": "qwen3-reranker-8b"},
     {"id": "custom", "name": "Custom (OpenAI-compatible)", "baseUrl": "", "needsKey": False,
@@ -52,9 +52,9 @@ def get(provider_id: str | None) -> dict[str, Any] | None:
 
 # Three model tiers, spelled the way each preset names them. A preset with no row (ollama, custom) uses its defaultModel.
 TIER_DEFAULTS: dict[str, dict[str, str]] = {
-    "fireworks": {"high": "accounts/fireworks/models/ember-1", "medium": "accounts/fireworks/models/glm-5p3",
-                  "low": "accounts/fireworks/models/deepseek-v4p1-flash"},
-    "litellm": {"high": "ember-1", "medium": "glm-5.3", "low": "deepseek-v4-flash"},
+    # DeepSeek V4.1 Flash on every tier: cheap enough that the high tier costs what the low one did, and it thinks.
+    "fireworks": {t: "accounts/fireworks/models/deepseek-v4p1-flash" for t in ("high", "medium", "low")},
+    "litellm": {t: "deepseek-v4-flash" for t in ("high", "medium", "low")},
     "openai": {"high": "gpt-5", "medium": "gpt-5-mini", "low": "gpt-5-nano"},
     "anthropic": {"high": "claude-opus-5-5", "medium": "claude-sonnet-5-5", "low": "claude-haiku-4-5-20251001"},
     "openrouter": {"high": "anthropic/claude-sonnet-5-5", "medium": "openai/gpt-5-mini", "low": "google/gemini-2.5-flash"},

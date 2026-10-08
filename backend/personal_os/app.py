@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import blobs, system_access, telegram
+from . import auth_breaker, blobs, system_access, telegram
 from . import approval_edits, approval_log, assist, autoreview, backups, llm, mac, macos, mcp_drift, mcp_eval, mcp_routes, mcp_search, redact, stt, tools, verify
 from . import compaction, followups, otel_export, router, thinking_summary, titles
 from . import chatlink, coding_route, fsx, opencode_usage
@@ -417,6 +417,13 @@ def _save_model_caps(caps: dict[str, Any]) -> None:
 llm.load_caps(db.get_settings().get("modelCaps") or {})
 if not any(getattr(f, "__name__", "") == "_save_model_caps" for f in llm._caps_listeners):
     llm.on_caps(_save_model_caps)
+def _auth_breaker_changed(ev: dict[str, Any]) -> None:
+    """auth_breaker listener: one app event when a rejected key starts or stops holding requests (never per run)."""
+    events.publish("provider_auth", ev)
+
+
+if not any(getattr(f, "__name__", "") == "_auth_breaker_changed" for f in auth_breaker._listeners):
+    auth_breaker.on_change(_auth_breaker_changed)
 # A desk is one conversation plus one workspace plus one approved plan. The workspace is a plain
 # directory per desk under the data dir, containment-checked after symlink resolution; Desks is the
 # state machine and the timeline over it.
@@ -789,6 +796,7 @@ def public_settings() -> dict[str, Any]:
         out[f"{k}Set"] = bool(out.get(k))
         out[k] = ""
     out["providerKeysSet"] = provider_keys.saved_for(db.secrets)  # which providers have a saved key, never the keys
+    out["providerAuthBlocked"] = auth_breaker.blocked(settings()) or ""  # computed, never stored: the active key was rejected
     out["firecrawlEnvKey"] = bool(os.environ.get("FIRECRAWL_API_KEY", "").strip())  # computed, never stored: the key came from the environment
     out["snapshotsAvailable"] = snapshots_available()  # computed, never stored: folder snapshots need a version-control binary
     return out
@@ -873,6 +881,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     if perm:
         permissions.save(db, perm)
     set_settings_via_provider(clean)
+    if {"apiKey", "baseUrl", "provider"} & clean.keys():
+        auth_breaker.reset()  # a new key or endpoint gets a fresh start, whatever the old one's record
     if "sandboxRuntime" in perm:
         sandboxes._avail = None  # the status line answers for the new runtime now, not after the cache expires
     if "telegramEnabled" in clean and _loop is not None and not _loop.is_closed():
@@ -883,6 +893,13 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         # A raised cap frees slots no desk's ending will report; launch queued desks into them now.
         # (A sync route runs in the threadpool, and launching creates tasks on the loop.)
         _loop.call_soon_threadsafe(_drain_queue)
+    return public_settings()
+
+
+@app.post("/provider/auth/reset")
+def reset_provider_auth() -> dict[str, Any]:
+    """The user's retry: let the next request try the rejected key again."""
+    auth_breaker.reset()
     return public_settings()
 
 

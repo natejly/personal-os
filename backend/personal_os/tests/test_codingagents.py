@@ -106,6 +106,32 @@ class Validation(CodingTestCase):
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", new_worktree=True, branch="taken")
 
+    async def test_opencode_gets_a_worktree_on_a_main_checkout_unless_told_otherwise(self) -> None:
+        launched: list[str] = []
+
+        async def launch(row: dict[str, Any], *_a: Any) -> None:
+            launched.append(row["worktree"])
+            row["external_id"] = "j"
+
+        main = unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True))
+        with main, unittest.mock.patch.object(ca.opencode, "binary", return_value="/bin/opencode"), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):
+            row = await self.cs.start("opencode", str(self.repo), "Fix the bug")
+            self.assertRegex(row["branch"], r"^grain/fix-the-bug-[0-9a-f]{4}$")
+            self.assertEqual(launched[-1], row["worktree"])
+            self.assertIn("worktree", self.fake.calls[-1])
+            n = len(self.fake.calls)
+            row = await self.cs.start("opencode", str(self.repo), "in place", new_worktree=False)
+            self.assertEqual((row["worktree"], row["branch"], len(self.fake.calls)), (str(self.repo), None, n))
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, False)), \
+                unittest.mock.patch.object(self.cs, "_launch_opencode", launch):  # already a linked worktree
+            row = await self.cs.start("opencode", str(self.repo), "x")
+            self.assertEqual((row["worktree"], row["branch"]), (str(self.repo), None))
+        self.job_files("deadbeef", "working")
+        with unittest.mock.patch.object(ca.opencode, "repo_of", return_value=(self.repo, True)):
+            row = await self.cs.start("claude", str(self.repo), "x")  # Claude Code's default is unchanged
+            self.assertEqual(row["branch"], None)
+
     async def test_permission_mode_and_agent_rules(self) -> None:
         with self.assertRaises(ca.CodingError):
             await self.cs.start("claude", str(self.repo), "x", permission_mode="plan")
@@ -315,6 +341,25 @@ class OpencodeDriver(CodingTestCase):
         row["status"] = "working"
         self.jobs.jobs.clear()
         self.assertEqual(self.cs.refresh(row)["status"], "blocked")
+
+    async def test_a_job_ending_publishes_the_session_at_once(self) -> None:
+        """The job registry's change hook refreshes live OpenCode sessions, so the chat card sees "done" without a poll;
+        the hook that was there before still runs."""
+        before: list[int] = []
+        jobs = SimpleNamespace(jobs={}, on_change=lambda: before.append(1))
+        cs = ca.CodingSessions(self.cs.db, jobs, self.fake, lambda e, d: self.events.append((e, d)), lambda: {})
+        wt, t = str(self.repo), 1.0
+        with cs.db.tx() as c:
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s3','opencode','j3',?,?,'n','p','working','',?,?)", (wt, wt, t, t))
+            c.execute("INSERT INTO coding_sessions(id, agent, external_id, repo_path, worktree, name, prompt, status, log_tail, "
+                      "created_at, updated_at) VALUES('s4','opencode',NULL,?,?,'n','p','starting','',?,?)", (wt, wt, t, t))
+        jobs.jobs["j3"] = SimpleNamespace(status="exited", exit_code=0, buf="", total=0, live=lambda: False)
+        self.events.clear()
+        jobs.on_change()
+        self.assertEqual(before, [1])
+        self.assertEqual([(d["id"], d["status"]) for e, d in self.events if e == "coding_session"], [("s3", "done")])
+        self.assertEqual(cs.get("s4")["status"], "starting")  # still launching: not mistaken for a lost job
 
 
 class Diff(CodingTestCase):

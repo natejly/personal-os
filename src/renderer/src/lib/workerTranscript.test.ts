@@ -21,3 +21,13 @@ test('a worker history becomes chat rows: labelled user rows, one reply per turn
   assert.deepEqual(reply.tool_events![1].arguments, {})
   assert.equal(workerRows([{ role: 'assistant', content: null, tool_calls: [{ id: 'x', function: { name: 't', arguments: '{}' } }] }], 'c', false)[0].message.tool_events![0].pending, false)
 })
+
+test("a worker's NO_REPLY is not shown in its transcript", () => {
+  const rows = workerRows([
+    { role: 'user', content: 'Check the build', from: 'agent' },
+    { role: 'assistant', content: 'NO_REPLY' }
+  ], 'conv', false)
+  assert.equal(rows[1].message.content, '')
+  const mixed = workerRows([{ role: 'assistant', content: 'Build is green.\n\nNO_REPLY' }], 'conv', false)
+  assert.equal(mixed[0].message.content, 'Build is green.')
+})

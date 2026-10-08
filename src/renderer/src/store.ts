@@ -36,6 +36,7 @@ import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQu
 import { DEFAULT_ZOOM, stepZoom } from './lib/zoom'
 import { inputChip } from './lib/deskFiles'
 import { isInternal, upsertWorker, withoutInternal } from './lib/workers'
+import { appendDelta, settleHeld } from './lib/noReply'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -868,7 +869,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'status':
       return mapMsg(ev.data.id, (m) => ({ ...m, status: ev.data.kind ? { kind: ev.data.kind, attempt: ev.data.attempt, max: ev.data.max, until: ev.data.until, reason: ev.data.reason, model: ev.data.model, why: ev.data.why } : null }))
     case 'delta':
-      return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text, status: null }))
+      return mapMsg(ev.data.id, (m) => ({ ...m, ...appendDelta(m, ev.data.text), status: null }))  // a NO_REPLY in the making never shows
     case 'thinking_summary':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: m.reasoning ? `${m.reasoning}\n${ev.data.text}` : ev.data.text, status: null }))
     case 'tool_call':
@@ -886,7 +887,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'taint':
       return withTaint(s, [ev.data.source])
     case 'done': {
-      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, attachments: ev.data.attachments ?? m.attachments, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
+      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, ...settleHeld(m), status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, attachments: ev.data.attachments ?? m.attachments, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       // `unread` counts the final done, not the first token: a chat that is mid-reply off-screen has nothing to read yet.

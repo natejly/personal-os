@@ -265,7 +265,7 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
                    "`desk_write_file` handle whole text files.")
     if has("fs_edit"):
-        out.append("- `fs_edit` makes surgical edits (read the file first).")
+        out.append("- `fs_edit` makes surgical edits (read the file first); code in a git repo goes to a coding agent instead.")
     if has("fs_glob", "fs_grep"):
         out.append("- `fs_glob` / `fs_grep` search files.")
     if has("shell_run"):
@@ -273,10 +273,12 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
             str(facts.get("shell_network")), "network reaches only package registries and hosts the user allowed")
         out.append(f"- `shell_run` runs in the workspace under the OS sandbox and can write only inside it; {net}. Long commands: "
                    "`background=true`, then `shell_poll`.")
+    if has("coding_session_start"):
+        out.append("- `coding_session_start` hands a coding task (a feature, a fix, a refactor in a git repo) to OpenCode or Claude "
+                   "Code in its own worktree; give it a self-contained brief, then check `coding_session_diff` and run the tests.")
     if has("opencode_run"):
-        out.append("- `opencode_run` hands a whole coding task (a feature, a fix, a refactor in a repo under the workspace) to a "
-                   "coding agent that edits files and runs commands there (in a repo's checkout it works in a fresh git worktree); give it "
-                   "a self-contained brief with the repo path and check the diff it reports after.")
+        out.append("- `opencode_run` runs OpenCode in the foreground for a small coding change (in a repo's checkout it works in a "
+                   "fresh git worktree); give it a self-contained brief with the repo path and check the diff it reports after.")
     if has("run_python"):
         out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
                    "writes under `outputs/` stay.")

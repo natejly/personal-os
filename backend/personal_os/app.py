@@ -353,6 +353,15 @@ app.include_router(compaction.router(compactor, convos, lambda: settings(),
                                      window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens"))))
 
 
+@app.post("/conversations/{conv_id}/clear")
+def clear_context(conv_id: str) -> dict[str, Any]:
+    """`/clear`: later turns replay only what follows this marker. The rolling summary covered the old rows, so it goes too."""
+    if not convos.get(conv_id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    compactor.clear(conv_id)
+    return convos.clear_context(conv_id)
+
+
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
     try:
         return int(cfg.get(key, default))

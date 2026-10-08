@@ -229,8 +229,11 @@ class Conversations:
         # (a dotted capital I becomes two characters) and shift every offset.
         needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
         out: dict[str, dict[str, Any]] = {}
+        from .workers import is_silent  # here, not at the top: workers imports half the app
         for r in rows:
             snip = r["snip"]
+            if is_silent(snip.replace("\x02", "").replace("\x03", "")):
+                continue  # a stored NO_REPLY is not something the user was told
             if not fts_ok:
                 m = needle.search(snip)
                 if m is None:  # LIKE's own folding found it where Python's does not: head of the row, unmarked

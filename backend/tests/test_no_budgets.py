@@ -310,10 +310,10 @@ def test_the_pricing_cache_learns_output_caps(monkeypatch: pytest.MonkeyPatch) -
 
 
 # ---------------- context shares ----------------
-def test_context_shares_scale_with_the_window() -> None:
+def test_context_shares_scale_with_the_window_up_to_the_fallback() -> None:
     small, big = limits.context_shares(8_000), limits.context_shares(1_000_000)
     assert all(small[k] < big[k] for k in limits.CONTEXT_SHARES)
-    assert big["memories"] == int(1_000_000 * limits.CONTEXT_SHARES["memories"])
+    assert big == limits.context_shares(limits.CONTEXT_WINDOW_FALLBACK)  # a 1M window gets the 128K block sizes
 
 
 def test_injected_memory_and_profile_follow_the_window() -> None:
@@ -328,10 +328,10 @@ def test_injected_memory_and_profile_follow_the_window() -> None:
         return build_context(memories=memories, graph=graph, documents=Documents(db), project=None, project_id=None, query="alpha",
                              settings={}, conv_settings={}, global_system_prompt="", memory_hits=hits, window=window)[1]
 
-    small, large = build(8_000), build(1_000_000)
-    assert len(small["memories"]) < len(large["memories"]) == 200
-    assert len(small["profile"]) < len(large["profile"]) == 40
-    assert small["trimmed"]["memories"] > 0 and "memories" not in large["trimmed"]
+    small, large, huge = build(8_000), build(limits.CONTEXT_WINDOW_FALLBACK), build(1_000_000)
+    assert len(small["memories"]) < len(large["memories"]) == len(huge["memories"])
+    assert len(small["profile"]) < len(large["profile"]) == len(huge["profile"])
+    assert small["trimmed"]["memories"] > 0 and huge["trimmed"] == large["trimmed"]
     block = "## What you remember about the user" + small["volatile_blocks"][0].split("## What you remember about the user")[1]
     assert estimate_tokens(block) <= limits.context_shares(8_000)["memories"] + 40
 

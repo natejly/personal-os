@@ -88,5 +88,35 @@ class FoldedFrontmatter(unittest.TestCase):
         self.assertEqual(p["frontmatter"]["metadata"], {"author": "me"})
 
 
+class ClearContext(unittest.TestCase):
+    """`/clear`: the transcript keeps every row; the model's replay starts after the latest live marker."""
+
+    def setUp(self) -> None:
+        from personal_os.repos import Conversations
+        d = tempfile.TemporaryDirectory(prefix="clear-")
+        self.addCleanup(d.cleanup)
+        self.convos = Conversations(Database(Path(d.name)))
+        self.cid = self.convos.create(None, "t", "m")["id"]
+
+    def test_replay_starts_after_the_marker(self) -> None:
+        self.convos.add_message(self.cid, "user", "old question")
+        self.convos.add_message(self.cid, "assistant", "old answer")
+        marker = self.convos.clear_context(self.cid)
+        self.assertEqual(marker["kind"], "clear")
+        self.convos.add_message(self.cid, "user", "fresh start")
+        self.assertEqual([r["content"] for r in self.convos.history_rows(self.cid)], ["fresh start"])
+        self.assertEqual([r["content"] for r in self.convos.history(self.cid)], ["fresh start"])
+        shown = self.convos.get(self.cid)["messages"]
+        self.assertEqual([m.get("kind") for m in shown], [None, None, "clear", None])
+
+    def test_a_superseded_marker_no_longer_cuts(self) -> None:
+        u = self.convos.add_message(self.cid, "user", "kept")
+        self.convos.clear_context(self.cid)
+        self.assertEqual(self.convos.history_rows(self.cid), [])
+        self.convos.supersede_from(self.cid, u["id"])  # edit-and-resend from before the marker hides it too
+        self.convos.add_message(self.cid, "user", "edited")
+        self.assertEqual([r["content"] for r in self.convos.history_rows(self.cid)], ["edited"])
+
+
 if __name__ == "__main__":
     unittest.main()

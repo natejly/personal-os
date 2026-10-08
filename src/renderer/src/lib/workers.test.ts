@@ -43,6 +43,7 @@ test('any non-null kind is hidden, null and absent kinds are kept, identity hold
   assert.equal(isInternal(m('x')), false)
   assert.equal(isInternal(m('x', 'chat_in')), false)
   assert.equal(isInternal(m('x', 'chat_reply')), false)
+  assert.equal(isInternal(m('x', 'clear')), false) // the /clear divider renders
   assert.equal(isInternal(m('x', null as unknown as string)), false)
   assert.deepEqual(withoutInternal([m('a'), m('n', 'nudge'), m('z', 'xyz'), m('b')])?.map((x) => x.id), ['a', 'b'])
   assert.equal(withoutInternal(undefined), undefined)

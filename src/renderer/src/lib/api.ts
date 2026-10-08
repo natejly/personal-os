@@ -643,6 +643,8 @@ export const api = {
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
+  /** `/clear`: the marker row the model's replay starts after; the rolling summary is dropped with it. */
+  clearContext: (conversationId: string) => req<Message>(`/conversations/${conversationId}/clear`, { method: 'POST' }),
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),

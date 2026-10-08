@@ -488,6 +488,41 @@ async def test_errors_and_interrupts(env: Env) -> None:
     assert env.sent() == [tg.RUN_ERROR]
 
 
+async def _final(env: Env, text: str | None) -> list[str]:
+    await env.feed(msg("hi"))
+    if text is not None:
+        env.texts["m1"] = text
+    env.bridge.on_run_change(env.run(status="done", live=False, replied=True, message_id="m1" if text is not None else None, run_id="run-1"))
+    await asyncio.sleep(0.1)
+    return env.sent()
+
+
+@case
+async def test_a_reply_that_is_only_no_reply_sends_nothing(env: Env) -> None:
+    assert await _final(env, "NO_REPLY") == []
+
+
+@case
+async def test_no_reply_marker_is_stripped_from_a_mixed_reply(env: Env) -> None:
+    assert await _final(env, "Here you go.\n\nNO_REPLY") == ["Here you go."]
+
+
+@case
+async def test_an_empty_reply_still_says_stopped(env: Env) -> None:
+    assert await _final(env, "") == ["Stopped."]
+
+
+@case
+async def test_a_pushed_worker_result_drops_the_no_reply_marker(env: Env) -> None:
+    await env.feed()  # takes the poll lock
+    env.bridge.push("NO_REPLY")
+    await asyncio.sleep(0.1)
+    assert env.sent() == []
+    env.bridge.push("Done.\nNO_REPLY")
+    await until(lambda: env.sent())
+    assert env.sent() == ["Done."]
+
+
 @case
 async def test_long_runs_notify_only_when_asked(env: Env) -> None:
     await env.feed()

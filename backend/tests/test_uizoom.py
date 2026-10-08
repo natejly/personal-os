@@ -18,10 +18,10 @@ client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKE
 
 
 def test_uizoom_setting_validated():
-    assert client.get("/settings").json()["uiZoom"] == 100
+    assert client.get("/settings").json()["uiZoom"] == 110
     assert client.put("/settings", json={"uiZoom": 125}).status_code == 200
     assert client.get("/settings").json()["uiZoom"] == 125
     for bad in (79, 161, "big", True):
         assert client.put("/settings", json={"uiZoom": bad}).status_code == 422
     assert client.get("/settings").json()["uiZoom"] == 125
-    client.put("/settings", json={"uiZoom": 100})
+    client.put("/settings", json={"uiZoom": 110})

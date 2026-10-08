@@ -5,7 +5,7 @@ import { modeOf } from '../lib/permissionMode'
 import type { SettingsTab } from '../lib/settingsTabs'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
-import { stepZoom } from '../lib/zoom'
+import { DEFAULT_ZOOM, stepZoom } from '../lib/zoom'
 import { downloadJson, pickJson } from '../lib/jsonFile'
 import { usePresets } from '../canvas/presets'
 import { HOME_MODULES } from '../modules'
@@ -472,10 +472,10 @@ export default function SettingsModal(): JSX.Element {
               <div className="setting-row">
                 <span className="toggle-text"><b>Zoom</b><small>Scales the whole interface, in every window. ⌘= and ⌘− step it, ⌥⌘0 resets.</small></span>
                 <div className="seg" role="group" aria-label="Zoom">
-                  <button type="button" aria-label="Zoom out" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? 100, -1) })}>−</button>
-                  <button type="button" disabled>{settings.uiZoom ?? 100}%</button>
-                  <button type="button" aria-label="Zoom in" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? 100, 1) })}>+</button>
-                  <button type="button" onClick={() => void saveEarly({ uiZoom: 100 })}>Reset</button>
+                  <button type="button" aria-label="Zoom out" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, -1) })}>−</button>
+                  <button type="button" disabled>{settings.uiZoom ?? DEFAULT_ZOOM}%</button>
+                  <button type="button" aria-label="Zoom in" onClick={() => void saveEarly({ uiZoom: stepZoom(settings.uiZoom ?? DEFAULT_ZOOM, 1) })}>+</button>
+                  <button type="button" onClick={() => void saveEarly({ uiZoom: DEFAULT_ZOOM })}>Reset</button>
                 </div>
               </div>
               <h4>Today cards</h4>

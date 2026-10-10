@@ -127,3 +127,8 @@ test('rankChats: same project first, then shared words, recency breaks ties', ()
   const chats = [{ title: 'Taxes', projectId: 'money' }, { title: 'Remodel quotes', projectId: 'x' }, { title: 'Paint colours', projectId: 'home' }, { title: 'Misc', projectId: null }]
   assert.deepEqual(rankChats(chats, ctx).map((c) => c.title), ['Paint colours', 'Remodel quotes', 'Taxes', 'Misc'])
 })
+
+test('/quick is a client built-in that takes on or off', () => {
+  assert.deepEqual(clientCommand('/quick'), { name: 'quick', args: '' })
+  assert.deepEqual(clientCommand('/quick off'), { name: 'quick', args: 'off' })
+})

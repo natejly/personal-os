@@ -42,12 +42,11 @@ export function PermissionModeCards({ mode, onPick }: { mode: PermissionMode; on
           <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="allow-all-title">
             <header><h2 id="allow-all-title">Allow everything?</h2></header>
             <section>
-              <p>Grain will not check actions with a second AI and will not show approval cards for ordinary actions. It will run commands, move files to the Trash, and schedule tasks without asking.</p>
+              <p>Grain will not check actions with a second AI and will not show any approval card. It will run commands, delete files, send email, accept its own document edits and schedule tasks without asking.</p>
               <ul>
                 <li>Deny rules still apply.</li>
-                <li>Grain&apos;s own data and app stay off limits. Credential stores (keys, passwords, sign-in files) and writes right after untrusted content still ask.</li>
-                <li>Permanent deletes outside the Trash, disk wipes and git force-pushes still show an approval card.</li>
-                <li>Sending email always shows the review card.</li>
+                <li>Grain&apos;s own data and app stay off limits.</li>
+                <li>Permanent deletes, disk wipes, force-pushes, credential access and sent email are not confirmed first.</li>
                 <li>Every action is still logged in approval history.</li>
               </ul>
             </section>

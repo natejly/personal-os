@@ -417,6 +417,11 @@ kbd {
 /* Pushes whatever follows it to the far end of any flex row. */
 .spacer { flex: 1; }
 /* The quick-chat button: the last thing in every title bar, set off from the view's own controls. */
+.inbox-btn { position: relative; }
+.inbox-btn-count {
+  position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 8px; background: var(--accent-solid); color: var(--on-accent); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center;
+}
 .app-switcher {
   display: flex; align-items: center; gap: 2px;
   margin-left: 4px; padding-left: 8px;
@@ -586,6 +591,8 @@ kbd {
 /* While the reply streams the row keeps its height but cannot be seen, focused or clicked. */
 .msg-actions.streaming { visibility: hidden; }
 .msg.user .msg-actions { justify-content: flex-end; }
+/* Two user messages in a row are one group: the actions row stops reserving the turn gap and its buttons float over the bubble's corner on hover. */
+.msg.user:has(+ .msg.user) .msg-actions { height: 0; min-height: 0; overflow: visible; flex-wrap: nowrap; align-items: flex-end; padding-right: 4px; }
 .files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
 .files-changed-note { margin-left: 6px; opacity: 0.8; }
 .msg-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -955,8 +962,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* "Unsaved changes", and the question asked before a draft is thrown away, sit left of the buttons. */
 .settings-modal .footer-note { margin-right: auto; font-size: 13px; color: var(--text-muted); }
 .settings-modal .footer-note.ask { color: var(--text); font-weight: 500; }
-/* The knowledge graph and the memory list need room side by side: this tab widens the dialog. */
-.modal.settings-modal.wide-pane { width: min(1240px, calc(100vw - 60px)); height: min(860px, calc(100vh - 60px)); }
 /* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
 .settings-pane section.knowledge-section { display: flex; flex-direction: column; height: 100%; padding-bottom: 16px; }
 .knowledge-section > .muted { margin: 8px 0 12px; }
@@ -1458,21 +1463,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .graph-tools .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 
 /* ---------- Tool events in messages ---------- */
-.reasoning { font-size: 12px; margin: 0 0 12px; }
-.reasoning-head { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 0; color: var(--text-muted); text-align: left; }
-.reasoning-head:hover { color: var(--text); }
-.reasoning-head svg.rot90 { transform: rotate(90deg); }
-.reasoning-head > svg:first-child { transition: transform 0.15s; flex-shrink: 0; }
-.reasoning-label { font-weight: 400; }
-.reasoning-body {
-  max-height: 220px; overflow-y: auto; margin: 2px 0 0; padding: 0 0 6px 18px; list-style: none;
-  font-size: 12px; line-height: 1.5;
-  color: var(--text-muted); word-break: break-word;
-}
-/* The thinking line and the tool-calls line sit together, one above the other. */
-.reasoning + .reasoning { margin-top: -10px; }
-.activity-tools { padding: 0 0 6px 12px; }
-.activity-tools .tool-events { margin: 0; }
+.trace { font-size: 12px; margin: 0 0 12px; color: var(--text-muted); }
+.trace-line { line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-line.err { color: var(--danger, var(--text-muted)); }
+
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-doc-diff { margin: 6px 8px 8px; }
 .tool-doc-diff .diff-card { margin-bottom: 0; }
@@ -1535,50 +1529,19 @@ textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Home / dashboard ---------- */
 .page-body.wide { max-width: 1180px; }
-/* ---------- shell modularity (Today customize popover) ---------- */
-.home-customize-wrap { position: relative; display: inline-flex; }
-.home-customize {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 31;
   min-width: 190px; padding: 10px 12px; border-radius: 10px;
   background: var(--bg-elev); border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-float);
 }
-.home-customize h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
 .chip-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; color: var(--text); }
 .chip-check-row input { accent-color: var(--accent); }
 
-.home-hero { padding: 8px 0 18px; }
-.home-hero h1 { font-size: 28px; font-weight: 500; margin: 0 0 14px; letter-spacing: -0.01em; }
-.quick-ask { display: flex; align-items: center; gap: 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 14px; padding: 8px 8px 8px 14px; color: var(--text-muted); transition: box-shadow 0.15s, border-color 0.15s; }
-.quick-ask:focus-within { border-color: transparent; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); }
-.quick-ask input { flex: 1; background: none; border: 0; outline: 0; font-size: 15px; color: var(--text); }
-.widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
 .widget { border-radius: 12px; background: var(--bg-elev); padding: 14px 16px; min-height: 120px; }
 .widget > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text); }
 .widget > header .link { margin-left: auto; }
-/* A canvas window's body is also called `.widget`, and it is `height: 100%` of its window. On Today
-   that resolved against the page for a card outside the grid, which then filled the viewport. */
-.home .widget { height: auto; }
-/* A card above the grid gets the gap the grid would have given it, and no floor: the 120px minimum
-   is there to keep a row of grid cards level. */
-.home .page-body > .widget { margin-bottom: 16px; min-height: 0; }
-/* Google is not connected: one strip says so once, in place of four cards each saying it. */
-.home-connect { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 12px 10px 16px; border: 1px dashed var(--border-strong); border-radius: 12px; }
-.home-connect p { flex: 1; margin: 0; font-size: 13px; color: var(--text-muted); }
-.home-connect b { font-weight: 600; color: var(--text); }
 .widget-empty p { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
-.events, .mails, .proj-list, .mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.events li, .proj-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
-.proj-list li, .events li[role='button'] { cursor: pointer; }
-.proj-list li:hover, .mails li:hover, .events li[role='button']:hover { background: var(--hover); }
-.ev-time { color: var(--text-muted); font-variant-numeric: tabular-nums; width: 68px; flex-shrink: 0; font-size: 12px; }
 .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ev-sep { font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 8px 8px 2px !important; }
-.mails li { display: grid; grid-template-columns: 120px 1fr; grid-template-rows: auto auto; column-gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
-.mail-from { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; grid-row: 1 / span 2; align-self: start; }
-.mail-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mail-snippet { color: var(--text-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mem-list li { padding: 5px 8px; border-radius: 8px; background: var(--hover); line-height: 1.4; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -2000,6 +1963,16 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 24px;
   background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
+/* Mail-style run rows: sender, preview, time; unread is bold with a tinted row, open is selected; actions appear on hover. */
+.inbox-item.mail-row { padding: 4px 6px 4px 10px; }
+.inbox-item.mail-row.unread { background: color-mix(in srgb, var(--accent-solid) 7%, transparent); }
+.inbox-item.mail-row.unread .inbox-job, .inbox-item.mail-row.unread .inbox-line { font-weight: 600; color: var(--text); }
+.inbox-item.mail-row.seen .inbox-job { font-weight: 500; }
+.inbox-item.mail-row:hover { background: var(--bg-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
+.inbox-item.mail-row.selected { border-color: var(--accent-solid); }
+.inbox-item.mail-row .inbox-job { flex: 0 0 140px; max-width: 140px; }
+.inbox-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.inbox-item:hover .inbox-actions, .inbox-item:focus-within .inbox-actions, .inbox-item.selected .inbox-actions, .inbox-actions.show { opacity: 1; }
 .inbox-go { color: var(--text-muted); }
 .inbox-open:hover .inbox-line, .inbox-open:hover .inbox-go { color: var(--text); }
 .inbox-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-idle); }
@@ -2480,7 +2453,6 @@ select:focus-visible {
    !important: the input rule above is (0,4,1) through its :not()s and would outrank every entry here. */
 .composer textarea:focus-visible,
 .composer input:focus-visible,
-.quick-ask input:focus-visible,
 .search input:focus-visible,
 .kcol.new input:focus-visible,
 .cal-create input:focus-visible,
@@ -2616,9 +2588,6 @@ select:focus-visible {
 /* The subagent panel: a transcript that grows, and a one-line box to talk to it. */
 .subagent-panel { width: 640px; display: flex; flex-direction: column; max-height: calc(100vh - 80px); }
 .subagent-panel header h2 { display: flex; align-items: center; gap: 8px; }
-.reasoning { display: flex; flex-wrap: wrap; align-items: center; }
-.reasoning .reasoning-head { flex: 1 1 0; width: auto; }
-.reasoning .reasoning-body, .reasoning .activity-tools { flex-basis: 100%; }
 .subagent-thread { margin: -4px 0 12px 16px; padding-left: 8px; border-left: 1px solid var(--border); font-size: 12px; }
 .subagent-head, .subagent-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 26px; padding: 0 6px; border-radius: 6px; color: var(--text-muted); text-align: left; }
 .subagent-head:hover, .subagent-row:hover { background: var(--hover); color: var(--text); }
@@ -2802,3 +2771,10 @@ select:focus-visible {
 .reply-image img { display: block; max-width: 100%; max-height: 320px; min-width: 48px; min-height: 48px; font: 11px var(--font); color: var(--text-faint); line-height: 1.4; }
 .reply-image:hover { border-color: var(--accent); }
 .msg-body .msg-files { justify-content: flex-start; margin-top: 8px; }
+.recap-inline { max-width: 560px; width: 100%; margin: 14px auto 0; padding: 10px 14px; text-align: left; background: transparent; border: 1px solid var(--border); }
+.recap-inline > header { font-weight: 500; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.recap-inline .markdown { font-size: 12.5px; }
+.recap-inline .markdown.clamped { max-height: 5.4em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.inbox-modal { width: min(760px, 94vw); max-height: 86vh; overflow-y: auto; padding: 0; position: relative; }
+.inbox-modal > .agent-inbox { margin: 0; background: none; }
+.inbox-modal-close { position: absolute; top: 8px; right: 8px; z-index: 1; }

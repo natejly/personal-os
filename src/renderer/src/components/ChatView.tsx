@@ -25,6 +25,7 @@ import { chatBrowserSession, deskBrowserSession, latestBrowserMessage } from '..
 import { DeskInline } from './DeskStrip'
 import DeskPanel from './DeskPanel'
 import Face from './Face'
+import DailyRecap from './DailyRecap'
 import TelegramIcon from './TelegramIcon'
 import { chatLabel, isTelegramChat } from '../lib/chatRows'
 
@@ -165,6 +166,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <div className="empty-state">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
+                {!conversationId && !project && <DailyRecap />}
                 {showFirstPrompts && (
                   <div className="ob-first-prompts" role="group" aria-label="Things to try">
                     {firstPrompts(pimOn).map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}

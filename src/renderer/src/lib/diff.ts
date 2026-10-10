@@ -33,62 +33,112 @@ export interface DiffStat {
   changed: number
 }
 
+/** Largest gap (cells) the exact LCS table is built for; bigger gaps are split on anchor lines first. */
+const LCS_CELLS = 1_000_000
+
 /**
- * Longest common subsequence over lines, as a backtrace matrix.
- * O(n·m) memory, which is fine for prose: a 5k-line doc against itself is 25M cells only if it shares
- * nothing, and the common-prefix/suffix trim below removes that case in practice.
+ * Line diff of a[aLo..aHi) against b[bLo..bHi), appended to `out` with absolute 1-based line numbers.
+ * Trims the shared head and tail, then runs an exact LCS when the gap is small. A bigger gap is split on lines that
+ * occur exactly once on each side (kept in order by a longest increasing subsequence) and each piece is diffed on its
+ * own, so a large rewrite costs about its size, not n*m. With no such anchor the gap is a plain delete-then-insert,
+ * which is a valid diff, only not always the shortest.
  */
-function lcsDiff(a: string[], b: string[]): DiffLine[] {
-  // Trim the matching head and tail first: most edits touch a small middle.
-  let head = 0
-  while (head < a.length && head < b.length && a[head] === b[head]) head++
-  let tail = 0
-  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++
-
-  const aMid = a.slice(head, a.length - tail)
-  const bMid = b.slice(head, b.length - tail)
-
-  const out: DiffLine[] = []
-  for (let i = 0; i < head; i++) out.push({ op: 'same', text: a[i], oldNo: i + 1, newNo: i + 1 })
-
-  const n = aMid.length
-  const m = bMid.length
+function diffRange(a: string[], b: string[], aLo: number, aHi: number, bLo: number, bHi: number, out: DiffLine[]): void {
+  while (aLo < aHi && bLo < bHi && a[aLo] === b[bLo]) {
+    out.push({ op: 'same', text: a[aLo], oldNo: aLo + 1, newNo: bLo + 1 })
+    aLo++
+    bLo++
+  }
+  const tail: DiffLine[] = []
+  while (aLo < aHi && bLo < bHi && a[aHi - 1] === b[bHi - 1]) {
+    aHi--
+    bHi--
+    tail.push({ op: 'same', text: a[aHi], oldNo: aHi + 1, newNo: bHi + 1 })
+  }
+  const n = aHi - aLo
+  const m = bHi - bLo
   if (n === 0 || m === 0) {
-    // Pure insertion or pure deletion in the middle.
-    for (let i = 0; i < n; i++) out.push({ op: 'del', text: aMid[i], oldNo: head + i + 1, newNo: null })
-    for (let j = 0; j < m; j++) out.push({ op: 'add', text: bMid[j], oldNo: null, newNo: head + j + 1 })
-  } else {
+    for (let i = aLo; i < aHi; i++) out.push({ op: 'del', text: a[i], oldNo: i + 1, newNo: null })
+    for (let j = bLo; j < bHi; j++) out.push({ op: 'add', text: b[j], oldNo: null, newNo: j + 1 })
+  } else if (n * m <= LCS_CELLS) {
     const w = m + 1
     const dp = new Uint32Array((n + 1) * w)
     for (let i = n - 1; i >= 0; i--) {
       for (let j = m - 1; j >= 0; j--) {
-        dp[i * w + j] = aMid[i] === bMid[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1])
+        dp[i * w + j] = a[aLo + i] === b[bLo + j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1])
       }
     }
     let i = 0
     let j = 0
     while (i < n && j < m) {
-      if (aMid[i] === bMid[j]) {
-        out.push({ op: 'same', text: aMid[i], oldNo: head + i + 1, newNo: head + j + 1 })
+      if (a[aLo + i] === b[bLo + j]) {
+        out.push({ op: 'same', text: a[aLo + i], oldNo: aLo + i + 1, newNo: bLo + j + 1 })
         i++
         j++
       } else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) {
-        out.push({ op: 'del', text: aMid[i], oldNo: head + i + 1, newNo: null })
+        out.push({ op: 'del', text: a[aLo + i], oldNo: aLo + i + 1, newNo: null })
         i++
       } else {
-        out.push({ op: 'add', text: bMid[j], oldNo: null, newNo: head + j + 1 })
+        out.push({ op: 'add', text: b[bLo + j], oldNo: null, newNo: bLo + j + 1 })
         j++
       }
     }
-    while (i < n) out.push({ op: 'del', text: aMid[i], oldNo: head + i++ + 1, newNo: null })
-    while (j < m) out.push({ op: 'add', text: bMid[j], oldNo: null, newNo: head + j++ + 1 })
+    while (i < n) out.push({ op: 'del', text: a[aLo + i], oldNo: aLo + i++ + 1, newNo: null })
+    while (j < m) out.push({ op: 'add', text: b[bLo + j], oldNo: null, newNo: bLo + j++ + 1 })
+  } else {
+    const anchors = uniqueAnchors(a, b, aLo, aHi, bLo, bHi)
+    if (anchors.length === 0) {
+      for (let i = aLo; i < aHi; i++) out.push({ op: 'del', text: a[i], oldNo: i + 1, newNo: null })
+      for (let j = bLo; j < bHi; j++) out.push({ op: 'add', text: b[j], oldNo: null, newNo: j + 1 })
+    } else {
+      let pa = aLo
+      let pb = bLo
+      for (const [ai, bi] of anchors) {
+        diffRange(a, b, pa, ai, pb, bi, out)
+        out.push({ op: 'same', text: a[ai], oldNo: ai + 1, newNo: bi + 1 })
+        pa = ai + 1
+        pb = bi + 1
+      }
+      diffRange(a, b, pa, aHi, pb, bHi, out)
+    }
   }
+  for (let k = tail.length - 1; k >= 0; k--) out.push(tail[k])
+}
 
-  for (let k = 0; k < tail; k++) {
-    const oi = a.length - tail + k
-    const ni = b.length - tail + k
-    out.push({ op: 'same', text: a[oi], oldNo: oi + 1, newNo: ni + 1 })
+/** Lines that appear once in a[aLo..aHi) and once in b[bLo..bHi), as [aIndex, bIndex] pairs in increasing order of both. */
+function uniqueAnchors(a: string[], b: string[], aLo: number, aHi: number, bLo: number, bHi: number): [number, number][] {
+  const inA = new Map<string, number>() // line -> index, -1 once seen twice
+  for (let i = aLo; i < aHi; i++) inA.set(a[i], inA.has(a[i]) ? -1 : i)
+  const inB = new Map<string, number>()
+  for (let j = bLo; j < bHi; j++) inB.set(b[j], inB.has(b[j]) ? -1 : j)
+  const pairs: [number, number][] = []
+  for (const [line, i] of inA) {
+    const j = inB.get(line)
+    if (i >= 0 && j !== undefined && j >= 0 && line.trim() !== '') pairs.push([i, j])
   }
+  pairs.sort((x, y) => x[0] - y[0])
+  // Longest increasing subsequence on the b index.
+  const tails: number[] = [] // index into pairs of the smallest tail for each length
+  const prev = new Array<number>(pairs.length).fill(-1)
+  for (let k = 0; k < pairs.length; k++) {
+    let lo = 0
+    let hi = tails.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (pairs[tails[mid]][1] < pairs[k][1]) lo = mid + 1
+      else hi = mid
+    }
+    if (lo > 0) prev[k] = tails[lo - 1]
+    tails[lo] = k
+  }
+  const out: [number, number][] = []
+  for (let k = tails.length ? tails[tails.length - 1] : -1; k >= 0; k = prev[k]) out.push(pairs[k])
+  return out.reverse()
+}
+
+function lcsDiff(a: string[], b: string[]): DiffLine[] {
+  const out: DiffLine[] = []
+  diffRange(a, b, 0, a.length, 0, b.length, out)
   return out
 }
 
@@ -101,6 +151,8 @@ export function wordDiff(before: string, after: string): { before: WordPart[]; a
   const b = tokenize(after)
   const n = a.length
   const m = b.length
+  // Two very long lines (minified text, a pasted blob): marking the words would cost n*m, so show them as whole changes.
+  if (n * m > LCS_CELLS) return { before: [{ text: before, changed: true }], after: [{ text: after, changed: true }] }
   const w = m + 1
   const dp = new Uint32Array((n + 1) * w)
   for (let i = n - 1; i >= 0; i--) {

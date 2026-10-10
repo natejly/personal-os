@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ToolEvent } from '@shared/types'
-import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, staysVisible, argRows, cardStatus, changedKeys, describeCall, traceLines, docEditStatus, formatValue, fullTitle, humanizeName, labelFor, recalledChats, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')

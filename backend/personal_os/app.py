@@ -35,6 +35,7 @@ from . import compaction, followups, otel_export, router, thinking_summary, titl
 from . import chatlink, coding_route, fsx, opencode_usage
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
+from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
@@ -101,7 +102,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import ASK_LOCKED_DANGER, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
+from .tools import ASK_LOCKED_DANGER, QUICK_HIDDEN, Toolbox, UrlBlocked, guarded_request, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -1527,7 +1528,8 @@ LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row
 CUT_STOP = ("The model's output limit cut this call short, so it was not executed. "
             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
-            "send a smaller call or split the content")
+            "send a smaller call or split the content: for a big file, desk_write_file the first part, then add the rest "
+            "in several calls with mode='append'")
 REPEAT_LIMIT = limits.REPEAT_LIMIT
 TOOL_ERROR_LIMIT = limits.TOOL_ERROR_LIMIT
 
@@ -2026,6 +2028,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         explicit_modes = toolbox.explicit(*_tool_maps) if use_tools else {}  # what the user set on purpose (auto mode trusts those)
         if persona is not None:
             modes = {n: v for n, v in modes.items() if n in persona.tools}
+        if conv["settings"].get("quick"):  # enforced here, not just asked for in the prompt (context.QUICK_RULES)
+            modes = {n: v for n, v in modes.items() if n not in QUICK_HIDDEN}
         # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
         mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
         # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
@@ -2074,11 +2078,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             spec = toolbox.specs.get(name)
             danger = spec.danger if spec else "external"
             fenced = bool(toolbox.fs_needs_ask(name, args, tool_ctx))
-            # Allow everything's floor: a shell command that deletes for good, wipes a disk or force-pushes still asks.
-            if pmode == "allow_all" and name == "shell_run" and shell_tool.floor(toolbox, args, tool_ctx):
-                fenced = forced = True
             blog = f"{am['id']}:bridgelog{bridge_n + 1}"
-            if pmode == "allow_all" and not fenced:
+            if pmode == "allow_all":
                 if danger != "safe":
                     _log_mode(name, args, blog, "auto", "allow-all", "allowed (allow-all mode)")
                 return True
@@ -3022,12 +3023,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     explicit = explicit_modes.get(c["name"]) if not mcp_is(c["name"]) else ("on" if raw_mode == "on" else None)
                     locked_spec = bool(spec and toolbox.ask_locked(spec))
                     hints = _mcp_event(c["name"]) or {}
-                    # A connector call forced by untrusted content stays a card in every mode, allow-all included, except the
-                    # coding-agent connectors under allow-all: they run like opencode_run and coding_session_start do there.
-                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"]) and not (
-                        pmode == "allow_all" and _coding_connector(c["name"]))
-                    # Allow everything's floor (permrules.destructive): a delete that skips the Trash, a disk wipe or a force-push.
-                    floor = shell_tool.floor(toolbox, args, tool_ctx) if pmode == "allow_all" and c["name"] == "shell_run" else None
+                    # A connector call forced by untrusted content stays a card (allow-all runs it: autoreview.route).
+                    mcp_tainted = bool(hints) and hard_forced and bool(tool_ctx["tainted"])
                     rt = autoreview.route(
                         # handing work to a worker needs no review of its own: each call the worker makes is reviewed in its turn
                         pmode, mode=mode, danger="safe" if c["name"] in workers_mod.FRONT_TOOLS else danger, explicit_on=explicit == "on",
@@ -3036,13 +3033,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         covered=desk_cleared or (pre_mode == "ask" and perm.mode == "on") or bool(perm.rule and perm.mode == "on"),
                         # a connector that calls its own tool destructive is reviewed strictly (a confident, untainted allow)
                         hard_forced=hard_forced, soft_forced=(lockable or bool(hints.get("destructive"))) and not hard_forced,
-                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card even in allow-all
-                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted or bool(floor),
+                        # a sensitive-path read/write, a tainted write or a runaway repeat stays a card (not in allow-all)
+                        fenced=bool(fs_ask) or perm.kind in ("external_directory", "doom_loop") or mcp_tainted,
                         question=c["name"] in permrules.STILL_ASK or c["name"] == PLAN_TOOL)
-                    if floor and rt == "card":
-                        # One card, no rule or session grant behind it: the user reads what will be lost.
-                        mode, forced = "ask", True
-                        perm.mode, perm.forced, perm.kind, perm.display = "ask", True, floor[0], floor[1]
                     if rt == "run":
                         if mode == "ask":
                             mode, forced = "on", False
@@ -3660,6 +3653,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
     failure: str | None = None
+    # Every turn (wake report, chat-link delivery, resume, not just a typed message) un-hides an archived chat it writes into.
+    if (cur := convos.get(run.conversation_id, with_messages=False)) and cur.get("archived_at"):
+        convos.update(run.conversation_id, {"archived": False})
     try:
         async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
             if event == "assistant_message":
@@ -6032,6 +6028,39 @@ def inbox_delete_run(run_id: str) -> dict[str, Any]:
     return {"ok": True, "deleted": 1}
 
 
+@app.get("/inbox/archived")
+def inbox_archived(limit: int = 50) -> list[dict[str, Any]]:
+    """Archived run messages, newest first: out of "While you were away" but kept, and restorable."""
+    out = []
+    for r in run_store.of_kind("job", limit=_clamp(limit), archived=True):
+        fire = r["input"] if isinstance(r.get("input"), dict) else {}
+        text = workers_mod.strip_no_reply(run_store.transcript(r["run_id"], r["message_id"])[0]) if r["message_id"] else ""
+        out.append({"run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
+                    "job": fire.get("job") or "Scheduled job", "fired_at": fire.get("fired_at") or r["started_at"],
+                    "error": r["error"], "summary": text[:INBOX_SUMMARY_CHARS]})
+    return out
+
+
+@app.post("/inbox/runs/{run_id}/archive")
+def inbox_archive_run(run_id: str) -> dict[str, bool]:
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    if row.get("status") in ("running", "awaiting_approval"):
+        raise HTTPException(409, "That run is still going")
+    run_store.set_archived(run_id, True)
+    return {"ok": True}
+
+
+@app.post("/inbox/runs/{run_id}/restore")
+def inbox_restore_run(run_id: str) -> dict[str, bool]:
+    row = run_store.get(run_id)
+    if not row or row.get("kind") != "job":
+        raise HTTPException(404, "No such job run")
+    run_store.set_archived(run_id, False)
+    return {"ok": True}
+
+
 @app.delete("/inbox")
 def inbox_clear(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """Erase exactly the run messages GET /inbox would list with the same window. A run still going is left
@@ -6959,6 +6988,33 @@ def google_callback(state: str = "", code: str = "", error: str = "", error_desc
     )
 
 
+drive_backup = DriveBackup(db, google)
+
+
+@app.get("/integrations/google/drive-backup")
+def drive_backup_status() -> dict[str, Any]:
+    return drive_backup.status()
+
+
+@app.post("/integrations/google/drive-backup/run")
+async def drive_backup_run() -> dict[str, Any]:
+    return await asyncio.to_thread(drive_backup.run)
+
+
+@app.on_event("startup")
+async def _drive_backup_startup() -> None:
+    app.state.drive_backup_task = asyncio.create_task(drive_backup.loop(), name="drive-backup")
+
+
+@app.on_event("shutdown")
+async def _drive_backup_shutdown() -> None:
+    task = getattr(app.state, "drive_backup_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
 @app.post("/integrations/google/disconnect")
 def google_disconnect() -> dict[str, Any]:
     google.disconnect()
@@ -7826,6 +7882,18 @@ def local_raw(path: str) -> FileResponse:
     if mime in _RAW_AS_TEXT:
         mime = "text/plain"
     return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/local/stat")
+def local_stat(path: str) -> dict[str, Any]:
+    """Whether a path a reply names is a readable file, so a link can say so before the panel opens (same guard as /local/raw)."""
+    try:
+        p = mac.readable_path(path)
+    except mac.LocalPathError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    return {"path": str(p), "name": p.name, "size": p.stat().st_size}
 
 
 # Both declared above /docs/{id} so "assets" is not read as a doc id.

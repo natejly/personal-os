@@ -233,7 +233,6 @@ function buildMenu(): void {
     {
       label: 'View',
       submenu: [
-        item('view-home'),
         item('view-chat'),
         item('view-todos'),
         item('view-calendar'),
@@ -262,7 +261,7 @@ function buildMenu(): void {
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        // Explicit, because ⌘0 is Today above and resetZoom's default would have been the dead duplicate.
+        // Explicit, so zoom-reset carries its own chord rather than resetZoom's default.
         // These change the uiZoom setting (the renderer writes it and every window follows), not the page directly.
         item('zoom-reset'),
         item('zoom-in'),

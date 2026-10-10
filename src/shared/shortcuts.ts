@@ -45,7 +45,6 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'upload', label: 'Upload File…', keys: 'CmdOrCtrl+U', group: 'Create', action: 'upload', scope: 'menu' },
 
   // Go to
-  { id: 'view-home', label: 'Today', keys: 'CmdOrCtrl+0', group: 'Go to', action: 'view:home', scope: 'menu' },
   { id: 'view-chat', label: 'Chats', keys: 'CmdOrCtrl+1', group: 'Go to', action: 'view:chat', scope: 'menu' },
   { id: 'view-todos', label: 'Lists', keys: 'CmdOrCtrl+2', group: 'Go to', action: 'view:todos', scope: 'menu' },
   { id: 'view-calendar', label: 'Calendar', keys: 'CmdOrCtrl+3', group: 'Go to', action: 'view:calendar', scope: 'menu' },

@@ -615,7 +615,8 @@ class Database:
                           # spent the one-shot grant an approved parked card leaves behind.
                           "note": "TEXT", "parked_at": "REAL", "reported_at": "REAL", "claimed_by": "TEXT",
                           "edited_args": "TEXT", "edited_by": "TEXT"},
-            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
+            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT",
+                           "archived_at": "REAL"},  # Agent inbox: archived runs leave "While you were away", restorable
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0",
                           # Who spent it: 'chat', 'job:<id>' or 'desk:<id>', and which tool round of the reply.

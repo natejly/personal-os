@@ -167,6 +167,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "llmRetries": LLM_RETRIES,
     "llmIdleSeconds": LLM_IDLE_SECONDS,  # a reasoning model can think a long while before its first token
     # Retention (retention.py): days of history kept in tables that only ever grow. User content is never pruned.
+    # Chats and inbox messages whose last activity is older than this many days are archived (restorable). 0 = off.
+    "autoArchiveDays": 0,
     "retainUsageDays": RETAIN_USAGE_DAYS,
     "retainTraceDays": RETAIN_TRACE_DAYS,
     "retainToolResultDays": RETAIN_TOOL_RESULT_DAYS,

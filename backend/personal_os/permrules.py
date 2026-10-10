@@ -31,7 +31,7 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user", "gmail_send"})  # gmail_send: the email card is the user writing, not granting
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
@@ -874,21 +874,6 @@ def touches_protected(cmd: str, cwd: str | None = None, roots: Iterable[str] = (
                 here = to
         return None
     return walk(normalize(cmd or ""), 0, cwd)
-
-
-def allow_all_floor(tool: str, args: dict[str, Any], cwd: str | None = None,
-                    scratch: Iterable[str] = ()) -> tuple[str, str] | None:
-    """What Allow everything still cards for this call, as (card kind, reason): an unsandboxed command that names a
-    credential store or Grain's own data or app ("external_directory"), or a command `destructive` flags
-    ("destructive"), sandboxed or not. None for anything else. `scratch` (the desk's work folder) also marks the desk
-    whose own folder is not Grain's data."""
-    if tool != "shell_run" or not isinstance(args, dict):
-        return None
-    cmd = str(args.get("command") or "")
-    if args.get("unsandboxed") and (why := touches_protected(cmd, cwd, scratch)):
-        return "external_directory", why
-    why = destructive(cmd, cwd, scratch)
-    return ("destructive", why) if why else None
 
 
 # The claude.ai Gmail connector's sending tools, as the Claude Code CLI names them (it ships with the user's account).

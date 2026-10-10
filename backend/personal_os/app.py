@@ -35,6 +35,7 @@ from . import compaction, followups, otel_export, router, thinking_summary, titl
 from . import chatlink, coding_route, fsx, opencode_usage
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
+from .drive_backup import DriveBackup
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .kinds import is_internal
 from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
@@ -6960,6 +6961,33 @@ def google_callback(state: str = "", code: str = "", error: str = "", error_desc
         "You can close this tab and return to Grain.",
         ok=True,
     )
+
+
+drive_backup = DriveBackup(db, google)
+
+
+@app.get("/integrations/google/drive-backup")
+def drive_backup_status() -> dict[str, Any]:
+    return drive_backup.status()
+
+
+@app.post("/integrations/google/drive-backup/run")
+async def drive_backup_run() -> dict[str, Any]:
+    return await asyncio.to_thread(drive_backup.run)
+
+
+@app.on_event("startup")
+async def _drive_backup_startup() -> None:
+    app.state.drive_backup_task = asyncio.create_task(drive_backup.loop(), name="drive-backup")
+
+
+@app.on_event("shutdown")
+async def _drive_backup_shutdown() -> None:
+    task = getattr(app.state, "drive_backup_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
 
 
 @app.post("/integrations/google/disconnect")

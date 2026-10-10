@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { GoogleTaskList } from '@shared/types'
+import type { DriveBackupRun, GoogleTaskList } from '@shared/types'
 
 /** Console pages, in the order the setup walks through them. */
 const CONSOLE = {
@@ -36,6 +36,16 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
   useEffect(() => {
     if (google?.connected && syncEnabled) void api.google.tasklists().then(setTaskLists).catch(() => undefined)
   }, [google?.connected, syncEnabled])
+
+  const [last, setLast] = useState<DriveBackupRun | null>(null)
+  const [backingUp, setBackingUp] = useState(false)
+  useEffect(() => {
+    if (google?.connected) void api.google.driveBackup().then((s) => setLast(s.last)).catch(() => undefined)
+  }, [google?.connected])
+  const backUpNow = async (): Promise<void> => {
+    setBackingUp(true)
+    try { setLast(await api.google.driveBackupRun()) } catch (e) { toast(e instanceof Error ? e.message : 'Backup failed', 'error') } finally { setBackingUp(false) }
+  }
 
   // Google only runs a sign-in flow on behalf of a registered app, so there has to be an
   // OAuth client before the button can do anything: from .env, or pasted here.
@@ -135,6 +145,24 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
                     : 'Not synced yet — press Sync now'}
               </small>
             </div>
+          )}
+        </div>
+      )}
+
+      {google?.connected && (
+        <div className="tasks-sync">
+          <div className="tasks-sync-row">
+            <span className="toggle-text"><b>Back up files to Google Drive</b><small>Uploads and documents are copied to a "Grain Backup" folder daily. Chats, memories and settings are not.</small></span>
+            <button className="ghost-btn" onClick={() => void backUpNow()} disabled={backingUp}>
+              <Upload size={13} className={backingUp ? 'spin' : ''} /> {backingUp ? 'Backing up…' : 'Back up now'}
+            </button>
+          </div>
+          {last && (
+            <small className={last.ok ? 'muted' : 'integration-warn'}>
+              {last.error
+                ? `Last backup (${new Date(last.at * 1000).toLocaleString()}) did not run: ${last.error}`
+                : `Last backup ${new Date(last.at * 1000).toLocaleString()}: ${last.copied} copied, ${last.skipped} unchanged${last.failed.length ? `, ${last.failed.length} failed (${last.failed.slice(0, 3).map((f) => `${f.name}: ${f.error}`).join('; ')})` : ''}`}
+            </small>
           )}
         </div>
       )}

@@ -74,6 +74,10 @@ class DriveBackup:
                 raise GoogleNotConnected("Google Drive access was not granted. Reconnect Google in Settings → Integrations and allow it.")
             files: dict[str, Any] = self.state["files"]
             folder = self.state.get("folder_id")
+            if folder and not self.google.drive_backup_folder_alive(folder):
+                # Folder deleted or trashed in Drive: its files went with it, so start over this run.
+                folder = self.state["folder_id"] = None
+                files.clear()
             if not folder:
                 folder = self.state["folder_id"] = self.google.drive_backup_folder(FOLDER)
             for it in self._items():

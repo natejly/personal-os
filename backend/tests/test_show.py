@@ -105,6 +105,16 @@ def test_local_raw_serves_a_home_file_with_its_type_and_html_as_text(home: Path,
     assert client.get("/local/raw", params={"path": "~/Documents/none.pdf"}).status_code == 404
 
 
+def test_local_stat_says_whether_a_named_path_opens(home: Path) -> None:
+    (home / "Documents" / "a.pdf").write_bytes(PDF)
+    r = client.get("/local/stat", params={"path": "~/Documents/a.pdf"})
+    assert r.status_code == 200 and r.json()["name"] == "a.pdf" and r.json()["size"] == len(PDF)
+    assert client.get("/local/stat", params={"path": "~/Documents/none.pdf"}).status_code == 404
+    (home / ".aws").mkdir()
+    (home / ".aws" / "credentials").write_text("k")
+    assert client.get("/local/stat", params={"path": "~/.aws/credentials"}).status_code == 400
+
+
 def test_local_raw_needs_the_app_token() -> None:
     assert TestClient(appmod.app).get("/local/raw", params={"path": "~/Documents/a.pdf"}).status_code == 401
 

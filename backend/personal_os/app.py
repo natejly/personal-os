@@ -7828,6 +7828,18 @@ def local_raw(path: str) -> FileResponse:
     return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
 
 
+@app.get("/local/stat")
+def local_stat(path: str) -> dict[str, Any]:
+    """Whether a path a reply names is a readable file, so a link can say so before the panel opens (same guard as /local/raw)."""
+    try:
+        p = mac.readable_path(path)
+    except mac.LocalPathError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    return {"path": str(p), "name": p.name, "size": p.stat().st_size}
+
+
 # Both declared above /docs/{id} so "assets" is not read as a doc id.
 @app.get("/docs/assets/{doc_id}/{name}")
 def get_doc_asset(doc_id: str, name: str) -> FileResponse:

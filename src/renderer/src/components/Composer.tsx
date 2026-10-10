@@ -10,6 +10,7 @@ import ScheduleForm from './ScheduleForm'
 import { mentionChats, mentionItems, routeMention } from '../lib/mentions'
 import { ArrowUp, Square, Paperclip, Loader2, Sparkles, Download, FileText, X } from 'lucide-react'
 import AutonomyToggle from './AutonomyToggle'
+import QuickToggle from './QuickToggle'
 import { PermissionModePill } from './PermissionMode'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
@@ -163,6 +164,15 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       } catch (e) {
         s.toast(`Could not clear: ${(e as Error).message}`, 'error')
       }
+      return
+    }
+    if (name === 'quick') {
+      // Flips this chat's quick answer mode; "/quick on" and "/quick off" set it. A draft parks it until the first send.
+      const cur = (activeId ? s.sessions[activeId]?.conversation.settings?.quick : s.draftChatSettings.quick) === true
+      const next = args === 'on' ? true : args === 'off' ? false : !cur
+      await s.setChatSettings({ quick: next }, activeId ?? undefined)
+      dropDraft(k0)
+      s.toast(next ? 'Quick answers on for this chat.' : 'Quick answers off.', 'info')
       return
     }
     if (name === 'compact') {
@@ -484,6 +494,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         {conversationId !== '\u0000page-agent' && (
           <>
             <PermissionModePill />
+            <QuickToggle conversationId={conversationId} />
             <AutonomyToggle conversationId={conversationId} draft={newChat} />
           </>
         )}

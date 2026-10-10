@@ -55,6 +55,8 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** The always-on standing preferences (pinned rows plus preference and instruction rows) carried in the system prompt every turn. Absent on older messages. */
   profile?: { id: string; content: string; project_id: string | null; pinned: boolean }[]
+  /** The reply was made in quick answer mode (shown as a quiet tag). */
+  quick?: boolean
   /** Items dropped per section because it hit its share of the model's context window. */
   trimmed?: Record<string, number>
   /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
@@ -846,6 +848,8 @@ export interface ConversationSettings {
   useStyle: boolean
   /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
   draftMode?: boolean
+  /** Quick answer mode: short answers, and the backend hides delegation and background-job tools. */
+  quick?: boolean
   /** This chat's reply style; absent reads as default. `responseStyleText` is the user's own wording for 'custom'. */
   responseStyle?: string
   responseStyleText?: string

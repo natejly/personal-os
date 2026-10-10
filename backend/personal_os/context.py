@@ -111,6 +111,18 @@ DIRECTNESS_RULES = (
     "never comes back as bare tool calls with no visible output."
 )
 
+# Quick answer mode (a per-chat switch, conv_settings["quick"]). The tools that start background work are hidden
+# in the same turn (QUICK_HIDDEN, applied in app.py), so the last line here is true, not a hope.
+QUICK_RULES = (
+    "## Quick answer mode (on for this chat)\n"
+    "- Reply with the answer in as few words as it takes: no preamble, no restating the question, no plan, no summary or "
+    "sign-off wrapped around it.\n"
+    "- Stay honest: still say what you are unsure of, and still mention anything that would change the user's decision. "
+    "Say it in a clause, not a paragraph.\n"
+    "- Use a tool only when it changes the answer. You cannot delegate, start workers or jobs, or schedule anything in "
+    "this mode. If the question needs a longer lookup or a long job, say so in one line and offer the full answer."
+)
+
 
 def cite_ref(h: dict[str, Any], n: int) -> dict[str, Any]:
     """What a message keeps about cited excerpt `n`: enough to label it and open the passage in its source."""
@@ -276,6 +288,8 @@ def build_context(
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [redact.scrub_command_output(global_system_prompt.strip())] if global_system_prompt.strip() else []
     parts.append(DIRECTNESS_RULES)
+    if conv_settings.get("quick"):
+        parts.append(QUICK_RULES)
     hidden = [{"docs": "Files"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
@@ -285,6 +299,8 @@ def build_context(
     used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None,
                             "skills": [], "profile": [], "page": None, "style": None, "pinned": [], "trimmed": {}}
     trimmed: dict[str, int] = used["trimmed"]
+    if conv_settings.get("quick"):
+        used["quick"] = True  # the reply wears a quiet "Quick" tag
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}

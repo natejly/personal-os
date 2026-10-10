@@ -279,7 +279,7 @@ def test_a_call_cut_at_the_output_limit_is_reported_and_nothing_runs() -> None:
     cid, rid = run_chat({"t_echo": "on"})
     assert RAN == []
     res = tool_msgs(SEEN[1])["c1"]
-    assert "cut off" in res["error"] and "output limit" in res["error"]
+    assert "cut off" in res["error"] and "output limit" in res["error"] and "append" in res["error"]
     assert [f["arguments"] for f in replayed(SEEN[1])] == ["{}"]
 
 

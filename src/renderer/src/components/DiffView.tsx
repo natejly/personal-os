@@ -1,7 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Columns2, AlignLeft, Copy, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react'
 import type { DocRevision } from '@shared/types'
-import { diffLines, diffStat, hunks, toUnified, type DiffLine, type WordPart } from '../lib/diff'
+import { diffLines, diffStat, hunks, toUnified, type DiffLine, type Hunk, type WordPart } from '../lib/diff'
+
+/** Rows drawn up front, and added each time the end of the list scrolls into view: a rewrite of a long doc is thousands of rows. */
+const ROW_CHUNK = 300
+
+/** `hunks` cut to the first `budget` lines. */
+function takeRows(hs: Hunk[], budget: number): Hunk[] {
+  const out: Hunk[] = []
+  let left = budget
+  for (const h of hs) {
+    if (left <= 0) break
+    out.push(h.lines.length <= left ? h : { ...h, lines: h.lines.slice(0, left) })
+    left -= h.lines.length
+  }
+  return out
+}
 
 /** Word parts of a reworded line, so only the words that actually moved are marked. */
 export function Parts({ parts, text, op }: { parts: WordPart[] | undefined; text: string; op: DiffLine['op'] }): JSX.Element {
@@ -114,7 +129,19 @@ export default function DiffView({
 
   const lines = useMemo(() => diffLines(before, revision.after), [before, revision.after])
   const stat = useMemo(() => diffStat(lines), [lines])
-  const shown = useMemo(() => (whole ? [{ oldStart: 1, newStart: 1, lines }] : hunks(lines, 3)), [lines, whole])
+  const all = useMemo(() => (whole ? [{ oldStart: 1, newStart: 1, lines }] : hunks(lines, 3)), [lines, whole])
+  const total = useMemo(() => all.reduce((n, h) => n + h.lines.length, 0), [all])
+  const [budget, setBudget] = useState(ROW_CHUNK)
+  useEffect(() => setBudget(ROW_CHUNK), [all])
+  const shown = useMemo(() => (total > budget ? takeRows(all, budget) : all), [all, total, budget])
+  const more = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = more.current
+    if (!el || budget >= total) return
+    const io = new IntersectionObserver((e) => e[0]?.isIntersecting && setBudget((b) => b + ROW_CHUNK), { rootMargin: '600px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [budget, total])
 
   const copy = (): void => {
     void navigator.clipboard.writeText(toUnified(before, revision.after))
@@ -173,6 +200,7 @@ export default function DiffView({
             </div>
           ))
         )}
+        {budget < total && <div ref={more} className="muted small pad">Loading {total - budget} more lines…</div>}
       </div>
 
       {/* The decision leads, primary first, as on every other card; the view toggle trails. */}

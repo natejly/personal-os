@@ -189,7 +189,7 @@ A first-run walkthrough. Each step stands alone, so skip to the one you need.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. Export menu → *Export as PDF…* typesets the note (maths,
     code, tables) for A4 or Letter, or files the PDF straight into Uploads. See [docs/docs-editor.md](docs/docs-editor.md).
-  - *Uploads* — any file up to 50 MB (⌘U). Text, PDF and Word are read; other
+  - *Uploads* — any file up to 100 MB (⌘U). Text, PDF and Word are read; other
     files are kept by name. Chunked, indexed, and the best excerpts pulled
     into replies.
   - *Artifacts* — everything the assistant made in any chat (documents, data,

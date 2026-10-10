@@ -53,7 +53,7 @@ Type / in the composer:
 - Your own saved commands (Library -> Automations) appear in the same menu.
 
 ## Files
-- Cmd+4. Two sections: Notes (your own writing) and Uploads (any file up to 50 MB; Cmd+U uploads one).
+- Cmd+4. Two sections: Notes (your own writing) and Uploads (any file up to 100 MB; Cmd+U uploads one).
 - New note: Cmd+Shift+N. Today's note: Cmd+Shift+D. Notes support markdown and LaTeX, / menu, [[wikilinks]], backlinks, an outline, folders per project, templates and full revision history.
 - Each note has its own chat in the Page agent panel (Cmd+I). The assistant proposes edits as diffs you accept or reject; Settings -> Tools -> File edits -> Accept all writes them straight in (still undoable from history).
 - Delete: the assistant asks first. Deleted notes go to Settings -> Trash, where you can restore them.

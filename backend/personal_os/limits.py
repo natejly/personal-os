@@ -77,7 +77,7 @@ JOB_EXPIRE_DAYS = 0                # a recurring job pauses this many days after
 GMAIL_SEND_HOLD_SECONDS = 90       # undo window on outgoing mail (clamped to 60-120 on read)
 
 # ---- Storage ----
-MAX_UPLOAD_MB = 50                   # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
+MAX_UPLOAD_MB = 100                  # largest file POST /documents accepts (Files, the composer, drag-drop); mirrored in src/renderer/src/lib/uploadNote.ts
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_UNZIPPED_BYTES = MAX_UPLOAD_BYTES * 5 // 2  # a docx/xlsx's declared uncompressed size, summed; refused past this (zip bomb guard)
 FILE_SNAPSHOT_MAX_BYTES = 5_000_000  # largest file pre-image kept
